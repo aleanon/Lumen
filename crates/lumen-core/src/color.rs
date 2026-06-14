@@ -80,12 +80,68 @@ impl Color {
     /// Serialize to the canonical `#rrggbbaa` form used by `ui.getStyles` and
     /// test assertions (04 §7). RGB channels are encoded back to sRGB.
     pub fn to_hex(&self) -> String {
-        let r = linear_to_srgb8(self.r);
-        let g = linear_to_srgb8(self.g);
-        let b = linear_to_srgb8(self.b);
-        let a = (self.a.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let [r, g, b, a] = self.to_srgb8();
         format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
     }
+
+    /// The color as 8-bit **sRGB** RGBA — the boundary representation handed to
+    /// the rasterizer (which works in gamma space).
+    pub fn to_srgb8(&self) -> [u8; 4] {
+        [
+            linear_to_srgb8(self.r),
+            linear_to_srgb8(self.g),
+            linear_to_srgb8(self.b),
+            (self.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+        ]
+    }
+
+    /// Interpolate toward `other` by `t` in `[0, 1]`, **in Oklab** (ADR-017),
+    /// which matches the perceptual diff metric and gives even-looking ramps.
+    /// Alpha interpolates linearly.
+    pub fn lerp_oklab(self, other: Color, t: f32) -> Color {
+        let (l1, a1, b1) = linear_to_oklab(self.r, self.g, self.b);
+        let (l2, a2, b2) = linear_to_oklab(other.r, other.g, other.b);
+        let l = l1 + (l2 - l1) * t;
+        let a = a1 + (a2 - a1) * t;
+        let b = b1 + (b2 - b1) * t;
+        let (r, g, bl) = oklab_to_linear(l, a, b);
+        Color {
+            r,
+            g,
+            b: bl,
+            a: self.a + (other.a - self.a) * t,
+        }
+    }
+}
+
+/// Linear sRGB → Oklab (Björn Ottosson's matrices).
+fn linear_to_oklab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let l = 0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b;
+    let m = 0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b;
+    let s = 0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b;
+    let l_ = l.cbrt();
+    let m_ = m.cbrt();
+    let s_ = s.cbrt();
+    (
+        0.210_454_26 * l_ + 0.793_617_8 * m_ - 0.004_072_047 * s_,
+        1.977_998_5 * l_ - 2.428_592_2 * m_ + 0.450_593_7 * s_,
+        0.025_904_037 * l_ + 0.782_771_77 * m_ - 0.808_675_77 * s_,
+    )
+}
+
+/// Oklab → linear sRGB (inverse of [`linear_to_oklab`]).
+fn oklab_to_linear(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
+    let l_ = l + 0.396_337_78 * a + 0.215_803_76 * b;
+    let m_ = l - 0.105_561_346 * a - 0.063_854_17 * b;
+    let s_ = l - 0.089_484_18 * a - 1.291_485_5 * b;
+    let l = l_ * l_ * l_;
+    let m = m_ * m_ * m_;
+    let s = s_ * s_ * s_;
+    (
+        4.076_741_7 * l - 3.307_711_6 * m + 0.230_969_94 * s,
+        -1.268_438 * l + 2.609_757_4 * m - 0.341_319_38 * s,
+        -0.004_196_086_3 * l - 0.703_418_6 * m + 1.707_614_7 * s,
+    )
 }
 
 impl std::fmt::Display for Color {
@@ -201,5 +257,17 @@ mod tests {
     fn alpha_is_linear() {
         let c = Color::srgb8(0, 0, 0, 128);
         assert!((c.a - 128.0 / 255.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn oklab_lerp_reproduces_endpoints() {
+        let a = Color::srgb8(255, 0, 0, 255);
+        let b = Color::srgb8(0, 0, 255, 255);
+        assert_eq!(a.lerp_oklab(b, 0.0).to_srgb8(), a.to_srgb8());
+        assert_eq!(a.lerp_oklab(b, 1.0).to_srgb8(), b.to_srgb8());
+        // midpoint stays in gamut and is distinct from both ends
+        let mid = a.lerp_oklab(b, 0.5).to_srgb8();
+        assert_ne!(mid, a.to_srgb8());
+        assert_ne!(mid, b.to_srgb8());
     }
 }

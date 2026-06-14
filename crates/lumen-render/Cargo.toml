@@ -8,3 +8,8 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+lumen-core = { workspace = true }
+kurbo = { workspace = true }
+# CPU reference renderer (ADR-002). `png-format` provides PNG encode/decode for
+# RgbaImage, avoiding the non-whitelisted `image` crate (see decision log).
+tiny-skia = { workspace = true, features = ["png-format"] }

@@ -21,7 +21,7 @@ Generational `NodeIndex`; intrusive tree links + parallel arrays per 02 §5; ins
 `signal/memo/effect/resource` per 02 §4; identity-path keying; batched writes; subscriber-only invalidation; `Checkpoint` impl: snapshot → restore round-trip; `#[state_registry]` macro for stored trait objects; W0002 lenient deserialization.
 *Accept:* `cargo test -p lumen-core state::` — incl.: writing 1 of 10k signals re-runs exactly 1 scope (counted); snapshot/restore of a 1k-signal store is lossless; struct-evolution fixture (field added/removed) restores with defaults + W0002.
 
-**T0.4 ☐ Display list + CPU renderer.** Deps: T0.1
+**T0.4 ☑ Display list + CPU renderer.** Deps: T0.1
 `DrawCmd` per 02 §7; tiny-skia execution: rects/rrects/borders, paths (fill/stroke), gradients (3 kinds), images, layers (clip/opacity/transform/blend), damage-region rendering. Bit-deterministic.
 *Accept:* `cargo test -p lumen-render` — golden PNGs for each command class (exact compare); same scene rendered twice is byte-identical; damage test: re-render of dirty rect equals full re-render cropped.
 
