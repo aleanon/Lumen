@@ -13,7 +13,7 @@ Build the eyes first: by the end of M0 every later task can be verified headless
 Workspace with all 11 crates (02 §1) compiling empty; `rust-toolchain.toml`; CI (GitHub Actions): fmt, clippy `-D warnings`, test on linux/windows/macos; `deny.toml` license check; `lumen-core/diagnostics.md` seeded with codes from 02 §9.
 *Accept:* `cargo build --workspace && cargo clippy --workspace -- -D warnings` green on 3 OS runners.
 
-**T0.2 ☐ Node tree + SoA hot data.** Deps: T0.1
+**T0.2 ☑ Node tree + SoA hot data.** Deps: T0.1
 Generational `NodeIndex`; intrusive tree links + parallel arrays per 02 §5; insert/remove/reparent; document-order and z-order iteration; hit-test scan honoring clip/flags.
 *Accept:* `cargo test -p lumen-core tree::` — incl. property tests (proptest): 10k random tree edits preserve invariants (no dangling indices, parent/child symmetry); hit-test agrees with a naive reference implementation on 1k random scenes.
 

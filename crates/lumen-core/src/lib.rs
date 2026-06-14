@@ -14,7 +14,8 @@ pub mod color;
 pub mod diagnostics;
 pub mod geometry;
 pub mod identity;
+pub(crate) mod tree;
 
 pub use color::Color;
 pub use diagnostics::{codes, Diagnostic, Severity, SourceSpan};
-pub use identity::StableId;
+pub use identity::{NodeIndex, StableId};
