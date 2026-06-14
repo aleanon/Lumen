@@ -1,0 +1,58 @@
+# Lumen — AI-first cross-platform GUI framework.
+# Virtual workspace manifest. Crate naming per 02-spec-core.md §1.
+[workspace]
+resolver = "2"
+members = [
+    "crates/lumen-core",
+    "crates/lumen-layout",
+    "crates/lumen-render",
+    "crates/lumen-text",
+    "crates/lumen-style",
+    "crates/lumen-widgets",
+    "crates/lumen-shell",
+    "crates/lumen-test",
+    "crates/lumen-agent",
+    "crates/lumen-cli",
+    "crates/lumen",
+]
+
+# Pre-1.0 lockstep version for the whole workspace (02 §11).
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+repository = "https://example.invalid/lumen"
+publish = false
+
+# Every dependency version is pinned in exactly one place (ADR-003).
+# Only the ADR-003 whitelist + dev-tooling may appear here.
+[workspace.dependencies]
+# internal crates
+lumen-core = { path = "crates/lumen-core" }
+lumen-layout = { path = "crates/lumen-layout" }
+lumen-render = { path = "crates/lumen-render" }
+lumen-text = { path = "crates/lumen-text" }
+lumen-style = { path = "crates/lumen-style" }
+lumen-widgets = { path = "crates/lumen-widgets" }
+lumen-shell = { path = "crates/lumen-shell" }
+lumen-test = { path = "crates/lumen-test" }
+lumen-agent = { path = "crates/lumen-agent" }
+lumen-cli = { path = "crates/lumen-cli" }
+lumen = { path = "crates/lumen" }
+
+# whitelisted runtime deps (ADR-003) — added to crates as tasks need them
+kurbo = "0.11"
+smol_str = "0.3"
+bitflags = "2.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# whitelisted dev deps (ADR-003)
+proptest = "1"
+
+[profile.release]
+# Deterministic CPU renderer is the contract (ADR-002); keep release builds
+# reproducible and small for the <5 MB hello-world target.
+lto = "thin"
+codegen-units = 1

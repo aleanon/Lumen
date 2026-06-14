@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# lumen-test artifacts
+**/*.actual.png
+**/*.diff.png
+/target/lumen-traces
+
+# editor / OS
+.DS_Store
+*.swp
