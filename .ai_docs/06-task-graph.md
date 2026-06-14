@@ -17,7 +17,7 @@ Workspace with all 11 crates (02 §1) compiling empty; `rust-toolchain.toml`; CI
 Generational `NodeIndex`; intrusive tree links + parallel arrays per 02 §5; insert/remove/reparent; document-order and z-order iteration; hit-test scan honoring clip/flags.
 *Accept:* `cargo test -p lumen-core tree::` — incl. property tests (proptest): 10k random tree edits preserve invariants (no dangling indices, parent/child symmetry); hit-test agrees with a naive reference implementation on 1k random scenes.
 
-**T0.3 ☐ Signals + state store + checkpoint.** Deps: T0.2
+**T0.3 ☑ Signals + state store + checkpoint.** Deps: T0.2
 `signal/memo/effect/resource` per 02 §4; identity-path keying; batched writes; subscriber-only invalidation; `Checkpoint` impl: snapshot → restore round-trip; `#[state_registry]` macro for stored trait objects; W0002 lenient deserialization.
 *Accept:* `cargo test -p lumen-core state::` — incl.: writing 1 of 10k signals re-runs exactly 1 scope (counted); snapshot/restore of a 1k-signal store is lossless; struct-evolution fixture (field added/removed) restores with defaults + W0002.
 

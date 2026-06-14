@@ -12,7 +12,9 @@ kurbo = { workspace = true }
 smol_str = { workspace = true, features = ["serde"] }
 bitflags = { workspace = true }
 serde = { workspace = true }
+# Snapshot format is self-describing field-tagged JSON (ADR-011), so serde_json
+# is a runtime dependency, not dev-only.
+serde_json = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
 proptest = { workspace = true }
