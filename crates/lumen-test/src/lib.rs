@@ -17,8 +17,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 mod runtime;
+pub mod session;
 pub mod trace;
 pub use runtime::block_on;
+pub use session::Session;
 pub use trace::Tracer;
 
 /// Auto-wait poll step and timeout (05 §3).
