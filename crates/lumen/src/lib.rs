@@ -22,7 +22,7 @@ pub use lumen_core::semantics;
 
 /// The application and headless runtime (02 §8).
 #[doc(inline)]
-pub use lumen_widgets::{app::FrameStats, App, BuildCx, Element, Handler, Headless};
+pub use lumen_widgets::{app::FrameStats, App, AppSnapshot, BuildCx, Element, Handler, Headless};
 
 /// The built-in widget library (02 §10).
 pub use lumen_widgets::widgets;

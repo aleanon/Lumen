@@ -1648,6 +1648,7 @@ dependencies = [
  "lumen-render",
  "lumen-style",
  "lumen-text",
+ "serde",
  "serde_json",
 ]
 

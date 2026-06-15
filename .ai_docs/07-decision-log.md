@@ -80,3 +80,10 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - ABI compatibility: a candidate whose `lumen_abi_hash` != `HOST_ABI_HASH` returns `Swap::NeedsTier3 { host, found }` — the caller downgrades to a tier-3 snapshot restart (T2.4) instead of swapping.
 - Fixtures: crates/fixtures/{hot_a,hot_b,hot_c} are minimal cdylibs — hot_a/hot_b model a build() edit (Count -> Counter, same ABI), hot_c carries a different ABI hash.
 - Tests (cargo test -p lumen-cli --test hotpatch): the libloading swap is sub-millisecond (well under the 2 s budget), host `count` signal survives the swap, the old lib is retired; the ABI-mismatch case rejects the swap and asks for tier 3.
+
+### T2.4 — Tier-3 snapshot restart
+- `AppSnapshot` (lumen-widgets::app) bundles the reactive store (`Runtime::snapshot`, ADR-011 self-describing field-tagged JSON) plus `focused` (host state, not in the store). It is `Serialize`/`Deserialize`, so it can be written before a kill and restored after.
+- Scroll offset needs no special handling: the scroll widget keeps its offset in a `cx.signal`, so it is already part of the reactive store and rides along in the snapshot.
+- `App::run_headless_restored(size, snap)` stages the snapshot via `Runtime::load_pending` *before* the first build so each signal adopts its restored value as it is recreated (Checkpoint protocol), then returns the instance plus `finish_restore` (W0002) drop diagnostics. `run_headless` now delegates to a shared private `boot`.
+- Added `serde` to lumen-widgets (for the derive); exported `AppSnapshot` from lumen-widgets + the `lumen` facade.
+- Tests (cargo test -p lumen-widgets --test tier3): drive count=5 + focus + scroll=40, snapshot → serialize → drop → deserialize → `run_headless_restored`; the re-serialized snapshot equals the original (signals+scroll+focus preserved), restore raises no drop diagnostics, and the restored state drives the live semantics. A guard test confirms a no-snapshot boot is at defaults.

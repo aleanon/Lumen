@@ -53,6 +53,28 @@ impl App {
 
     /// Run headless on the CPU renderer at `size` (no OS dependencies).
     pub fn run_headless(self, size: Size) -> Headless {
+        self.boot(size, None).0
+    }
+
+    /// Run headless, restoring a prior [`AppSnapshot`] (tier-3 restart,
+    /// ADR-011). Returns the instance plus any `W0002` drop diagnostics raised
+    /// when a snapshot value no longer has a matching signal.
+    pub fn run_headless_restored(
+        self,
+        size: Size,
+        snap: AppSnapshot,
+    ) -> (Headless, Vec<lumen_core::Diagnostic>) {
+        self.boot(size, Some(snap))
+    }
+
+    fn boot(
+        self,
+        size: Size,
+        restore: Option<AppSnapshot>,
+    ) -> (Headless, Vec<lumen_core::Diagnostic>) {
+        // Focus is host state (not in the reactive store), so it is carried on
+        // the snapshot and re-applied directly.
+        let focused = restore.as_ref().and_then(|s| s.focused.clone());
         let mut h = Headless {
             root: self.root,
             rt: Runtime::new(),
@@ -63,7 +85,7 @@ impl App {
             meta: HashMap::new(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
             sem_root: None,
-            focused_id: None,
+            focused_id: focused,
             hovered_id: None,
             pressed: None,
             input: InputQueue::new(),
@@ -73,9 +95,27 @@ impl App {
             node_style: HashMap::new(),
             node_computed: HashMap::new(),
         };
-        h.rebuild();
-        h
+        let diags = if let Some(s) = restore {
+            // Stage the snapshot *before* the first build so each signal adopts
+            // its restored value as it is (re-)created (Checkpoint protocol).
+            h.rt.load_pending(s.state);
+            h.rebuild();
+            h.rt.finish_restore()
+        } else {
+            h.rebuild();
+            Vec::new()
+        };
+        (h, diags)
     }
+}
+
+/// A tier-3 snapshot of a running app: the reactive store (every signal —
+/// including scroll offsets) plus focus. Serializable, so it can be written
+/// before a process restart and restored afterwards (ADR-011).
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct AppSnapshot {
+    state: lumen_core::state::StateSnapshot,
+    focused: Option<StableId>,
 }
 
 /// Parse a stylesheet, returning it only if error-free.
@@ -162,6 +202,15 @@ impl Headless {
     /// The most recent rendered frame.
     pub fn screenshot(&mut self) -> RgbaImage {
         self.frame.clone()
+    }
+
+    /// Capture a tier-3 [`AppSnapshot`] (reactive store + focus) for a later
+    /// restart via [`App::run_headless_restored`].
+    pub fn snapshot(&self) -> AppSnapshot {
+        AppSnapshot {
+            state: self.rt.snapshot(),
+            focused: self.focused_id.clone(),
+        }
     }
 
     /// The current virtual-clock time (ms).

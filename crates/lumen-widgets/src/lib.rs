@@ -13,5 +13,5 @@ pub mod element;
 pub mod widgets;
 pub mod widgets_m1;
 
-pub use app::{center, App, FrameStats, Headless, ReloadResult};
+pub use app::{center, App, AppSnapshot, FrameStats, Headless, ReloadResult};
 pub use element::{BuildCx, Element, Handler};

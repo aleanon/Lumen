@@ -14,4 +14,5 @@ lumen-layout = { workspace = true }
 lumen-text = { workspace = true }
 lumen-style = { workspace = true }
 kurbo = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
