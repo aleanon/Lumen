@@ -17,7 +17,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 mod runtime;
+pub mod trace;
 pub use runtime::block_on;
+pub use trace::Tracer;
 
 /// Auto-wait poll step and timeout (05 §3).
 const POLL_MS: f64 = 10.0;
@@ -46,6 +48,7 @@ pub enum LocatorError {
 pub struct TestApp {
     inner: Rc<RefCell<Headless>>,
     golden_dir: std::path::PathBuf,
+    tracer: Rc<RefCell<Tracer>>,
 }
 
 impl TestApp {
@@ -64,7 +67,38 @@ impl TestApp {
         TestApp {
             inner: Rc::new(RefCell::new(app.run_headless(size))),
             golden_dir: std::path::PathBuf::from(base).join("tests/golden/cpu"),
+            tracer: Rc::new(RefCell::new(Tracer::new())),
         }
+    }
+
+    /// Record an input action in the trace, with a tree snapshot (05 §5).
+    pub fn trace_action(&self, action: &str, selector: &str) {
+        let mut t = self.tracer.borrow_mut();
+        t.action(action, selector);
+        t.tree(self.inner.borrow().semantics_doc().to_json(false));
+    }
+
+    /// Record an assertion result in the trace.
+    pub fn trace_assert(&self, name: &str, passed: bool) {
+        self.tracer.borrow_mut().assertion(name, passed);
+    }
+
+    /// Write the trace to `target/lumen-traces/<name>.trace.jsonl`.
+    pub fn write_trace(&self, name: &str) -> std::path::PathBuf {
+        self.tracer.borrow().write(name)
+    }
+
+    /// The current trace events (for inspection/validation).
+    pub fn trace_events(&self) -> Vec<serde_json::Value> {
+        self.tracer.borrow().events().to_vec()
+    }
+
+    /// Record a failure artifact (last screenshot + tree) and write the trace.
+    pub fn capture_failure(&self, name: &str, message: &str) -> std::path::PathBuf {
+        let png = self.inner.borrow_mut().screenshot().to_png();
+        let tree = self.inner.borrow().semantics_doc().to_json(false);
+        self.tracer.borrow_mut().failure(message, &png, tree);
+        self.write_trace(name)
     }
 
     /// Run `app` headless at `size` with theme `"light"|"dark"|"high-contrast"`

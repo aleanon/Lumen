@@ -76,7 +76,7 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 
 ## M2 — Testing & AI loop complete
 **T2.1 ☑ lumen-test full surface** (all of 05 §2: drag, set_value, styles/bounds assertions, perceptual GPU goldens, per-test size/scale/theme). *Accept:* harness self-test suite.
-**T2.2 ☐ Traces** (05 §5) + failure artifacts. *Accept:* trace schema validation; failing test embeds screenshot+tree.
+**T2.2 ☑ Traces** (05 §5) + failure artifacts. *Accept:* trace schema validation; failing test embeds screenshot+tree.
 **T2.3 ☐ Tier-2 hot patch.** cdylib registry, incremental rebuild orchestration, libloading swap, state-preservation, abi_hash downgrade to tier 3, intentional dylib leak. *Accept:* integration: edit a `build()` fn → swap <2 s on warm cache, counter state preserved; change state shape → that component resets, others preserved; core-crate edit → automatic tier-3 with state restore.
 **T2.4 ☐ Tier-3 snapshot restart.** *Accept:* kill/rebuild/restore round-trip preserves signals, scroll, focus.
 **T2.5 ☐ `session.exportTest`.** Recording, codegen to lumen-test source, auto-assertions. *Accept:* recorded session on settings app exports a test that compiles and passes.

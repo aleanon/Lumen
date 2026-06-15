@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lumen-trace/1",
+  "title": "Lumen test trace event",
+  "type": "object",
+  "required": ["schema", "seq", "type"],
+  "properties": {
+    "schema": { "const": "lumen-trace/1" },
+    "seq": { "type": "integer", "minimum": 1 },
+    "type": {
+      "enum": ["action", "assert", "tree", "frame", "failure"]
+    },
+    "action": { "type": "string" },
+    "selector": { "type": "string" },
+    "name": { "type": "string" },
+    "passed": { "type": "boolean" },
+    "message": { "type": "string" },
+    "screenshot_base64": { "type": "string" },
+    "tree": { "type": "object" },
+    "damage": { "type": "array" }
+  }
+}
