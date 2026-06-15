@@ -8,3 +8,5 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+lumen-core = { workspace = true }
+kurbo = { workspace = true }

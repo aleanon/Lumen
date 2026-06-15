@@ -1443,6 +1443,10 @@ dependencies = [
 [[package]]
 name = "lumen-style"
 version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+]
 
 [[package]]
 name = "lumen-test"
