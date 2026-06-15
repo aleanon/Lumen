@@ -109,7 +109,7 @@ impl Style {
 /// Apply one `.lss` declaration to `style`, resolving `$tokens`. Unknown
 /// properties are ignored here (the parser already flagged them E0102).
 pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) {
-    let v = resolve(value, tokens);
+    let v = resolve_token(value, tokens);
     match property {
         "display" => style.display = as_display(&v),
         "flex-direction" => style.flex_direction = as_flex_direction(&v),
@@ -128,8 +128,9 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
     }
 }
 
-/// Resolve `$token` references (one level) against `tokens`.
-fn resolve(v: &Value, tokens: &Tokens) -> Value {
+/// Resolve `$token` references (one level) against `tokens`. Public so the
+/// runtime can store *resolved* computed values for `ui.getStyles` (04 §7).
+pub fn resolve_token(v: &Value, tokens: &Tokens) -> Value {
     match v {
         Value::Var(name) => tokens
             .get(name)

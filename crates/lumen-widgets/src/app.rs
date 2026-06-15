@@ -377,11 +377,22 @@ impl Headless {
             };
             let computed = lumen_style::resolve(&sources, &desc);
             let mut style = lumen_style::Style::new();
+            let mut resolved = HashMap::new();
             for (prop, c) in &computed {
                 lumen_style::apply(&mut style, prop, &c.value, &tokens);
+                // Store the token-resolved value so `get_styles` returns the
+                // computed (substituted) form (04 §7).
+                resolved.insert(
+                    prop.clone(),
+                    lumen_style::Computed {
+                        value: lumen_style::resolve_token(&c.value, &tokens),
+                        important: c.important,
+                        origin: c.origin,
+                    },
+                );
             }
             self.node_style.insert(node, style);
-            self.node_computed.insert(node, computed);
+            self.node_computed.insert(node, resolved);
         }
     }
 

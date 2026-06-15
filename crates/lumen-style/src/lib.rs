@@ -22,7 +22,7 @@ pub use ast::{
 };
 pub use parser::{has_errors, parse};
 pub use properties::KNOWN_PROPERTIES;
-pub use style::{apply, canonical, computed_json, Style, Tokens};
+pub use style::{apply, canonical, computed_json, resolve_token, Style, Tokens};
 
 use std::collections::HashMap;
 
