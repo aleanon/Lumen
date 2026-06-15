@@ -1,5 +1,14 @@
-//! Taffy wrapper: incremental layout, style->Taffy mapping.
+//! `lumen-layout` — incremental layout over Taffy, behind a wrapper (ADR-004).
 //!
-//! Contract surface: see `README.md` and the normative specs in `.ai_docs/`.
-//! This crate is a stub pending its M0 task.
+//! The engine is replaceable: nothing outside this crate sees a taffy type.
+//! [`LayoutStyle`] mirrors the layout property set of 04 §3; [`LayoutTree`]
+//! computes absolute window-space bounds and supports dirty-subtree relayout.
 #![warn(missing_docs)]
+
+pub mod style;
+pub mod tree;
+
+pub use style::{
+    Align, Dim, Display, Edges, FlexDirection, FlexWrap, GridLine, GridTrack, LayoutStyle, Position,
+};
+pub use tree::{LayoutNode, LayoutTree};

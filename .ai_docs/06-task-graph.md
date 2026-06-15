@@ -25,7 +25,7 @@ Generational `NodeIndex`; intrusive tree links + parallel arrays per 02 §5; ins
 `DrawCmd` per 02 §7; tiny-skia execution: rects/rrects/borders, paths (fill/stroke), gradients (3 kinds), images, layers (clip/opacity/transform/blend), damage-region rendering. Bit-deterministic.
 *Accept:* `cargo test -p lumen-render` — golden PNGs for each command class (exact compare); same scene rendered twice is byte-identical; damage test: re-render of dirty rect equals full re-render cropped.
 
-**T0.5 ☐ Layout engine wrapper.** Deps: T0.2
+**T0.5 ☑ Layout engine wrapper.** Deps: T0.2
 `lumen-layout` over Taffy: style→Taffy mapping for the layout property set (04 §3), incremental relayout of dirty subtrees, results written into SoA `bounds`.
 *Accept:* `cargo test -p lumen-layout` — fixture suite of 40 layouts (flex, grid, absolute, min/max, aspect-ratio) asserting exact bounds; dirty-subtree relayout touches only descendant nodes (counted).
 
