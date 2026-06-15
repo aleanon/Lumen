@@ -7,9 +7,19 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+name = "lumen_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "lumen"
 path = "src/main.rs"
 
 [dependencies]
 serde_json = { workspace = true }
+# Dev server: file watcher (ADR-003) + the framework for live reload.
+notify = { workspace = true }
+lumen = { workspace = true }
+lumen-core = { workspace = true }
+lumen-style = { workspace = true }
+lumen-widgets = { workspace = true }

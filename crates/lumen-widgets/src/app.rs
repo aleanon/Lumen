@@ -68,10 +68,29 @@ impl App {
             pressed: None,
             input: InputQueue::new(),
             pointer: PointerState::new(),
+            app_sheet: self.stylesheet.as_deref().and_then(parse_sheet),
+            theme: lumen_style::ThemeKind::Light,
+            node_style: HashMap::new(),
+            node_computed: HashMap::new(),
         };
         h.rebuild();
         h
     }
+}
+
+/// Parse a stylesheet, returning it only if error-free.
+fn parse_sheet(src: &str) -> Option<lumen_style::Stylesheet> {
+    let (sheet, diags) = lumen_style::parse("app.lss", src);
+    (!lumen_style::has_errors(&diags)).then_some(sheet)
+}
+
+/// The result of a tier-1 hot reload (03 §3 reload event).
+#[derive(Clone, Debug)]
+pub enum ReloadResult {
+    /// The stylesheet applied; styles changed live.
+    Ok,
+    /// The edit was rejected; the previous stylesheet stays live.
+    Failed(Vec<lumen_core::Diagnostic>),
 }
 
 struct NodeMeta {
@@ -110,6 +129,10 @@ pub struct Headless {
     focused_id: Option<StableId>,
     hovered_id: Option<StableId>,
     pressed: Option<NodeIndex>,
+    app_sheet: Option<lumen_style::Stylesheet>,
+    theme: lumen_style::ThemeKind,
+    node_style: HashMap<NodeIndex, lumen_style::Style>,
+    node_computed: HashMap<NodeIndex, HashMap<String, lumen_style::Computed>>,
     input: InputQueue,
     pointer: PointerState,
 }
@@ -316,8 +339,95 @@ impl Headless {
 
         self.tree = tree;
         self.meta = meta;
+        self.compute_styles();
         self.frame = self.paint();
         self.sem_root = Some(self.build_semantics(self.tree.root()));
+    }
+
+    /// Resolve the `.lss` cascade for every node, storing both the typed `Style`
+    /// (applied to paint) and the raw computed values (for `get_styles`).
+    fn compute_styles(&mut self) {
+        self.node_style.clear();
+        self.node_computed.clear();
+        let Some(sheet) = &self.app_sheet else {
+            return;
+        };
+        let sources = [lumen_style::StyleSource {
+            origin: lumen_style::Origin::App,
+            sheet: sheet.clone(),
+        }];
+        let tokens = lumen_style::tokens_for(sheet, self.theme);
+        for node in self.tree.document_order() {
+            let Some(m) = self.meta.get(&node) else {
+                continue;
+            };
+            let mut states = Vec::new();
+            let f = self.tree.flags(node);
+            if f.contains(NodeFlags::FOCUSED) {
+                states.push("focused".to_string());
+            }
+            if f.contains(NodeFlags::HOVERED) {
+                states.push("hovered".to_string());
+            }
+            let desc = lumen_style::NodeDesc {
+                id: m.id.as_ref().map(|i| i.as_str().to_string()),
+                classes: m.classes.clone(),
+                states,
+                ty: m.role.as_str().to_string(),
+            };
+            let computed = lumen_style::resolve(&sources, &desc);
+            let mut style = lumen_style::Style::new();
+            for (prop, c) in &computed {
+                lumen_style::apply(&mut style, prop, &c.value, &tokens);
+            }
+            self.node_style.insert(node, style);
+            self.node_computed.insert(node, computed);
+        }
+    }
+
+    /// Set/replace the app stylesheet at runtime (tier-1 hot reload). A broken
+    /// edit is rejected and the previous stylesheet stays live (04 §9).
+    pub fn set_stylesheet(&mut self, src: &str) -> ReloadResult {
+        let (sheet, diags) = lumen_style::parse("app.lss", src);
+        if lumen_style::has_errors(&diags) {
+            ReloadResult::Failed(diags)
+        } else {
+            self.app_sheet = Some(sheet);
+            self.rebuild();
+            ReloadResult::Ok
+        }
+    }
+
+    /// Switch the active theme and re-resolve styles.
+    pub fn set_theme(&mut self, theme: lumen_style::ThemeKind) {
+        self.theme = theme;
+        self.rebuild();
+    }
+
+    /// Computed styles for the node a `selector` resolves to (03 §3 ui.getStyles,
+    /// 04 §7 value serialization). Returns `null` if the selector doesn't resolve
+    /// to exactly one node.
+    pub fn get_styles(&self, selector: &str) -> serde_json::Value {
+        let root = self.semantics_doc().root.elided();
+        let Ok(id) = lumen_core::semantics::resolve_one(&root, selector) else {
+            return serde_json::Value::Null;
+        };
+        // Map the semantics node id back to a live NodeIndex.
+        let node = self
+            .tree
+            .document_order()
+            .into_iter()
+            .find(|n| n.index() == id);
+        let Some(node) = node else {
+            return serde_json::Value::Null;
+        };
+        let mut map = serde_json::Map::new();
+        if let Some(computed) = self.node_computed.get(&node) {
+            for (prop, c) in computed {
+                map.insert(prop.clone(), lumen_style::computed_json(&c.value, c.origin));
+            }
+        }
+        serde_json::Value::Object(map)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -415,11 +525,18 @@ impl Headless {
             let Some(m) = self.meta.get(&node) else {
                 continue;
             };
-            if let Some(bg) = m.background {
+            // `.lss` overrides the widget's hardcoded background/radius.
+            let css = self.node_style.get(&node);
+            let bg = css.and_then(|s| s.background).or(m.background);
+            let radius = css
+                .and_then(|s| s.border_radius)
+                .map(|r| r as f64)
+                .unwrap_or(m.corner_radius);
+            if let Some(bg) = bg {
                 dl.push(DrawCmd::Rect {
                     rect: bounds,
                     brush: Brush::Solid(bg),
-                    radii: CornerRadii::all(m.corner_radius),
+                    radii: CornerRadii::all(radius),
                     border: None,
                 });
             }
