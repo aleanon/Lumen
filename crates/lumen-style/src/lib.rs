@@ -7,11 +7,14 @@
 //! keep the previous one live (04 §9).
 #![warn(missing_docs)]
 
+pub mod anim;
 pub mod ast;
 pub mod lexer;
 pub mod parser;
 pub mod properties;
 pub mod style;
+
+pub use anim::{AnimValue, Easing, Scheduler};
 
 pub use ast::{
     Combinator, Compound, Declaration, Item, Part, Rule, Selector, Specificity, Stylesheet,
