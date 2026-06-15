@@ -29,7 +29,7 @@ Generational `NodeIndex`; intrusive tree links + parallel arrays per 02 §5; ins
 `lumen-layout` over Taffy: style→Taffy mapping for the layout property set (04 §3), incremental relayout of dirty subtrees, results written into SoA `bounds`.
 *Accept:* `cargo test -p lumen-layout` — fixture suite of 40 layouts (flex, grid, absolute, min/max, aspect-ratio) asserting exact bounds; dirty-subtree relayout touches only descendant nodes (counted).
 
-**T0.6 ☐ Text v0.** Deps: T0.4
+**T0.6 ☑ Text v0.** Deps: T0.4
 parley+swash wrapper: single & multi-style runs, wrapping, alignment, ellipsis, bundled Noto fonts (no system fonts in tests), glyph atlas for the CPU path; bidi + CJK fixtures from day one.
 *Accept:* `cargo test -p lumen-text` — goldens for latin/CJK/bidi/emoji/wrap/ellipsis; measurement function returns stable sizes across runs.
 

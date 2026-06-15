@@ -8,3 +8,9 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+kurbo = { workspace = true }
+# Shaping/layout (parley) + scaling/rasterization (swash), ADR-005.
+parley = { workspace = true }
+swash = { workspace = true }
