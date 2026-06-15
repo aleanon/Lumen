@@ -45,7 +45,7 @@ Event enum per 02 §6; capture/bubble dispatch via SoA hit-test; pointer enter/l
 `App::run_headless`, `Headless::{pump, inject, screenshot, semantics_json}` (02 §8); minimal `lumen-test`: `#[lumen::test]`, `TestApp`, `Locator` with click/fill/press/text, `expect` with to_exist/to_have_text, auto-wait per 05 §3, exact-golden `expect_screenshot`, virtual clock.
 *Accept:* `cargo test -p lumen-test` self-tests: auto-wait succeeds on delayed-appearance fixture, fails `Ambiguous` with candidates on duplicate fixture; golden round-trip works; `LUMEN_UPDATE_GOLDENS` re-records.
 
-**T0.10 ☐ Ten primitive widgets.** Deps: T0.9
+**T0.10 ☑ Ten primitive widgets.** Deps: T0.9
 Text, Image, Row, Column, Stack, Scroll, Button, TextFieldBasic, Checkbox, Slider — each: build/layout/paint/event/semantics, keyboard map, default styles (hardcoded constants until T1.2), rustdoc + example.
 *Accept:* per-widget golden + semantic-tree + interaction test (e.g. slider: drag changes value; checkbox: space toggles; scroll: wheel moves content & updates `scroll` in semantics). `cargo test -p lumen-widgets`.
 

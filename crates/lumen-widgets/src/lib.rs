@@ -10,6 +10,7 @@
 
 pub mod app;
 pub mod element;
+pub mod widgets;
 
 pub use app::{center, App, FrameStats, Headless};
 pub use element::{BuildCx, Element, Handler};

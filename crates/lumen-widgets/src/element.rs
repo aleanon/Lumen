@@ -4,15 +4,22 @@
 //! arrives in T0.10). It carries everything the headless runtime needs to lay
 //! out, paint, route events, and emit semantics for one node.
 
-use lumen_core::semantics::{Action, Role};
+use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
 use lumen_core::state::{Runtime, State};
 use lumen_core::{Color, Signal, StableId};
 use lumen_layout::{Dim, Display, FlexDirection, LayoutStyle};
+use lumen_render::RgbaImage;
 use lumen_text::TextStyle;
 use std::rc::Rc;
 
-/// An event handler. Re-registered every build; never stored in state (ADR-013).
+/// A click/activate handler. Re-registered every build; never stored (ADR-013).
 pub type Handler = Rc<dyn Fn(&Runtime)>;
+/// A wheel handler receiving the vertical delta (logical px).
+pub type WheelHandler = Rc<dyn Fn(&Runtime, f64)>;
+/// A drag handler receiving the pointer's fraction along the node's main axis.
+pub type DragHandler = Rc<dyn Fn(&Runtime, f64)>;
+/// A committed-text handler (text inputs).
+pub type TextHandler = Rc<dyn Fn(&Runtime, &str)>;
 
 /// A description of one node: type + props + children.
 #[derive(Clone)]
@@ -41,8 +48,20 @@ pub struct Element {
     pub focusable: bool,
     /// Whether the node is elided from semantics (pure layout).
     pub elide_semantics: bool,
+    /// Explicit semantic states (e.g. checked/disabled).
+    pub states: Vec<SemState>,
+    /// Scroll info for scroll containers (semantics).
+    pub scroll: Option<ScrollInfo>,
+    /// Image content (the Image widget).
+    pub image: Option<RgbaImage>,
     /// Click handler.
     pub on_click: Option<Handler>,
+    /// Wheel handler (scroll containers).
+    pub on_wheel: Option<WheelHandler>,
+    /// Drag handler (sliders); receives the fraction along the main axis.
+    pub on_drag: Option<DragHandler>,
+    /// Committed-text handler (text inputs).
+    pub on_text: Option<TextHandler>,
     /// Children.
     pub children: Vec<Element>,
 }
@@ -62,7 +81,13 @@ impl Default for Element {
             text: None,
             focusable: false,
             elide_semantics: false,
+            states: Vec::new(),
+            scroll: None,
+            image: None,
             on_click: None,
+            on_wheel: None,
+            on_drag: None,
+            on_text: None,
             children: Vec::new(),
         }
     }

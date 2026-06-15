@@ -65,6 +65,7 @@ impl App {
             sem_root: None,
             focused_id: None,
             hovered_id: None,
+            pressed: None,
             input: InputQueue::new(),
             pointer: PointerState::new(),
         };
@@ -80,12 +81,18 @@ struct NodeMeta {
     value: Option<String>,
     classes: Vec<String>,
     actions: Vec<Action>,
+    states: Vec<SemState>,
+    scroll: Option<lumen_core::semantics::ScrollInfo>,
     focusable: bool,
     elide: bool,
     on_click: Option<Handler>,
+    on_wheel: Option<crate::element::WheelHandler>,
+    on_drag: Option<crate::element::DragHandler>,
+    on_text: Option<crate::element::TextHandler>,
     background: Option<Color>,
     corner_radius: f64,
     text: Option<(String, TextStyle)>,
+    image: Option<RgbaImage>,
 }
 
 /// A headless, CPU-rendered application instance (02 §8). Drives the same input
@@ -102,6 +109,7 @@ pub struct Headless {
     sem_root: Option<SemanticsNode>,
     focused_id: Option<StableId>,
     hovered_id: Option<StableId>,
+    pressed: Option<NodeIndex>,
     input: InputQueue,
     pointer: PointerState,
 }
@@ -171,14 +179,43 @@ impl Headless {
     fn route(&mut self, ev: Event) {
         match ev {
             Event::PointerDown(pe) => {
-                if let Some(target) = self.tree.hit_test(pe.pos) {
-                    if let Some(m) = self.meta.get(&target) {
-                        if m.focusable {
+                // Bubble from the hit target up its ancestors, firing the
+                // nearest focus/click/drag handlers (decorative children let
+                // their interactive ancestor handle the press).
+                let mut n = self.tree.hit_test(pe.pos);
+                let (mut did_focus, mut did_click, mut did_drag) = (false, false, false);
+                while let Some(node) = n {
+                    if let Some(m) = self.meta.get(&node) {
+                        if !did_focus && m.focusable {
                             self.focused_id = m.id.clone();
+                            did_focus = true;
                         }
-                        if let Some(h) = m.on_click.clone() {
-                            h(&self.rt);
+                        if !did_click {
+                            if let Some(h) = m.on_click.clone() {
+                                h(&self.rt);
+                                did_click = true;
+                            }
                         }
+                        if !did_drag && m.on_drag.is_some() {
+                            self.pressed = Some(node);
+                            self.apply_drag(node, pe.pos);
+                            did_drag = true;
+                        }
+                    }
+                    if did_focus && did_click && did_drag {
+                        break;
+                    }
+                    let p = self.tree.parent(node);
+                    n = p.is_some().then_some(p);
+                }
+            }
+            Event::PointerUp(_) => {
+                self.pressed = None;
+            }
+            Event::TextInput(te) => {
+                if let Some(node) = self.focused_node() {
+                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_text.clone()) {
+                        h(&self.rt, &te.text);
                     }
                 }
             }
@@ -186,6 +223,21 @@ impl Headless {
                 let (_l, _e) = self.pointer.update(&self.tree, pe.pos);
                 let target = self.tree.hit_test(pe.pos);
                 self.hovered_id = target.and_then(|t| self.meta.get(&t).and_then(|m| m.id.clone()));
+                if let Some(node) = self.pressed {
+                    self.apply_drag(node, pe.pos);
+                }
+            }
+            Event::Wheel(we) => {
+                // Find the nearest ancestor (incl. target) with a wheel handler.
+                let mut n = self.tree.hit_test(we.pos);
+                while let Some(node) = n {
+                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_wheel.clone()) {
+                        h(&self.rt, we.delta.y);
+                        break;
+                    }
+                    let parent = self.tree.parent(node);
+                    n = parent.is_some().then_some(parent);
+                }
             }
             Event::KeyDown(ke) => match ke.key {
                 Key::Named(NamedKey::Tab) => {
@@ -221,6 +273,18 @@ impl Headless {
             if let Some(h) = self.meta.get(&n).and_then(|m| m.on_click.clone()) {
                 h(&self.rt);
             }
+        }
+    }
+
+    /// Call a node's drag handler with the pointer's fraction along its width.
+    fn apply_drag(&self, node: NodeIndex, pos: Point) {
+        let b = self.tree.bounds(node);
+        if b.width() <= 0.0 {
+            return;
+        }
+        let frac = ((pos.x - b.x0) / b.width()).clamp(0.0, 1.0);
+        if let Some(h) = self.meta.get(&node).and_then(|m| m.on_drag.clone()) {
+            h(&self.rt, frac);
         }
     }
 
@@ -272,7 +336,12 @@ impl Headless {
         };
 
         let mut flags = NodeFlags::VISIBLE;
-        let interactive = el.background.is_some() || el.on_click.is_some() || el.text.is_some();
+        let interactive = el.background.is_some()
+            || el.on_click.is_some()
+            || el.text.is_some()
+            || el.image.is_some()
+            || el.on_wheel.is_some()
+            || el.on_drag.is_some();
         if interactive {
             flags |= NodeFlags::HIT_TESTABLE;
         }
@@ -318,12 +387,18 @@ impl Headless {
                 value: el.value.clone(),
                 classes: el.classes.clone(),
                 actions: el.actions.clone(),
+                states: el.states.clone(),
+                scroll: el.scroll,
                 focusable: el.focusable,
                 elide: el.elide_semantics,
                 on_click: el.on_click.clone(),
+                on_wheel: el.on_wheel.clone(),
+                on_drag: el.on_drag.clone(),
+                on_text: el.on_text.clone(),
                 background: el.background,
                 corner_radius: el.corner_radius,
                 text: el.text.clone(),
+                image: el.image.clone(),
             },
         );
         built.push((node, lnode));
@@ -346,6 +421,18 @@ impl Headless {
                     brush: Brush::Solid(bg),
                     radii: CornerRadii::all(m.corner_radius),
                     border: None,
+                });
+            }
+            if let Some(img) = &m.image {
+                let iw = img.width() as f64;
+                let ih = img.height() as f64;
+                let id = lumen_render::ImageId(dl.images.len() as u32);
+                dl.images.push(img.clone());
+                dl.push(DrawCmd::Image {
+                    id,
+                    src_rect: Rect::new(0.0, 0.0, iw, ih),
+                    dst_rect: bounds,
+                    quality: lumen_render::Filter::Nearest,
                 });
             }
             if let Some((txt, ts)) = &m.text {
@@ -386,6 +473,8 @@ impl Headless {
             s.actions = m.actions.clone();
             s.type_name = format!("{:?}", m.role);
             s.elide = m.elide;
+            s.scroll = m.scroll;
+            s.states = m.states.clone();
             let flags = self.tree.flags(node);
             if flags.contains(NodeFlags::FOCUSED) {
                 s.states.push(SemState::Focused);
