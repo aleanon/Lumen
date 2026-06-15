@@ -120,6 +120,24 @@ impl Color {
         let (l2, a2, b2) = linear_to_oklab(other.r, other.g, other.b);
         ((l1 - l2).powi(2) + (a1 - a2).powi(2) + (b1 - b2).powi(2)).sqrt()
     }
+
+    /// Construct an opaque color from Oklab components.
+    pub fn from_oklab(l: f32, a: f32, b: f32) -> Color {
+        let (r, g, bl) = oklab_to_linear(l, a, b);
+        Color {
+            r,
+            g,
+            b: bl,
+            a: 1.0,
+        }
+    }
+
+    /// Construct an opaque color from OkLCh (`oklch(L C H)`, 04 §1): lightness
+    /// `L`, chroma `C`, hue `h_deg` in degrees.
+    pub fn from_oklch(l: f32, c: f32, h_deg: f32) -> Color {
+        let h = h_deg.to_radians();
+        Color::from_oklab(l, c * h.cos(), c * h.sin())
+    }
 }
 
 /// Linear sRGB → Oklab (Björn Ottosson's matrices).

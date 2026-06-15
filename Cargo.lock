@@ -1446,6 +1446,8 @@ version = "0.0.0"
 dependencies = [
  "kurbo",
  "lumen-core",
+ "lumen-layout",
+ "serde_json",
 ]
 
 [[package]]

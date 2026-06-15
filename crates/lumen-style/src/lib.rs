@@ -11,6 +11,7 @@ pub mod ast;
 pub mod lexer;
 pub mod parser;
 pub mod properties;
+pub mod style;
 
 pub use ast::{
     Combinator, Compound, Declaration, Item, Part, Rule, Selector, Specificity, Stylesheet,
@@ -18,6 +19,7 @@ pub use ast::{
 };
 pub use parser::{has_errors, parse};
 pub use properties::KNOWN_PROPERTIES;
+pub use style::{apply, canonical, computed_json, Style, Tokens};
 
 use std::collections::HashMap;
 
@@ -145,6 +147,29 @@ pub fn resolve(sources: &[StyleSource], node: &NodeDesc) -> HashMap<String, Comp
         }
     }
     winners.into_iter().map(|(k, (_, c))| (k, c)).collect()
+}
+
+/// Build the token table for `theme`: `@tokens` first, then the matching
+/// `@theme` block overrides (theme-scoped names win, 04 §4).
+pub fn tokens_for(sheet: &Stylesheet, theme: ThemeKind) -> Tokens {
+    let mut t = Tokens::new();
+    for item in &sheet.items {
+        if let Item::Tokens(bindings) = item {
+            for b in bindings {
+                t.insert(b.name.clone(), b.value.clone());
+            }
+        }
+    }
+    for item in &sheet.items {
+        if let Item::Theme(kind, bindings) = item {
+            if *kind == theme {
+                for b in bindings {
+                    t.insert(b.name.clone(), b.value.clone());
+                }
+            }
+        }
+    }
+    t
 }
 
 /// All top-level rules of a stylesheet (media rules are flattened in; their
