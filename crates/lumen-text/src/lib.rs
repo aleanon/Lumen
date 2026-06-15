@@ -22,6 +22,9 @@ use swash::FontRef;
 /// (ADR-005). Color emoji is out of M0 scope; see the decision log.
 const FONT: &[u8] = include_bytes!("../fonts/GoNotoKurrent-Regular.ttf");
 
+pub mod editor;
+pub use editor::{Preedit, TextEditor};
+
 /// Brush carried through parley to each glyph run: straight sRGB RGBA8.
 type Brush = [u8; 4];
 
@@ -124,6 +127,17 @@ impl TextEngine {
         TextBlock { layout }
     }
 
+    /// The x-position (logical px) of byte offset `byte` in `text` at `base`
+    /// style, measured by laying out the prefix. Used for selection/caret
+    /// geometry (T1.5). `byte` must be a char boundary.
+    pub fn measure_prefix(&mut self, text: &str, base: TextStyle, byte: usize) -> f32 {
+        if byte == 0 {
+            return 0.0;
+        }
+        self.layout(&text[..byte], base, &[], None, TextAlign::Start)
+            .width()
+    }
+
     /// Lay out `text` on a single line, truncating with an ellipsis (`…`) if it
     /// exceeds `max_width` (text-overflow: ellipsis).
     pub fn layout_ellipsized(&mut self, text: &str, base: TextStyle, max_width: f32) -> TextBlock {
@@ -175,6 +189,30 @@ impl TextBlock {
     /// Rasterize onto a `width`×`height` image over `background` (CPU path).
     /// `width`/`height` default to the measured size if zero.
     pub fn render(&self, width: u32, height: u32, background: Color) -> RgbaImage {
+        self.render_inner(width, height, background, None)
+    }
+
+    /// Like [`TextBlock::render`], but paints a selection highlight from `x0` to
+    /// `x1` (logical px) behind the text (T1.5 selection rendering).
+    pub fn render_with_selection(
+        &self,
+        width: u32,
+        height: u32,
+        background: Color,
+        x0: f32,
+        x1: f32,
+        highlight: Color,
+    ) -> RgbaImage {
+        self.render_inner(width, height, background, Some((x0, x1, highlight)))
+    }
+
+    fn render_inner(
+        &self,
+        width: u32,
+        height: u32,
+        background: Color,
+        selection: Option<(f32, f32, Color)>,
+    ) -> RgbaImage {
         let w = if width == 0 {
             self.width().ceil() as u32
         } else {
@@ -191,6 +229,19 @@ impl TextBlock {
         let mut pixels = vec![0u8; (w as usize) * (h as usize) * 4];
         for px in pixels.chunks_exact_mut(4) {
             px.copy_from_slice(&bg);
+        }
+
+        // Selection highlight (opaque fill) behind the glyphs.
+        if let Some((sx0, sx1, color)) = selection {
+            let hc = color.to_srgb8();
+            let cx0 = sx0.max(0.0) as u32;
+            let cx1 = (sx1.max(0.0) as u32).min(w);
+            for y in 0..h {
+                for x in cx0..cx1 {
+                    let idx = ((y * w + x) * 4) as usize;
+                    pixels[idx..idx + 4].copy_from_slice(&hc);
+                }
+            }
         }
 
         let mut ctx = ScaleContext::new();
