@@ -15,6 +15,7 @@ pub mod diagnostics;
 pub(crate) mod events;
 pub mod geometry;
 pub mod identity;
+pub(crate) mod semantics;
 pub(crate) mod state;
 pub(crate) mod tree;
 

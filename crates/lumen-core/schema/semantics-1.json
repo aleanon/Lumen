@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lumen-semantics/1",
+  "title": "Lumen semantics document",
+  "type": "object",
+  "required": ["schema", "window", "root"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "lumen-semantics/1" },
+    "window": {
+      "type": "object",
+      "required": ["width", "height", "scale"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "scale": { "type": "number" },
+        "focused": { "type": "string" }
+      }
+    },
+    "root": { "$ref": "#/$defs/SemNode" }
+  },
+  "$defs": {
+    "SemNode": {
+      "type": "object",
+      "required": ["node", "role", "label", "classes", "states", "bounds", "actions", "type", "children"],
+      "additionalProperties": false,
+      "properties": {
+        "node": { "type": "string", "pattern": "^node-[0-9]+$" },
+        "id": { "type": "string" },
+        "role": {
+          "enum": [
+            "window", "button", "checkbox", "radio", "switch", "slider",
+            "text_input", "text", "image", "link", "list", "list_item",
+            "table", "row", "cell", "column_header", "tab_list", "tab",
+            "tab_panel", "menu", "menu_item", "dialog", "alert", "tooltip",
+            "progress", "group", "scroll_area", "tree", "tree_item",
+            "combo_box", "generic"
+          ]
+        },
+        "label": { "type": "string" },
+        "value": { "type": "string" },
+        "classes": { "type": "array", "items": { "type": "string" } },
+        "states": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "focused", "hovered", "pressed", "disabled", "checked",
+              "unchecked", "mixed", "selected", "expanded", "collapsed",
+              "readonly", "required", "invalid", "busy"
+            ]
+          }
+        },
+        "bounds": {
+          "type": "object",
+          "required": ["x", "y", "w", "h"],
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "w": { "type": "number" },
+            "h": { "type": "number" }
+          }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "click", "focus", "blur", "set_value", "increment", "decrement",
+              "scroll_into_view", "expand", "collapse", "dismiss"
+            ]
+          }
+        },
+        "scroll": {
+          "type": "object",
+          "required": ["x", "y", "max_x", "max_y"],
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "max_x": { "type": "number" },
+            "max_y": { "type": "number" }
+          }
+        },
+        "text_selection": {
+          "type": "object",
+          "required": ["start", "end"],
+          "additionalProperties": false,
+          "properties": {
+            "start": { "type": "integer" },
+            "end": { "type": "integer" }
+          }
+        },
+        "type": { "type": "string" },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SemNode" }
+        }
+      }
+    }
+  }
+}

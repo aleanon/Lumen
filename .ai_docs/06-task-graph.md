@@ -37,7 +37,7 @@ parley+swash wrapper: single & multi-style runs, wrapping, alignment, ellipsis, 
 Event enum per 02 §6; capture/bubble dispatch via SoA hit-test; pointer enter/leave tracking; Tab focus traversal; timer events; single input queue used by both OS and synthesized input.
 *Accept:* `cargo test -p lumen-core events::` — dispatch-order fixtures; enter/leave on synthetic moves; focus ring traversal over 20-node fixture matches expected order.
 
-**T0.8 ☐ Semantics tree + JSON export.** Deps: T0.2, T0.7
+**T0.8 ☑ Semantics tree + JSON export.** Deps: T0.2, T0.7
 `SemanticsNode` building during rebuild; elision rules; schema per 03 §1 (validated against a JSON Schema file checked into repo); selector engine per 03 §2.
 *Accept:* `cargo test -p lumen-core semantics::` — schema validation on fixtures; selector test table (≥30 cases incl. `:has`, `:nth`, ambiguity errors with candidates).
 
