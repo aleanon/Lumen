@@ -6,7 +6,6 @@
 //! [`InputQueue`], so tests and the agent drive the app identically.
 //!
 //! Consumed by the headless `App` in T0.9; `allow(dead_code)` is removed then.
-#![allow(dead_code)]
 
 use crate::tree::{NodeFlags, Tree};
 use crate::NodeIndex;

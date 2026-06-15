@@ -15,7 +15,6 @@
 //!
 //! Several items here have no non-test consumer until the headless `App` wires
 //! the tree in (T0.9); the module-level `allow(dead_code)` below is removed then.
-#![allow(dead_code)]
 
 use crate::identity::NodeIndex;
 use bitflags::bitflags;
@@ -24,7 +23,7 @@ use kurbo::{Affine, Point, Rect};
 bitflags! {
     /// Per-node state bits stored in the SoA `flags` array (02 §5).
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-    pub(crate) struct NodeFlags: u32 {
+    pub struct NodeFlags: u32 {
         /// Node participates in layout/paint and can be hit.
         const VISIBLE      = 1 << 0;
         /// Layout of this subtree is stale.
@@ -48,7 +47,7 @@ bitflags! {
 
 /// The node arena: a generational slot allocator plus the SoA hot-data arrays
 /// and intrusive tree links. All arrays are indexed by `NodeIndex::index`.
-pub(crate) struct Tree {
+pub struct Tree {
     // allocator
     generation: Vec<u32>,
     alive: Vec<bool>,
@@ -71,9 +70,15 @@ pub(crate) struct Tree {
     root: NodeIndex,
 }
 
+impl Default for Tree {
+    fn default() -> Self {
+        Tree::new()
+    }
+}
+
 impl Tree {
     /// An empty tree with no root.
-    pub(crate) fn new() -> Tree {
+    pub fn new() -> Tree {
         Tree {
             generation: Vec::new(),
             alive: Vec::new(),
@@ -93,17 +98,22 @@ impl Tree {
     }
 
     /// The root node, or [`NodeIndex::NONE`] if the tree is empty.
-    pub(crate) fn root(&self) -> NodeIndex {
+    pub fn root(&self) -> NodeIndex {
         self.root
     }
 
     /// Number of live nodes.
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.live_count
     }
 
+    /// Whether the tree has no live nodes.
+    pub fn is_empty(&self) -> bool {
+        self.live_count == 0
+    }
+
     /// Whether `n` refers to a currently-live node (generation must match).
-    pub(crate) fn is_alive(&self, n: NodeIndex) -> bool {
+    pub fn is_alive(&self, n: NodeIndex) -> bool {
         let i = n.index() as usize;
         n.is_some() && i < self.alive.len() && self.alive[i] && self.generation[i] == n.generation()
     }
@@ -111,7 +121,7 @@ impl Tree {
     // --- structure mutation -------------------------------------------------
 
     /// Allocate the root. Panics if a root already exists.
-    pub(crate) fn insert_root(&mut self) -> NodeIndex {
+    pub fn insert_root(&mut self) -> NodeIndex {
         assert!(self.root.is_none(), "tree already has a root");
         let n = self.alloc(NodeIndex::NONE);
         self.root = n;
@@ -120,7 +130,7 @@ impl Tree {
 
     /// Allocate a node and append it as the last child of `parent`.
     /// `parent` must be live.
-    pub(crate) fn insert_child(&mut self, parent: NodeIndex) -> NodeIndex {
+    pub fn insert_child(&mut self, parent: NodeIndex) -> NodeIndex {
         debug_assert!(self.is_alive(parent), "insert_child: dead parent");
         let n = self.alloc(parent);
         self.link_last_child(parent, n);
@@ -131,7 +141,7 @@ impl Tree {
     /// (and does nothing) if the move is invalid — `node` is the root, either
     /// index is dead, or `new_parent` lies within `node`'s own subtree (which
     /// would create a cycle).
-    pub(crate) fn reparent(&mut self, node: NodeIndex, new_parent: NodeIndex) -> bool {
+    pub fn reparent(&mut self, node: NodeIndex, new_parent: NodeIndex) -> bool {
         if !self.is_alive(node) || !self.is_alive(new_parent) || node == self.root {
             return false;
         }
@@ -145,7 +155,7 @@ impl Tree {
 
     /// Remove `node` and its entire subtree, recycling all their slots.
     /// Removing the root empties the tree.
-    pub(crate) fn remove(&mut self, node: NodeIndex) {
+    pub fn remove(&mut self, node: NodeIndex) {
         if !self.is_alive(node) {
             return;
         }
@@ -165,50 +175,50 @@ impl Tree {
 
     /// The window-space bounds of `n` — the single source of truth shared with
     /// semantics and `ui.getLayout` (02 §5).
-    pub(crate) fn bounds(&self, n: NodeIndex) -> Rect {
+    pub fn bounds(&self, n: NodeIndex) -> Rect {
         self.bounds[n.index() as usize]
     }
-    pub(crate) fn set_bounds(&mut self, n: NodeIndex, r: Rect) {
+    pub fn set_bounds(&mut self, n: NodeIndex, r: Rect) {
         self.bounds[n.index() as usize] = r;
     }
-    pub(crate) fn z(&self, n: NodeIndex) -> u32 {
+    pub fn z(&self, n: NodeIndex) -> u32 {
         self.z[n.index() as usize]
     }
-    pub(crate) fn set_z(&mut self, n: NodeIndex, z: u32) {
+    pub fn set_z(&mut self, n: NodeIndex, z: u32) {
         self.z[n.index() as usize] = z;
     }
-    pub(crate) fn flags(&self, n: NodeIndex) -> NodeFlags {
+    pub fn flags(&self, n: NodeIndex) -> NodeFlags {
         self.flags[n.index() as usize]
     }
-    pub(crate) fn set_flags(&mut self, n: NodeIndex, f: NodeFlags) {
+    pub fn set_flags(&mut self, n: NodeIndex, f: NodeFlags) {
         self.flags[n.index() as usize] = f;
     }
-    pub(crate) fn set_clip(&mut self, n: NodeIndex, c: Option<Rect>) {
+    pub fn set_clip(&mut self, n: NodeIndex, c: Option<Rect>) {
         self.clip[n.index() as usize] = c;
     }
-    pub(crate) fn set_opacity(&mut self, n: NodeIndex, o: f32) {
+    pub fn set_opacity(&mut self, n: NodeIndex, o: f32) {
         self.opacity[n.index() as usize] = o;
     }
-    pub(crate) fn set_transform(&mut self, n: NodeIndex, t: Affine) {
+    pub fn set_transform(&mut self, n: NodeIndex, t: Affine) {
         self.transform[n.index() as usize] = t;
     }
 
     // --- link accessors -----------------------------------------------------
 
-    pub(crate) fn parent(&self, n: NodeIndex) -> NodeIndex {
+    pub fn parent(&self, n: NodeIndex) -> NodeIndex {
         self.parent[n.index() as usize]
     }
-    pub(crate) fn first_child(&self, n: NodeIndex) -> NodeIndex {
+    pub fn first_child(&self, n: NodeIndex) -> NodeIndex {
         self.first_child[n.index() as usize]
     }
-    pub(crate) fn next_sibling(&self, n: NodeIndex) -> NodeIndex {
+    pub fn next_sibling(&self, n: NodeIndex) -> NodeIndex {
         self.next_sibling[n.index() as usize]
     }
 
     // --- iteration ----------------------------------------------------------
 
     /// Live nodes in document order (depth-first preorder from the root).
-    pub(crate) fn document_order(&self) -> Vec<NodeIndex> {
+    pub fn document_order(&self) -> Vec<NodeIndex> {
         let mut out = Vec::with_capacity(self.live_count);
         if self.root.is_some() {
             self.visit_preorder(self.root, &mut out);
@@ -218,7 +228,7 @@ impl Tree {
 
     /// Live nodes in paint (z) order: document order stably sorted by ascending
     /// `z`. Lower `z` paints first; equal `z` keeps document order.
-    pub(crate) fn z_order(&self) -> Vec<NodeIndex> {
+    pub fn z_order(&self) -> Vec<NodeIndex> {
         let mut out = self.document_order();
         out.sort_by_key(|&n| self.z[n.index() as usize]);
         out
@@ -230,7 +240,7 @@ impl Tree {
     /// ancestor + own clip rects), and the binding order: highest `z` wins, ties
     /// broken by reverse document order (later in document order is on top).
     /// Implemented as a single preorder walk over the link arrays.
-    pub(crate) fn hit_test(&self, p: Point) -> Option<NodeIndex> {
+    pub fn hit_test(&self, p: Point) -> Option<NodeIndex> {
         if self.root.is_none() {
             return None;
         }

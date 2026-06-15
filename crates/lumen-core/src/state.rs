@@ -15,7 +15,6 @@
 //!
 //! Not yet wired to a consumer (the headless `App`/`BuildCx` arrive in T0.9);
 //! `allow(dead_code)` is removed then.
-#![allow(dead_code)]
 
 use crate::diagnostics::{codes, Diagnostic};
 use serde::de::DeserializeOwned;

@@ -41,7 +41,7 @@ Event enum per 02 §6; capture/bubble dispatch via SoA hit-test; pointer enter/l
 `SemanticsNode` building during rebuild; elision rules; schema per 03 §1 (validated against a JSON Schema file checked into repo); selector engine per 03 §2.
 *Accept:* `cargo test -p lumen-core semantics::` — schema validation on fixtures; selector test table (≥30 cases incl. `:has`, `:nth`, ambiguity errors with candidates).
 
-**T0.9 ☐ Headless app + harness seed. ← verification gate.** Deps: T0.3–T0.8
+**T0.9 ☑ Headless app + harness seed. ← verification gate.** Deps: T0.3–T0.8
 `App::run_headless`, `Headless::{pump, inject, screenshot, semantics_json}` (02 §8); minimal `lumen-test`: `#[lumen::test]`, `TestApp`, `Locator` with click/fill/press/text, `expect` with to_exist/to_have_text, auto-wait per 05 §3, exact-golden `expect_screenshot`, virtual clock.
 *Accept:* `cargo test -p lumen-test` self-tests: auto-wait succeeds on delayed-appearance fixture, fails `Ambiguous` with candidates on duplicate fixture; golden round-trip works; `LUMEN_UPDATE_GOLDENS` re-records.
 

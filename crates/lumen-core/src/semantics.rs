@@ -8,7 +8,6 @@
 //! In M0 this module owns the schema, elision, JSON serialization, and the
 //! selector resolver; the headless `App` (T0.9) builds these nodes during
 //! rebuild. `allow(dead_code)` until then.
-#![allow(dead_code)]
 
 use crate::identity::StableId;
 use kurbo::Rect;

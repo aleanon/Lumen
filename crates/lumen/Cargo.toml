@@ -9,3 +9,7 @@ publish = false
 
 [dependencies]
 lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+lumen-layout = { workspace = true }
+lumen-text = { workspace = true }
+lumen-widgets = { workspace = true }

@@ -12,13 +12,17 @@
 
 pub mod color;
 pub mod diagnostics;
-pub(crate) mod events;
+pub mod events;
 pub mod geometry;
 pub mod identity;
-pub(crate) mod semantics;
-pub(crate) mod state;
-pub(crate) mod tree;
+pub mod semantics;
+pub mod state;
+// The SoA hot-data tree is an advanced/internal surface (02 §5): public so the
+// integration layer can drive it, but hidden from docs.
+#[doc(hidden)]
+pub mod tree;
 
 pub use color::Color;
 pub use diagnostics::{codes, Diagnostic, Severity, SourceSpan};
 pub use identity::{NodeIndex, StableId};
+pub use state::{Runtime, Signal};
