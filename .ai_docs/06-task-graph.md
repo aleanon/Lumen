@@ -33,7 +33,7 @@ Generational `NodeIndex`; intrusive tree links + parallel arrays per 02 §5; ins
 parley+swash wrapper: single & multi-style runs, wrapping, alignment, ellipsis, bundled Noto fonts (no system fonts in tests), glyph atlas for the CPU path; bidi + CJK fixtures from day one.
 *Accept:* `cargo test -p lumen-text` — goldens for latin/CJK/bidi/emoji/wrap/ellipsis; measurement function returns stable sizes across runs.
 
-**T0.7 ☐ Event routing + focus.** Deps: T0.2
+**T0.7 ☑ Event routing + focus.** Deps: T0.2
 Event enum per 02 §6; capture/bubble dispatch via SoA hit-test; pointer enter/leave tracking; Tab focus traversal; timer events; single input queue used by both OS and synthesized input.
 *Accept:* `cargo test -p lumen-core events::` — dispatch-order fixtures; enter/leave on synthetic moves; focus ring traversal over 20-node fixture matches expected order.
 

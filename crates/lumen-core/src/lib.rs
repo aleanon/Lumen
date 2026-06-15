@@ -12,6 +12,7 @@
 
 pub mod color;
 pub mod diagnostics;
+pub(crate) mod events;
 pub mod geometry;
 pub mod identity;
 pub(crate) mod state;
