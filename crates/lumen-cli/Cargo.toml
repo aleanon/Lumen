@@ -19,6 +19,8 @@ path = "src/main.rs"
 serde_json = { workspace = true }
 # Dev server: file watcher (ADR-003) + the framework for live reload.
 notify = { workspace = true }
+# Tier-2 hot patch: load freshly-built component cdylibs at runtime (ADR-012).
+libloading = { workspace = true }
 lumen = { workspace = true }
 lumen-core = { workspace = true }
 lumen-style = { workspace = true }
