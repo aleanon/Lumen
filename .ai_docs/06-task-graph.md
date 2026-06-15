@@ -49,7 +49,7 @@ Event enum per 02 §6; capture/bubble dispatch via SoA hit-test; pointer enter/l
 Text, Image, Row, Column, Stack, Scroll, Button, TextFieldBasic, Checkbox, Slider — each: build/layout/paint/event/semantics, keyboard map, default styles (hardcoded constants until T1.2), rustdoc + example.
 *Accept:* per-widget golden + semantic-tree + interaction test (e.g. slider: drag changes value; checkbox: space toggles; scroll: wheel moves content & updates `scroll` in semantics). `cargo test -p lumen-widgets`.
 
-**T0.11 ☐ winit shell + wgpu renderer.** Deps: T0.4, T0.10
+**T0.11 ☑ winit shell + wgpu renderer.** Deps: T0.4, T0.10
 Desktop window, surface, resize/scale handling, vsync present, damage-aware redraw; glyph/image atlases on GPU; parity harness comparing GPU output to CPU goldens (perceptual threshold 05 §4).
 *Accept:* `cargo test -p lumen-render -- --ignored gpu_parity` on GPU runner; `examples/hello` opens, renders the counter, idle CPU <0.5% over 10 s (measured in an ignored test on desktop runner).
 
@@ -57,7 +57,7 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 `lumen new` (scaffolds app with `main_app()` convention), `lumen run`, `lumen test` (wraps cargo test), all with `--json` output envelopes.
 *Accept:* integration test: `lumen new demo && cd demo && lumen test --json` passes and emits valid JSON.
 
-**M0-exit ☐:** `examples/hello` counter app; CI runs a lumen-test that queries the tree, clicks `#increment` by selector, asserts label `1`, matches exact golden — on all 3 desktop OS runners, headless.
+**M0-exit ☑:** `examples/hello` counter app; CI runs a lumen-test that queries the tree, clicks `#increment` by selector, asserts label `1`, matches exact golden — on all 3 desktop OS runners, headless.
 
 ---
 

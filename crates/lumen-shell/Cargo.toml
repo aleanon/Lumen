@@ -8,3 +8,10 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+lumen-widgets = { workspace = true }
+kurbo = { workspace = true }
+# Desktop windowing + GPU surface presentation (ADR-001).
+winit = { workspace = true }
+wgpu = { workspace = true }

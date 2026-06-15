@@ -7,6 +7,7 @@
 
 pub mod cpu;
 pub mod display_list;
+pub mod gpu;
 pub mod image;
 
 pub use display_list::{

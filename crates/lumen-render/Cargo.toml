@@ -13,3 +13,6 @@ kurbo = { workspace = true }
 # CPU reference renderer (ADR-002). `png-format` provides PNG encode/decode for
 # RgbaImage, avoiding the non-whitelisted `image` crate (see decision log).
 tiny-skia = { workspace = true, features = ["png-format"] }
+# GPU backend (ADR-001). Offscreen rendering needs no display; parity-tested
+# against the CPU reference renderer (05 §4).
+wgpu = { workspace = true }

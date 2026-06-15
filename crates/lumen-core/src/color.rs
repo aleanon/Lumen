@@ -112,6 +112,14 @@ impl Color {
             a: self.a + (other.a - self.a) * t,
         }
     }
+
+    /// Perceptual color difference (ΔE) in Oklab — the metric used for GPU↔CPU
+    /// parity (05 §4). Alpha is ignored.
+    pub fn delta_e_oklab(self, other: Color) -> f32 {
+        let (l1, a1, b1) = linear_to_oklab(self.r, self.g, self.b);
+        let (l2, a2, b2) = linear_to_oklab(other.r, other.g, other.b);
+        ((l1 - l2).powi(2) + (a1 - a2).powi(2) + (b1 - b2).powi(2)).sqrt()
+    }
 }
 
 /// Linear sRGB → Oklab (Björn Ottosson's matrices).

@@ -35,3 +35,6 @@ pub use lumen_render as render;
 
 /// Text shaping and layout (ADR-005).
 pub use lumen_text as text;
+
+/// The desktop window shell. `use lumen::RunExt` to call `app.run(size)` (02 §8).
+pub use lumen_shell::{run, RunExt};
