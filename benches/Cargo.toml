@@ -1,0 +1,26 @@
+[package]
+name = "lumen-benches"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+# The lib is just a host for the bench targets; don't run it as a bench (its
+# default libtest harness rejects criterion's CLI flags).
+bench = false
+
+[dependencies]
+lumen-core = { workspace = true }
+lumen-layout = { workspace = true }
+lumen-widgets = { workspace = true }
+kurbo = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "perf"
+harness = false

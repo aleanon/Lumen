@@ -92,3 +92,10 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `lumen-test::session::Session` wraps a `TestApp` and exposes the recording surface (click/fill/press/expect_text/expect_value/expect_state). Each call executes live against the real app *and* appends a typed `Step`, so a recorded session is a genuinely-passing run.
 - `Session::export_test(fn_name, header)` emits a standalone, `cargo test`-able file: the `header` (imports + app-builder fn) followed by a `#[test]` that replays the steps through `lumen_test::{block_on, TestApp, expect}`. Selectors/text are emitted via `{:?}` so quotes/backslashes escape correctly.
 - Verification (cargo test -p lumen-test --test session_export): a fast test records a 2-click + assert session and checks the exported source shape; an `#[ignore]`d test writes the exported file into a throwaway crate (path-deps on lumen + lumen-test) and runs `cargo test` on it — confirmed compiling + passing in ~15 s. The `#[ignore]` follows the existing CLI-e2e convention for framework-building tests.
+
+### T2.6 — Perf gates (criterion benches)
+- Added `criterion 0.5` (locked 0.5.1) to the ADR-003 dev whitelist; new `lumen-benches` workspace crate hosts the benches (`[lib] bench = false` so its empty lib isn't run as a bench).
+- `benches/benches/perf.rs` (criterion): `layout_10k_dirty_subtree` (LayoutTree::relayout_subtree over 10k leaves), `vlist_1m_scroll` (1M-row VirtualList wheel+pump — windowed, so cost is row-count-independent), `idle_frame` (no-input pump).
+- `scripts/perf_gate.sh` runs the benches and checks each mean against an absolute budget (layout <2 ms, vlist <8.33 ms ≈120 fps, idle <2 ms), parsing criterion's `target/criterion/<name>/new/estimates.json` in python3 (locale-proof; bash printf+bc tripped over comma decimals). Criterion's own baseline tracking supplies the ±10% per-run regression signal.
+- CI: a `perf` job (Linux reference runner) in `.github/workflows/ci.yml` runs the gate.
+- Local run on the dev box: layout 0.36 ms, vlist 2.54 ms, idle 0.10 ms — all green within budget.
