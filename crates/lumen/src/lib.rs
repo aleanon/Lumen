@@ -24,6 +24,9 @@ pub use lumen_core::semantics;
 #[doc(inline)]
 pub use lumen_widgets::{app::FrameStats, App, BuildCx, Element, Handler, Headless};
 
+/// The built-in widget library (02 §10).
+pub use lumen_widgets::widgets;
+
 /// Layout styling (the typed mirror of the `.lss` layout properties, 04 §3).
 pub use lumen_layout as layout;
 

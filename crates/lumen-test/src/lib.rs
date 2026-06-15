@@ -56,10 +56,14 @@ impl TestApp {
 
     /// Run `app` headless at a specific size.
     pub fn with_size(app: App, size: Size) -> TestApp {
+        // Resolve goldens relative to the crate under test. Cargo sets
+        // CARGO_MANIFEST_DIR in the test process's environment at runtime, which
+        // is the *calling* crate (not lumen-test); fall back to compile-time.
+        let base = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
         TestApp {
             inner: Rc::new(RefCell::new(app.run_headless(size))),
-            golden_dir: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/golden/cpu"),
+            golden_dir: std::path::PathBuf::from(base).join("tests/golden/cpu"),
         }
     }
 

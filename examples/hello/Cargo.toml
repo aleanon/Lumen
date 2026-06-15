@@ -1,0 +1,22 @@
+[package]
+name = "hello"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "hello"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hello"
+path = "src/main.rs"
+
+[dependencies]
+lumen = { workspace = true }
+
+[dev-dependencies]
+lumen-test = { workspace = true }

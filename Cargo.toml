@@ -14,6 +14,7 @@ members = [
     "crates/lumen-agent",
     "crates/lumen-cli",
     "crates/lumen",
+    "examples/hello",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
