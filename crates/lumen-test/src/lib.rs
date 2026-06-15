@@ -67,6 +67,14 @@ impl TestApp {
         }
     }
 
+    /// Run `app` headless at `size` with theme `"light"|"dark"|"high-contrast"`
+    /// (per-test config, 05 §1).
+    pub fn with_options(app: App, size: Size, theme: &str) -> TestApp {
+        let t = TestApp::with_size(app, size);
+        t.inner.borrow_mut().set_theme_str(theme);
+        t
+    }
+
     /// A locator for `selector` (grammar 03 §2).
     pub fn locator(&self, selector: &str) -> Locator {
         Locator {
@@ -236,6 +244,91 @@ impl Locator {
         let root = self.inner.borrow().semantics_doc().root.elided();
         find_node(&root, id).map(|n| n.bounds)
     }
+
+    /// The matched node's window-space bounds (05 §2).
+    pub async fn bounds(&self) -> Result<Rect, LocatorError> {
+        let id = self.wait_one().await?;
+        Ok(self.node_bounds(id).unwrap_or(Rect::ZERO))
+    }
+
+    /// The matched node's value (inputs/sliders).
+    pub async fn value(&self) -> Result<Option<String>, LocatorError> {
+        let id = self.wait_one().await?;
+        let root = self.inner.borrow().semantics_doc().root.elided();
+        Ok(find_node(&root, id).and_then(|n| n.value.clone()))
+    }
+
+    /// The matched node's active semantic states.
+    pub async fn states(&self) -> Result<Vec<String>, LocatorError> {
+        let id = self.wait_one().await?;
+        let root = self.inner.borrow().semantics_doc().root.elided();
+        Ok(find_node(&root, id)
+            .map(|n| n.states.iter().map(|s| s.as_str().to_string()).collect())
+            .unwrap_or_default())
+    }
+
+    /// A computed style property of the matched node (canonical form, 04 §7).
+    pub async fn style(&self, prop: &str) -> serde_json::Value {
+        let styles = self.inner.borrow().get_styles(&self.selector);
+        styles.get(prop).cloned().unwrap_or(serde_json::Value::Null)
+    }
+
+    /// Hover the matched node (synthesizes a pointer move to its center).
+    pub async fn hover(&self) -> Result<(), LocatorError> {
+        let id = self.wait_one().await?;
+        let p = center(self.node_bounds(id).unwrap_or(Rect::ZERO));
+        let mut h = self.inner.borrow_mut();
+        h.inject(Event::PointerMove(PointerEvent::at(p)));
+        h.pump();
+        Ok(())
+    }
+
+    /// Focus the matched node (clicks it).
+    pub async fn focus(&self) -> Result<(), LocatorError> {
+        self.click().await
+    }
+
+    /// Double-click the matched node.
+    pub async fn dblclick(&self) -> Result<(), LocatorError> {
+        self.click().await?;
+        self.click().await
+    }
+
+    /// Drag from the matched node to `target` (pointer down → move → up).
+    pub async fn drag_to(&self, target: &Locator) -> Result<(), LocatorError> {
+        let from = center(
+            self.node_bounds(self.wait_one().await?)
+                .unwrap_or(Rect::ZERO),
+        );
+        let to = center(
+            target
+                .node_bounds(target.wait_one().await?)
+                .unwrap_or(Rect::ZERO),
+        );
+        let mut h = self.inner.borrow_mut();
+        h.inject(Event::PointerDown(PointerEvent::at(from)));
+        h.inject(Event::PointerMove(PointerEvent::at(to)));
+        h.inject(Event::PointerUp(PointerEvent::at(to)));
+        h.pump();
+        Ok(())
+    }
+
+    /// Set the matched node's value by dragging to `fraction` of its width
+    /// (sliders). `fraction` is in `0.0..=1.0`.
+    pub async fn set_value(&self, fraction: f64) -> Result<(), LocatorError> {
+        let b = self
+            .node_bounds(self.wait_one().await?)
+            .unwrap_or(Rect::ZERO);
+        let p = kurbo::Point::new(
+            b.x0 + fraction.clamp(0.0, 1.0) * b.width(),
+            b.y0 + b.height() / 2.0,
+        );
+        let mut h = self.inner.borrow_mut();
+        h.inject(Event::PointerDown(PointerEvent::at(p)));
+        h.inject(Event::PointerUp(PointerEvent::at(p)));
+        h.pump();
+        Ok(())
+    }
 }
 
 /// An assertion builder (auto-retrying, 05 §2).
@@ -272,6 +365,85 @@ impl Expect {
                 h.pump();
             }
             waited += POLL_MS;
+        }
+    }
+
+    /// Assert the matched node contains `text` (substring).
+    pub async fn to_contain_text(&self, text: &str) -> Result<(), LocatorError> {
+        let got = self.locator.text().await?;
+        if got.contains(text) {
+            Ok(())
+        } else {
+            Err(LocatorError::Timeout)
+        }
+    }
+
+    /// Assert the matched node's value equals `value`.
+    pub async fn to_have_value(&self, value: &str) -> Result<(), LocatorError> {
+        if self.locator.value().await?.as_deref() == Some(value) {
+            Ok(())
+        } else {
+            Err(LocatorError::Timeout)
+        }
+    }
+
+    /// Assert the matched node has state `state` (e.g. `"checked"`, `"focused"`).
+    pub async fn to_have_state(&self, state: &str) -> Result<(), LocatorError> {
+        if self.locator.states().await?.iter().any(|s| s == state) {
+            Ok(())
+        } else {
+            Err(LocatorError::Timeout)
+        }
+    }
+
+    /// Assert the matched node is focused.
+    pub async fn to_be_focused(&self) -> Result<(), LocatorError> {
+        self.to_have_state("focused").await
+    }
+
+    /// Assert the matched node is disabled.
+    pub async fn to_be_disabled(&self) -> Result<(), LocatorError> {
+        self.to_have_state("disabled").await
+    }
+
+    /// Assert the selector resolves to exactly `n` nodes.
+    pub async fn to_have_count(&self, n: usize) -> Result<(), LocatorError> {
+        if self.locator.count().await == n {
+            Ok(())
+        } else {
+            Err(LocatorError::Timeout)
+        }
+    }
+
+    /// Assert a computed style property equals the canonical `value` JSON.
+    pub async fn to_have_style(
+        &self,
+        prop: &str,
+        value: serde_json::Value,
+    ) -> Result<(), LocatorError> {
+        let got = self.locator.style(prop).await;
+        if got.get("value") == Some(&value) || got == value {
+            Ok(())
+        } else {
+            Err(LocatorError::Timeout)
+        }
+    }
+
+    /// Assert the matched node's bounds are within `tol` of `expected`.
+    pub async fn to_have_bounds_within(
+        &self,
+        expected: Rect,
+        tol: f64,
+    ) -> Result<(), LocatorError> {
+        let b = self.locator.bounds().await?;
+        let ok = (b.x0 - expected.x0).abs() <= tol
+            && (b.y0 - expected.y0).abs() <= tol
+            && (b.width() - expected.width()).abs() <= tol
+            && (b.height() - expected.height()).abs() <= tol;
+        if ok {
+            Ok(())
+        } else {
+            Err(LocatorError::Timeout)
         }
     }
 }

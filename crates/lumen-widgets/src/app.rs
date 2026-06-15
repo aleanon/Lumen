@@ -415,6 +415,16 @@ impl Headless {
         self.rebuild();
     }
 
+    /// Set the theme by name (`"light"|"dark"|"high-contrast"`).
+    pub fn set_theme_str(&mut self, theme: &str) {
+        let t = match theme {
+            "dark" => lumen_style::ThemeKind::Dark,
+            "high-contrast" => lumen_style::ThemeKind::HighContrast,
+            _ => lumen_style::ThemeKind::Light,
+        };
+        self.set_theme(t);
+    }
+
     /// Computed styles for the node a `selector` resolves to (03 §3 ui.getStyles,
     /// 04 §7 value serialization). Returns `null` if the selector doesn't resolve
     /// to exactly one node.
