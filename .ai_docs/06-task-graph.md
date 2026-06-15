@@ -64,7 +64,7 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 ## M1 — Usable desktop framework
 **T1.1 ☑ `.lss` parser + cascade.** Deps: T0.10. Grammar 04 §1–2; atomic reject-on-error; E0101–E0104 with spans. *Accept:* parser test corpus (valid + 30 error fixtures asserting codes/spans/did-you-mean); cascade/specificity table tests.
 **T1.2 ☑ Property set + Rust mirror.** Deps: T1.1. All v1 properties applied; `Style` typed API; `style_parity!` macro test; computed-value serialization 04 §7; widgets restyled via default `.lss`. *Accept:* `cargo test -p lumen-style`; goldens of widget gallery under light/dark.
-**T1.3 ☐ Tokens, themes, media queries.** Deps: T1.2. *Accept:* theme-switch test animates colors; media-query fixtures at 3 window sizes.
+**T1.3 ☑ Tokens, themes, media queries.** Deps: T1.2. *Accept:* theme-switch test animates colors; media-query fixtures at 3 window sizes.
 **T1.4 ☐ Animation scheduler.** Deps: T1.2. Transitions, keyframes, springs; vsync-driven; virtual-clock control in tests; reduced-motion. *Accept:* frame-by-frame value assertions using TestClock; idle-after-settle test (0 frames once animations finish).
 **T1.5 ☐ Full text input + IME.** Deps: T0.6. Editing model (selection, undo), preedit handling, clipboard; TextField/TextArea on it. *Accept:* IME preedit fixture tests (synthetic ImePreedit/TextInput sequences incl. CJK composition); goldens for selection rendering.
 **T1.6 ☐ Widget library → 30.** Deps: T1.2, T1.5. List in 02 §10 M1; VirtualList with windowing. *Accept:* per-widget test triple (golden, semantics, interaction); VirtualList: 1M items, ≤ visible+overscan nodes materialized (counted), scroll goldens.

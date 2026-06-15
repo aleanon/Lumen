@@ -149,6 +149,129 @@ pub fn resolve(sources: &[StyleSource], node: &NodeDesc) -> HashMap<String, Comp
     winners.into_iter().map(|(k, (_, c))| (k, c)).collect()
 }
 
+/// The environment a media query is evaluated against (04 §6).
+#[derive(Clone, Debug)]
+pub struct MediaContext {
+    /// Window width (logical px).
+    pub width: f64,
+    /// Window height (logical px).
+    pub height: f64,
+    /// DPI scale factor.
+    pub scale: f64,
+    /// Platform: `windows|macos|linux|android|ios`.
+    pub platform: String,
+    /// Pointer: `mouse|touch`.
+    pub pointer: String,
+}
+
+impl Default for MediaContext {
+    fn default() -> Self {
+        MediaContext {
+            width: 800.0,
+            height: 600.0,
+            scale: 1.0,
+            platform: "linux".into(),
+            pointer: "mouse".into(),
+        }
+    }
+}
+
+/// Evaluate one media query against `ctx`.
+pub fn eval_query(q: &ast::MediaQuery, ctx: &MediaContext) -> bool {
+    use ast::MediaOp::*;
+    let num = |v: &Value| match v {
+        Value::Number(n, _) => Some(*n),
+        _ => None,
+    };
+    match q.feature.as_str() {
+        "width" | "height" | "scale" => {
+            let lhs = match q.feature.as_str() {
+                "width" => ctx.width,
+                "height" => ctx.height,
+                _ => ctx.scale,
+            };
+            let Some(rhs) = num(&q.value) else {
+                return false;
+            };
+            match q.op {
+                Eq => lhs == rhs,
+                Lt => lhs < rhs,
+                Gt => lhs > rhs,
+                Le => lhs <= rhs,
+                Ge => lhs >= rhs,
+            }
+        }
+        "platform" => matches!(&q.value, Value::Keyword(k) if *k == ctx.platform),
+        "pointer" => matches!(&q.value, Value::Keyword(k) if *k == ctx.pointer),
+        _ => false,
+    }
+}
+
+/// Whether all queries in a `@media (...) and (...)` hold.
+pub fn eval_media(queries: &[ast::MediaQuery], ctx: &MediaContext) -> bool {
+    queries.iter().all(|q| eval_query(q, ctx))
+}
+
+/// Resolve the cascade for `node` in media `ctx`: `@media` rules participate
+/// only when their query matches.
+pub fn resolve_media(
+    sources: &[StyleSource],
+    node: &NodeDesc,
+    ctx: &MediaContext,
+) -> HashMap<String, Computed> {
+    let mut winners: HashMap<String, (CascadeKey, Computed)> = HashMap::new();
+    let mut source = 0usize;
+    for src in sources {
+        for rule in rules_in_ctx(&src.sheet, ctx) {
+            if !rule.selectors.iter().any(|s| node.matches(s)) {
+                continue;
+            }
+            let specificity = rule
+                .selectors
+                .iter()
+                .filter(|s| node.matches(s))
+                .map(|s| s.specificity())
+                .max()
+                .unwrap_or_default();
+            for decl in &rule.declarations {
+                let key = CascadeKey {
+                    important: decl.important,
+                    origin: src.origin,
+                    specificity,
+                    source,
+                };
+                source += 1;
+                if winners.get(&decl.property).is_none_or(|(k, _)| key > *k) {
+                    winners.insert(
+                        decl.property.clone(),
+                        (
+                            key,
+                            Computed {
+                                value: decl.value.clone(),
+                                important: decl.important,
+                                origin: src.origin,
+                            },
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    winners.into_iter().map(|(k, (_, c))| (k, c)).collect()
+}
+
+fn rules_in_ctx<'a>(sheet: &'a Stylesheet, ctx: &MediaContext) -> Vec<&'a Rule> {
+    let mut out = Vec::new();
+    for item in &sheet.items {
+        match item {
+            Item::Rule(r) => out.push(r),
+            Item::Media(queries, rules) if eval_media(queries, ctx) => out.extend(rules.iter()),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Build the token table for `theme`: `@tokens` first, then the matching
 /// `@theme` block overrides (theme-scoped names win, 04 §4).
 pub fn tokens_for(sheet: &Stylesheet, theme: ThemeKind) -> Tokens {
