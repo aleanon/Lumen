@@ -32,6 +32,185 @@ pub fn dispatch(app: &mut Headless, req: &Value) -> Value {
 
 type RpcResult = Result<Value, (i64, String)>;
 
+/// Step recorded for export to a `lumen-test` regression suite.
+enum Step {
+    Click(String),
+    Fill(String, String),
+    Press(String, String),
+    ExpectText(String, String),
+    ExpectState(String, String),
+}
+
+/// A recording agent session (M2-exit): wraps [`dispatch`], remembers the
+/// replayable input/assertion steps, and exports them as a standalone
+/// `lumen-test` via `session.exportTest`. An agent connected only to
+/// `lumen-agent` can thus turn an exploration into a committed regression test.
+#[derive(Default)]
+pub struct Session {
+    steps: Vec<Step>,
+}
+
+impl Session {
+    /// A new, empty session.
+    pub fn new() -> Session {
+        Session::default()
+    }
+
+    /// Number of recorded steps.
+    pub fn len(&self) -> usize {
+        self.steps.len()
+    }
+
+    /// Whether nothing has been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.steps.is_empty()
+    }
+
+    /// Dispatch a JSON-RPC request, recording replayable steps. `session.*`
+    /// methods are handled here; everything else delegates to [`dispatch`] and
+    /// successful input methods are recorded.
+    pub fn dispatch(&mut self, app: &mut Headless, req: &Value) -> Value {
+        let id = req.get("id").cloned().unwrap_or(Value::Null);
+        let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
+
+        if let Some(result) = self.handle_session(app, method, &params) {
+            return match result {
+                Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+                Err((code, message)) => {
+                    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+                }
+            };
+        }
+
+        let resp = dispatch(app, req);
+        if resp.get("result").is_some() {
+            self.record(method, &params);
+        }
+        resp
+    }
+
+    fn record(&mut self, method: &str, params: &Value) {
+        let sel = params
+            .get("selector")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        match method {
+            "input.click" => self.steps.push(Step::Click(sel)),
+            "input.type" => {
+                if let Some(t) = params.get("text").and_then(|v| v.as_str()) {
+                    self.steps.push(Step::Fill(sel, t.to_string()));
+                }
+            }
+            "input.key" => {
+                if let Some(k) = params.get("keys").and_then(|v| v.as_str()) {
+                    self.steps.push(Step::Press(sel, k.to_string()));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_session(
+        &mut self,
+        app: &mut Headless,
+        method: &str,
+        params: &Value,
+    ) -> Option<RpcResult> {
+        match method {
+            "session.assertText" => Some(self.assert_text(app, params)),
+            "session.assertState" => Some(self.assert_state(app, params)),
+            "session.exportTest" => Some(self.export(params)),
+            _ => None,
+        }
+    }
+
+    fn assert_text(&mut self, app: &mut Headless, params: &Value) -> RpcResult {
+        let selector = sel(params)?.to_string();
+        let expected = params
+            .get("equals")
+            .and_then(|v| v.as_str())
+            .ok_or((-32602, "missing `equals`".to_string()))?;
+        app.pump();
+        let node = resolve(app, &selector)?;
+        if node.label == expected {
+            self.steps
+                .push(Step::ExpectText(selector, expected.to_string()));
+            Ok(json!({ "ok": true }))
+        } else {
+            Err((
+                -32001,
+                format!("expected text {expected:?}, got {:?}", node.label),
+            ))
+        }
+    }
+
+    fn assert_state(&mut self, app: &mut Headless, params: &Value) -> RpcResult {
+        let selector = sel(params)?.to_string();
+        let state = params
+            .get("state")
+            .and_then(|v| v.as_str())
+            .ok_or((-32602, "missing `state`".to_string()))?;
+        app.pump();
+        let node = resolve(app, &selector)?;
+        if node.states.iter().any(|s| s.as_str() == state) {
+            self.steps
+                .push(Step::ExpectState(selector, state.to_string()));
+            Ok(json!({ "ok": true }))
+        } else {
+            Err((-32001, format!("node lacks state {state:?}")))
+        }
+    }
+
+    fn export(&self, params: &Value) -> RpcResult {
+        let fn_name = params
+            .get("fnName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("agent_regression");
+        let app_expr = params
+            .get("appExpr")
+            .and_then(|v| v.as_str())
+            .ok_or((-32602, "missing `appExpr`".to_string()))?;
+        let header = params.get("header").and_then(|v| v.as_str()).unwrap_or("");
+        Ok(json!({ "source": export_test(fn_name, app_expr, header, &self.steps) }))
+    }
+}
+
+/// Emit a standalone, `cargo test`-able `lumen-test` from recorded steps.
+fn export_test(fn_name: &str, app_expr: &str, header: &str, steps: &[Step]) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    if !header.is_empty() {
+        let _ = writeln!(s, "{header}");
+    }
+    let _ = writeln!(s, "#[test]");
+    let _ = writeln!(s, "fn {fn_name}() {{");
+    let _ = writeln!(s, "    lumen_test::block_on(async {{");
+    let _ = writeln!(s, "        let app = lumen_test::TestApp::new({app_expr});");
+    for step in steps {
+        let line = match step {
+            Step::Click(sel) => format!("        app.locator({sel:?}).click().await.unwrap();"),
+            Step::Fill(sel, t) => {
+                format!("        app.locator({sel:?}).fill({t:?}).await.unwrap();")
+            }
+            Step::Press(sel, k) => {
+                format!("        app.locator({sel:?}).press({k:?}).await.unwrap();")
+            }
+            Step::ExpectText(sel, t) => format!(
+                "        lumen_test::expect(app.locator({sel:?})).to_have_text({t:?}).await.unwrap();"
+            ),
+            Step::ExpectState(sel, st) => format!(
+                "        lumen_test::expect(app.locator({sel:?})).to_have_state({st:?}).await.unwrap();"
+            ),
+        };
+        let _ = writeln!(s, "{line}");
+    }
+    let _ = writeln!(s, "    }});");
+    let _ = writeln!(s, "}}");
+    s
+}
+
 fn handle(app: &mut Headless, method: &str, params: &Value) -> RpcResult {
     match method {
         "ui.getTree" => {
@@ -208,6 +387,16 @@ pub fn mcp_manifest() -> Value {
 /// Blocking and single-threaded (the app lives here). Returns when the client
 /// disconnects.
 pub fn serve_one(listener: &TcpListener, app: &mut Headless) -> std::io::Result<()> {
+    serve_one_session(listener, app, &mut Session::new())
+}
+
+/// Like [`serve_one`], but records the connection into `session` so it can be
+/// exported as a regression suite (`session.exportTest`).
+pub fn serve_one_session(
+    listener: &TcpListener,
+    app: &mut Headless,
+    session: &mut Session,
+) -> std::io::Result<()> {
     let (stream, _) = listener.accept()?;
     let mut ws = match tungstenite::accept(stream) {
         Ok(ws) => ws,
@@ -217,7 +406,7 @@ pub fn serve_one(listener: &TcpListener, app: &mut Headless) -> std::io::Result<
         match ws.read() {
             Ok(tungstenite::Message::Text(txt)) => {
                 let req: Value = serde_json::from_str(&txt).unwrap_or(Value::Null);
-                let resp = dispatch(app, &req);
+                let resp = session.dispatch(app, &req);
                 if ws
                     .send(tungstenite::Message::Text(resp.to_string()))
                     .is_err()

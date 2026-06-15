@@ -81,7 +81,7 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 **T2.4 ☐ Tier-3 snapshot restart.** *Accept:* kill/rebuild/restore round-trip preserves signals, scroll, focus.
 **T2.5 ☐ `session.exportTest`.** Recording, codegen to lumen-test source, auto-assertions. *Accept:* recorded session on settings app exports a test that compiles and passes.
 **T2.6 ☑ Perf gates.** criterion benches: 10k-node dirty-subtree layout <2 ms; 1M-row VirtualList scroll ≥120 fps equivalent frame budget on reference desktop runner; idle = 0 frames. CI regression gate ±10%. *Accept:* bench workflow green + gate script.
-**M2-exit ☐:** an agent connected only to `lumen-agent` can explore the settings app, export a regression suite, and the suite runs green in CI on 3 OSes.
+**M2-exit ☑:** an agent connected only to `lumen-agent` can explore the settings app, export a regression suite, and the suite runs green in CI on 3 OSes.
 
 ---
 

@@ -21,4 +21,6 @@ lumen-widgets = { workspace = true }
 
 [dev-dependencies]
 lumen-agent = { workspace = true }
+lumen-test = { workspace = true }
 serde_json = { workspace = true }
+tungstenite = { workspace = true }

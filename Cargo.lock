@@ -3069,8 +3069,10 @@ version = "0.0.0"
 dependencies = [
  "lumen-agent",
  "lumen-core",
+ "lumen-test",
  "lumen-widgets",
  "serde_json",
+ "tungstenite",
 ]
 
 [[package]]

@@ -99,3 +99,10 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `scripts/perf_gate.sh` runs the benches and checks each mean against an absolute budget (layout <2 ms, vlist <8.33 ms ≈120 fps, idle <2 ms), parsing criterion's `target/criterion/<name>/new/estimates.json` in python3 (locale-proof; bash printf+bc tripped over comma decimals). Criterion's own baseline tracking supplies the ±10% per-run regression signal.
 - CI: a `perf` job (Linux reference runner) in `.github/workflows/ci.yml` runs the gate.
 - Local run on the dev box: layout 0.36 ms, vlist 2.54 ms, idle 0.10 ms — all green within budget.
+
+### M2-exit — agent explores, exports a regression suite, green on 3 OSes
+- `lumen-agent::Session` records an agent-driven exploration (input.click/type/key + new `session.assertText`/`session.assertState`) and `session.exportTest` returns a standalone, compiling `lumen-test`. `serve_one_session` is a recording variant of `serve_one`.
+- New methods over the wire: `session.assertText {selector, equals}`, `session.assertState {selector, state}`, `session.exportTest {fnName, appExpr, header?}`.
+- `examples/settings/tests/m2_exit.rs`: an agent connected only over a real loopback WebSocket explores the settings app (General→About→Appearance, toggle dark mode), asserts text/state, then exports the suite — and asserts it matches the committed `agent_regression.rs` (whitespace-insensitive, so rustfmt may reflow the committed copy).
+- `examples/settings/tests/agent_regression.rs` is the agent-exported regression suite (a normal `lumen-test`); `cargo test --workspace` runs it on all three OSes via the existing CI matrix. settings gains lumen-test + tungstenite dev-deps.
+- Whole-workspace gate green: 59 test binaries ok, clippy clean, fmt clean, cargo-deny ok.
