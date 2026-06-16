@@ -1,0 +1,24 @@
+[package]
+name = "agent-gauntlet-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "agent_gauntlet_media"
+path = "src/lib.rs"
+
+[dependencies]
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+lumen-widgets = { workspace = true }
+lumen-style = { workspace = true }
+lumen-layout = { workspace = true }
+kurbo = { workspace = true }
+
+[dev-dependencies]
+lumen-agent = { workspace = true }
+serde_json = { workspace = true }

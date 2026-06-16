@@ -137,7 +137,7 @@ motion/choreography model.*
 **T6.4 ☑ Motion system.** Physics springs, gesture-driven interruptible animations, **shared-element transitions** across routes, and a choreography/timeline API; the inspector's scrubber becomes a keyframe editor. *Accept:* gesture-driven + shared-element transition tests are deterministic under the virtual clock; choreographed sequence golden.
 **T6.5 ☑ Advanced text & editing.** A real rich-text document model (styles, lists, tables, links, images), selection that spans widgets, find/replace, spell-check hooks, variable-font axis controls, and CRDT-ready edit hooks for future collaboration. *Accept:* rich-editor test triple; cross-widget selection + find/replace driven by the agent.
 **T6.6 ☑ Performance at scale.** Multi-threaded layout, on-device GPU damage/partial redraw, a memory profiler + leak gate, and CI enforcement of the remaining `01 §9` budgets (cold start <300 ms desktop / <800 ms mobile, hello-world <5 MB). *Accept:* a 100k-node scene + all `01 §9` budgets gated in CI on the reference runners.
-**M6-exit ☐:** a **media-rich, animated app** (video + SVG + shared-element navigation + a rich-text editor) holds 120 fps desktop / 60 fps mobile and passes every perf gate, agent-verified on desktop + both mobile emulators — added to the release gate.
+**M6-exit ☑:** a **media-rich, animated app** (video + SVG + shared-element navigation + a rich-text editor) holds 120 fps desktop / 60 fps mobile and passes every perf gate, agent-verified on desktop + both mobile emulators — added to the release gate.
 
 ---
 

@@ -45,6 +45,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-gauntlet-media"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-agent",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-style",
+ "lumen-widgets",
+ "serde_json",
+]
+
+[[package]]
 name = "agent-gauntlet-web"
 version = "0.0.0"
 dependencies = [

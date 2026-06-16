@@ -30,6 +30,7 @@ members = [
     "crates/lumen-shell-web",
     "examples/hello_web",
     "examples/agent-gauntlet-web",
+    "examples/agent-gauntlet-media",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
