@@ -22,6 +22,8 @@ members = [
     "benches",
     "crates/lumen-shell-android",
     "examples/hello_android",
+    "crates/lumen-shell-ios",
+    "examples/hello_ios",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
@@ -48,6 +50,7 @@ lumen-test = { path = "crates/lumen-test" }
 lumen-agent = { path = "crates/lumen-agent" }
 lumen-cli = { path = "crates/lumen-cli" }
 lumen-shell-android = { path = "crates/lumen-shell-android" }
+lumen-shell-ios = { path = "crates/lumen-shell-ios" }
 lumen = { path = "crates/lumen" }
 
 # whitelisted runtime deps (ADR-003) — added to crates as tasks need them

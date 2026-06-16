@@ -1195,6 +1195,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hello_ios"
+version = "0.0.0"
+dependencies = [
+ "lumen",
+ "lumen-shell-ios",
+]
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1831,6 +1839,16 @@ dependencies = [
  "lumen-core",
  "lumen-render",
  "ndk",
+]
+
+[[package]]
+name = "lumen-shell-ios"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen",
+ "lumen-core",
+ "lumen-render",
 ]
 
 [[package]]

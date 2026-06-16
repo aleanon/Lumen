@@ -1,0 +1,17 @@
+[package]
+name = "hello_ios"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "hello_ios"
+# staticlib for the Xcode/Metal host to link; lib so the C ABI is host-testable.
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+lumen = { workspace = true }
+lumen-shell-ios = { workspace = true }
