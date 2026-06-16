@@ -1,5 +1,8 @@
-//! loading_spinners — an indeterminate spinner: an arc rotated by an angle the
-//! agent (or the animation clock) advances.
+//! loading_spinners — an indeterminate spinner: a 3/4 arc whose rotation is a
+//! pure function of `now_ms()` (E8.9/E8.11). `cx.animate()` keeps the host
+//! producing frames; the shell advances the clock by real elapsed time, so it
+//! spins on its own. Deterministic: advancing the clock rotates it by an exact
+//! angle.
 use kurbo::{Affine, BezPath, Point};
 use lumen_core::Color;
 use lumen_widgets::{widgets, App, BuildCx, Element};
@@ -11,11 +14,12 @@ pub fn main_app() -> App {
 }
 
 fn build(cx: &mut BuildCx) -> Element {
-    let step = cx.signal("step", || 0i64);
-    let s = step.get(cx.runtime());
+    cx.animate();
+    // One revolution every 1.2 seconds.
+    let angle = cx.now_ms() / 1000.0 * (2.0 * PI / 1.2);
     let spinner = widgets::canvas(64.0, 64.0, move |f, size| {
         let c = Point::new(size.width / 2.0, size.height / 2.0);
-        // A 3/4 arc approximated by line segments, rotated by the step.
+        // A 3/4 arc approximated by line segments, rotated by `angle`.
         let mut arc = BezPath::new();
         let r = 24.0;
         for i in 0..=27 {
@@ -27,15 +31,11 @@ fn build(cx: &mut BuildCx) -> Element {
                 arc.line_to(p);
             }
         }
-        let angle = s as f64 * (PI / 8.0);
         f.with_transform(
             Affine::translate((c.x, c.y)) * Affine::rotate(angle) * Affine::translate((-c.x, -c.y)),
             |f| f.stroke(&arc, Color::srgb8(0x1a, 0x73, 0xe8, 0xff), 4.0),
         );
     })
     .id("spinner");
-    widgets::column(vec![
-        spinner,
-        widgets::button("advance", move |rt| step.update(rt, |x| *x += 1)).id("advance"),
-    ])
+    widgets::column(vec![spinner, widgets::text("Loading…").id("label")])
 }

@@ -73,8 +73,12 @@ fn clock_canvas() {
     let mut a = iced_parity::clock::main_app().run_headless(Size::new(160.0, 200.0));
     a.pump();
     assert!(nonblank(&mut a), "clock face renders");
-    click(&mut a, "#tick");
-    assert!(tree(&mut a).contains("00:01"), "tick advances time");
+    assert!(a.is_animating(), "clock animates off the virtual clock");
+    a.advance(1000.0); // one second of virtual time
+    assert!(
+        tree(&mut a).contains("00:01"),
+        "advancing the clock ticks time"
+    );
 }
 
 #[test]
@@ -128,10 +132,11 @@ fn gradient_canvas() {
 fn loading_spinner_canvas() {
     let mut a = iced_parity::loading_spinners::main_app().run_headless(Size::new(120.0, 120.0));
     a.pump();
+    assert!(a.is_animating(), "spinner animates off the virtual clock");
     let before = a.screenshot().pixels().to_vec();
-    click(&mut a, "#advance");
+    a.advance(150.0); // 150ms of virtual time ≈ 45° of rotation
     let after = a.screenshot().pixels().to_vec();
-    assert_ne!(before, after, "spinner rotates on advance");
+    assert_ne!(before, after, "spinner rotates as the clock advances");
 }
 
 #[test]
