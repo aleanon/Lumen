@@ -218,3 +218,29 @@ pub fn text_area(cx: &BuildCx, name: &str, initial: &str) -> Element {
     }
     .id(name)
 }
+
+/// A modal overlay (E8.2): when `open`, `dialog` is shown centered over `base`
+/// with a dimmed backdrop; otherwise just `base`.
+pub fn modal(base: Element, dialog: Element, open: bool) -> Element {
+    if !open {
+        return base;
+    }
+    let backdrop = Element {
+        role: Role::Group,
+        background: Some(Color::srgb8(0x00, 0x00, 0x00, 0x88)),
+        style: LayoutStyle {
+            position: lumen_layout::Position::Absolute,
+            inset: Edges::all(Dim::px(0.0)),
+            display: Display::Flex,
+            align_items: Some(Align::Center),
+            justify_content: Some(Align::Center),
+            width: Dim::pct(1.0),
+            height: Dim::pct(1.0),
+            ..LayoutStyle::default()
+        },
+        children: vec![dialog],
+        ..Element::default()
+    }
+    .id("modal-overlay");
+    crate::widgets::stack(vec![base, backdrop])
+}

@@ -310,3 +310,7 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `widgets::progress_bar(fraction)` (track + fill, role Progress); `Frame::linear_gradient_rect` (canvas linear gradient over the display-list gradient brush).
 - `examples/iced-parity`: `progress_bar`, `gradient` (canvas gradient), `loading_spinners` (rotated arc on a canvas). Verified (10 parity tests): progress advances, gradient varies across the strip, spinner changes on advance.
 - Remaining E8.6 items (QR encoder, vectorial outline text, jpeg/webp/gif codecs, animated images) follow the same widget/asset pattern (still PENDING per the plan).
+
+### E8.2 — overlays (batch 3): modal + toast
+- `widgets_extra::modal(base, dialog, open)`: a centered dialog over a dimmed full-bleed backdrop via `stack` + absolute positioning. `examples/iced-parity`: `modal` (open/close a dialog) + `toast` (transient notification that ticks down to auto-dismiss). Verified (12 parity tests).
+- Anchored dropdown popups (combo_box / menu / tooltip positioning) still need a popup positioner (PENDING); modal + toast cover the layered-overlay core.

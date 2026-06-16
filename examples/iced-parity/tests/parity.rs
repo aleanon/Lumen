@@ -133,3 +133,27 @@ fn loading_spinner_canvas() {
     let after = a.screenshot().pixels().to_vec();
     assert_ne!(before, after, "spinner rotates on advance");
 }
+
+#[test]
+fn modal_overlay() {
+    let mut a = iced_parity::modal::main_app().run_headless(Size::new(300.0, 240.0));
+    a.pump();
+    assert!(!tree(&mut a).contains("Are you sure?"), "closed by default");
+    click(&mut a, "#open");
+    assert!(tree(&mut a).contains("Are you sure?"), "dialog shown");
+    click(&mut a, "#close");
+    assert!(!tree(&mut a).contains("Are you sure?"), "dialog closed");
+}
+
+#[test]
+fn toast_notification() {
+    let mut a = iced_parity::toast::main_app().run_headless(Size::new(240.0, 160.0));
+    a.pump();
+    assert!(!tree(&mut a).contains("Saved"));
+    click(&mut a, "#notify");
+    assert!(tree(&mut a).contains("Saved"), "toast appears");
+    for _ in 0..3 {
+        click(&mut a, "#tick");
+    }
+    assert!(!tree(&mut a).contains("Saved"), "toast auto-dismisses");
+}
