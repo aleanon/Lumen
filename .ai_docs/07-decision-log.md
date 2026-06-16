@@ -209,3 +209,7 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `lumen_widgets::nav::Router`: a serializable back-stack — `navigate`/`back`/`deep_link`/`navigate_guarded` (guard predicate)/`current`/`depth`. `lumen_widgets::undo::History<T>`: past/present/future undo-redo with `push`/`undo`/`redo`/`can_undo`/`can_redo` (a new edit clears redo).
 - Both are held in signals, so navigation and undo state are part of the reactive store and persist through the **Checkpoint protocol** (tier-3 restart / save-load) with no extra plumbing — global state is just signals.
 - Verified headless (`cargo test -p lumen-widgets --test nav`): router navigate/back/deep-link/guard; undo/redo incl. redo-clear; and an agent-style nav+counter app whose route stack and undo history survive a `snapshot → drop → run_headless_restored` round-trip.
+
+### T5.5 — Forms & validation
+- `lumen_widgets::forms`: `Validator` (Required / MinLen / MaxLen / Email / Custom predicate) + `validate(value, &[Validator])` (first failure wins). `form_field(cx, name, label, validators)` renders a labelled text input that carries `State::Invalid` while failing, with the message as an associated `#<name>-error` node — validation failures are **structured semantic data**, not pixels.
+- Verified headless (`cargo test -p lumen-widgets --test forms`): validators check values; an agent-style flow reads the initial `required` error (State::Invalid + error node), types an invalid email (error → "invalid email"), then fixes it and the field becomes valid with the error node gone.
