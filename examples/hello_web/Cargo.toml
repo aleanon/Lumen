@@ -1,0 +1,19 @@
+[package]
+name = "hello_web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "hello_web"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+lumen = { workspace = true }
+lumen-shell-web = { workspace = true }
+
+[dev-dependencies]
+lumen-render = { workspace = true }

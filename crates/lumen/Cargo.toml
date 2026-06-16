@@ -14,8 +14,8 @@ lumen-layout = { workspace = true }
 lumen-text = { workspace = true }
 lumen-widgets = { workspace = true }
 
-# The desktop window shell (winit) is desktop-only; mobile targets use the
-# platform shells (lumen-shell-android / -ios) instead, so excluding it here
-# keeps winit → android-activity out of mobile builds.
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# The desktop window shell (winit) is desktop-only; mobile + web targets use
+# their own shells (lumen-shell-android / -ios / -web), so excluding it here
+# keeps winit → android-activity out of those builds.
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))'.dependencies]
 lumen-shell = { workspace = true }

@@ -25,8 +25,12 @@ pub use lumen_core::semantics;
 pub use lumen_widgets::{app::FrameStats, App, AppSnapshot, BuildCx, Element, Handler, Headless};
 
 /// The built-in widget library (02 §10): M0 primitives plus the M1/M3/M4 and
-/// remaining widget sets, the accessibility bridge, and the ShaderWidget.
-pub use lumen_widgets::{a11y, shader, widgets, widgets_extra, widgets_m1, widgets_m3, widgets_m4};
+/// remaining widget sets, plus the accessibility bridge.
+pub use lumen_widgets::{a11y, widgets, widgets_extra, widgets_m1, widgets_m3, widgets_m4};
+
+/// The ShaderWidget (GPU; not available on wasm).
+#[cfg(not(target_arch = "wasm32"))]
+pub use lumen_widgets::shader;
 
 /// Layout styling (the typed mirror of the `.lss` layout properties, 04 §3).
 pub use lumen_layout as layout;
@@ -38,6 +42,6 @@ pub use lumen_render as render;
 pub use lumen_text as text;
 
 /// The desktop window shell. `use lumen::RunExt` to call `app.run(size)` (02 §8).
-/// Desktop-only; mobile targets use the platform shells.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+/// Desktop-only; mobile + web targets use their own shells.
+#[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
 pub use lumen_shell::{run, RunExt};

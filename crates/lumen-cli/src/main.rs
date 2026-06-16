@@ -26,12 +26,12 @@ fn run() -> i32 {
     match positional.first().copied() {
         Some("new") => cmd_new(positional.get(1).copied(), json),
         Some("test") => match platform.as_deref() {
-            Some(p @ ("android" | "ios_sim")) => cmd_mobile("test", p, json),
+            Some(p @ ("android" | "ios_sim" | "web")) => cmd_mobile("test", p, json),
             Some(other) => fail(json, "test", &format!("unknown platform `{other}`")),
             None => cmd_passthrough("test", &["test"], json),
         },
         Some("run") => match platform.as_deref() {
-            Some(p @ ("android" | "ios_sim")) => cmd_mobile("run", p, json),
+            Some(p @ ("android" | "ios_sim" | "web")) => cmd_mobile("run", p, json),
             Some(other) => fail(json, "run", &format!("unknown platform `{other}`")),
             None => cmd_passthrough("run", &["run"], json),
         },
@@ -65,6 +65,7 @@ fn cmd_mobile(command: &str, platform: &str, json: bool) -> i32 {
     let script = match platform {
         "android" => "scripts/android_orchestrate.sh",
         "ios_sim" => "scripts/ios_orchestrate.sh",
+        "web" => "scripts/web_orchestrate.sh",
         _ => unreachable!(),
     };
     if !Path::new(script).exists() {

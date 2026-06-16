@@ -7,6 +7,8 @@
 
 pub mod cpu;
 pub mod display_list;
+// The GPU backend (wgpu) is unavailable on wasm; the web shell renders on the CPU.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod gpu;
 pub mod image;
 

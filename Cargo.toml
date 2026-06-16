@@ -27,6 +27,8 @@ members = [
     "examples/settings_android",
     "examples/inspector",
     "examples/agent-gauntlet",
+    "crates/lumen-shell-web",
+    "examples/hello_web",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
@@ -54,12 +56,17 @@ lumen-agent = { path = "crates/lumen-agent" }
 lumen-cli = { path = "crates/lumen-cli" }
 lumen-shell-android = { path = "crates/lumen-shell-android" }
 lumen-shell-ios = { path = "crates/lumen-shell-ios" }
+lumen-shell-web = { path = "crates/lumen-shell-web" }
 lumen = { path = "crates/lumen" }
 
 # whitelisted runtime deps (ADR-003) — added to crates as tasks need them
 kurbo = "0.11"
 taffy = "0.7"
-parley = "0.3"
+# `default-features = false` drops fontique's `system` font-enumeration backend
+# (windows/objc2/fontconfig) — Lumen only ever uses the bundled font
+# (`system_fonts: false`, ADR-005), so this changes nothing on desktop and makes
+# the text stack compile to wasm32.
+parley = { version = "0.3", default-features = false, features = ["std"] }
 swash = "0.2"
 wgpu = "22"
 winit = "0.30"

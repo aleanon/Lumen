@@ -182,3 +182,12 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
   - **M6 Media, Motion & Performance** — Vello-class GPU rasterizer, vector/image/video/audio media, motion + shared-element transitions, advanced rich-text, perf-at-scale gates (closes `01 §9`).
   - **M7 Ecosystem, Production & AI-Native** — distribution/signing, plugin ecosystem, production hardening, screen-reader a11y certification, agent auto-repair loop + ADR-014 hot-patching-linker slot + design import; **2.0 release gate**.
 - 01-architecture.md §11 updated to list M5–M7 (M0–M4 = 1.0 line; M5–M7 = road to 2.0). New ADRs flagged per milestone (web backend, RTL layout, routing model, Vello backend, media pipeline, motion model, distribution/signing, plugin ABI).
+
+## M5 — Ubiquity & App-Building
+
+### T5.1 — Web / WASM target
+- The whole framework (CPU renderer + layout + parley/swash text + widgets) now compiles to `wasm32-unknown-unknown`. Two enabling changes, both inert on desktop: parley is pinned `default-features = false, features = ["std"]` to drop fontique's `system` font-enumeration backend (Lumen only uses the bundled font, `system_fonts: false`, ADR-005); and `wgpu` + `lumen_render::gpu` + the `ShaderWidget` are `cfg(not(wasm32))` (the web fallback is CPU; WebGPU would pull wasm-bindgen and is a browser-only presenter). The `lumen` facade's desktop shell is also gated off wasm.
+- `crates/lumen-shell-web`: the shared `render_into` CPU core (compiles host + wasm) + a `web/` canvas-presenter template (blit `ImageData`; WebSocket agent bridge noted). `examples/hello_web` is a `cdylib` exposing the C ABI `lumen_web_render(w,h) -> *const u8` (leaks an RGBA buffer in linear memory) with a `web/render.mjs` node harness and `index.html`.
+- Verified WITHOUT a browser: `cargo test -p hello_web --test web_golden -- --ignored` builds the wasm, renders it under **node**, and asserts the bytes are **pixel-identical to the native CPU render** (deterministic renderer → exact parity on the web). `lumen run|test --platform web` → `scripts/web_orchestrate.sh`.
+- PENDING (no headless-Chromium+WebGPU here): the in-browser WebGPU presenter + agent-over-WebSocket — authored in `examples/hello_web/web/`, runs in a browser-CI leg.
+- Host gate green: 91 test binaries, clippy/fmt clean, cargo-deny ok; desktop goldens unchanged.

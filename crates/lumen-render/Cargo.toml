@@ -14,5 +14,8 @@ kurbo = { workspace = true }
 # RgbaImage, avoiding the non-whitelisted `image` crate (see decision log).
 tiny-skia = { workspace = true, features = ["png-format"] }
 # GPU backend (ADR-001). Offscreen rendering needs no display; parity-tested
-# against the CPU reference renderer (05 §4).
+# against the CPU reference renderer (05 §4). Excluded on wasm — the web shell
+# uses the CPU renderer (WebGPU would pull wasm-bindgen); the GPU/WebGPU path is
+# a browser-only production presenter, not part of the deterministic core.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = { workspace = true }
