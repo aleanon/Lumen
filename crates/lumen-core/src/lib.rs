@@ -14,6 +14,7 @@ pub mod color;
 pub mod diagnostics;
 pub mod events;
 pub mod geometry;
+pub mod gesture;
 pub mod identity;
 pub mod semantics;
 pub mod state;

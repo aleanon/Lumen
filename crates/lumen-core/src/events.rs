@@ -170,24 +170,40 @@ pub enum ThemeKind {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TimerToken(pub u64);
 
-/// A high-level gesture (fleshed out for touch in M3).
-#[derive(Clone, Copy, Debug)]
+/// A high-level gesture recognized from raw touch input (02 §6, 03 §94).
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GestureEvent {
-    /// Gesture kind.
+    /// Gesture kind, carrying its parameters.
     pub kind: GestureKind,
-    /// Centroid position.
+    /// Centroid position (mean of active touch points).
     pub pos: Point,
+    /// Number of touch points involved.
+    pub pointers: u8,
 }
 
-/// Gesture kinds.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Gesture kinds with their parameters.
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum GestureKind {
-    /// A tap.
+    /// A single tap.
     Tap,
-    /// A double tap.
+    /// Two taps in quick succession.
     DoubleTap,
-    /// A long press.
+    /// A press held past the long-press threshold without moving.
     LongPress,
+    /// A single-pointer drag.
+    Pan {
+        /// Movement since the previous pan event.
+        delta: Vec2,
+        /// Instantaneous velocity (logical px/s).
+        velocity: Vec2,
+    },
+    /// A two-pointer scale gesture.
+    Pinch {
+        /// Current distance / initial distance between the two pointers.
+        scale: f64,
+        /// Rate of change of `scale` (per second).
+        velocity: f64,
+    },
 }
 
 /// Application-defined event payload.

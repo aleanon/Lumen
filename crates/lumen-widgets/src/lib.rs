@@ -9,9 +9,11 @@
 #![warn(missing_docs)]
 
 pub mod app;
+pub mod audit;
 pub mod element;
 pub mod widgets;
 pub mod widgets_m1;
+pub mod widgets_m3;
 
 pub use app::{center, App, AppSnapshot, FrameStats, Headless, ReloadResult};
 pub use element::{BuildCx, Element, Handler};
