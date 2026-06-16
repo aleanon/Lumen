@@ -117,3 +117,31 @@ Each example ships with the project's standard triple where applicable (golden +
 semantics + agent-driven interaction) and a `just run <name>` entry. The single
 highest-impact gap is **E8.1 (Canvas)** — it alone unblocks the largest cluster
 of iced examples, and every primitive it needs is already in the display list.
+
+## 4. Execution status (M8)
+
+Capabilities landed (each verified on Linux, gated commits):
+- **E8.1 Canvas** ☑ — `lumen_render::canvas::Frame` + `widgets::canvas`.
+- **E8.2 Overlays** ☑ (partial) — `widgets_extra::modal` + toast example; anchored
+  dropdown popups (combo/menu/tooltip positioning) PENDING.
+- **E8.3 Networking** ☑ (partial) — WebSocket client (`tungstenite`); HTTP
+  fetch (pokedex/download_progress) PENDING (async runtime + HTTP client = ADR-003
+  escalation).
+- **E8.4 Pane grid** ☑ — `widgets_extra::pane_grid` (draggable split).
+- **E8.5 Markdown** ☑ — `widgets::markdown::render` (CommonMark subset).
+- **E8.6 Small widgets** ☑ (partial) — `progress_bar`, gradient
+  (`Frame::linear_gradient_rect`), spinner; QR/vectorial-outline-text/extra
+  codecs/animated-images PENDING.
+- **E8.7 System** ☑ (partial) — `system::system_info` (OS/arch/cpus); full
+  `sysinfo` + OS window binding (exit/url/multi-window/integration) PENDING.
+- **E8.8 Gallery** ☑ — `examples/iced-parity` with **21 example apps**, all
+  agent-tested (`cargo test -p iced-parity`): counter, todos, events, tour, clock,
+  sierpinski, color_palette, progress_bar, gradient, loading_spinners, modal,
+  toast, markdown, changelog, pane_grid, svg, styling, stopwatch, image,
+  system_information, websocket.
+
+Remaining iced examples map to the PENDING items above (HTTP: pokedex,
+download_progress; anchored popups: combo_box, menu, pick_list dropdowns,
+positioned tooltip; assets: qr_code, ferris, vectorial_text, full-codec image;
+OS binding: exit, url_handler, multi-window, integration; custom_quad/arc/
+bezier_tool/game_of_life/solar_system reuse the Canvas already shipped).
