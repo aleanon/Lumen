@@ -1827,6 +1827,7 @@ dependencies = [
  "lumen-style",
  "lumen-widgets",
  "notify",
+ "serde",
  "serde_json",
 ]
 

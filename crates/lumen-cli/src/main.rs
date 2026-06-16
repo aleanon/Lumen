@@ -35,12 +35,54 @@ fn run() -> i32 {
             Some(other) => fail(json, "run", &format!("unknown platform `{other}`")),
             None => cmd_passthrough("run", &["run"], json),
         },
+        Some("package") => cmd_package(json),
         Some(other) => fail(json, "usage", &format!("unknown command `{other}`")),
         None => fail(
             json,
             "usage",
-            "usage: lumen <new|run|test> [--platform <p>] [--json]",
+            "usage: lumen <new|run|test|package> [--platform <p>] [--json]",
         ),
+    }
+}
+
+/// `lumen package`: build the current crate in release and write a portable
+/// bundle (binary + assets + manifest). Code signing / installer formats are a
+/// per-OS step on top of the bundle (T7.1).
+fn cmd_package(json: bool) -> i32 {
+    let toml = match std::fs::read_to_string("Cargo.toml") {
+        Ok(t) => t,
+        Err(_) => return fail(json, "package", "no Cargo.toml in the current directory"),
+    };
+    let field = |key: &str| {
+        toml.lines()
+            .find_map(|l| l.trim().strip_prefix(key))
+            .and_then(|r| r.split('"').nth(1))
+            .unwrap_or("app")
+            .to_string()
+    };
+    let name = field("name =").replace('"', "");
+    let version = field("version =");
+
+    let built = Command::new("cargo").args(["build", "--release"]).status();
+    match built {
+        Ok(s) if s.success() => {}
+        _ => return fail(json, "package", "release build failed"),
+    }
+    let bin = Path::new("target/release").join(&name);
+    let bytes = match std::fs::read(&bin) {
+        Ok(b) => b,
+        Err(_) => return fail(json, "package", &format!("no release binary at {bin:?}")),
+    };
+    let platform = std::env::consts::OS;
+    let manifest = lumen_cli::dist::BundleManifest::new(&name, &version, platform, &name);
+    match lumen_cli::dist::package(Path::new("target"), manifest, &bytes, &[]) {
+        Ok(dir) => ok(
+            json,
+            "package",
+            json!({ "bundle": dir.display().to_string(), "platform": platform }),
+            &format!("packaged {name} {version} → {}", dir.display()),
+        ),
+        Err(e) => fail(json, "package", &format!("bundle failed: {e}")),
     }
 }
 

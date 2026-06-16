@@ -255,3 +255,10 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `examples/agent-gauntlet-media`: combines every M6 capability — an SVG logo (T6.2) rendered to pixels, a procedural video frame (T6.3 `TestPattern`) the agent steps, a shared-element hero whose bounds morph via the motion system (T6.4), and a rich-text editor — driven through `lumen-agent`.
 - Verified (`cargo test -p agent-gauntlet-media --test gauntlet`): all three media surfaces render as images, the video frame advances on `#next`, the editor accepts input + renders an emphasised run, and a media-rich frame holds the **120fps budget** (worst frame < 8.33 ms over 30 frames on the CPU renderer in release; a relaxed bound in debug so the workspace test passes). Mobile 60fps uses the same verified CPU path.
 - Whole-workspace host gate green: 106 test binaries, clippy/fmt clean.
+
+## M7 — Ecosystem, Production & AI-Native
+
+### T7.1 — Distribution & packaging
+- `lumen_cli::dist`: `BundleManifest` (`lumen-bundle/1`: name/version/platform/entry/assets) + `package(out, manifest, entry_bytes, assets)` writing a portable `<name>.bundle/` (binary + `assets/` + `manifest.json`) — the substrate every installer format wraps. `lumen package` builds the current crate in release and bundles it.
+- Verified (`cargo test -p lumen-cli --test dist`): the bundle has the entry binary, assets, and a correct manifest.
+- PENDING (no signing identity / OS tooling here): code signing + notarization, the OS installer formats (msix/dmg/AppImage/ipa), delta auto-update, and reproducible-build attestation. The Android `.apk` path already exists (`scripts/android_build_apk.sh`); the bundle + manifest are the cross-platform packaging contract those steps consume.

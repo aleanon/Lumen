@@ -5,5 +5,6 @@
 #![warn(missing_docs)]
 
 pub mod dev;
+pub mod dist;
 pub mod hotpatch;
 pub mod proto;
