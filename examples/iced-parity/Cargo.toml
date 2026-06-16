@@ -20,4 +20,5 @@ tungstenite = { workspace = true }
 
 [dev-dependencies]
 lumen-agent = { workspace = true }
+lumen-shell = { workspace = true }
 serde_json = { workspace = true }

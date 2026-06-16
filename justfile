@@ -22,6 +22,11 @@ run name *args:
         cargo run -q -p iced-parity --example show -- "$name"   # iced-parity gallery example
     fi
 
+# Open an iced-parity gallery example in a real interactive desktop window
+# (winit + wgpu); blocks until closed. `just win list` shows the names.
+win name:
+    cargo run -q -p iced-parity --example win -- "{{name}}"
+
 # List the example packages.
 examples:
     @ls examples
