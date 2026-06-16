@@ -8,6 +8,7 @@
 //! `lumen::App`.
 #![warn(missing_docs)]
 
+pub mod a11y;
 pub mod app;
 pub mod audit;
 pub mod element;
