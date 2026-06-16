@@ -18,6 +18,7 @@ pub mod i18n;
 pub mod nav;
 pub mod system;
 pub mod undo;
+pub mod wcag;
 // ShaderWidget needs the wgpu GPU backend (CPU fallback included), which is not
 // built on wasm; on the web, shaders are a WebGPU presenter concern.
 #[cfg(not(target_arch = "wasm32"))]

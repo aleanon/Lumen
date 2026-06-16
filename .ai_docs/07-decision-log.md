@@ -273,3 +273,9 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `lumen_widgets::boundary::error_boundary(child, fallback)`: wraps a subtree's build in `catch_unwind`(AssertUnwindSafe); a panic is contained and renders `fallback(message)` instead of crashing the process. `default_fallback` shows the message.
 - Verified (`cargo test -p lumen-widgets --test hardening`): the boundary returns the fallback on panic; an app with a panicking subtree keeps its sibling alive and shows the recovered fallback; and 3000 fuzzed inputs to the `.lss` parser and the selector engine never panic (both are total — errors are diagnostics).
 - PENDING: crash/diagnostic reporting hooks + opt-in telemetry transport, and a continuous `cargo-fuzz` harness in CI. The panic-containment + totality contracts (the safety guarantees) are landed and tested.
+
+### T7.4 — Accessibility certification (automated WCAG)
+- `lumen_widgets::wcag`: `contrast_ratio` / `meets_aa` (WCAG 1.4.3, computed from Lumen's linear-light colors) and `audit_names` (WCAG 4.1.2 — interactive nodes with no label/value). Touch-target size (2.5.5) is `audit::audit_touch_targets`; role/state is the AccessKit map (`a11y`).
+- Verified (`cargo test -p lumen-widgets --test wcag`): black/white = 21:1, AA pass/fail on real color pairs; the name audit flags an unlabelled button and passes a labelled one.
+- `docs/a11y-checklist.md` now splits WCAG 2.2 into automated (in CI) vs manual screen-reader passes.
+- PENDING (no screen reader / a11y runner here): real VoiceOver / NVDA / Orca driven in CI. The machine-verifiable half of conformance (contrast, target size, name/role/value) is automated and gated.
