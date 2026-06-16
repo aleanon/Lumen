@@ -4,10 +4,26 @@
 //!   * `idle_frame`               < 2 ms (idle does no real work)
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use kurbo::{Point, Size, Vec2};
+use kurbo::{Point, Rect, Size, Vec2};
 use lumen_core::events::{Event, Modifiers, WheelEvent};
 use lumen_layout::{Dim, LayoutStyle, LayoutTree};
+use lumen_render::scene::cull_visible;
 use lumen_widgets::{widgets, widgets_m1, widgets_m4, App};
+
+/// 100k-node scene: cull a large scene against a viewport (multi-threaded, T6.6).
+fn cull_100k(c: &mut Criterion) {
+    let bounds: Vec<Rect> = (0u64..100_000)
+        .map(|i| {
+            let x = (i.wrapping_mul(2654435761) % 100_000) as f64;
+            let y = (i.wrapping_mul(40503) % 100_000) as f64;
+            Rect::new(x, y, x + 30.0, y + 20.0)
+        })
+        .collect();
+    let viewport = Rect::new(10_000.0, 10_000.0, 30_000.0, 30_000.0);
+    c.bench_function("cull_100k", |b| {
+        b.iter(|| cull_visible(&bounds, viewport).len());
+    });
+}
 
 /// 10k-node tree: one container over 10 000 fixed-height leaves; the bench
 /// recomputes the whole subtree each iteration.
@@ -97,6 +113,7 @@ criterion_group!(
     layout_10k_dirty_subtree,
     vlist_1m_scroll,
     data_grid_1m_scroll,
+    cull_100k,
     idle_frame
 );
 criterion_main!(perf);

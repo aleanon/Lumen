@@ -245,3 +245,8 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `lumen_text::richtext`: a `RichDoc` (text buffer + `StyleRun`s) with `apply_style`/`is_bold_at`, `find` (non-overlapping match ranges), `replace_all` (count + buffer rewrite), and `insert`; plus a `CrossSelection`/`selected_text` model that spans multiple text widgets by `(widget, offset)` (order-independent).
 - Verified (`cargo test -p lumen-text --test richtext`): styling + find/replace, insert + non-overlapping finds, and cross-widget selection (incl. reversed anchor/focus and single-widget).
 - PENDING (layer on `RichDoc`): lists/tables/links/inline images, spell-check, variable-font axis UI, and CRDT collaboration hooks.
+
+### T6.6 — Performance at scale
+- `cull_100k` criterion bench (100k-node scene culled via the T6.1 parallel `cull_visible`) added to the perf suite with a < 5 ms budget; measured ~0.52 ms. All perf gates green (layout 0.38 / vlist 2.58 / data_grid 6.87 / cull_100k 0.52 / idle 0.10 ms).
+- `scripts/size_gate.sh` reports the hello-world release binary size. HONEST STATUS: it is ~17.8 MB, dominated by the bundled 15.5 MB GoNotoKurrent CJK font (ADR-005); the `01 §9` <5 MB target needs a subset/on-demand font strategy — recorded as a known trade-off, not silently passed.
+- PENDING: fully multi-threaded *layout* (taffy isn't trivially parallel) and on-device GPU partial-redraw — the multi-threaded scene/cull pass (T6.1) and the bounded-node windowing (VirtualList/DataGrid) are the landed scale wins; cold-start timing + the <5 MB binary need the font work.

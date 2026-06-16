@@ -1799,6 +1799,7 @@ dependencies = [
  "kurbo",
  "lumen-core",
  "lumen-layout",
+ "lumen-render",
  "lumen-widgets",
 ]
 
