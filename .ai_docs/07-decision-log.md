@@ -262,3 +262,9 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `lumen_cli::dist`: `BundleManifest` (`lumen-bundle/1`: name/version/platform/entry/assets) + `package(out, manifest, entry_bytes, assets)` writing a portable `<name>.bundle/` (binary + `assets/` + `manifest.json`) — the substrate every installer format wraps. `lumen package` builds the current crate in release and bundles it.
 - Verified (`cargo test -p lumen-cli --test dist`): the bundle has the entry binary, assets, and a correct manifest.
 - PENDING (no signing identity / OS tooling here): code signing + notarization, the OS installer formats (msix/dmg/AppImage/ipa), delta auto-update, and reproducible-build attestation. The Android `.apk` path already exists (`scripts/android_build_apk.sh`); the bundle + manifest are the cross-platform packaging contract those steps consume.
+
+### T7.2 — Plugin & widget ecosystem
+- Third-party widgets are first-class because a widget is just an `Element` constructor over the public `Element`/`BuildCx` ABI. `examples/widget-rating` is an **out-of-tree** crate exposing `rating(cx, name, max) -> Element` (a star rating, role Slider) depending only on lumen-widgets.
+- `examples/gallery` is a Storybook-class component gallery mixing built-in widgets with the third-party rating widget; `lumen add <crate>` appends a dependency to the current `Cargo.toml`.
+- Verified: `cargo test -p gallery --test gallery` — the gallery drives built-ins (switch, select) AND the third-party rating widget (`#stars-star-3` → "rating 4 of 5") identically through `lumen-agent`; `lumen add widget-rating` adds the dependency.
+- PENDING: a published registry + binary plugin ABI + automated doc-gen site; the source-level widget ABI + agent-drivability (the contract that makes widgets portable) is proven.

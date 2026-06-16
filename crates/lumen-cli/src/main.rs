@@ -36,6 +36,7 @@ fn run() -> i32 {
             None => cmd_passthrough("run", &["run"], json),
         },
         Some("package") => cmd_package(json),
+        Some("add") => cmd_add(positional.get(1).copied(), json),
         Some(other) => fail(json, "usage", &format!("unknown command `{other}`")),
         None => fail(
             json,
@@ -43,6 +44,45 @@ fn run() -> i32 {
             "usage: lumen <new|run|test|package> [--platform <p>] [--json]",
         ),
     }
+}
+
+/// `lumen add <crate>`: append a widget/plugin dependency to the current
+/// crate's `Cargo.toml` (T7.2 ecosystem).
+fn cmd_add(krate: Option<&str>, json: bool) -> i32 {
+    let Some(krate) = krate else {
+        return fail(json, "add", "usage: lumen add <crate>");
+    };
+    let toml = match std::fs::read_to_string("Cargo.toml") {
+        Ok(t) => t,
+        Err(_) => return fail(json, "add", "no Cargo.toml here"),
+    };
+    if toml.contains(&format!("\n{krate} =")) {
+        return ok(
+            json,
+            "add",
+            json!({ "crate": krate, "added": false }),
+            &format!("{krate} already a dependency"),
+        );
+    }
+    let line = format!("{krate} = \"*\"\n");
+    let updated = if let Some(i) = toml.find("[dependencies]") {
+        let nl = toml[i..]
+            .find('\n')
+            .map(|n| i + n + 1)
+            .unwrap_or(toml.len());
+        format!("{}{}{}", &toml[..nl], line, &toml[nl..])
+    } else {
+        format!("{toml}\n[dependencies]\n{line}")
+    };
+    if std::fs::write("Cargo.toml", updated).is_err() {
+        return fail(json, "add", "could not write Cargo.toml");
+    }
+    ok(
+        json,
+        "add",
+        json!({ "crate": krate, "added": true }),
+        &format!("added dependency {krate}"),
+    )
 }
 
 /// `lumen package`: build the current crate in release and write a portable

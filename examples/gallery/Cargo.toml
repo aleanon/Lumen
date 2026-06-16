@@ -1,0 +1,21 @@
+[package]
+name = "gallery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "gallery"
+path = "src/lib.rs"
+
+[dependencies]
+lumen-widgets = { workspace = true }
+widget-rating = { path = "../widget-rating" }
+
+[dev-dependencies]
+lumen-agent = { workspace = true }
+lumen-core = { workspace = true }
+serde_json = { workspace = true }
