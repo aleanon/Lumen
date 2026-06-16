@@ -90,6 +90,7 @@ impl App {
             pressed: None,
             input: InputQueue::new(),
             pointer: PointerState::new(),
+            requests: crate::element::FrameRequests::default(),
             app_sheet: self.stylesheet.as_deref().and_then(parse_sheet),
             theme: lumen_style::ThemeKind::Light,
             node_style: HashMap::new(),
@@ -183,6 +184,8 @@ pub struct Headless {
     node_computed: HashMap<NodeIndex, HashMap<String, lumen_style::Computed>>,
     input: InputQueue,
     pointer: PointerState,
+    // Animation/timer requests from the latest build (02 §8, time-driven UI).
+    requests: crate::element::FrameRequests,
     // Desktop system integration (T5.2).
     clipboard: String,
     menu: crate::system::MenuModel,
@@ -236,6 +239,38 @@ impl Headless {
     /// Advance the virtual clock by `ms`.
     pub fn advance_clock(&mut self, ms: f64) {
         self.clock_ms += ms;
+    }
+
+    /// Advance the virtual clock by `dt_ms` and pump one frame. The deterministic
+    /// driver for time-based UI: a test calls `advance(1000.0)` to move a clock
+    /// hand exactly one second; the desktop shell calls it with the real elapsed
+    /// time each frame. Equivalent to [`advance_clock`](Self::advance_clock) then
+    /// [`pump`](Self::pump).
+    pub fn advance(&mut self, dt_ms: f64) -> FrameStats {
+        self.advance_clock(dt_ms);
+        self.pump()
+    }
+
+    /// Whether the latest build requested continuous animation (via
+    /// [`BuildCx::animate`](crate::BuildCx::animate)).
+    pub fn is_animating(&self) -> bool {
+        self.requests.continuous
+    }
+
+    /// The next virtual-clock time (ms) at which the UI wants a frame, or `None`
+    /// if it is idle. `Some(t)` with `t <= now_ms()` means "animate now" (a
+    /// continuous animation); a larger `t` is a one-shot wake. The host turns
+    /// this into a wait/poll decision so an idle UI costs no frames.
+    pub fn next_deadline(&self) -> Option<f64> {
+        if self.requests.continuous {
+            return Some(self.clock_ms);
+        }
+        self.requests
+            .wakes
+            .iter()
+            .copied()
+            .filter(|t| *t > self.clock_ms)
+            .min_by(|a, b| a.total_cmp(b))
     }
 
     /// The semantics document as JSON (`lumen-semantics/1`, 03 §1).
@@ -467,10 +502,12 @@ impl Headless {
     // --- rebuild ------------------------------------------------------------
 
     fn rebuild(&mut self) {
-        let root_el = {
+        let (root_el, requests) = {
             let mut cx = BuildCx::new(&self.rt, self.clock_ms);
-            (self.root)(&mut cx)
+            let el = (self.root)(&mut cx);
+            (el, cx.take_requests())
         };
+        self.requests = requests;
 
         let mut tree = Tree::new();
         let mut layout = LayoutTree::new();

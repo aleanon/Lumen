@@ -10,6 +10,8 @@ use lumen_core::{Color, Signal, StableId};
 use lumen_layout::{Dim, Display, FlexDirection, LayoutStyle};
 use lumen_render::RgbaImage;
 use lumen_text::TextStyle;
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// A click/activate handler. Re-registered every build; never stored (ADR-013).
@@ -211,16 +213,35 @@ impl Element {
     }
 }
 
+/// Animation/timer requests a build emitted, collected for the host (the shell
+/// schedules the next frame from these; tests read them directly). Re-collected
+/// from scratch on every build, so the build closure is the single source of
+/// truth (like signals and effects) — a request lives only while it is re-emitted.
+#[derive(Default)]
+pub struct FrameRequests {
+    /// Any node asked to keep animating (redraw continuously).
+    pub continuous: bool,
+    /// Absolute virtual-clock deadlines (ms) at which the UI wants a frame.
+    pub wakes: Vec<f64>,
+}
+
 /// The build context handed to the root closure and components. Exposes signal
-/// creation and the (virtual) clock.
+/// creation, the (virtual) clock, and time-driven animation requests.
 pub struct BuildCx<'a> {
     rt: &'a Runtime,
     now_ms: f64,
+    requests: RefCell<Vec<f64>>,
+    continuous: Cell<bool>,
 }
 
 impl<'a> BuildCx<'a> {
     pub(crate) fn new(rt: &'a Runtime, now_ms: f64) -> BuildCx<'a> {
-        BuildCx { rt, now_ms }
+        BuildCx {
+            rt,
+            now_ms,
+            requests: RefCell::new(Vec::new()),
+            continuous: Cell::new(false),
+        }
     }
 
     /// Create or re-attach a signal keyed by `name` (02 §4).
@@ -236,5 +257,33 @@ impl<'a> BuildCx<'a> {
     /// The current virtual-clock time in milliseconds (for time-driven UI).
     pub fn now_ms(&self) -> f64 {
         self.now_ms
+    }
+
+    /// Request continuous animation: the host should keep producing frames (each
+    /// advancing the virtual clock) as long as this is re-emitted. Use for UI
+    /// whose value is a function of [`now_ms`](Self::now_ms) (a spinner, a clock
+    /// hand). Idle and deterministic: nothing animates unless a build asks.
+    pub fn animate(&self) {
+        self.continuous.set(true);
+    }
+
+    /// Request a single frame at virtual time `t_ms` (absolute). Lets time-based
+    /// state transitions (a toast auto-dismiss, a delayed reveal) happen without
+    /// other input. A past `t_ms` is ignored by the host.
+    pub fn wake_at(&self, t_ms: f64) {
+        self.requests.borrow_mut().push(t_ms);
+    }
+
+    /// Request a single frame `dt_ms` from now (relative form of [`wake_at`](Self::wake_at)).
+    pub fn wake_in(&self, dt_ms: f64) {
+        self.wake_at(self.now_ms + dt_ms);
+    }
+
+    /// Take the animation/timer requests this build emitted.
+    pub(crate) fn take_requests(self) -> FrameRequests {
+        FrameRequests {
+            continuous: self.continuous.get(),
+            wakes: self.requests.into_inner(),
+        }
     }
 }
