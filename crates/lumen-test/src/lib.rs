@@ -53,6 +53,20 @@ pub struct TestApp {
     tracer: Rc<RefCell<Tracer>>,
 }
 
+/// Resolve the golden directory. `LUMEN_GOLDEN_DIR` overrides everything (used
+/// when running tests on a device, where the assets are pushed to a known path);
+/// otherwise goldens sit under the crate-under-test's `tests/golden/cpu`. Cargo
+/// sets `CARGO_MANIFEST_DIR` at test runtime to the *calling* crate; the
+/// compile-time value is the last-resort fallback.
+fn golden_dir() -> std::path::PathBuf {
+    if let Ok(dir) = std::env::var("LUMEN_GOLDEN_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    let base = std::env::var("CARGO_MANIFEST_DIR")
+        .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
+    std::path::PathBuf::from(base).join("tests/golden/cpu")
+}
+
 impl TestApp {
     /// Run `app` headless at the default 800×600.
     pub fn new(app: App) -> TestApp {
@@ -61,14 +75,9 @@ impl TestApp {
 
     /// Run `app` headless at a specific size.
     pub fn with_size(app: App, size: Size) -> TestApp {
-        // Resolve goldens relative to the crate under test. Cargo sets
-        // CARGO_MANIFEST_DIR in the test process's environment at runtime, which
-        // is the *calling* crate (not lumen-test); fall back to compile-time.
-        let base = std::env::var("CARGO_MANIFEST_DIR")
-            .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
         TestApp {
             inner: Rc::new(RefCell::new(app.run_headless(size))),
-            golden_dir: std::path::PathBuf::from(base).join("tests/golden/cpu"),
+            golden_dir: golden_dir(),
             tracer: Rc::new(RefCell::new(Tracer::new())),
         }
     }

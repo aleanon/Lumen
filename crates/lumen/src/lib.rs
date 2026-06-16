@@ -37,4 +37,6 @@ pub use lumen_render as render;
 pub use lumen_text as text;
 
 /// The desktop window shell. `use lumen::RunExt` to call `app.run(size)` (02 §8).
+/// Desktop-only; mobile targets use the platform shells.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use lumen_shell::{run, RunExt};

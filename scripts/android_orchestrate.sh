@@ -46,6 +46,9 @@ run)
     ;;
 test)
     ensure_emulator
+    # The M0-exit suite, cross-compiled and run unmodified on the emulator (T3.6).
+    bash scripts/android_device_test.sh hello m0_exit examples/hello/tests/golden/cpu
+    # Plus the device shell + tier-1 reload checks.
     cargo test -p lumen-shell-android --test device_golden --test tier1_reload -- --ignored
     ;;
 *)

@@ -129,3 +129,10 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `examples/hello_ios` exposes the stable C ABI `lumen_ios_render(w,h,out,len)` (staticlib for the host to link, lib so the ABI compiles + is host-tested).
 - `scripts/ios_orchestrate.sh`: on macOS drives `xcrun simctl` (boot/build/install/launch/screenshot for run; M0-exit suite for test) — tier-2 hot patch works on the simulator, physical devices are tier-3-only (code-signing forbids dlopen of new code). On a non-mac host it runs the headless render-core verification and explains the macOS requirement.
 - Verified HERE (Linux): `cargo test -p lumen-shell-ios -p hello_ios` — the core renders at iPhone resolution, rejects undersized buffers, and a `.lss` repaints the root (tier-1). PENDING a macOS runner: the actual Simulator screenshot golden + simctl e2e (authored, not run here). Honest status: iOS is headless-verified only, per the agreed scope.
+
+### T3.6 — lumen test --platform android|ios_sim
+- `lumen test --platform android` runs the **M0-exit lumen-test unmodified on the emulator**: `scripts/android_device_test.sh` cross-compiles the test (`cargo ndk test --no-run`), pushes the test binary + golden assets to the device, and runs it with `LUMEN_GOLDEN_DIR` pointed at the pushed goldens. The exact-golden screenshot matches because the CPU renderer (tiny-skia + swash) is bit-identical on android x86_64.
+- Harness infra (not a test change): `lumen-test` golden resolution now honours a runtime `LUMEN_GOLDEN_DIR` override (for on-device runs), falling back to the crate-under-test's `tests/golden/cpu`.
+- Build fix enabling mobile cross-compiles: the `lumen` facade's desktop `lumen-shell` (winit) dep + `run`/`RunExt` re-export are now `cfg(not(any(android, ios)))`, so mobile builds no longer pull winit → android-activity (which fails without a backend feature).
+- `--platform ios_sim` runs the headless render-core verification here and the full simctl suite on macOS (T3.4).
+- Verified: `bash scripts/android_device_test.sh hello m0_exit …` → `test result: ok` on the emulator (`DEVEXIT=0`).
