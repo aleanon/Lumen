@@ -167,3 +167,10 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - rustdoc pass: fixed broken intra-doc links (`clear_refresh`, `apply_stylesheet_into`) and the `lumen` lib/bin doc collision (`doc = false` on the cli bin). `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` is clean.
 - API audit + 1.0 freeze documented in `docs/api-audit-1.0.md`; the `lumen` facade now re-exports the full widget surface (widgets/_extra/_m1/_m3/_m4) + a11y + shader. semver-checks gates future releases against this baseline (no prior published version to diff yet; first publish establishes it).
 - Whole-workspace gate green: 83 test binaries, clippy/fmt/doc clean, cargo-deny ok.
+
+### M4-exit — the agent gauntlet (release gate)
+- `examples/agent-gauntlet`: a multi-screen (Home/Shader/Data), `.lss`-styled app with one custom WGSL shader (rendered once at construction; CPU fallback when no GPU) and a deliberately injectable layout bug (a 50px box with a forced-wider child → overflow).
+- Structured layout diagnostics: `audit::check_overflow` emits `W0103` for any child whose laid-out bounds exceed its parent; `Headless::diagnostics()` surfaces them and the agent's `app.diagnostics` now returns them (was a stub).
+- Release-gate test (`cargo test -p agent-gauntlet --test gauntlet`): through `lumen-agent` only — navigates the styled screens (verifies `#title` themed by `.lss`), confirms the shader widget, exports a passing test from a recorded `Session`, then detects `W0103` and fixes it (`#fix` → no W0103).
+- `scripts/agent_gauntlet.sh` runs the whole gate end-to-end, zero human intervention: (1) scaffold via the CLI (`lumen new`), (2) desktop verify, (3) Android emulator (`android_orchestrate.sh test` — M0-exit on-device + golden + tier-1 reload), (4) iOS (headless here / Simulator on macOS). Verified locally: **AGENT GAUNTLET PASSED**.
+- Whole-workspace gate green: 86 test binaries, clippy/fmt/doc clean, cargo-deny ok.

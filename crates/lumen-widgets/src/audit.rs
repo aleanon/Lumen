@@ -3,6 +3,35 @@
 //! semantic tree — the same tree the agent and tests see — so it runs headless.
 
 use lumen_core::semantics::{Action, SemanticsNode};
+use lumen_core::{codes, Diagnostic};
+
+/// Layout overflow audit (`W0103`): report any child whose laid-out bounds
+/// extend beyond its parent's box (a sign of a too-small fixed size). The
+/// structured diagnostics let an agent locate and fix layout bugs.
+pub fn check_overflow(root: &SemanticsNode) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    overflow(root, &mut out);
+    out
+}
+
+fn overflow(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
+    for c in &n.children {
+        let b = c.bounds;
+        let p = n.bounds;
+        if b.x1 > p.x1 + 0.5 || b.y1 > p.y1 + 0.5 {
+            let who = c.id.as_ref().map(|i| i.as_str()).unwrap_or(&c.label);
+            out.push(Diagnostic::new(
+                codes::W0103,
+                format!(
+                    "`{who}` overflows its parent ({:.0}×{:.0} past the edge)",
+                    (b.x1 - p.x1).max(0.0),
+                    (b.y1 - p.y1).max(0.0)
+                ),
+            ));
+        }
+        overflow(c, out);
+    }
+}
 
 /// An interactive node whose tappable area is below the minimum.
 #[derive(Clone, Debug, PartialEq)]

@@ -228,6 +228,12 @@ impl Headless {
         self.semantics_doc().to_json(false)
     }
 
+    /// Structured diagnostics for the current frame (e.g. `W0103` layout
+    /// overflow). Lets an agent detect and fix layout bugs by code.
+    pub fn diagnostics(&self) -> Vec<lumen_core::Diagnostic> {
+        crate::audit::check_overflow(&self.semantics_doc().root)
+    }
+
     /// The semantics document (typed).
     pub fn semantics_doc(&self) -> SemanticsDoc {
         let focused = self.focused_node().map(|n| n.index());

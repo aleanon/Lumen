@@ -242,7 +242,7 @@ fn handle(app: &mut Headless, method: &str, params: &Value) -> RpcResult {
             }
             Ok(out)
         }
-        "app.diagnostics" => Ok(json!({ "diagnostics": [] })),
+        "app.diagnostics" => Ok(json!({ "diagnostics": app.diagnostics() })),
         "app.perf" => Ok(json!({
             "frame_ms_p50": 0.0, "frame_ms_p95": 0.0,
             "node_count": app.semantics_doc().root.elided().children.len(),
