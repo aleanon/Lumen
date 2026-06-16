@@ -4,23 +4,22 @@
 default:
     @just --list
 
-# Run an example by name, e.g. `just run hello` (binary examples run headless;
-# library examples — the gauntlets, gallery, mobile/web shells — run their tests).
+# Run an example by name, e.g. `just run counter` or `just run hello`. The
+# iced-parity gallery examples (counter, clock, todos, …) render a frame to a
+# PNG; binary examples (hello/inspector/settings) run headless; the gauntlet/
+# shell library examples run their tests. `just run list` shows the gallery.
 run name *args:
     #!/usr/bin/env bash
     set -euo pipefail
     name="{{name}}"
     dir="examples/$name"
-    if [[ ! -d "$dir" ]]; then
-        echo "no example '$name'. available:" >&2
-        ls examples >&2
-        exit 1
-    fi
-    if [[ -f "$dir/src/main.rs" ]]; then
-        cargo run -p "$name" {{args}}
-    else
+    if [[ -d "$dir" && -f "$dir/src/main.rs" ]]; then
+        cargo run -p "$name" {{args}}            # binary example (hello/inspector/settings)
+    elif [[ -d "$dir" ]]; then
         echo "→ '$name' is a library example (no binary); running its tests:"
-        cargo test -p "$name" {{args}}
+        cargo test -p "$name" {{args}}           # gauntlets / shells / gallery crate
+    else
+        cargo run -q -p iced-parity --example show -- "$name"   # iced-parity gallery example
     fi
 
 # List the example packages.
