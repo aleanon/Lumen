@@ -424,6 +424,234 @@ impl GpuRenderer {
             ],
         })
     }
+
+    /// Render a WGSL fragment shader to an [`RgbaImage`] (T4.1 ShaderWidget).
+    ///
+    /// `fragment` must define `@fragment fn fs_main(@location(0) uv: vec2<f32>)
+    /// -> @location(0) vec4<f32>` and may read the bound `u: Uniforms`
+    /// (`resolution`, `time`, `params`). On a WGSL compile/validation error the
+    /// returned `Err` carries an `E0201` diagnostic and no pipeline is built.
+    pub fn render_shader(
+        &self,
+        fragment: &str,
+        uniforms: ShaderUniforms,
+        width: u32,
+        height: u32,
+    ) -> Result<RgbaImage, lumen_core::Diagnostic> {
+        let src = format!("{SHADER_HEADER}\n{fragment}");
+
+        // Capture WGSL validation errors instead of panicking, so a broken edit
+        // becomes a diagnostic and the caller keeps the previous pipeline.
+        self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("user-shader"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Owned(src)),
+            });
+        if let Some(err) = block_on(self.device.pop_error_scope()) {
+            return Err(lumen_core::Diagnostic::new(
+                lumen_core::codes::E0201,
+                err.to_string(),
+            ));
+        }
+
+        let ubgl = self
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("shader-uniforms"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("shader-layout"),
+                bind_group_layouts: &[&ubgl],
+                push_constant_ranges: &[],
+            });
+        self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("shader-pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: TARGET_FORMAT,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
+        if let Some(err) = block_on(self.device.pop_error_scope()) {
+            return Err(lumen_core::Diagnostic::new(
+                lumen_core::codes::E0201,
+                err.to_string(),
+            ));
+        }
+
+        // Uniform buffer: resolution(vec2), time(f32), _pad, params(vec4).
+        let data: [f32; 8] = [
+            width as f32,
+            height as f32,
+            uniforms.time,
+            0.0,
+            uniforms.params[0],
+            uniforms.params[1],
+            uniforms.params[2],
+            uniforms.params[3],
+        ];
+        let ubuf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("u"),
+            size: std::mem::size_of_val(&data) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        self.queue.write_buffer(&ubuf, 0, f32s_as_bytes(&data));
+        let ubg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ubg"),
+            layout: &ubgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: ubuf.as_entire_binding(),
+            }],
+        });
+
+        let target = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shader-target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TARGET_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shader-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &ubg, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        let bpr = padded_bytes_per_row(width);
+        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shader-readback"),
+            size: (bpr * height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: &target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &readback,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bpr),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        self.device.poll(wgpu::Maintain::Wait);
+        let mapped = slice.get_mapped_range();
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for row in 0..height {
+            let start = (row * bpr) as usize;
+            pixels.extend_from_slice(&mapped[start..start + (width * 4) as usize]);
+        }
+        drop(mapped);
+        readback.unmap();
+        Ok(RgbaImage::from_raw(width, height, pixels))
+    }
+}
+
+/// Typed shader uniforms (T4.1): `time` plus four free `params`. `resolution` is
+/// supplied automatically from the render size.
+#[derive(Clone, Copy, Default)]
+pub struct ShaderUniforms {
+    /// Seconds since start (drives animation).
+    pub time: f32,
+    /// Four user parameters, bound as `u.params`.
+    pub params: [f32; 4],
+}
+
+/// Common WGSL prelude prepended to every ShaderWidget fragment: the `Uniforms`
+/// binding and a fullscreen-triangle vertex shader exposing `uv` in `[0,1]`.
+const SHADER_HEADER: &str = r#"
+struct Uniforms { resolution: vec2<f32>, time: f32, _pad: f32, params: vec4<f32>, };
+@group(0) @binding(0) var<uniform> u: Uniforms;
+struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, };
+@vertex fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
+    var p = array<vec2<f32>, 3>(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+    var o: VsOut;
+    o.pos = vec4<f32>(p[i], 0.0, 1.0);
+    o.uv = p[i] * 0.5 + 0.5;
+    return o;
+}
+"#;
+
+/// Reinterpret an f32 slice as bytes for buffer uploads (avoids a bytemuck dep).
+fn f32s_as_bytes(data: &[f32]) -> &[u8] {
+    // SAFETY: f32 has no padding/invalid bit patterns; length is exact.
+    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data)) }
 }
 
 fn padded_bytes_per_row(width: u32) -> u32 {
