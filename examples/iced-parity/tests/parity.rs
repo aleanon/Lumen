@@ -96,3 +96,40 @@ fn color_palette_canvas() {
     click(&mut a, "#more");
     assert!(tree(&mut a).contains("7 colors"));
 }
+
+#[test]
+fn progress_bar() {
+    let mut a = iced_parity::progress_bar::main_app().run_headless(Size::new(260.0, 120.0));
+    a.pump();
+    assert!(tree(&mut a).contains("30%"));
+    click(&mut a, "#more");
+    assert!(tree(&mut a).contains("40%"), "progress advances");
+}
+
+#[test]
+fn gradient_canvas() {
+    let mut a = iced_parity::gradient::main_app().run_headless(Size::new(240.0, 120.0));
+    a.pump();
+    // The gradient produces a spread of distinct colors across the strip.
+    let img = a.screenshot();
+    let left = {
+        let p = img.pixels();
+        [p[(80 * 240 + 10) * 4], p[(80 * 240 + 10) * 4 + 2]]
+    };
+    let right = {
+        let p = img.pixels();
+        let i = (80 * 240 + 210) * 4;
+        [p[i], p[i + 2]]
+    };
+    assert_ne!(left, right, "gradient varies across the strip");
+}
+
+#[test]
+fn loading_spinner_canvas() {
+    let mut a = iced_parity::loading_spinners::main_app().run_headless(Size::new(120.0, 120.0));
+    a.pump();
+    let before = a.screenshot().pixels().to_vec();
+    click(&mut a, "#advance");
+    let after = a.screenshot().pixels().to_vec();
+    assert_ne!(before, after, "spinner rotates on advance");
+}

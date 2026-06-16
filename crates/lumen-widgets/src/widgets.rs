@@ -262,3 +262,32 @@ pub fn canvas(
         ..Element::default()
     }
 }
+
+/// A determinate progress bar showing `fraction` (0..=1) of a track filled.
+pub fn progress_bar(fraction: f64) -> Element {
+    use lumen_layout::{Dim, LayoutStyle};
+    let frac = fraction.clamp(0.0, 1.0);
+    let fill = Element {
+        role: lumen_core::semantics::Role::Generic,
+        background: Some(lumen_core::Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
+        style: LayoutStyle {
+            width: Dim::pct(frac as f32),
+            height: Dim::pct(1.0),
+            ..LayoutStyle::default()
+        },
+        ..Element::default()
+    };
+    Element {
+        role: lumen_core::semantics::Role::Progress,
+        value: Some(format!("{:.0}%", frac * 100.0)),
+        background: Some(lumen_core::Color::srgb8(0xe0, 0xe2, 0xe6, 0xff)),
+        corner_radius: 4.0,
+        style: LayoutStyle {
+            width: Dim::px(200.0),
+            height: Dim::px(12.0),
+            ..LayoutStyle::default()
+        },
+        children: vec![fill],
+        ..Element::default()
+    }
+}

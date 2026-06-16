@@ -305,3 +305,8 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 ### E8.8 — Example gallery (batch 1: Phase 0 + canvas)
 - `examples/iced-parity` crate (one module per example): `counter`, `todos`, `events`, `tour` (Phase 0, zero-gap) + `clock`, `sierpinski`, `color_palette` (canvas-based, unblocked by E8.1).
 - Verified (`cargo test -p iced-parity --test parity`): all 7 driven through `lumen-agent` (counter increments, todo added, event logged, tour navigates, clock ticks, fractal deepens, palette resizes); the canvas examples assert non-blank render.
+
+### E8.6 — small widgets/assets (batch 2) + progress/gradient/spinner examples
+- `widgets::progress_bar(fraction)` (track + fill, role Progress); `Frame::linear_gradient_rect` (canvas linear gradient over the display-list gradient brush).
+- `examples/iced-parity`: `progress_bar`, `gradient` (canvas gradient), `loading_spinners` (rotated arc on a canvas). Verified (10 parity tests): progress advances, gradient varies across the strip, spinner changes on advance.
+- Remaining E8.6 items (QR encoder, vectorial outline text, jpeg/webp/gif codecs, animated images) follow the same widget/asset pattern (still PENDING per the plan).

@@ -72,6 +72,34 @@ impl Frame {
         self.transform = prev;
     }
 
+    /// Fill a rectangle with a horizontal two-color linear gradient.
+    pub fn linear_gradient_rect(&mut self, rect: Rect, a: Color, b: Color) {
+        use crate::display_list::{GradientStop, SpreadMode};
+        let p0 = self.transform * Point::new(rect.x0, rect.y0);
+        let p1 = self.transform * Point::new(rect.x1, rect.y1);
+        let r = Rect::from_points(p0, p1);
+        self.cmds.push(DrawCmd::Rect {
+            rect: r,
+            brush: Brush::LinearGradient {
+                start: Point::new(r.x0, r.y0),
+                end: Point::new(r.x1, r.y0),
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: a,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: b,
+                    },
+                ],
+                spread: SpreadMode::Pad,
+            },
+            radii: CornerRadii::all(0.0),
+            border: None,
+        });
+    }
+
     /// Consume the frame, returning its commands.
     pub fn into_cmds(self) -> Vec<DrawCmd> {
         self.cmds
