@@ -12,6 +12,7 @@ pub mod display_list;
 pub mod gpu;
 pub mod image;
 pub mod scene;
+pub mod svg;
 
 pub use display_list::{
     BlendMode, Border, Brush, CornerRadii, DisplayList, DrawCmd, FillOrStroke, Filter, GlyphRunId,

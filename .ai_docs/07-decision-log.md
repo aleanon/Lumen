@@ -226,3 +226,8 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `lumen_render::scene`: `Backend { Cpu, Gpu, VelloCompute }` — the runtime renderer-selection seam — and `cull_visible(bounds, viewport)`, a culling/scene-build pass that splits across `std::thread::scope` threads above an 8k-item threshold (no rayon; result order identical to serial).
 - Verified (`cargo test -p lumen-render --test scene`): parallel culling matches the serial reference across scene sizes; the backend variants are distinct.
 - PENDING (large GPU integration, not practically verifiable on this lavapipe box): the **Vello-class compute-shader path rasterizer** itself + its CPU-parity golden and path-heavy perf gate. The seam (`Backend::VelloCompute`) + the multi-threaded scene build are the parts landed and verified; the compute backend slots behind the seam without touching the display-list contract.
+
+### T6.2 — Vector & image media (minimal SVG)
+- `lumen_render::svg`: a minimal SVG parser+renderer — `rect`, `circle`, `path` (`M`/`L`/`C`/`Z`) with solid `#hex` fills → display list → the deterministic CPU renderer. Exact goldens for vector assets.
+- Verified (`cargo test -p lumen-render --test svg`): a 3-shape SVG (blue rect, green circle, red triangle) renders to an exact committed golden + pixel spot-checks.
+- PENDING (larger asset-pipeline work): full SVG (gradients/transforms/text/clips), Lottie/animated vector, GIF/APNG, and jpeg/webp/avif decode. PNG is already supported; the minimal renderer establishes the vector→golden contract.
