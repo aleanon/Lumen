@@ -1378,6 +1378,7 @@ dependencies = [
  "lumen-render",
  "lumen-widgets",
  "serde_json",
+ "tungstenite",
 ]
 
 [[package]]

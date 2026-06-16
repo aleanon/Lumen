@@ -248,3 +248,23 @@ fn system_information() {
     let t = tree(&mut a);
     assert!(t.contains("OS: ") && t.contains("Arch: ") && t.contains("CPUs: "));
 }
+
+#[test]
+fn websocket_echo() {
+    use std::net::TcpListener;
+    // A local echo server.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        if let Ok((stream, _)) = listener.accept() {
+            let mut ws = tungstenite::accept(stream).unwrap();
+            while let Ok(msg) = ws.read() {
+                if msg.is_text() && ws.send(msg).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    let reply = iced_parity::websocket::echo_once(&format!("ws://127.0.0.1:{port}/"), "ping");
+    assert_eq!(reply.as_deref(), Some("ping"), "websocket round-trip");
+}

@@ -325,3 +325,7 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `system::SystemInfo` + `system::system_info()` (OS/arch/CPU count, dependency-free; memory/GPU need a `sysinfo` source — PENDING).
 - `examples/iced-parity`: `svg`, `styling` (.lss-themed), `stopwatch` (running tick), `image`, `system_information`. Verified (20 parity tests).
 - Window-binding examples (exit/url_handler/multi-window/integration) still depend on the OS shell binding (T5.2 model exists; binding PENDING).
+
+### E8.3 — networking (batch 7): websocket
+- `examples/iced-parity::websocket`: `echo_once(url, msg)` does a real `ws://` round-trip via `tungstenite` (whitelisted; the client the agent conformance test uses) + a minimal chat UI. Verified: a local echo server round-trips a message.
+- PENDING (ADR-003 escalation needed — no whitelisted async runtime + HTTP client here): `pokedex` / `download_progress` (HTTP fetch + streaming). The async-data shape is `resource()`; only the transport is missing.

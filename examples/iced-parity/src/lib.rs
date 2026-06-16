@@ -23,3 +23,4 @@ pub mod system_information;
 pub mod toast;
 pub mod todos;
 pub mod tour;
+pub mod websocket;

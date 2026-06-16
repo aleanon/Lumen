@@ -16,6 +16,7 @@ lumen-core = { workspace = true }
 lumen-render = { workspace = true }
 lumen-widgets = { workspace = true }
 kurbo = { workspace = true }
+tungstenite = { workspace = true }
 
 [dev-dependencies]
 lumen-agent = { workspace = true }
