@@ -10,6 +10,7 @@
 pub mod anim;
 pub mod ast;
 pub mod lexer;
+pub mod motion;
 pub mod parser;
 pub mod properties;
 pub mod style;

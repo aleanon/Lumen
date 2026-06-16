@@ -236,3 +236,7 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `lumen_render::media`: a `VideoSource` trait + `TestPattern` (a procedural animated-gradient "decoder", deterministic by timestamp), `AudioBuffer` + `sine` synth, and a `CaptureSource` (Camera/Microphone) the platform shell binds.
 - Verified (`cargo test -p lumen-render --test media`): the video frame at a fixed `t` matches an exact golden and is identical on re-render / differs at another `t`; the sine buffer is deterministic with the expected length/duration/first sample.
 - PENDING (platform shell work): hardware-accelerated video decode, audio playback, and real mic/camera capture — a thin shell over the same `VideoSource`/`AudioBuffer`/`CaptureSource` model; the deterministic CI path (the golden-testable contract) is landed.
+
+### T6.4 — Motion system
+- `lumen_style::motion` on top of the `anim` scheduler: `lerp_rect`; `SharedElement` (bounds morph `from→to`, driven by time `bounds_at` for route transitions or by a gesture `bounds_at_fraction` for interruptible drags); `Timeline`/`Track` for staggered choreography (per-track delay/duration/easing, `values`/`settled`/`duration_ms`); and a `spring` physics helper.
+- Verified (`cargo test -p lumen-style --test motion`): a shared element hits `from`/mid/`to` (time and gesture paths agree at 0.5); a 2-track choreography staggers correctly and reports settled; rect-lerp + spring approach targets. All deterministic under the virtual clock.
