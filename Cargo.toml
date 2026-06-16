@@ -20,6 +20,8 @@ members = [
     "crates/fixtures/hot_b",
     "crates/fixtures/hot_c",
     "benches",
+    "crates/lumen-shell-android",
+    "examples/hello_android",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
@@ -45,6 +47,7 @@ lumen-shell = { path = "crates/lumen-shell" }
 lumen-test = { path = "crates/lumen-test" }
 lumen-agent = { path = "crates/lumen-agent" }
 lumen-cli = { path = "crates/lumen-cli" }
+lumen-shell-android = { path = "crates/lumen-shell-android" }
 lumen = { path = "crates/lumen" }
 
 # whitelisted runtime deps (ADR-003) — added to crates as tasks need them
@@ -60,6 +63,11 @@ bitflags = "2.6"
 notify = "6"
 libloading = "0.8"
 tungstenite = "0.24"
+# Mobile (M3). Pulled only when building for the respective target.
+android-activity = "0.6"
+ndk = "0.9"
+log = "0.4"
+android_logger = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tiny-skia = "0.11"
