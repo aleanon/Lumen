@@ -13,6 +13,7 @@ pub fn app(cx: &mut BuildCx) -> Element {
         widgets::text(format!("Hello Lumen — {v}")).id("hello"),
         widgets::button("Tap", move |rt| count.update(rt, |c| *c += 1)).id("tap"),
     ])
+    .id("screen")
 }
 
 /// NativeActivity entry point (called by the android-activity glue). The

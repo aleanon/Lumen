@@ -20,6 +20,7 @@ fn hello(cx: &mut BuildCx) -> Element {
         widgets::text(format!("Hello Lumen — {v}")).id("hello"),
         widgets::button("Tap", move |rt| count.update(rt, |c| *c += 1)).id("tap"),
     ])
+    .id("screen")
 }
 
 fn sh(cmd: &str, args: &[&str]) -> Option<Vec<u8>> {

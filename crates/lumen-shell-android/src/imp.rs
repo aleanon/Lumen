@@ -20,6 +20,19 @@ pub fn run(android: AndroidApp, build: impl Fn(&mut BuildCx) -> Element + 'stati
     let mut size = (0u32, 0u32);
     let mut quit = false;
 
+    // Tier-1 hot reload (T3.2): the dev orchestration pushes the live stylesheet
+    // into the app's external files dir (adb-writable, app-readable — unlike
+    // /data/local/tmp which SELinux denies the app); the shell re-applies it
+    // whenever it changes.
+    let lss_path = std::env::var("LUMEN_LSS_PATH").ok().unwrap_or_else(|| {
+        android
+            .external_data_path()
+            .map(|p| p.join("lumen.lss").to_string_lossy().into_owned())
+            .unwrap_or_else(|| "/data/local/tmp/lumen.lss".to_string())
+    });
+    log::info!("tier-1 stylesheet path: {lss_path}");
+    let mut lss_mtime: Option<std::time::SystemTime> = None;
+
     while !quit {
         android.poll_events(Some(Duration::from_millis(250)), |event| match event {
             PollEvent::Main(MainEvent::InitWindow { .. })
@@ -34,6 +47,20 @@ pub fn run(android: AndroidApp, build: impl Fn(&mut BuildCx) -> Element + 'stati
             PollEvent::Main(MainEvent::Destroy) => quit = true,
             _ => {}
         });
+
+        // Poll the stylesheet file each tick (~4 Hz via the poll timeout).
+        let changed = std::fs::metadata(&lss_path)
+            .and_then(|m| m.modified())
+            .ok()
+            .filter(|mt| lss_mtime != Some(*mt));
+        if let Some(mt) = changed {
+            if let (Ok(src), Some(hl)) = (std::fs::read_to_string(&lss_path), headless.as_mut()) {
+                lss_mtime = Some(mt);
+                log::info!("tier-1 reload: {} bytes of .lss", src.len());
+                let _ = hl.set_stylesheet(&src);
+                present(&android, &build, &mut headless, &mut size);
+            }
+        }
     }
 }
 

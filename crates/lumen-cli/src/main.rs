@@ -22,12 +22,72 @@ fn run() -> i32 {
         .map(|s| s.as_str())
         .collect();
 
+    let platform = flag_value(&args, "--platform");
     match positional.first().copied() {
         Some("new") => cmd_new(positional.get(1).copied(), json),
-        Some("test") => cmd_passthrough("test", &["test"], json),
-        Some("run") => cmd_passthrough("run", &["run"], json),
+        Some("test") => match platform.as_deref() {
+            Some(p @ ("android" | "ios_sim")) => cmd_mobile("test", p, json),
+            Some(other) => fail(json, "test", &format!("unknown platform `{other}`")),
+            None => cmd_passthrough("test", &["test"], json),
+        },
+        Some("run") => match platform.as_deref() {
+            Some(p @ ("android" | "ios_sim")) => cmd_mobile("run", p, json),
+            Some(other) => fail(json, "run", &format!("unknown platform `{other}`")),
+            None => cmd_passthrough("run", &["run"], json),
+        },
         Some(other) => fail(json, "usage", &format!("unknown command `{other}`")),
-        None => fail(json, "usage", "usage: lumen <new|run|test> [--json]"),
+        None => fail(
+            json,
+            "usage",
+            "usage: lumen <new|run|test> [--platform <p>] [--json]",
+        ),
+    }
+}
+
+/// Value of `--flag value` or `--flag=value`, if present.
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if let Some(v) = a.strip_prefix(&format!("{flag}=")) {
+            return Some(v.to_string());
+        }
+        if a == flag {
+            return it.next().cloned();
+        }
+    }
+    None
+}
+
+/// `lumen <run|test> --platform <android|ios_sim>`: delegate to the platform
+/// orchestration script, which provisions the device, builds, deploys, and (for
+/// `run`) wires the dev socket / streams logs (T3.2/T3.4/T3.6).
+fn cmd_mobile(command: &str, platform: &str, json: bool) -> i32 {
+    let script = match platform {
+        "android" => "scripts/android_orchestrate.sh",
+        "ios_sim" => "scripts/ios_orchestrate.sh",
+        _ => unreachable!(),
+    };
+    if !Path::new(script).exists() {
+        return fail(
+            json,
+            command,
+            &format!("missing orchestration script {script}"),
+        );
+    }
+    let status = Command::new("bash").arg(script).arg(command).status();
+    match status {
+        Ok(s) if s.success() => ok(
+            json,
+            command,
+            json!({ "platform": platform }),
+            &format!("{command} on {platform}: ok"),
+        ),
+        Ok(s) => fail(
+            json,
+            command,
+            &format!("{platform} {command} failed (exit {:?})", s.code()),
+        ),
+        Err(e) => fail(json, command, &format!("could not run {script}: {e}")),
     }
 }
 

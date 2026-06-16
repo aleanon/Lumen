@@ -87,7 +87,7 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 
 ## M3 — Mobile
 **T3.1 ☑ Android shell** (cargo-ndk, GameActivity, surface lifecycle, touch, soft-keyboard/IME, safe areas). *Accept:* hello app runs on API-34 emulator in CI (headless emulator), agent screenshot matches golden perceptually.
-**T3.2 ☐ Android orchestration** (`lumen run --platform android`: AVD provision, build, install, log stream, adb reverse for dev socket). *Accept:* scripted end-to-end on CI emulator incl. tier-1 hot reload.
+**T3.2 ☑ Android orchestration** (`lumen run --platform android`: AVD provision, build, install, log stream, adb reverse for dev socket). *Accept:* scripted end-to-end on CI emulator incl. tier-1 hot reload.
 **T3.3 ☐ iOS shell** (UIKit host, Metal surface, touch/IME/safe areas, Xcode project template). *Accept:* hello app on iOS Simulator (macOS runner) with agent screenshot golden.
 **T3.4 ☐ iOS orchestration** (`simctl` boot/install/launch/screenshot; dev socket). *Accept:* scripted e2e on simulator incl. tier-1 reload; tier-2 verified on simulator, documented as tier-3-only on physical devices.
 **T3.5 ☑ Gestures + mobile widgets** (GestureEvent full params; BottomNav, NavigationRail, AppBar, pull-to-refresh, DatePicker, TimePicker; touch target ≥44 px audit). *Accept:* gesture synthesis tests (pinch/pan/long-press) + widget test triples on both emulators.
