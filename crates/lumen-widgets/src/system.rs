@@ -109,3 +109,26 @@ pub struct WindowDesc {
     /// Logical height.
     pub height: f64,
 }
+
+/// Basic, dependency-free system information (E8.7). Memory/GPU details need a
+/// platform `sysinfo` source (PENDING).
+#[derive(Clone, Debug, Serialize)]
+pub struct SystemInfo {
+    /// Operating system (`linux`/`macos`/`windows`/…).
+    pub os: String,
+    /// CPU architecture (`x86_64`/`aarch64`/…).
+    pub arch: String,
+    /// Available parallelism (logical CPUs).
+    pub cpus: usize,
+}
+
+/// Query basic system information from `std` (no external dependency).
+pub fn system_info() -> SystemInfo {
+    SystemInfo {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        cpus: std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1),
+    }
+}

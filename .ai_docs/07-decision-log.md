@@ -320,3 +320,8 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 
 ### E8.4 — resizable pane grid (batch 5)
 - `widgets_extra::pane_grid(cx, name, first, second)`: a two-pane split whose ratio is a signal; the container's `on_drag` (pointer fraction along its width) sets the split, with a visual divider. `examples/iced-parity::pane_grid`. Verified (15 parity tests): dragging at x≈0.8·w moves the divider right (ratio 0.5→0.8).
+
+### E8.7 — system info (batch 6) + more zero-gap examples
+- `system::SystemInfo` + `system::system_info()` (OS/arch/CPU count, dependency-free; memory/GPU need a `sysinfo` source — PENDING).
+- `examples/iced-parity`: `svg`, `styling` (.lss-themed), `stopwatch` (running tick), `image`, `system_information`. Verified (20 parity tests).
+- Window-binding examples (exit/url_handler/multi-window/integration) still depend on the OS shell binding (T5.2 model exists; binding PENDING).

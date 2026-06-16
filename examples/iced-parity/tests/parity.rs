@@ -203,3 +203,48 @@ fn pane_grid_resizes() {
     a.pump();
     assert!(divider_x(&a) > before + 40.0, "split moved right on drag");
 }
+
+#[test]
+fn svg_asset() {
+    let mut a = iced_parity::svg::main_app().run_headless(Size::new(120.0, 120.0));
+    a.pump();
+    assert!(tree(&mut a).contains("SVG asset") && nonblank(&mut a));
+}
+
+#[test]
+fn styling_lss() {
+    let mut a = iced_parity::styling::main_app().run_headless(Size::new(200.0, 140.0));
+    a.pump();
+    let styles = rpc(&mut a, "ui.getStyles", json!({ "selector": "#title" }));
+    assert!(
+        styles["result"].to_string().contains("1a73e8"),
+        "title themed by .lss"
+    );
+}
+
+#[test]
+fn stopwatch_runs() {
+    let mut a = iced_parity::stopwatch::main_app().run_headless(Size::new(200.0, 200.0));
+    a.pump();
+    click(&mut a, "#tick"); // not running → no change
+    assert!(tree(&mut a).contains("00:00"));
+    click(&mut a, "#toggle"); // start
+    click(&mut a, "#tick");
+    click(&mut a, "#tick");
+    assert!(tree(&mut a).contains("00:02"), "ticks while running");
+}
+
+#[test]
+fn image_viewer() {
+    let mut a = iced_parity::image::main_app().run_headless(Size::new(140.0, 120.0));
+    a.pump();
+    assert!(tree(&mut a).contains("Image viewer") && nonblank(&mut a));
+}
+
+#[test]
+fn system_information() {
+    let mut a = iced_parity::system_information::main_app().run_headless(Size::new(260.0, 160.0));
+    a.pump();
+    let t = tree(&mut a);
+    assert!(t.contains("OS: ") && t.contains("Arch: ") && t.contains("CPUs: "));
+}
