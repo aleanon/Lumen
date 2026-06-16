@@ -11,6 +11,7 @@ pub mod display_list;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu;
 pub mod image;
+pub mod scene;
 
 pub use display_list::{
     BlendMode, Border, Brush, CornerRadii, DisplayList, DrawCmd, FillOrStroke, Filter, GlyphRunId,

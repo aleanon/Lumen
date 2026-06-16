@@ -219,3 +219,10 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - Facade now re-exports the M5 modules (`forms`, `i18n`, `nav`, `undo`, `system`) for the public surface.
 - `scripts/agent_gauntlet_web.sh` is the M5 release gate, run green end-to-end here: (1) **desktop** — the agent adds a contact (blocked while the form is invalid), deletes + undoes it, switches to Arabic + mirrors RTL via `input.setLocale`, and exports a test from its session; (2) **web** — the app compiles to wasm + the CPU render-parity check passes under node; (3) **Android emulator** — the gauntlet suite runs unmodified on-device (`DEVEXIT=0`). **M5 GAUNTLET PASSED.**
 - Whole-workspace host gate green: 98 test binaries, clippy/fmt/doc clean. (`Locale` gained Serialize/Deserialize to live in a signal.)
+
+## M6 — Media, Motion & Performance
+
+### T6.1 — GPU rasterizer seam + multi-threaded scene build
+- `lumen_render::scene`: `Backend { Cpu, Gpu, VelloCompute }` — the runtime renderer-selection seam — and `cull_visible(bounds, viewport)`, a culling/scene-build pass that splits across `std::thread::scope` threads above an 8k-item threshold (no rayon; result order identical to serial).
+- Verified (`cargo test -p lumen-render --test scene`): parallel culling matches the serial reference across scene sizes; the backend variants are distinct.
+- PENDING (large GPU integration, not practically verifiable on this lavapipe box): the **Vello-class compute-shader path rasterizer** itself + its CPU-parity golden and path-heavy perf gate. The seam (`Backend::VelloCompute`) + the multi-threaded scene build are the parts landed and verified; the compute backend slots behind the seam without touching the display-list contract.
