@@ -11,6 +11,7 @@
 pub mod a11y;
 pub mod app;
 pub mod audit;
+pub mod boundary;
 pub mod element;
 pub mod forms;
 pub mod i18n;

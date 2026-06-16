@@ -268,3 +268,8 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `examples/gallery` is a Storybook-class component gallery mixing built-in widgets with the third-party rating widget; `lumen add <crate>` appends a dependency to the current `Cargo.toml`.
 - Verified: `cargo test -p gallery --test gallery` — the gallery drives built-ins (switch, select) AND the third-party rating widget (`#stars-star-3` → "rating 4 of 5") identically through `lumen-agent`; `lumen add widget-rating` adds the dependency.
 - PENDING: a published registry + binary plugin ABI + automated doc-gen site; the source-level widget ABI + agent-drivability (the contract that makes widgets portable) is proven.
+
+### T7.3 — Production hardening
+- `lumen_widgets::boundary::error_boundary(child, fallback)`: wraps a subtree's build in `catch_unwind`(AssertUnwindSafe); a panic is contained and renders `fallback(message)` instead of crashing the process. `default_fallback` shows the message.
+- Verified (`cargo test -p lumen-widgets --test hardening`): the boundary returns the fallback on panic; an app with a panicking subtree keeps its sibling alive and shows the recovered fallback; and 3000 fuzzed inputs to the `.lss` parser and the selector engine never panic (both are total — errors are diagnostics).
+- PENDING: crash/diagnostic reporting hooks + opt-in telemetry transport, and a continuous `cargo-fuzz` harness in CI. The panic-containment + totality contracts (the safety guarantees) are landed and tested.
