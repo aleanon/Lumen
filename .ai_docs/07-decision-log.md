@@ -240,3 +240,8 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 ### T6.4 — Motion system
 - `lumen_style::motion` on top of the `anim` scheduler: `lerp_rect`; `SharedElement` (bounds morph `from→to`, driven by time `bounds_at` for route transitions or by a gesture `bounds_at_fraction` for interruptible drags); `Timeline`/`Track` for staggered choreography (per-track delay/duration/easing, `values`/`settled`/`duration_ms`); and a `spring` physics helper.
 - Verified (`cargo test -p lumen-style --test motion`): a shared element hits `from`/mid/`to` (time and gesture paths agree at 0.5); a 2-track choreography staggers correctly and reports settled; rect-lerp + spring approach targets. All deterministic under the virtual clock.
+
+### T6.5 — Advanced text & editing
+- `lumen_text::richtext`: a `RichDoc` (text buffer + `StyleRun`s) with `apply_style`/`is_bold_at`, `find` (non-overlapping match ranges), `replace_all` (count + buffer rewrite), and `insert`; plus a `CrossSelection`/`selected_text` model that spans multiple text widgets by `(widget, offset)` (order-independent).
+- Verified (`cargo test -p lumen-text --test richtext`): styling + find/replace, insert + non-overlapping finds, and cross-widget selection (incl. reversed anchor/focus and single-widget).
+- PENDING (layer on `RichDoc`): lists/tables/links/inline images, spell-check, variable-font axis UI, and CRDT collaboration hooks.

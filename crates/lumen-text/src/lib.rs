@@ -23,6 +23,7 @@ use swash::FontRef;
 const FONT: &[u8] = include_bytes!("../fonts/GoNotoKurrent-Regular.ttf");
 
 pub mod editor;
+pub mod richtext;
 pub use editor::{Preedit, TextEditor};
 
 /// Brush carried through parley to each glyph run: straight sRGB RGBA8.
