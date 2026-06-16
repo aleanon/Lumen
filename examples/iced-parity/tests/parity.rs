@@ -157,3 +157,23 @@ fn toast_notification() {
     }
     assert!(!tree(&mut a).contains("Saved"), "toast auto-dismisses");
 }
+
+#[test]
+fn markdown_render() {
+    let mut a = iced_parity::markdown::main_app().run_headless(Size::new(320.0, 260.0));
+    a.pump();
+    let t = tree(&mut a);
+    assert!(t.contains("Lumen") && t.contains("Features"), "headings");
+    assert!(
+        t.contains("•") && t.contains("deterministic rendering"),
+        "list item"
+    );
+    assert!(t.contains("first-class"), "emphasis run");
+}
+
+#[test]
+fn changelog_scroll() {
+    let mut a = iced_parity::changelog::main_app().run_headless(Size::new(320.0, 240.0));
+    a.pump();
+    assert!(tree(&mut a).contains("Changelog"));
+}

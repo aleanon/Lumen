@@ -314,3 +314,6 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 ### E8.2 — overlays (batch 3): modal + toast
 - `widgets_extra::modal(base, dialog, open)`: a centered dialog over a dimmed full-bleed backdrop via `stack` + absolute positioning. `examples/iced-parity`: `modal` (open/close a dialog) + `toast` (transient notification that ticks down to auto-dismiss). Verified (12 parity tests).
 - Anchored dropdown popups (combo_box / menu / tooltip positioning) still need a popup positioner (PENDING); modal + toast cover the layered-overlay core.
+
+### E8.5 — Markdown (batch 4): markdown + changelog
+- `lumen_widgets::markdown::render(src)`: CommonMark subset (`#`/`##` headings, `-` lists, fenced code blocks, inline `*emphasis*`/`` `code` ``) → an `Element` block tree. `examples/iced-parity`: `markdown` (a doc) + `changelog` (a scrollable doc). Verified (14 parity tests): headings, list items, emphasis runs render.
