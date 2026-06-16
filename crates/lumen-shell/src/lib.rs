@@ -15,9 +15,10 @@ use lumen_core::events::{
 use lumen_render::RgbaImage;
 use lumen_widgets::{App, Headless};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
 /// Extension trait adding `run()` to [`App`] (02 §8).
@@ -42,6 +43,7 @@ pub fn run(app: App, size: Size) {
         window: None,
         presenter: None,
         cursor: Point::ZERO,
+        last_frame: Instant::now(),
     };
     event_loop.run_app(&mut shell).expect("run app");
 }
@@ -53,6 +55,9 @@ struct Shell {
     window: Option<Arc<Window>>,
     presenter: Option<Presenter>,
     cursor: Point,
+    /// Wall-clock time of the previous presented frame; the delta drives the
+    /// runtime's virtual clock. The shell is the *only* place wall time enters.
+    last_frame: Instant,
 }
 
 impl ApplicationHandler for Shell {
@@ -71,7 +76,9 @@ impl ApplicationHandler for Shell {
         let app = self.app.take().expect("app");
         self.headless = Some(app.run_headless(self.size));
         self.presenter = Some(presenter);
+        window.request_redraw(); // paint the first frame
         self.window = Some(window);
+        self.last_frame = Instant::now();
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -129,12 +136,55 @@ impl ApplicationHandler for Shell {
             }
             WindowEvent::RedrawRequested => {
                 if let (Some(h), Some(p)) = (&mut self.headless, &mut self.presenter) {
+                    let now = Instant::now();
+                    let elapsed_ms = (now - self.last_frame).as_secs_f64() * 1000.0;
+                    self.last_frame = now;
+                    // Advance the virtual clock by real elapsed time, then pump.
+                    // Clamp the step so a sleep/background pause becomes one
+                    // bounded jump rather than a long skip (since the UI renders
+                    // as a function of now_ms(), there is no tick backlog to
+                    // replay — just a single catch-up frame).
+                    h.advance_clock(elapsed_ms.min(1000.0));
                     h.pump();
                     let frame = h.screenshot();
                     p.present(&frame);
                 }
             }
             _ => {}
+        }
+    }
+
+    /// A `WaitUntil` deadline elapsed: a one-shot wake (e.g. a delayed reveal)
+    /// is due, so ask for the frame that will reflect it.
+    fn new_events(&mut self, _el: &ActiveEventLoop, cause: StartCause) {
+        if matches!(cause, StartCause::ResumeTimeReached { .. }) {
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+        }
+    }
+
+    /// Decide how to wait for the next frame from what the UI asked for, so an
+    /// idle UI costs zero frames while an animating one runs free.
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        let Some(h) = &self.headless else { return };
+        match h.next_deadline() {
+            // Idle: sleep until the next OS event (input/resize/close).
+            None => el.set_control_flow(ControlFlow::Wait),
+            // Continuous animation: keep producing frames back-to-back.
+            Some(t) if t <= h.now_ms() => {
+                el.set_control_flow(ControlFlow::Poll);
+                if let Some(w) = &self.window {
+                    w.request_redraw();
+                }
+            }
+            // One-shot wake: sleep until the (virtual==real) deadline.
+            Some(t) => {
+                let dt = (t - h.now_ms()).max(0.0);
+                el.set_control_flow(ControlFlow::WaitUntil(
+                    Instant::now() + Duration::from_secs_f64(dt / 1000.0),
+                ));
+            }
         }
     }
 }
