@@ -301,3 +301,7 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 ### E8.1 — Canvas (immediate-mode 2D drawing)
 - `lumen_render::canvas::Frame`: accumulates display-list commands with an affine transform stack — `fill`/`stroke`(BezPath), `fill_rect`(Brush), `fill_circle`, and `with_transform` (compose a rotation/scale about a pivot). `lumen_widgets::widgets::canvas(w, h, draw)` hands a `Frame` (sized to the node, offset to its window origin) to the draw closure each paint; the paint loop appends the resulting commands.
 - Verified (`cargo test -p lumen-widgets --test canvas`): a clock face (two circles + a 90°-rotated stroked hand) renders to an exact golden + pixel spot-checks. All primitives reuse the existing display list (paths/rects/circles/transforms) — the keystone gap is now closed, unblocking the canvas-based iced examples.
+
+### E8.8 — Example gallery (batch 1: Phase 0 + canvas)
+- `examples/iced-parity` crate (one module per example): `counter`, `todos`, `events`, `tour` (Phase 0, zero-gap) + `clock`, `sierpinski`, `color_palette` (canvas-based, unblocked by E8.1).
+- Verified (`cargo test -p iced-parity --test parity`): all 7 driven through `lumen-agent` (counter increments, todo added, event logged, tour navigates, clock ticks, fractal deepens, palette resizes); the canvas examples assert non-blank render.

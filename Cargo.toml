@@ -34,6 +34,7 @@ members = [
     "examples/widget-rating",
     "examples/gallery",
     "examples/agent-gauntlet-2",
+    "examples/iced-parity",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
