@@ -89,5 +89,9 @@ lumen-cli       dev server, hot reload, emulator orchestration
 - **M2** Testing & AI loop complete (full lumen-test, tier-2 hot patch, traces, export-session-as-test, perf gates).
 - **M3** Mobile (Android + iOS shells, emulator orchestration, touch/IME, mobile widgets).
 - **M4** Depth (ShaderWidget, DataGrid/charts/rich-text editor, inspector, a11y certification pass, 1.0 freeze).
+- **M5** Ubiquity & app-building (Web/WASM target, desktop system integration, i18n/RTL, routing + global state + undo, forms & validation).
+- **M6** Media, motion & performance (Vello-class GPU rasterizer, vector/image/video/audio media, motion/shared-element transitions, advanced rich-text, perf-at-scale gates).
+- **M7** Ecosystem, production & AI-native (distribution/signing, plugin ecosystem, production hardening, screen-reader a11y certification, agent auto-repair + hot-patching-linker + design import; 2.0 freeze).
 
+M0–M4 are the 1.0 line; M5–M7 are the post-1.0 roadmap to 2.0.
 Detailed tasks and acceptance criteria: `06-task-graph.md`.

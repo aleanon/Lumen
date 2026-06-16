@@ -106,6 +106,58 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 
 ---
 
+## M5 — Ubiquity & App-Building (post-1.0: run everywhere, build real products)
+
+*Theme: 1.0 ships a native desktop+mobile widget toolkit. M5 closes the three
+gaps that stop teams shipping **real apps**: the framework doesn't run on the
+**web**, doesn't integrate with the **OS** (windows/menus/clipboard/DnD), and
+lacks the **app-level scaffolding** (i18n, routing, forms) every product needs.
+New ADRs: web/WASM backend; RTL layout; routing & global-state model.*
+
+**T5.1 ☐ Web / WASM target.** wgpu→WebGPU with a WebGL2 fallback; a canvas-only shell (no DOM widgets); the CPU reference renderer compiled to wasm for golden parity; agent bridge over WebSocket/`postMessage`; asset/font streaming; wasm size budget. *Accept:* the settings + inspector apps run in headless Chromium, driven unmodified through `lumen-agent`, matching a perceptual golden; `lumen run --platform web`; wasm bundle under a gated size.
+**T5.2 ☐ Desktop system integration.** Multi-window + multi-monitor (DPI/scale per window), native menu bar + context menus, system tray, native file/color dialogs, rich clipboard (text/image/files), drag-and-drop intra- and inter-app, OS notifications — all behind portable APIs surfaced on the agent + synthesizable in `lumen-test`. *Accept:* a multi-window app driven by the agent (focus, menu invoke, DnD between windows); clipboard + drop events synthesized headlessly in a test triple.
+**T5.3 ☐ Internationalization & RTL.** Fluent-style message catalogs with structured missing-key diagnostics; ICU-class locale formatting (date/number/plural/currency); **RTL layout mirroring** in `lumen-layout` (start/end resolution, logical insets); per-locale theming; agent `input.setLocale`. *Accept:* one app rendered in en / ar / ja with RTL-mirror goldens; locale switch via agent reflows + re-mirrors; missing-translation surfaces as a `W####` code.
+**T5.4 ☐ Navigation, global state, undo/redo, persistence.** Typed router with a back stack + deep links + guards; global stores layered on the signal runtime; a command/undo-redo history; whole-app state save/load (building on the Checkpoint protocol). *Accept:* deep-link navigation + multi-step undo/redo driven by the agent; app state round-trips through save→relaunch and through a tier-3 restart.
+**T5.5 ☐ Forms & validation.** Declarative form state, sync + async validators, input masks/formatters, error→diagnostic surfacing with accessible error association (a11y `described_by`). *Accept:* a validated multi-field form; the agent fills it, reads validation failures as **structured data** (not pixels), corrects them, and submits.
+**M5-exit ☐:** an agent, given only the CLI + lumen-agent, scaffolds and builds a **localized (RTL+LTR), multi-window, routed, form-driven CRUD app**, runs it on **desktop + web + the Android emulator**, exercises undo and deep-links, and exports a passing cross-platform suite from its own session — scripted as `examples/agent-gauntlet-web/`, added to the release gate.
+
+---
+
+## M6 — Media, Motion & Performance (rich, fluid, fast at scale)
+
+*Theme: M5 makes Lumen deployable; M6 makes it **feel premium** and pays down
+the GPU/perf debt deferred from v1 — rich media (vector/video/audio), a
+world-class motion system, and the compute-rasterization + multi-threading work
+flagged as a v1 evaluation. New ADRs: Vello-class GPU backend; media pipeline;
+motion/choreography model.*
+
+**T6.1 ☐ Vello-class GPU rasterizer.** A compute-shader path/scene rasterizer behind the existing display-list contract (selectable vs the lyon path); multi-threaded scene building; CPU↔GPU perceptual parity preserved. *Accept:* a complex vector scene matches the CPU golden within threshold on a GPU runner; path-heavy perf gate beats the lyon baseline; idle/damage contracts unchanged.
+**T6.2 ☐ Vector & image media.** SVG rendering, Lottie/animated-vector playback, GIF/APNG, and jpeg/webp/avif decode with a shared image cache/atlas; declarative asset references resolved by the dev server (tier-1 hot-swap). *Accept:* SVG + Lottie goldens at fixed clock; codec round-trips; a swapped asset reloads live.
+**T6.3 ☐ Audio / video / capture.** A media pipeline: hardware-accelerated video decode where available + a deterministic software path for CI, audio playback, and mic/camera capture, all clocked to the render loop. *Accept:* a video frame at a fixed timestamp matches a golden via the software decoder; capture surfaces are stubbable and agent-observable.
+**T6.4 ☐ Motion system.** Physics springs, gesture-driven interruptible animations, **shared-element transitions** across routes, and a choreography/timeline API; the inspector's scrubber becomes a keyframe editor. *Accept:* gesture-driven + shared-element transition tests are deterministic under the virtual clock; choreographed sequence golden.
+**T6.5 ☐ Advanced text & editing.** A real rich-text document model (styles, lists, tables, links, images), selection that spans widgets, find/replace, spell-check hooks, variable-font axis controls, and CRDT-ready edit hooks for future collaboration. *Accept:* rich-editor test triple; cross-widget selection + find/replace driven by the agent.
+**T6.6 ☐ Performance at scale.** Multi-threaded layout, on-device GPU damage/partial redraw, a memory profiler + leak gate, and CI enforcement of the remaining `01 §9` budgets (cold start <300 ms desktop / <800 ms mobile, hello-world <5 MB). *Accept:* a 100k-node scene + all `01 §9` budgets gated in CI on the reference runners.
+**M6-exit ☐:** a **media-rich, animated app** (video + SVG + shared-element navigation + a rich-text editor) holds 120 fps desktop / 60 fps mobile and passes every perf gate, agent-verified on desktop + both mobile emulators — added to the release gate.
+
+---
+
+## M7 — Ecosystem, Production & AI-Native (ship it; advance the thesis)
+
+*Theme: everything required to **ship, distribute, extend, and trust** a Lumen
+app in production — then the AI-native frontier the project exists for: an agent
+that doesn't just build UIs but **operates** them (repairs regressions, imports
+designs, certifies a11y) autonomously. Culminates in the 2.0 release. New ADRs:
+distribution/signing; plugin ABI; the ADR-014 hot-patching-linker tier-2 slot.*
+
+**T7.1 ☐ Distribution & packaging.** `lumen package` → per-OS installers/bundles (msix/dmg/AppImage/apk/ipa), code signing + notarization, delta auto-update, an asset-optimization pipeline, reproducible builds, and binary-size + supply-chain (`cargo-deny`/SBOM) gates. *Accept:* signed, installable artifacts produced per platform; the agent triggers a versioned release end-to-end.
+**T7.2 ☐ Plugin & widget ecosystem.** Third-party `Widget` distribution over a stable ABI; `lumen add <widget>`; a Storybook-class component gallery app (self-testing); semver-checked widget APIs; doc generation. *Accept:* an external widget crate is installed and driven by the agent unmodified; the gallery drives every widget through its own self-test.
+**T7.3 ☐ Production hardening.** Error boundaries + panic recovery scoped to UI subtrees, crash/diagnostic reporting hooks, opt-in privacy-respecting telemetry, a security review, and fuzzing of the `.lss`/agent/asset parsers. *Accept:* an injected panic is contained to its subtree and reported as a structured diagnostic (app stays alive); parser fuzz gate green.
+**T7.4 ☐ Accessibility certification.** Real VoiceOver / NVDA / Orca driven in CI (not just AccessKit-tree diffs), a WCAG 2.2 AA audit with automated checks where possible, a11y of the inspector + agent themselves, and localized accessibility. *Accept:* screen-reader smoke tests pass in CI on 3 OSes; the WCAG checklist is automated where automatable and signed off where manual.
+**T7.5 ☐ AI-native frontier.** An agent **auto-repair loop** (detect a regression → localize it via diagnostics + traces → patch → verify, unattended); the ADR-014 function-level hot-patching linker slotted in as an upgraded tier 2 (checkpoint protocol unchanged); design-import (Figma/Sketch → `.lss` + widgets) with agent reconciliation; self-describing components for agent authoring. *Accept:* the agent autonomously repairs an **injected functional regression** end-to-end with zero human edits; a design-import round-trips to a styled screen.
+**M7-exit ☐ (2.0 release gate):** the grand gauntlet — an agent, given only the CLI + lumen-agent, **ships a complete production app** across all five platforms (desktop ×3 + web + mobile ×2): signed/notarized and installable, screen-reader-certified, localized (RTL+LTR), extended with a third-party plugin, with media + motion; it then **auto-repairs an injected regression** and re-ships — the entire pipeline green, zero human intervention, as `examples/agent-gauntlet-2/` and the 2.0 release gate.
+
+---
+
 # Appendix A — M0 Implementation Plan (agent working notes, non-normative)
 
 These are my own working notes for executing M0. The normative contract is everything above plus docs 02–05; this appendix only records *how* I intend to satisfy it and *which order* I'll work in. Nothing here overrides a contract. Local decisions made here are also mirrored into `07-decision-log.md §3` as I land each task.

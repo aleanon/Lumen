@@ -174,3 +174,11 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - Release-gate test (`cargo test -p agent-gauntlet --test gauntlet`): through `lumen-agent` only — navigates the styled screens (verifies `#title` themed by `.lss`), confirms the shader widget, exports a passing test from a recorded `Session`, then detects `W0103` and fixes it (`#fix` → no W0103).
 - `scripts/agent_gauntlet.sh` runs the whole gate end-to-end, zero human intervention: (1) scaffold via the CLI (`lumen new`), (2) desktop verify, (3) Android emulator (`android_orchestrate.sh test` — M0-exit on-device + golden + tier-1 reload), (4) iOS (headless here / Simulator on macOS). Verified locally: **AGENT GAUNTLET PASSED**.
 - Whole-workspace gate green: 86 test binaries, clippy/fmt/doc clean, cargo-deny ok.
+
+### Post-1.0 roadmap — M5/M6/M7 planned
+- Gap analysis of the 1.0 framework (M0–M4 = native desktop+mobile widget toolkit + AI loop) identified the production-GUI gaps: no web target, no OS/system integration, no i18n/RTL, no routing/forms/global-state; deferred GPU (Vello) + media + motion depth; and no distribution/plugins/production-hardening/a11y-certification/AI-operation layer.
+- Grouped into three coherent post-1.0 milestones, each keeping the project's verification-first + agent-first + exit-gauntlet structure (see 06-task-graph.md):
+  - **M5 Ubiquity & App-Building** — Web/WASM, desktop system integration, i18n/RTL, navigation+global-state+undo, forms & validation.
+  - **M6 Media, Motion & Performance** — Vello-class GPU rasterizer, vector/image/video/audio media, motion + shared-element transitions, advanced rich-text, perf-at-scale gates (closes `01 §9`).
+  - **M7 Ecosystem, Production & AI-Native** — distribution/signing, plugin ecosystem, production hardening, screen-reader a11y certification, agent auto-repair loop + ADR-014 hot-patching-linker slot + design import; **2.0 release gate**.
+- 01-architecture.md §11 updated to list M5–M7 (M0–M4 = 1.0 line; M5–M7 = road to 2.0). New ADRs flagged per milestone (web backend, RTL layout, routing model, Vello backend, media pipeline, motion model, distribution/signing, plugin ABI).
