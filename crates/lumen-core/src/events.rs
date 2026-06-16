@@ -244,8 +244,28 @@ pub enum Event {
     Timer(TimerToken),
     /// High-level gesture.
     Gesture(GestureEvent),
+    /// A drag-and-drop payload dropped at a position (T5.2).
+    Drop(DropEvent),
     /// Application-defined.
     Custom(Box<dyn AnyEvent>),
+}
+
+/// A drag-and-drop drop at a window-space position.
+#[derive(Clone, Debug)]
+pub struct DropEvent {
+    /// Drop position.
+    pub pos: Point,
+    /// Dropped payload.
+    pub data: DropData,
+}
+
+/// Drag-and-drop payload — text and/or file paths.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DropData {
+    /// Dropped text, if any.
+    pub text: Option<String>,
+    /// Dropped file paths, if any.
+    pub files: Vec<String>,
 }
 
 /// Whether a handler consumed an event.

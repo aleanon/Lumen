@@ -290,6 +290,48 @@ fn handle(app: &mut Headless, method: &str, params: &Value) -> RpcResult {
             app.pump();
             Ok(json!({ "ok": true }))
         }
+        // --- desktop system integration (T5.2) ------------------------------
+        "input.drop" => {
+            let node = resolve_action(app, params)?;
+            let text = params
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let files = params
+                .get("files")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|f| f.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            app.inject(Event::Drop(lumen_core::events::DropEvent {
+                pos: center(node.bounds),
+                data: lumen_core::events::DropData { text, files },
+            }));
+            app.pump();
+            Ok(json!({ "ok": true }))
+        }
+        "clipboard.read" => Ok(json!({ "text": app.clipboard_read() })),
+        "clipboard.write" => {
+            let t = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            app.clipboard_write(t);
+            Ok(json!({ "ok": true }))
+        }
+        "ui.getMenu" => Ok(json!({ "menu": app.menu() })),
+        "menu.invoke" => {
+            let id = params
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or((-32602, "missing `id`".to_string()))?;
+            match app.invoke_menu(id) {
+                Some(label) => Ok(json!({ "ok": true, "label": label })),
+                None => Err((-32000, format!("no enabled menu item `{id}`"))),
+            }
+        }
+        "app.systemRequests" => Ok(json!({ "requests": app.system_requests() })),
+        "ui.getWindows" => Ok(json!({ "windows": app.windows() })),
         other => Err((-32601, format!("method not found: {other}"))),
     }
 }

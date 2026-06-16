@@ -94,6 +94,11 @@ impl App {
             theme: lumen_style::ThemeKind::Light,
             node_style: HashMap::new(),
             node_computed: HashMap::new(),
+            clipboard: String::new(),
+            menu: crate::system::MenuModel::default(),
+            invoked_menu: Vec::new(),
+            system_requests: Vec::new(),
+            windows: Vec::new(),
         };
         let diags = if let Some(s) = restore {
             // Stage the snapshot *before* the first build so each signal adopts
@@ -147,6 +152,7 @@ struct NodeMeta {
     on_click: Option<Handler>,
     on_wheel: Option<crate::element::WheelHandler>,
     on_drag: Option<crate::element::DragHandler>,
+    on_drop: Option<crate::element::DropHandler>,
     on_text: Option<crate::element::TextHandler>,
     background: Option<Color>,
     corner_radius: f64,
@@ -175,6 +181,12 @@ pub struct Headless {
     node_computed: HashMap<NodeIndex, HashMap<String, lumen_style::Computed>>,
     input: InputQueue,
     pointer: PointerState,
+    // Desktop system integration (T5.2).
+    clipboard: String,
+    menu: crate::system::MenuModel,
+    invoked_menu: Vec<String>,
+    system_requests: Vec<crate::system::SystemRequest>,
+    windows: Vec<crate::system::WindowDesc>,
 }
 
 impl Headless {
@@ -232,6 +244,65 @@ impl Headless {
     /// overflow). Lets an agent detect and fix layout bugs by code.
     pub fn diagnostics(&self) -> Vec<lumen_core::Diagnostic> {
         crate::audit::check_overflow(&self.semantics_doc().root)
+    }
+
+    // --- desktop system integration (T5.2) ---------------------------------
+
+    /// Read the (in-memory) clipboard text.
+    pub fn clipboard_read(&self) -> String {
+        self.clipboard.clone()
+    }
+
+    /// Write text to the clipboard.
+    pub fn clipboard_write(&mut self, text: impl Into<String>) {
+        self.clipboard = text.into();
+    }
+
+    /// Install the app's native menu model.
+    pub fn set_menu(&mut self, menu: crate::system::MenuModel) {
+        self.menu = menu;
+    }
+
+    /// The current menu model.
+    pub fn menu(&self) -> &crate::system::MenuModel {
+        &self.menu
+    }
+
+    /// Invoke a menu command by id; returns its label if it exists and is
+    /// enabled, recording the invocation for the app/agent.
+    pub fn invoke_menu(&mut self, id: &str) -> Option<String> {
+        let label = self
+            .menu
+            .find(id)
+            .filter(|i| i.enabled)
+            .map(|i| i.label.clone())?;
+        self.invoked_menu.push(id.to_string());
+        Some(label)
+    }
+
+    /// Menu command ids invoked so far.
+    pub fn invoked_menu(&self) -> &[String] {
+        &self.invoked_menu
+    }
+
+    /// Record a request to an OS service (the real shell fulfils it).
+    pub fn request_system(&mut self, req: crate::system::SystemRequest) {
+        self.system_requests.push(req);
+    }
+
+    /// System requests recorded this session.
+    pub fn system_requests(&self) -> &[crate::system::SystemRequest] {
+        &self.system_requests
+    }
+
+    /// Declare the app's secondary windows (multi-window).
+    pub fn set_windows(&mut self, windows: Vec<crate::system::WindowDesc>) {
+        self.windows = windows;
+    }
+
+    /// The app's secondary windows.
+    pub fn windows(&self) -> &[crate::system::WindowDesc] {
+        &self.windows
     }
 
     /// The semantics document (typed).
@@ -311,6 +382,18 @@ impl Headless {
                 while let Some(node) = n {
                     if let Some(h) = self.meta.get(&node).and_then(|m| m.on_wheel.clone()) {
                         h(&self.rt, we.delta.y);
+                        break;
+                    }
+                    let parent = self.tree.parent(node);
+                    n = parent.is_some().then_some(parent);
+                }
+            }
+            Event::Drop(de) => {
+                // Bubble to the nearest ancestor (incl. target) with a drop handler.
+                let mut n = self.tree.hit_test(de.pos);
+                while let Some(node) = n {
+                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_drop.clone()) {
+                        h(&self.rt, &de.data);
                         break;
                     }
                     let parent = self.tree.parent(node);
@@ -580,6 +663,7 @@ impl Headless {
                 on_click: el.on_click.clone(),
                 on_wheel: el.on_wheel.clone(),
                 on_drag: el.on_drag.clone(),
+                on_drop: el.on_drop.clone(),
                 on_text: el.on_text.clone(),
                 background: el.background,
                 corner_radius: el.corner_radius,

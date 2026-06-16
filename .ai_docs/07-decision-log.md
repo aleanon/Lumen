@@ -191,3 +191,11 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - Verified WITHOUT a browser: `cargo test -p hello_web --test web_golden -- --ignored` builds the wasm, renders it under **node**, and asserts the bytes are **pixel-identical to the native CPU render** (deterministic renderer → exact parity on the web). `lumen run|test --platform web` → `scripts/web_orchestrate.sh`.
 - PENDING (no headless-Chromium+WebGPU here): the in-browser WebGPU presenter + agent-over-WebSocket — authored in `examples/hello_web/web/`, runs in a browser-CI leg.
 - Host gate green: 91 test binaries, clippy/fmt clean, cargo-deny ok; desktop goldens unchanged.
+
+### T5.2 — Desktop system integration
+- `lumen_core::events`: `Event::Drop(DropEvent { pos, data })` + `DropData { text, files }`; `Element::on_drop`; routed through the one input queue (bubbles to the nearest `on_drop`, like wheel).
+- `lumen_widgets::system`: portable `MenuModel`/`MenuItem` (menu bar + context menus), `SystemRequest` (notification / open-file / save-file / tray tooltip), `WindowDesc` (secondary windows) — all `Serialize` (agent-observable data).
+- `Headless` surface: `clipboard_read/write`, `set_menu`/`menu`/`invoke_menu`/`invoked_menu`, `request_system`/`system_requests`, `set_windows`/`windows`.
+- Agent surface: `input.drop`, `clipboard.read`/`clipboard.write`, `ui.getMenu`, `menu.invoke`, `app.systemRequests`, `ui.getWindows`.
+- Verified headless (`cargo test -p lumen-widgets --test system`): app-integrated drag-and-drop delivers a payload to a drop zone; clipboard round-trips; menu query + invoke (and reject of unknown/disabled); system requests recorded; secondary windows listed.
+- PENDING (needs a real display/winit): the OS-native binding — winit multi-window, native menus, `rfd` file/color dialogs, OS clipboard + DnD + notifications + tray. These are a thin shell that fulfils the same `SystemRequest`s and feeds the same `Event::Drop`; the portable model + headless/agent surface (the agent-verifiable contract) is complete.

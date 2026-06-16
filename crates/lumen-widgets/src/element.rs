@@ -20,6 +20,8 @@ pub type WheelHandler = Rc<dyn Fn(&Runtime, f64)>;
 pub type DragHandler = Rc<dyn Fn(&Runtime, f64)>;
 /// A committed-text handler (text inputs).
 pub type TextHandler = Rc<dyn Fn(&Runtime, &str)>;
+/// A drop handler receiving the dropped payload (T5.2 drag-and-drop).
+pub type DropHandler = Rc<dyn Fn(&Runtime, &lumen_core::events::DropData)>;
 
 /// A description of one node: type + props + children.
 #[derive(Clone)]
@@ -60,6 +62,8 @@ pub struct Element {
     pub on_wheel: Option<WheelHandler>,
     /// Drag handler (sliders); receives the fraction along the main axis.
     pub on_drag: Option<DragHandler>,
+    /// Drag-and-drop drop handler.
+    pub on_drop: Option<DropHandler>,
     /// Committed-text handler (text inputs).
     pub on_text: Option<TextHandler>,
     /// Children.
@@ -87,6 +91,7 @@ impl Default for Element {
             on_click: None,
             on_wheel: None,
             on_drag: None,
+            on_drop: None,
             on_text: None,
             children: Vec::new(),
         }
@@ -183,6 +188,14 @@ impl Element {
     /// Set a click handler.
     pub fn on_click(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
         self.on_click = Some(Rc::new(f));
+        self
+    }
+    /// Set the drag-and-drop drop handler (T5.2).
+    pub fn on_drop(
+        mut self,
+        f: impl Fn(&Runtime, &lumen_core::events::DropData) + 'static,
+    ) -> Self {
+        self.on_drop = Some(Rc::new(f));
         self
     }
     /// Replace the children.
