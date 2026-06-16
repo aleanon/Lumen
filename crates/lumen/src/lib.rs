@@ -25,8 +25,12 @@ pub use lumen_core::semantics;
 pub use lumen_widgets::{app::FrameStats, App, AppSnapshot, BuildCx, Element, Handler, Headless};
 
 /// The built-in widget library (02 §10): M0 primitives plus the M1/M3/M4 and
-/// remaining widget sets, plus the accessibility bridge.
-pub use lumen_widgets::{a11y, widgets, widgets_extra, widgets_m1, widgets_m3, widgets_m4};
+/// remaining widget sets, the accessibility bridge, and the M5 app-building
+/// modules (forms, navigation, undo, i18n, desktop system integration).
+pub use lumen_widgets::{
+    a11y, forms, i18n, nav, system, undo, widgets, widgets_extra, widgets_m1, widgets_m3,
+    widgets_m4,
+};
 
 /// The ShaderWidget (GPU; not available on wasm).
 #[cfg(not(target_arch = "wasm32"))]

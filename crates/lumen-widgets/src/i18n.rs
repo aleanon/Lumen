@@ -10,7 +10,7 @@ use lumen_core::{codes, Diagnostic};
 use std::collections::HashMap;
 
 /// A BCP-47-ish locale tag (e.g. `en`, `ar`, `ja`).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Locale(pub String);
 
 impl Locale {

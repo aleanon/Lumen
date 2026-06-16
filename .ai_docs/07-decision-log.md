@@ -213,3 +213,9 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 ### T5.5 — Forms & validation
 - `lumen_widgets::forms`: `Validator` (Required / MinLen / MaxLen / Email / Custom predicate) + `validate(value, &[Validator])` (first failure wins). `form_field(cx, name, label, validators)` renders a labelled text input that carries `State::Invalid` while failing, with the message as an associated `#<name>-error` node — validation failures are **structured semantic data**, not pixels.
 - Verified headless (`cargo test -p lumen-widgets --test forms`): validators check values; an agent-style flow reads the initial `required` error (State::Invalid + error node), types an invalid email (error → "invalid email"), then fixes it and the field becomes valid with the error node gone.
+
+### M5-exit — localized, routed, form-driven CRUD across desktop + web + Android
+- `examples/agent-gauntlet-web`: a contacts CRUD app combining every M5 capability — i18n `Catalog` (en/ar title), routing (`Router` list↔add with back stack), a validated form (`form_field` + Required), and undo/redo (`History<Vec<String>>` of the contact list). Wasm-compatible (no shader).
+- Facade now re-exports the M5 modules (`forms`, `i18n`, `nav`, `undo`, `system`) for the public surface.
+- `scripts/agent_gauntlet_web.sh` is the M5 release gate, run green end-to-end here: (1) **desktop** — the agent adds a contact (blocked while the form is invalid), deletes + undoes it, switches to Arabic + mirrors RTL via `input.setLocale`, and exports a test from its session; (2) **web** — the app compiles to wasm + the CPU render-parity check passes under node; (3) **Android emulator** — the gauntlet suite runs unmodified on-device (`DEVEXIT=0`). **M5 GAUNTLET PASSED.**
+- Whole-workspace host gate green: 98 test binaries, clippy/fmt/doc clean. (`Locale` gained Serialize/Deserialize to live in a signal.)
