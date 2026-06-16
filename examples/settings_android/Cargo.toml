@@ -1,0 +1,20 @@
+[package]
+name = "settings_android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "settings_android"
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+lumen = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+lumen-shell-android = { workspace = true }
+android-activity = { workspace = true, features = ["native-activity"] }
+settings = { path = "../settings" }

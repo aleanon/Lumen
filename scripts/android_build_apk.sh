@@ -24,8 +24,10 @@ echo "==> cross-compiling $CRATE ($ABI)"
 cargo ndk -t "$ABI" -o "$STAGE/jniLibs" build -p "$CRATE" --release >/dev/null
 
 echo "==> linking base APK (aapt2)"
+# Point the NativeActivity's lib_name at this crate's .so.
+sed "s/android:value=\"hello_android\"/android:value=\"$LIB\"/" "$MANIFEST" >"$STAGE/AndroidManifest.xml"
 "$BT/aapt2" link -o "$STAGE/base.apk" -I "$PLATFORM" \
-    --manifest "$MANIFEST" --min-sdk-version 24 --target-sdk-version 34
+    --manifest "$STAGE/AndroidManifest.xml" --min-sdk-version 24 --target-sdk-version 34
 
 echo "==> adding native lib"
 # aapt2 ABI dir is e.g. x86_64; APK expects lib/<abi>/lib<name>.so

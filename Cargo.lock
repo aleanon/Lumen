@@ -3144,6 +3144,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "settings_android"
+version = "0.0.0"
+dependencies = [
+ "android-activity",
+ "lumen",
+ "lumen-shell-android",
+ "settings",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -25,7 +25,9 @@ BIN="$(ls -t "target/$TRIPLE/debug/deps/${TEST}"-* | grep -v '\.d$' | head -1)"
 echo "==> pushing binary + goldens to device"
 adb shell "rm -rf $DEV && mkdir -p $DEV/golden"
 adb push "$BIN" "$DEV/$TEST" >/dev/null
-adb push "$GOLDENS/." "$DEV/golden/" >/dev/null
+if [[ -d "$GOLDENS" ]] && compgen -G "$GOLDENS/*" >/dev/null; then
+    adb push "$GOLDENS/." "$DEV/golden/" >/dev/null
+fi
 adb shell "chmod 755 $DEV/$TEST"
 
 echo "==> running $TEST on device (unmodified)"

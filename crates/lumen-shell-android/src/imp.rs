@@ -10,11 +10,22 @@ use std::time::Duration;
 /// Run `build` as a Lumen app on this `NativeActivity`, presenting CPU frames to
 /// the window. Returns when the activity is destroyed.
 pub fn run(android: AndroidApp, build: impl Fn(&mut BuildCx) -> Element + 'static) {
+    run_styled(android, build, None)
+}
+
+/// Like [`run`], but applies an initial `.lss` stylesheet (e.g. an app's bundled
+/// theme). Tier-1 reloads still override it from the watched file.
+pub fn run_styled(
+    android: AndroidApp,
+    build: impl Fn(&mut BuildCx) -> Element + 'static,
+    initial_lss: Option<&str>,
+) {
     android_logger::init_once(
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
     );
     log::info!("lumen android shell starting");
 
+    let initial_lss = initial_lss.map(|s| s.to_string());
     let build = Rc::new(build);
     let mut headless: Option<Headless> = None;
     let mut size = (0u32, 0u32);
@@ -38,7 +49,13 @@ pub fn run(android: AndroidApp, build: impl Fn(&mut BuildCx) -> Element + 'stati
             PollEvent::Main(MainEvent::InitWindow { .. })
             | PollEvent::Main(MainEvent::RedrawNeeded { .. })
             | PollEvent::Main(MainEvent::WindowResized { .. }) => {
-                present(&android, &build, &mut headless, &mut size);
+                present(
+                    &android,
+                    &build,
+                    initial_lss.as_deref(),
+                    &mut headless,
+                    &mut size,
+                );
             }
             PollEvent::Main(MainEvent::TerminateWindow { .. }) => {
                 headless = None;
@@ -58,7 +75,13 @@ pub fn run(android: AndroidApp, build: impl Fn(&mut BuildCx) -> Element + 'stati
                 lss_mtime = Some(mt);
                 log::info!("tier-1 reload: {} bytes of .lss", src.len());
                 let _ = hl.set_stylesheet(&src);
-                present(&android, &build, &mut headless, &mut size);
+                present(
+                    &android,
+                    &build,
+                    initial_lss.as_deref(),
+                    &mut headless,
+                    &mut size,
+                );
             }
         }
     }
@@ -67,6 +90,7 @@ pub fn run(android: AndroidApp, build: impl Fn(&mut BuildCx) -> Element + 'stati
 fn present(
     android: &AndroidApp,
     build: &Rc<impl Fn(&mut BuildCx) -> Element + 'static>,
+    initial_lss: Option<&str>,
     headless: &mut Option<Headless>,
     size: &mut (u32, u32),
 ) {
@@ -81,8 +105,11 @@ fn present(
     // (Re)build the app whenever the surface size changes.
     if *size != (w, h) || headless.is_none() {
         let build = build.clone();
-        *headless =
-            Some(App::new(move |cx| (build)(cx)).run_headless(Size::new(w as f64, h as f64)));
+        let mut app = App::new(move |cx| (build)(cx));
+        if let Some(lss) = initial_lss {
+            app = app.stylesheet(lss);
+        }
+        *headless = Some(app.run_headless(Size::new(w as f64, h as f64)));
         *size = (w, h);
     }
     let hl = headless.as_mut().unwrap();

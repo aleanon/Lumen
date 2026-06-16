@@ -11,4 +11,4 @@
 mod imp;
 
 #[cfg(target_os = "android")]
-pub use imp::run;
+pub use imp::{run, run_styled};

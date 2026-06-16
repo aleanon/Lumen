@@ -136,3 +136,9 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - Build fix enabling mobile cross-compiles: the `lumen` facade's desktop `lumen-shell` (winit) dep + `run`/`RunExt` re-export are now `cfg(not(any(android, ios)))`, so mobile builds no longer pull winit → android-activity (which fails without a backend feature).
 - `--platform ios_sim` runs the headless render-core verification here and the full simctl suite on macOS (T3.4).
 - Verified: `bash scripts/android_device_test.sh hello m0_exit …` → `test result: ok` on the emulator (`DEVEXIT=0`).
+
+### M3-exit — settings app on mobile; suite green on desktop + emulator; agent loop
+- `examples/settings_android` runs `settings::build` (refactored out of `main_app`, with `STYLESHEET` as the initial sheet via the new `lumen_shell_android::run_styled`). Same `dev.lumen.hello` package; one parameterised manifest (the build script substitutes `android.app.lib_name`).
+- `scripts/android_m3_exit.sh` verifies all three M3-exit criteria on the API-34 emulator: (1) settings launches and renders (title/tabs/switch/stepper); (2) the settings regression suite (`agent_regression`) passes **unmodified on-device** via `android_device_test.sh`; (3) the agent loop edit-`.lss`→reload→screenshot repaints the UI (red pixels 0 → 7479). The device-test script now tolerates suites without goldens.
+- "Same suite on desktop + both": desktop via `cargo test -p settings`, Android on-device (above); iOS is **headless-verified** (the shared render core renders the same widgets; the simctl screenshot e2e is authored, pending a macOS runner — agreed scope).
+- Whole-workspace host gate green after the settings refactor: 75 test binaries, clippy/fmt clean, cargo-deny ok.
