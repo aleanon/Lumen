@@ -1,5 +1,5 @@
 //! counter — increment/decrement a value.
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the counter app.
 pub fn main_app() -> App {
@@ -7,6 +7,10 @@ pub fn main_app() -> App {
 }
 
 fn build(cx: &mut BuildCx) -> Element {
+    theme::screen("Counter", body(cx))
+}
+
+fn body(cx: &mut BuildCx) -> Element {
     let count = cx.signal("count", || 0i32);
     let v = count.get(cx.runtime());
     widgets::column(vec![

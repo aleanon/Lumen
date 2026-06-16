@@ -5,7 +5,7 @@
 //! clock and the hands land at an exact position.
 use kurbo::{Affine, BezPath, Point};
 use lumen_core::Color;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 use std::f64::consts::PI;
 
 /// Build the clock app.
@@ -42,8 +42,11 @@ fn build(cx: &mut BuildCx) -> Element {
     })
     .id("face");
     let whole = total as i64;
-    widgets::column(vec![
-        face,
-        widgets::text(format!("{:02}:{:02}", whole / 60 % 60, whole % 60)).id("digital"),
-    ])
+    theme::screen(
+        "Clock",
+        widgets::column(vec![
+            face,
+            widgets::text(format!("{:02}:{:02}", whole / 60 % 60, whole % 60)).id("digital"),
+        ]),
+    )
 }

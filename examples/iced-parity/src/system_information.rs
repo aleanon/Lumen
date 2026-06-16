@@ -1,12 +1,16 @@
 //! system_information — show basic OS/arch/CPU info.
 use lumen_widgets::system::system_info;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the system-information app.
 pub fn main_app() -> App {
     App::new(build)
 }
 fn build(cx: &mut BuildCx) -> Element {
+    theme::screen("System", body(cx))
+}
+
+fn body(cx: &mut BuildCx) -> Element {
     let _ = cx;
     let info = system_info();
     widgets::column(vec![

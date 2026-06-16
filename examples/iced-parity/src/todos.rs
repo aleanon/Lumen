@@ -1,5 +1,5 @@
 //! todos — add and toggle a list of tasks.
-use lumen_widgets::{widgets, widgets_m1, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, widgets_m1, App, BuildCx, Element};
 
 /// Build the todos app.
 pub fn main_app() -> App {
@@ -7,6 +7,10 @@ pub fn main_app() -> App {
 }
 
 fn build(cx: &mut BuildCx) -> Element {
+    theme::screen("Todos", body(cx))
+}
+
+fn body(cx: &mut BuildCx) -> Element {
     let tasks = cx.signal("tasks", Vec::<(String, bool)>::new);
     let draft = cx.signal("draft", String::new);
     let list = tasks.get(cx.runtime());

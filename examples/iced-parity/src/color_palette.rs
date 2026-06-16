@@ -3,7 +3,7 @@
 use kurbo::Rect;
 use lumen_core::Color;
 use lumen_render::display_list::Brush;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the color-palette app.
 pub fn main_app() -> App {
@@ -11,6 +11,10 @@ pub fn main_app() -> App {
 }
 
 fn build(cx: &mut BuildCx) -> Element {
+    theme::screen("Color palette", body(cx))
+}
+
+fn body(cx: &mut BuildCx) -> Element {
     let n = cx.signal("n", || 6usize);
     let count = n.get(cx.runtime());
     let strip = widgets::canvas(240.0, 48.0, move |f, size| {

@@ -1,7 +1,7 @@
 //! websocket — a live WebSocket client (E8.3). `echo_once` performs a real
 //! round-trip over a `ws://` connection (tungstenite, the same client the agent
 //! conformance test uses); the UI is a minimal chat log.
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Connect to `url`, send `msg`, and return the first reply (blocking; a real
 /// app runs this off the UI thread and feeds a signal).
@@ -23,6 +23,10 @@ pub fn main_app() -> App {
 }
 
 fn build(cx: &mut BuildCx) -> Element {
+    theme::screen("WebSocket", body(cx))
+}
+
+fn body(cx: &mut BuildCx) -> Element {
     let log = cx.signal("log", Vec::<String>::new);
     let lines = log.get(cx.runtime());
     let draft = widgets::text_field_basic(cx, "draft", "").id("draft");

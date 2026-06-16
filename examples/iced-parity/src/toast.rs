@@ -1,5 +1,5 @@
 //! toast — show a transient notification; it auto-dismisses after a few ticks.
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the toast app.
 pub fn main_app() -> App {
@@ -7,6 +7,10 @@ pub fn main_app() -> App {
 }
 
 fn build(cx: &mut BuildCx) -> Element {
+    theme::screen("Toast", body(cx))
+}
+
+fn body(cx: &mut BuildCx) -> Element {
     // `ttl` > 0 means a toast is showing; ticking decrements it to 0.
     let ttl = cx.signal("ttl", || 0i64);
     let remaining = ttl.get(cx.runtime());

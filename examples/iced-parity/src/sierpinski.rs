@@ -2,7 +2,7 @@
 //! signal driven by +/- buttons.
 use kurbo::{BezPath, Point};
 use lumen_core::Color;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the Sierpinski app.
 pub fn main_app() -> App {
@@ -26,6 +26,10 @@ fn tri(f: &mut lumen_render::canvas::Frame, a: Point, b: Point, c: Point, depth:
 }
 
 fn build(cx: &mut BuildCx) -> Element {
+    theme::screen("Sierpinski", body(cx))
+}
+
+fn body(cx: &mut BuildCx) -> Element {
     let depth = cx.signal("depth", || 4u32);
     let d = depth.get(cx.runtime());
     let canvas = widgets::canvas(160.0, 150.0, move |f, size| {

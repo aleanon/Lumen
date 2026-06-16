@@ -1,11 +1,15 @@
 //! stopwatch — a running timer (start/stop, tick).
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the stopwatch app.
 pub fn main_app() -> App {
     App::new(build)
 }
 fn build(cx: &mut BuildCx) -> Element {
+    theme::screen("Stopwatch", body(cx))
+}
+
+fn body(cx: &mut BuildCx) -> Element {
     let elapsed = cx.signal("elapsed", || 0i64);
     let running = cx.signal("running", || false);
     let e = elapsed.get(cx.runtime());

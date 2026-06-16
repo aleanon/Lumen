@@ -19,6 +19,7 @@ pub mod i18n;
 pub mod markdown;
 pub mod nav;
 pub mod system;
+pub mod theme;
 pub mod undo;
 pub mod wcag;
 // ShaderWidget needs the wgpu GPU backend (CPU fallback included), which is not

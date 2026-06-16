@@ -5,7 +5,7 @@
 //! angle.
 use kurbo::{Affine, BezPath, Point};
 use lumen_core::Color;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 use std::f64::consts::PI;
 
 /// Build the spinner app.
@@ -14,6 +14,10 @@ pub fn main_app() -> App {
 }
 
 fn build(cx: &mut BuildCx) -> Element {
+    theme::screen("Loading", body(cx))
+}
+
+fn body(cx: &mut BuildCx) -> Element {
     cx.animate();
     // One revolution every 1.2 seconds.
     let angle = cx.now_ms() / 1000.0 * (2.0 * PI / 1.2);
