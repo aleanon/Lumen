@@ -129,8 +129,8 @@ pub fn app_bar(title: impl Into<String>, actions: Vec<Element>) -> Element {
 }
 
 /// A scroll area with pull-to-refresh: dragging down past the top fires
-/// `on_refresh` and surfaces a `busy` state until [`clear_refresh`] is called by
-/// resetting the signal. `name` keys both the scroll offset and refresh state.
+/// `on_refresh` and surfaces a `busy` state until the `refreshing` signal is
+/// reset. `name` keys both the scroll offset and refresh state.
 pub fn pull_to_refresh(
     cx: &BuildCx,
     name: &str,

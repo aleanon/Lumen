@@ -3,7 +3,7 @@
 //!
 //! iOS binaries can only be linked on macOS with Xcode, so this crate is split:
 //!
-//! * [`render_into`] / [`apply_stylesheet_into`] — the **platform-independent**
+//! * [`render_into`] — the **platform-independent**
 //!   render core. It runs the CPU reference renderer (the same one the desktop
 //!   and Android shells use) and writes straight-RGBA8 into a caller buffer.
 //!   This is fully testable on the host, which is the "headless verification"

@@ -24,8 +24,9 @@ pub use lumen_core::semantics;
 #[doc(inline)]
 pub use lumen_widgets::{app::FrameStats, App, AppSnapshot, BuildCx, Element, Handler, Headless};
 
-/// The built-in widget library (02 §10).
-pub use lumen_widgets::widgets;
+/// The built-in widget library (02 §10): M0 primitives plus the M1/M3/M4 and
+/// remaining widget sets, the accessibility bridge, and the ShaderWidget.
+pub use lumen_widgets::{a11y, shader, widgets, widgets_extra, widgets_m1, widgets_m3, widgets_m4};
 
 /// Layout styling (the typed mirror of the `.lss` layout properties, 04 §3).
 pub use lumen_layout as layout;

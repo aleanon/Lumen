@@ -161,3 +161,9 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 ### T4.4 — Inspector app (built in Lumen)
 - `examples/inspector` is a real Lumen app: a tab bar over four panels — Tree view (a `widgets_m4::tree` of a sample semantic tree), Style editor (a stepper editing `font-size` with a live preview), Animation scrubber (a slider → frame readout), and Trace replay (steps through a recorded trace event by event).
 - Self-test (`cargo test -p inspector --test self_drive`): the inspector is driven entirely through `lumen-agent` (`dispatch` — the same protocol an external agent uses), navigating each panel via `tab:nth(..)`, bumping the style stepper (16→17px), moving the scrubber (→ frame 50), and stepping the trace (1/3 → 2/3), asserting on its own `ui.getTree`. It drives itself.
+
+### T4.5 — Remaining widgets, rustdoc pass, API audit, 1.0 freeze
+- `lumen_widgets::widgets_extra`: the 02 §10 widgets deferred from M1 — radio (single-select groups), select/combobox (cycles options), tooltip, menu, grid (N equal `Fr` columns), wrap (flex-wrap), split_pane (ratio'd panes), text_area (multiline). Triple-tested (`cargo test -p lumen-widgets --test widgets_extra`).
+- rustdoc pass: fixed broken intra-doc links (`clear_refresh`, `apply_stylesheet_into`) and the `lumen` lib/bin doc collision (`doc = false` on the cli bin). `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` is clean.
+- API audit + 1.0 freeze documented in `docs/api-audit-1.0.md`; the `lumen` facade now re-exports the full widget surface (widgets/_extra/_m1/_m3/_m4) + a11y + shader. semver-checks gates future releases against this baseline (no prior published version to diff yet; first publish establishes it).
+- Whole-workspace gate green: 83 test binaries, clippy/fmt/doc clean, cargo-deny ok.

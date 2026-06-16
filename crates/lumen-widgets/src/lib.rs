@@ -14,6 +14,7 @@ pub mod audit;
 pub mod element;
 pub mod shader;
 pub mod widgets;
+pub mod widgets_extra;
 pub mod widgets_m1;
 pub mod widgets_m3;
 pub mod widgets_m4;
