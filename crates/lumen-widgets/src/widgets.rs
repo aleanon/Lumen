@@ -242,3 +242,23 @@ pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
         ..Element::default()
     }
 }
+
+/// An immediate-mode drawing canvas (E8.1). `draw` paints into a `Frame` sized
+/// to the widget each frame; emit paths, rects, circles, and gradients.
+pub fn canvas(
+    width: f64,
+    height: f64,
+    draw: impl Fn(&mut lumen_render::canvas::Frame, lumen_core::geometry::Size) + 'static,
+) -> Element {
+    use lumen_layout::{Dim, LayoutStyle};
+    Element {
+        role: lumen_core::semantics::Role::Image,
+        style: LayoutStyle {
+            width: Dim::px(width as f32),
+            height: Dim::px(height as f32),
+            ..LayoutStyle::default()
+        },
+        canvas: Some(std::rc::Rc::new(draw)),
+        ..Element::default()
+    }
+}

@@ -22,6 +22,9 @@ pub type DragHandler = Rc<dyn Fn(&Runtime, f64)>;
 pub type TextHandler = Rc<dyn Fn(&Runtime, &str)>;
 /// A drop handler receiving the dropped payload (T5.2 drag-and-drop).
 pub type DropHandler = Rc<dyn Fn(&Runtime, &lumen_core::events::DropData)>;
+/// An immediate-mode draw callback (E8.1 Canvas): paints into a `Frame` sized to
+/// the node's bounds.
+pub type CanvasFn = Rc<dyn Fn(&mut lumen_render::canvas::Frame, kurbo::Size)>;
 
 /// A description of one node: type + props + children.
 #[derive(Clone)]
@@ -64,6 +67,8 @@ pub struct Element {
     pub on_drag: Option<DragHandler>,
     /// Drag-and-drop drop handler.
     pub on_drop: Option<DropHandler>,
+    /// Immediate-mode canvas draw callback (E8.1).
+    pub canvas: Option<CanvasFn>,
     /// Committed-text handler (text inputs).
     pub on_text: Option<TextHandler>,
     /// Children.
@@ -92,6 +97,7 @@ impl Default for Element {
             on_wheel: None,
             on_drag: None,
             on_drop: None,
+            canvas: None,
             on_text: None,
             children: Vec::new(),
         }

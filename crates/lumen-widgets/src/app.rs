@@ -159,6 +159,7 @@ struct NodeMeta {
     corner_radius: f64,
     text: Option<(String, TextStyle)>,
     image: Option<RgbaImage>,
+    canvas: Option<crate::element::CanvasFn>,
 }
 
 /// A headless, CPU-rendered application instance (02 §8). Drives the same input
@@ -686,6 +687,7 @@ impl Headless {
                 corner_radius: el.corner_radius,
                 text: el.text.clone(),
                 image: el.image.clone(),
+                canvas: el.canvas.clone(),
             },
         );
         built.push((node, lnode));
@@ -716,6 +718,19 @@ impl Headless {
                     radii: CornerRadii::all(radius),
                     border: None,
                 });
+            }
+            // Immediate-mode canvas: draw in node-local coords offset to bounds.
+            if let Some(draw) = &m.canvas {
+                let mut frame = lumen_render::canvas::Frame::new(kurbo::Affine::translate((
+                    bounds.x0, bounds.y0,
+                )));
+                draw(
+                    &mut frame,
+                    kurbo::Size::new(bounds.width(), bounds.height()),
+                );
+                for cmd in frame.into_cmds() {
+                    dl.push(cmd);
+                }
             }
             if let Some(img) = &m.image {
                 let iw = img.width() as f64;

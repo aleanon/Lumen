@@ -5,6 +5,7 @@
 //! (wgpu) and damage-aware presentation arrive in T0.11.
 #![warn(missing_docs)]
 
+pub mod canvas;
 pub mod cpu;
 pub mod display_list;
 // The GPU backend (wgpu) is unavailable on wasm; the web shell renders on the CPU.

@@ -295,3 +295,9 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `08-examples-plan.md`: mapped the iced framework's ~48 examples onto Lumen, recording per-example status (✅/🟡/🔴) and the exact Linux gap. ~18 are buildable today (Phase 0); the rest collapse to a handful of capability gaps proposed as an **M8 — Example Parity** milestone.
 - Capability gaps (highest leverage first): **E8.1 Canvas** (immediate-mode 2D draw over the existing display-list primitives — the keystone, unblocks ~9 examples), E8.2 overlays/popups (modal/toast/menu/combo), E8.3 networking (async HTTP/WS client — ADR-003 escalation), E8.4 resizable pane grid, E8.5 markdown, E8.6 small widgets/assets (progress/spinner/gradient surface/QR/codecs/animated images), E8.7 OS window+system binding (multi-window/exit/open-URL/sysinfo), E8.8 the example gallery.
 - Key finding: all primitives E8.1 needs (paths, arcs, gradients, glyph runs, `Affine` layer transforms) already exist in the display list; the gap is only a public Canvas widget. Networking is the only true new external dependency.
+
+## M8 — Example Parity (executing 08-examples-plan.md)
+
+### E8.1 — Canvas (immediate-mode 2D drawing)
+- `lumen_render::canvas::Frame`: accumulates display-list commands with an affine transform stack — `fill`/`stroke`(BezPath), `fill_rect`(Brush), `fill_circle`, and `with_transform` (compose a rotation/scale about a pivot). `lumen_widgets::widgets::canvas(w, h, draw)` hands a `Frame` (sized to the node, offset to its window origin) to the draw closure each paint; the paint loop appends the resulting commands.
+- Verified (`cargo test -p lumen-widgets --test canvas`): a clock face (two circles + a 90°-rotated stroked hand) renders to an exact golden + pixel spot-checks. All primitives reuse the existing display list (paths/rects/circles/transforms) — the keystone gap is now closed, unblocking the canvas-based iced examples.
