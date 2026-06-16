@@ -32,6 +32,34 @@ pub fn dispatch(app: &mut Headless, req: &Value) -> Value {
 
 type RpcResult = Result<Value, (i64, String)>;
 
+/// Autonomously repair an app (T7.5 AI-native): read its structured
+/// diagnostics, apply `fixer` to each, and repeat until the app is clean or
+/// `max_iters` is reached — the agent's detect → diagnose → fix → verify loop,
+/// with no human in the loop. Returns the number of repair rounds taken.
+pub fn auto_repair(
+    app: &mut Headless,
+    max_iters: usize,
+    mut fixer: impl FnMut(&mut Headless, &lumen_core::Diagnostic) -> bool,
+) -> usize {
+    for round in 0..max_iters {
+        app.pump();
+        let diags = app.diagnostics();
+        if diags.is_empty() {
+            return round;
+        }
+        let mut fixed_any = false;
+        for d in &diags {
+            if fixer(app, d) {
+                fixed_any = true;
+            }
+        }
+        if !fixed_any {
+            return round; // nothing we know how to fix
+        }
+    }
+    max_iters
+}
+
 /// Step recorded for export to a `lumen-test` regression suite.
 enum Step {
     Click(String),

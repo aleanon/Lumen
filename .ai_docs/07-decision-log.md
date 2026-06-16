@@ -279,3 +279,9 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - Verified (`cargo test -p lumen-widgets --test wcag`): black/white = 21:1, AA pass/fail on real color pairs; the name audit flags an unlabelled button and passes a labelled one.
 - `docs/a11y-checklist.md` now splits WCAG 2.2 into automated (in CI) vs manual screen-reader passes.
 - PENDING (no screen reader / a11y runner here): real VoiceOver / NVDA / Orca driven in CI. The machine-verifiable half of conformance (contrast, target size, name/role/value) is automated and gated.
+
+### T7.5 — AI-native frontier
+- `lumen_agent::auto_repair(app, max_iters, fixer)`: the agent's **detect → diagnose → fix → verify** loop — reads `app.diagnostics()`, applies a `fixer` to each structured diagnostic, repumps, and repeats until clean or no progress. The autonomous self-repair primitive.
+- `lumen_widgets::design::spec_to_lss`: maps a JSON design spec (`tokens` + `rules`) to a `.lss` stylesheet — the design-import reconciliation core.
+- Verified: `cargo test -p lumen-agent --test autorepair` — an app with an injected `W0103` layout regression **self-heals in ≤2 rounds with zero human edits** (the fixer maps W0103 → invoke `#fix`); `cargo test -p lumen-widgets --test design` — an imported spec round-trips to valid `.lss` (parses with no errors).
+- Hot-patching linker: ADR-014's tier-2 slot is already in place — the cdylib swap (T2.3) + the Checkpoint protocol (T0.3/T2.4); the full function-level binary patcher is the separate upgrade project. Full Figma/Sketch import layers on `spec_to_lss` (PENDING).

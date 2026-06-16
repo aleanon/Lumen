@@ -15,3 +15,6 @@ serde_json = { workspace = true }
 # Sync WebSocket so the non-Send app stays on the serving thread (ADR-003,
 # ADR-018: tokio is only for the dev-server multiplexer, not this loop).
 tungstenite = { workspace = true }
+
+[dev-dependencies]
+lumen-layout = { workspace = true }

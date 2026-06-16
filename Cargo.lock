@@ -1811,6 +1811,7 @@ version = "0.0.0"
 dependencies = [
  "kurbo",
  "lumen-core",
+ "lumen-layout",
  "lumen-widgets",
  "serde_json",
  "tungstenite",
