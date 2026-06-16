@@ -33,6 +33,7 @@ members = [
     "examples/agent-gauntlet-media",
     "examples/widget-rating",
     "examples/gallery",
+    "examples/agent-gauntlet-2",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).

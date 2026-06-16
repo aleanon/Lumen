@@ -1,0 +1,23 @@
+[package]
+name = "agent-gauntlet-2"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "agent_gauntlet_2"
+path = "src/lib.rs"
+
+[dependencies]
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+lumen-layout = { workspace = true }
+lumen-widgets = { workspace = true }
+widget-rating = { path = "../widget-rating" }
+
+[dev-dependencies]
+lumen-agent = { workspace = true }
+serde_json = { workspace = true }
