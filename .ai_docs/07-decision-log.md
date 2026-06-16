@@ -317,3 +317,6 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 
 ### E8.5 — Markdown (batch 4): markdown + changelog
 - `lumen_widgets::markdown::render(src)`: CommonMark subset (`#`/`##` headings, `-` lists, fenced code blocks, inline `*emphasis*`/`` `code` ``) → an `Element` block tree. `examples/iced-parity`: `markdown` (a doc) + `changelog` (a scrollable doc). Verified (14 parity tests): headings, list items, emphasis runs render.
+
+### E8.4 — resizable pane grid (batch 5)
+- `widgets_extra::pane_grid(cx, name, first, second)`: a two-pane split whose ratio is a signal; the container's `on_drag` (pointer fraction along its width) sets the split, with a visual divider. `examples/iced-parity::pane_grid`. Verified (15 parity tests): dragging at x≈0.8·w moves the divider right (ratio 0.5→0.8).

@@ -177,3 +177,29 @@ fn changelog_scroll() {
     a.pump();
     assert!(tree(&mut a).contains("Changelog"));
 }
+
+#[test]
+fn pane_grid_resizes() {
+    use kurbo::Point;
+    use lumen_core::events::{Event, PointerEvent};
+    let mut a = iced_parity::pane_grid::main_app().run_headless(Size::new(300.0, 160.0));
+    a.pump();
+    // The divider's x marks the split; dragging right moves it right.
+    fn divider_x(h: &lumen_widgets::Headless) -> f64 {
+        fn find(n: &lumen_core::semantics::SemanticsNode, id: &str) -> Option<kurbo::Rect> {
+            if n.id.as_ref().map(|i| i.as_str()) == Some(id) {
+                return Some(n.bounds);
+            }
+            n.children.iter().find_map(|c| find(c, id))
+        }
+        find(&h.semantics_doc().root.elided(), "split-divider")
+            .unwrap()
+            .x0
+    }
+    let before = divider_x(&a);
+    a.inject(Event::PointerDown(PointerEvent::at(Point::new(
+        240.0, 80.0,
+    ))));
+    a.pump();
+    assert!(divider_x(&a) > before + 40.0, "split moved right on drag");
+}

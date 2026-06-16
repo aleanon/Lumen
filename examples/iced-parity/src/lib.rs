@@ -12,6 +12,7 @@ pub mod gradient;
 pub mod loading_spinners;
 pub mod markdown;
 pub mod modal;
+pub mod pane_grid;
 pub mod progress_bar;
 pub mod sierpinski;
 pub mod toast;

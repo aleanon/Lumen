@@ -244,3 +244,50 @@ pub fn modal(base: Element, dialog: Element, open: bool) -> Element {
     .id("modal-overlay");
     crate::widgets::stack(vec![base, backdrop])
 }
+
+/// A resizable two-pane split (E8.4). Dragging within the grid sets the split
+/// position; `name` keys the ratio. A visual divider marks the boundary.
+pub fn pane_grid(cx: &BuildCx, name: &str, first: Element, second: Element) -> Element {
+    let ratio = cx.signal(name, || 0.5f64);
+    let r = ratio.get(cx.runtime());
+    let pane = |child: Element, grow: f32| Element {
+        role: Role::Group,
+        style: LayoutStyle {
+            flex_grow: grow,
+            flex_basis: Dim::px(0.0),
+            ..LayoutStyle::default()
+        },
+        children: vec![child],
+        ..Element::default()
+    };
+    let divider = Element {
+        role: Role::Generic,
+        background: Some(Color::srgb8(0x88, 0x8c, 0x90, 0xff)),
+        style: LayoutStyle {
+            width: Dim::px(4.0),
+            height: Dim::pct(1.0),
+            ..LayoutStyle::default()
+        },
+        ..Element::default()
+    }
+    .id(format!("{name}-divider"));
+    Element {
+        role: Role::Group,
+        value: Some(format!("{:.2}", r)),
+        on_drag: Some(Rc::new(move |rt, frac| ratio.set(rt, frac.clamp(0.1, 0.9)))),
+        style: LayoutStyle {
+            display: Display::Flex,
+            flex_direction: FlexDirection::Row,
+            width: Dim::pct(1.0),
+            height: Dim::pct(1.0),
+            ..LayoutStyle::default()
+        },
+        children: vec![
+            pane(first, r as f32),
+            divider,
+            pane(second, (1.0 - r) as f32),
+        ],
+        ..Element::default()
+    }
+    .id(name)
+}
