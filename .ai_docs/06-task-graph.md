@@ -100,7 +100,7 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 **T4.1 ☑ ShaderWidget** (WGSL, typed uniforms, built-ins, CPU fallback fill, shader hot reload, E0201 diagnostics). *Accept:* GPU-runner goldens for 3 sample shaders; broken-shader edit keeps old pipeline + diagnostic.
 **T4.2 ☑ DataGrid + Tree + charts + RichTextEditor.** *Accept:* test triples; DataGrid 1M-row gate added to perf suite.
 **T4.3 ☑ AccessKit integration** (role/state map per 03 §1; platform a11y smoke tests). *Accept:* map table complete; VoiceOver/NVDA manual checklist documented + automated AccessKit-tree diff tests.
-**T4.4 ☐ Inspector app** (tree view, style editor, animation scrubber, trace replay — built in Lumen). *Accept:* inspector drives itself via lumen-agent in a self-test.
+**T4.4 ☑ Inspector app** (tree view, style editor, animation scrubber, trace replay — built in Lumen). *Accept:* inspector drives itself via lumen-agent in a self-test.
 **T4.5 ☐ Remaining widget set, API audit, rustdoc pass, 1.0 freeze.** *Accept:* `cargo doc` no warnings; public-API diff reviewed; semver-checks clean.
 **M4-exit ☐ = 13 of `01-architecture.md`:** an agent, given only the CLI and lumen-agent, scaffolds an app, implements a multi-screen styled UI with one custom shader, verifies on desktop + both mobile emulators, generates a passing test suite from its own session, and fixes an injected layout bug using structured diagnostics — zero human intervention. Script this as `examples/agent-gauntlet/` and run it as the release gate.
 

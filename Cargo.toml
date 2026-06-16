@@ -25,6 +25,7 @@ members = [
     "crates/lumen-shell-ios",
     "examples/hello_ios",
     "examples/settings_android",
+    "examples/inspector",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
