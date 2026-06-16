@@ -7,7 +7,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use kurbo::{Point, Size, Vec2};
 use lumen_core::events::{Event, Modifiers, WheelEvent};
 use lumen_layout::{Dim, LayoutStyle, LayoutTree};
-use lumen_widgets::{widgets, widgets_m1, App};
+use lumen_widgets::{widgets, widgets_m1, widgets_m4, App};
 
 /// 10k-node tree: one container over 10 000 fixed-height leaves; the bench
 /// recomputes the whole subtree each iteration.
@@ -50,6 +50,34 @@ fn vlist_1m_scroll(c: &mut Criterion) {
     });
 }
 
+/// 1M-row DataGrid: each iteration scrolls and pumps a frame. Like VirtualList
+/// the grid windows its rows, so cost is independent of row count (T4.2 gate).
+fn data_grid_1m_scroll(c: &mut Criterion) {
+    let app = App::new(|cx| {
+        widgets_m4::data_grid(
+            cx,
+            "grid",
+            &["A", "B", "C"],
+            1_000_000,
+            20.0,
+            600.0,
+            |r, col| format!("r{r}c{col}"),
+        )
+    });
+    let mut h = app.run_headless(Size::new(400.0, 600.0));
+
+    c.bench_function("data_grid_1m_scroll", |b| {
+        b.iter(|| {
+            h.inject(Event::Wheel(WheelEvent {
+                pos: Point::new(200.0, 300.0),
+                delta: Vec2::new(0.0, 40.0),
+                modifiers: Modifiers::empty(),
+            }));
+            h.pump();
+        });
+    });
+}
+
 /// Idle: pumping with no input queued. The scheduler should do no real work.
 fn idle_frame(c: &mut Criterion) {
     let app = App::new(|cx| {
@@ -64,5 +92,11 @@ fn idle_frame(c: &mut Criterion) {
     });
 }
 
-criterion_group!(perf, layout_10k_dirty_subtree, vlist_1m_scroll, idle_frame);
+criterion_group!(
+    perf,
+    layout_10k_dirty_subtree,
+    vlist_1m_scroll,
+    data_grid_1m_scroll,
+    idle_frame
+);
 criterion_main!(perf);

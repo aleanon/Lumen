@@ -17,6 +17,7 @@ import json, os, sys
 budgets = {
     "layout_10k_dirty_subtree": 2_000_000,   # < 2 ms
     "vlist_1m_scroll": 8_333_333,            # < 8.33 ms (120 fps frame budget)
+    "data_grid_1m_scroll": 8_333_333,        # < 8.33 ms (1M-row DataGrid, T4.2)
     "idle_frame": 2_000_000,                 # < 2 ms (idle does no real work)
 }
 

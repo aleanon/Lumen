@@ -15,6 +15,7 @@ pub mod shader;
 pub mod widgets;
 pub mod widgets_m1;
 pub mod widgets_m3;
+pub mod widgets_m4;
 
 pub use app::{center, App, AppSnapshot, FrameStats, Headless, ReloadResult};
 pub use element::{BuildCx, Element, Handler};
