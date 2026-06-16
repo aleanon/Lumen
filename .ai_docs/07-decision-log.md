@@ -231,3 +231,8 @@ Stop the affected task, write `BLOCKED.md` (options + recommendation), continue 
 - `lumen_render::svg`: a minimal SVG parser+renderer — `rect`, `circle`, `path` (`M`/`L`/`C`/`Z`) with solid `#hex` fills → display list → the deterministic CPU renderer. Exact goldens for vector assets.
 - Verified (`cargo test -p lumen-render --test svg`): a 3-shape SVG (blue rect, green circle, red triangle) renders to an exact committed golden + pixel spot-checks.
 - PENDING (larger asset-pipeline work): full SVG (gradients/transforms/text/clips), Lottie/animated vector, GIF/APNG, and jpeg/webp/avif decode. PNG is already supported; the minimal renderer establishes the vector→golden contract.
+
+### T6.3 — Audio / video / capture (deterministic software path)
+- `lumen_render::media`: a `VideoSource` trait + `TestPattern` (a procedural animated-gradient "decoder", deterministic by timestamp), `AudioBuffer` + `sine` synth, and a `CaptureSource` (Camera/Microphone) the platform shell binds.
+- Verified (`cargo test -p lumen-render --test media`): the video frame at a fixed `t` matches an exact golden and is identical on re-render / differs at another `t`; the sine buffer is deterministic with the expected length/duration/first sample.
+- PENDING (platform shell work): hardware-accelerated video decode, audio playback, and real mic/camera capture — a thin shell over the same `VideoSource`/`AudioBuffer`/`CaptureSource` model; the deterministic CI path (the golden-testable contract) is landed.

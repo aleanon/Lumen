@@ -11,6 +11,7 @@ pub mod display_list;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu;
 pub mod image;
+pub mod media;
 pub mod scene;
 pub mod svg;
 
