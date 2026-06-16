@@ -103,6 +103,27 @@ impl LayoutTree {
         self.last_count
     }
 
+    /// Mirror the computed layout horizontally for right-to-left locales (T5.3).
+    /// Each node's x is flipped within its parent's box, so `start`-aligned
+    /// content moves to the right and rows read right-to-left, while sizes and
+    /// vertical layout are unchanged. Call after [`LayoutTree::compute`].
+    pub fn mirror_rtl(&mut self, root: LayoutNode) {
+        let r = self.abs.get(&root.0).copied().unwrap_or(Rect::ZERO);
+        self.mirror_node(root.0, r);
+    }
+
+    fn mirror_node(&mut self, node: NodeId, parent: Rect) {
+        let b = self.abs.get(&node).copied().unwrap_or(Rect::ZERO);
+        let new_x0 = parent.x0 + (parent.width() - (b.x0 - parent.x0) - b.width());
+        let mirrored =
+            Rect::from_origin_size(Point::new(new_x0, b.y0), Size::new(b.width(), b.height()));
+        self.abs.insert(node, mirrored);
+        let children = self.taffy.children(node).expect("children");
+        for child in children {
+            self.mirror_node(child, mirrored);
+        }
+    }
+
     /// Post-order-free recursive accumulation of absolute bounds; returns the
     /// number of nodes visited.
     fn update_abs(&mut self, node: NodeId, parent_origin: Point) -> usize {

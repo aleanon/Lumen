@@ -12,6 +12,7 @@ pub mod a11y;
 pub mod app;
 pub mod audit;
 pub mod element;
+pub mod i18n;
 pub mod system;
 // ShaderWidget needs the wgpu GPU backend (CPU fallback included), which is not
 // built on wasm; on the web, shaders are a WebGPU presenter concern.

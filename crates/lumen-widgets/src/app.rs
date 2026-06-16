@@ -99,6 +99,7 @@ impl App {
             invoked_menu: Vec::new(),
             system_requests: Vec::new(),
             windows: Vec::new(),
+            rtl: false,
         };
         let diags = if let Some(s) = restore {
             // Stage the snapshot *before* the first build so each signal adopts
@@ -187,6 +188,7 @@ pub struct Headless {
     invoked_menu: Vec<String>,
     system_requests: Vec<crate::system::SystemRequest>,
     windows: Vec<crate::system::WindowDesc>,
+    rtl: bool,
 }
 
 impl Headless {
@@ -303,6 +305,18 @@ impl Headless {
     /// The app's secondary windows.
     pub fn windows(&self) -> &[crate::system::WindowDesc] {
         &self.windows
+    }
+
+    /// Set the layout direction (T5.3). `true` mirrors the layout right-to-left
+    /// for RTL locales; re-lays-out immediately.
+    pub fn set_rtl(&mut self, rtl: bool) {
+        self.rtl = rtl;
+        self.rebuild();
+    }
+
+    /// Whether the layout is mirrored right-to-left.
+    pub fn is_rtl(&self) -> bool {
+        self.rtl
     }
 
     /// The semantics document (typed).
@@ -471,6 +485,9 @@ impl Headless {
         );
 
         layout.compute(root_lnode, self.size);
+        if self.rtl {
+            layout.mirror_rtl(root_lnode);
+        }
         for (node, lnode) in &built {
             tree.set_bounds(*node, layout.bounds(*lnode));
         }

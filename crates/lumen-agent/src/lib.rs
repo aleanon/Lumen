@@ -332,6 +332,15 @@ fn handle(app: &mut Headless, method: &str, params: &Value) -> RpcResult {
         }
         "app.systemRequests" => Ok(json!({ "requests": app.system_requests() })),
         "ui.getWindows" => Ok(json!({ "windows": app.windows() })),
+        "input.setLocale" => {
+            let loc = params
+                .get("locale")
+                .and_then(|v| v.as_str())
+                .unwrap_or("en");
+            let rtl = lumen_widgets::i18n::Locale::new(loc).is_rtl();
+            app.set_rtl(rtl);
+            Ok(json!({ "ok": true, "locale": loc, "rtl": rtl }))
+        }
         other => Err((-32601, format!("method not found: {other}"))),
     }
 }

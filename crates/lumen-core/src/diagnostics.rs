@@ -121,4 +121,6 @@ pub mod codes {
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).
     pub const W0301: &str = "W0301";
+    /// Missing translation for a message key in the active locale (T5.3).
+    pub const W0401: &str = "W0401";
 }
