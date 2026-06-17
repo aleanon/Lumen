@@ -158,6 +158,7 @@ struct NodeMeta {
     on_text: Option<crate::element::TextHandler>,
     background: Option<Color>,
     corner_radius: f64,
+    shadow: Option<crate::element::Shadow>,
     text: Option<(String, TextStyle)>,
     image: Option<RgbaImage>,
     canvas: Option<crate::element::CanvasFn>,
@@ -722,6 +723,7 @@ impl Headless {
                 on_text: el.on_text.clone(),
                 background: el.background,
                 corner_radius: el.corner_radius,
+                shadow: el.shadow,
                 text: el.text.clone(),
                 image: el.image.clone(),
                 canvas: el.canvas.clone(),
@@ -748,6 +750,29 @@ impl Headless {
                 .and_then(|s| s.border_radius)
                 .map(|r| r as f64)
                 .unwrap_or(m.corner_radius);
+            // Drop shadow: a soft penumbra approximated by stacked translucent
+            // rounded rects, fainter and larger outward (drawn before the box).
+            if let Some(sh) = m.shadow {
+                let base = bounds
+                    .with_origin((bounds.x0 + sh.dx, bounds.y0 + sh.dy))
+                    .inflate(sh.spread, sh.spread);
+                let [r, g, b, a] = sh.color.to_srgb8();
+                let layers = 8u32;
+                for i in 0..layers {
+                    let frac = i as f64 / layers as f64; // 0 (outer) .. ~1 (inner)
+                    let grow = sh.blur * (1.0 - frac);
+                    let alpha = (a as f64 * frac * frac / 2.0).round() as u8;
+                    if alpha == 0 {
+                        continue;
+                    }
+                    dl.push(DrawCmd::Rect {
+                        rect: base.inflate(grow, grow),
+                        brush: Brush::Solid(Color::srgb8(r, g, b, alpha)),
+                        radii: CornerRadii::all(radius + grow),
+                        border: None,
+                    });
+                }
+            }
             if let Some(bg) = bg {
                 dl.push(DrawCmd::Rect {
                     rect: bounds,

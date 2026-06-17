@@ -28,6 +28,36 @@ pub type DropHandler = Rc<dyn Fn(&Runtime, &lumen_core::events::DropData)>;
 /// the node's bounds.
 pub type CanvasFn = Rc<dyn Fn(&mut lumen_render::canvas::Frame, kurbo::Size)>;
 
+/// A drop shadow cast behind an element's (rounded) box. Approximated by the
+/// painter as a stack of translucent rounded rects, so `blur` reads as a soft
+/// penumbra without a true gaussian pass.
+#[derive(Clone, Copy, Debug)]
+pub struct Shadow {
+    /// Horizontal offset (px, positive = right).
+    pub dx: f64,
+    /// Vertical offset (px, positive = down).
+    pub dy: f64,
+    /// Blur radius (px): how far the penumbra spreads.
+    pub blur: f64,
+    /// Spread (px): grows the shadow box before blurring.
+    pub spread: f64,
+    /// Shadow colour (its alpha sets the overall strength).
+    pub color: Color,
+}
+
+impl Shadow {
+    /// A soft, subtle downward shadow (good default for cards).
+    pub fn soft() -> Shadow {
+        Shadow {
+            dx: 0.0,
+            dy: 6.0,
+            blur: 18.0,
+            spread: 0.0,
+            color: Color::srgb8(0x0f, 0x17, 0x2a, 0x40),
+        }
+    }
+}
+
 /// A description of one node: type + props + children.
 #[derive(Clone)]
 pub struct Element {
@@ -73,6 +103,8 @@ pub struct Element {
     pub canvas: Option<CanvasFn>,
     /// Committed-text handler (text inputs).
     pub on_text: Option<TextHandler>,
+    /// Optional drop shadow behind the box.
+    pub shadow: Option<Shadow>,
     /// Children.
     pub children: Vec<Element>,
 }
@@ -101,6 +133,7 @@ impl Default for Element {
             on_drop: None,
             canvas: None,
             on_text: None,
+            shadow: None,
             children: Vec::new(),
         }
     }
@@ -187,6 +220,11 @@ impl Element {
     /// Set the background fill.
     pub fn background(mut self, color: Color) -> Self {
         self.background = Some(color);
+        self
+    }
+    /// Set a drop shadow.
+    pub fn shadow(mut self, shadow: Shadow) -> Self {
+        self.shadow = Some(shadow);
         self
     }
     /// Replace the layout style.
