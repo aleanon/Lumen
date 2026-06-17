@@ -50,6 +50,7 @@ fn heading(text: &str, size: f32) -> Element {
             text.to_string(),
             TextStyle {
                 font_size: size,
+                weight: 400.0,
                 color: Color::BLACK,
             },
         )),
@@ -66,6 +67,7 @@ fn code_block(code: &str) -> Element {
             code.trim_end().to_string(),
             TextStyle {
                 font_size: 13.0,
+                weight: 400.0,
                 color: Color::srgb8(0x33, 0x33, 0x33, 0xff),
             },
         )),
@@ -97,6 +99,7 @@ fn inline(text: &str) -> Element {
                 std::mem::take(cur),
                 TextStyle {
                     font_size: 14.0,
+                    weight: 400.0,
                     color,
                 },
             )),

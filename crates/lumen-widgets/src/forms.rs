@@ -133,6 +133,7 @@ pub fn form_field(cx: &BuildCx, name: &str, label: &str, validators: Vec<Validat
                     e.clone(),
                     TextStyle {
                         font_size: 12.0,
+                        weight: 400.0,
                         color: Color::srgb8(0xc0, 0x39, 0x2b, 0xff),
                     },
                 )),

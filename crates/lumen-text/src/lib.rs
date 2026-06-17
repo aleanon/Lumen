@@ -48,6 +48,9 @@ pub struct TextStyle {
     pub font_size: f32,
     /// Text color.
     pub color: Color,
+    /// Font weight (100–900; 400 = regular, 700 = bold). The bundled font is a
+    /// single weight, so heavier values render as synthesized bold.
+    pub weight: f32,
 }
 
 impl Default for TextStyle {
@@ -55,7 +58,16 @@ impl Default for TextStyle {
         TextStyle {
             font_size: 16.0,
             color: Color::BLACK,
+            weight: 400.0,
         }
+    }
+}
+
+impl TextStyle {
+    /// This style at `weight` (e.g. `700.0` for bold).
+    pub fn weight(mut self, weight: f32) -> Self {
+        self.weight = weight;
+        self
     }
 }
 
@@ -112,9 +124,16 @@ impl TextEngine {
             FontFamily::Named(Cow::Owned(self.family.clone())),
         )));
         builder.push_default(StyleProperty::FontSize(base.font_size));
+        builder.push_default(StyleProperty::FontWeight(parley::FontWeight::new(
+            base.weight,
+        )));
         builder.push_default(StyleProperty::Brush(base.color.to_srgb8()));
         for (range, style) in ranges {
             builder.push(StyleProperty::FontSize(style.font_size), range.clone());
+            builder.push(
+                StyleProperty::FontWeight(parley::FontWeight::new(style.weight)),
+                range.clone(),
+            );
             builder.push(StyleProperty::Brush(style.color.to_srgb8()), range.clone());
         }
         let mut layout: Layout<Brush> = builder.build(text);
@@ -258,6 +277,13 @@ impl TextBlock {
                 else {
                     continue;
                 };
+                // Faux bold: when the requested weight exceeds the (single)
+                // bundled face, parley flags synthesis; embolden the outline.
+                let strength = if run.synthesis().embolden() {
+                    run.font_size() * 0.04
+                } else {
+                    0.0
+                };
                 let mut scaler = ctx
                     .builder(font_ref)
                     .size(run.font_size())
@@ -265,10 +291,12 @@ impl TextBlock {
                     .normalized_coords(run.normalized_coords())
                     .build();
                 for glyph in glyph_run.positioned_glyphs() {
-                    let Some(image) = Render::new(&[Source::Outline])
-                        .format(Format::Alpha)
-                        .render(&mut scaler, glyph.id)
-                    else {
+                    let mut render = Render::new(&[Source::Outline]);
+                    render.format(Format::Alpha);
+                    if strength != 0.0 {
+                        render.embolden(strength);
+                    }
+                    let Some(image) = render.render(&mut scaler, glyph.id) else {
                         continue;
                     };
                     blit_alpha(&mut pixels, w, h, &image, glyph.x, glyph.y, color);

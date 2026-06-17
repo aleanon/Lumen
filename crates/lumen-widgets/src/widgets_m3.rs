@@ -62,6 +62,7 @@ fn nav(cx: &BuildCx, name: &str, items: &[&str], dir: FlexDirection) -> Element 
                     (*label).to_string(),
                     TextStyle {
                         font_size: 13.0,
+                        weight: 400.0,
                         color: if on { Color::WHITE } else { Color::BLACK },
                     },
                 )),
@@ -103,6 +104,7 @@ pub fn app_bar(title: impl Into<String>, actions: Vec<Element>) -> Element {
             title.clone(),
             TextStyle {
                 font_size: 20.0,
+                weight: 400.0,
                 color: Color::BLACK,
             },
         )),
@@ -166,6 +168,7 @@ pub fn pull_to_refresh(
             .to_string(),
             TextStyle {
                 font_size: 12.0,
+                weight: 400.0,
                 color: Color::srgb8(0x66, 0x66, 0x66, 0xff),
             },
         )),
@@ -291,6 +294,7 @@ fn tap_button(label: &str, id: &str, on_click: impl Fn(&lumen_core::Runtime) + '
             label.to_string(),
             TextStyle {
                 font_size: 18.0,
+                weight: 400.0,
                 color: Color::BLACK,
             },
         )),

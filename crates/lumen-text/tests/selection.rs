@@ -31,6 +31,7 @@ fn check_golden(name: &str, img: &RgbaImage) {
 fn style() -> TextStyle {
     TextStyle {
         font_size: 24.0,
+        weight: 400.0,
         color: Color::BLACK,
     }
 }

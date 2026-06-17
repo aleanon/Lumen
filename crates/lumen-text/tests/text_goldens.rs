@@ -35,6 +35,7 @@ fn check_golden(name: &str, img: &RgbaImage) {
 fn black() -> TextStyle {
     TextStyle {
         font_size: 24.0,
+        weight: 400.0,
         color: Color::BLACK,
     }
 }
@@ -99,6 +100,7 @@ fn golden_multistyle() {
     let mut e = TextEngine::new();
     let big_blue = TextStyle {
         font_size: 32.0,
+        weight: 400.0,
         color: Color::srgb8(0x1a, 0x73, 0xe8, 0xff),
     };
     let b = e.layout(

@@ -35,6 +35,7 @@ pub fn rating(cx: &BuildCx, name: &str, max: usize) -> Element {
                     if filled { "★" } else { "☆" }.to_string(),
                     TextStyle {
                         font_size: 18.0,
+                        weight: 400.0,
                         color: Color::srgb8(0xf5, 0xa6, 0x23, 0xff),
                     },
                 )),

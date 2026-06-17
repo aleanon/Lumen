@@ -166,6 +166,7 @@ impl Element {
                 label,
                 TextStyle {
                     font_size: 16.0,
+                    weight: 400.0,
                     color: Color::WHITE,
                 },
             )),

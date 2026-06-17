@@ -281,6 +281,7 @@ pub fn rich_text(runs: &[Run]) -> Element {
                 r.text.to_string(),
                 TextStyle {
                     font_size: r.size,
+                    weight: 400.0,
                     color: r.color,
                 },
             )),

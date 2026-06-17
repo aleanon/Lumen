@@ -85,6 +85,7 @@ pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
                     text,
                     TextStyle {
                         font_size: 12.0,
+                        weight: 400.0,
                         color: Color::srgb8(0x44, 0x44, 0x44, 0xff),
                     },
                 )),

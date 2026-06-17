@@ -162,6 +162,7 @@ pub fn tabs(cx: &BuildCx, name: &str, labels: &[&str]) -> Element {
                     (*label).to_string(),
                     lumen_text::TextStyle {
                         font_size: 14.0,
+                        weight: 400.0,
                         color: if on { Color::WHITE } else { Color::BLACK },
                     },
                 )),
