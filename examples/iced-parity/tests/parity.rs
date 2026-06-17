@@ -229,14 +229,18 @@ fn styling_lss() {
 
 #[test]
 fn stopwatch_runs() {
-    let mut a = iced_parity::stopwatch::main_app().run_headless(Size::new(200.0, 200.0));
+    let mut a = iced_parity::stopwatch::main_app().run_headless(Size::new(320.0, 240.0));
     a.pump();
-    click(&mut a, "#tick"); // not running → no change
+    a.advance(3000.0); // not running → no change
     assert!(tree(&mut a).contains("00:00"));
     click(&mut a, "#toggle"); // start
-    click(&mut a, "#tick");
-    click(&mut a, "#tick");
-    assert!(tree(&mut a).contains("00:02"), "ticks while running");
+    a.advance(2000.0); // running → +2s
+    assert!(tree(&mut a).contains("00:02"), "accumulates while running");
+    click(&mut a, "#toggle"); // stop
+    a.advance(5000.0);
+    assert!(tree(&mut a).contains("00:02"), "frozen while stopped");
+    click(&mut a, "#reset");
+    assert!(tree(&mut a).contains("00:00"), "reset clears the time");
 }
 
 #[test]

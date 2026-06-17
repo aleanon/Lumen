@@ -133,6 +133,22 @@ pub fn center_screen(body: Element) -> Element {
     }
 }
 
+/// A horizontal row of controls with comfortable spacing between them.
+pub fn button_row(children: Vec<Element>) -> Element {
+    Element {
+        role: Role::Group,
+        elide_semantics: true,
+        style: LayoutStyle {
+            display: Display::Flex,
+            flex_direction: FlexDirection::Row,
+            column_gap: Dim::px(12.0),
+            ..LayoutStyle::default()
+        },
+        children,
+        ..Element::default()
+    }
+}
+
 /// A filled accent button — generous padding, semibold white label, rounded.
 pub fn accent_button(label: impl Into<String>, on_click: impl Fn(&Runtime) + 'static) -> Element {
     button_styled(label, on_click, accent(), Color::WHITE)

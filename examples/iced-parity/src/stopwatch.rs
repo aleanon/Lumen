@@ -1,33 +1,48 @@
-//! stopwatch — a running timer (start/stop, tick).
+//! stopwatch — a real running timer: large bold centred readout with Start/Stop
+//! and Reset on a row beneath, inside a rounded, soft-shadowed panel centred on
+//! the screen. It runs off the virtual clock (E8.9): while running it
+//! accumulates elapsed time each frame, so `just win stopwatch` ticks on its own
+//! and a test drives it deterministically with `advance()`.
 use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the stopwatch app.
 pub fn main_app() -> App {
     App::new(build)
 }
-fn build(cx: &mut BuildCx) -> Element {
-    theme::screen("Stopwatch", body(cx))
-}
 
-fn body(cx: &mut BuildCx) -> Element {
-    let elapsed = cx.signal("elapsed", || 0i64);
+fn build(cx: &mut BuildCx) -> Element {
+    let elapsed = cx.signal("elapsed_ms", || 0.0f64);
     let running = cx.signal("running", || false);
-    let e = elapsed.get(cx.runtime());
-    let on = running.get(cx.runtime());
-    widgets::column(vec![
-        widgets::text(format!("{:02}:{:02}", e / 60, e % 60)).id("display"),
-        widgets::button(if on { "Stop" } else { "Start" }, move |rt| {
-            running.update(rt, |r| *r = !*r)
-        })
-        .id("toggle"),
-        // A tick advances time only while running (the shell's frame clock does
-        // this automatically; exposed as a button for deterministic tests).
-        widgets::button("tick", move |rt| {
-            if running.get(rt) {
-                elapsed.update(rt, |x| *x += 1)
-            }
-        })
-        .id("tick"),
-        widgets::button("Reset", move |rt| elapsed.set(rt, 0)).id("reset"),
-    ])
+    let last = cx.signal("last_ms", || 0.0f64);
+    let rt = cx.runtime();
+
+    // Accumulate wall/virtual time while running: add the delta since the last
+    // frame, then remember this frame's clock. (Handlers can't read the clock,
+    // so the running total is integrated here in the build.)
+    let now = cx.now_ms();
+    let on = running.get(rt);
+    let prev = last.get(rt);
+    if on {
+        elapsed.update(rt, |e| *e += (now - prev).max(0.0));
+        cx.animate(); // keep frames coming so it ticks live
+    }
+    last.set(rt, now);
+
+    let total = elapsed.get(rt) as i64 / 1000;
+    let readout = format!("{:02}:{:02}", total / 60, total % 60);
+
+    let toggle = theme::accent_button(if on { "Stop" } else { "Start" }, move |rt| {
+        running.update(rt, |r| *r = !*r)
+    })
+    .id("toggle");
+    let reset = theme::ghost_button("Reset", move |rt| {
+        elapsed.set(rt, 0.0);
+        running.set(rt, false);
+    })
+    .id("reset");
+
+    theme::center_screen(theme::panel_centered(widgets::column(vec![
+        theme::display(readout).id("display"),
+        theme::button_row(vec![toggle, reset]),
+    ])))
 }
