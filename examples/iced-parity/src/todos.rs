@@ -15,8 +15,11 @@ fn body(cx: &mut BuildCx) -> Element {
     let draft = cx.signal("draft", String::new);
     let list = tasks.get(cx.runtime());
 
-    let input = widgets::text_field_basic(cx, "draft", "").id("draft");
-    let add = widgets::button("Add", move |rt| {
+    let input = theme::fixed_width(
+        widgets::text_field_basic(cx, "draft", "").id("draft"),
+        200.0,
+    );
+    let add = theme::accent_button("Add", move |rt| {
         let t = draft.get(rt);
         if !t.trim().is_empty() {
             tasks.update(rt, |v| v.push((t.clone(), false)));
@@ -39,7 +42,7 @@ fn body(cx: &mut BuildCx) -> Element {
         })
         .collect();
 
-    let mut col = vec![widgets::row(vec![input, add])];
+    let mut col = vec![theme::button_row(vec![input, add])];
     col.extend(items);
     widgets::column(col).id("root")
 }

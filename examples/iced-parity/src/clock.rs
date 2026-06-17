@@ -42,11 +42,8 @@ fn build(cx: &mut BuildCx) -> Element {
     })
     .id("face");
     let whole = total as i64;
-    theme::screen(
-        "Clock",
-        widgets::column(vec![
-            face,
-            widgets::text(format!("{:02}:{:02}", whole / 60 % 60, whole % 60)).id("digital"),
-        ]),
-    )
+    theme::center_screen(theme::panel_centered(widgets::column(vec![
+        face,
+        theme::heading(format!("{:02}:{:02}", whole / 60 % 60, whole % 60)).id("digital"),
+    ])))
 }

@@ -7,20 +7,17 @@ pub fn main_app() -> App {
 }
 
 fn build(cx: &mut BuildCx) -> Element {
-    theme::screen("Toast", body(cx))
-}
-
-fn body(cx: &mut BuildCx) -> Element {
     // `ttl` > 0 means a toast is showing; ticking decrements it to 0.
     let ttl = cx.signal("ttl", || 0i64);
     let remaining = ttl.get(cx.runtime());
 
-    let mut col = vec![
-        widgets::button("Notify", move |rt| ttl.set(rt, 3)).id("notify"),
-        widgets::button("tick", move |rt| ttl.update(rt, |t| *t = (*t - 1).max(0))).id("tick"),
-    ];
+    let mut col = vec![theme::button_row(vec![
+        theme::accent_button("Notify", move |rt| ttl.set(rt, 3)).id("notify"),
+        theme::ghost_button("tick", move |rt| ttl.update(rt, |t| *t = (*t - 1).max(0))).id("tick"),
+    ])];
     if remaining > 0 {
-        col.push(widgets::text("✓ Saved").id("toast"));
+        col.push(theme::badge("✓ Saved", theme::success()).id("toast"));
     }
-    widgets::column(col).id("root")
+
+    theme::center_screen(theme::panel_centered(widgets::column(col)))
 }

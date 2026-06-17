@@ -17,14 +17,14 @@ fn body(cx: &mut BuildCx) -> Element {
     let router = cx.signal("router", || Router::new("0"));
     let idx: usize = router.get(cx.runtime()).current().parse().unwrap_or(0);
 
-    let next = widgets::button("Next", move |rt| {
+    let next = theme::accent_button("Next", move |rt| {
         router.update(rt, |r| {
             let cur: usize = r.current().parse().unwrap_or(0);
             r.navigate((cur + 1).min(PAGES.len() - 1).to_string());
         })
     })
     .id("next");
-    let back = widgets::button("Back", move |rt| {
+    let back = theme::ghost_button("Back", move |rt| {
         router.update(rt, |r| {
             r.back();
         })
@@ -32,10 +32,11 @@ fn body(cx: &mut BuildCx) -> Element {
     .id("back");
 
     widgets::column(vec![
-        widgets::text(format!("Page {}/{}: {}", idx + 1, PAGES.len(), PAGES[idx])).id("page"),
+        theme::caption(format!("Page {}/{}: {}", idx + 1, PAGES.len(), PAGES[idx])).id("page"),
+        theme::heading(PAGES[idx]),
         widgets_m1::divider(),
         widgets::text(format!("This is the {} page of the tour.", PAGES[idx])).id("body"),
-        widgets::row(vec![back, next]),
+        theme::button_row(vec![back, next]),
     ])
     .id("root")
 }

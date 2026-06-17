@@ -31,6 +31,37 @@ pub fn muted() -> Color {
 pub fn accent() -> Color {
     Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
 }
+/// Success / positive colour.
+pub fn success() -> Color {
+    Color::srgb8(0x18, 0x9e, 0x5b, 0xff)
+}
+
+/// A filled pill badge with a white semibold label and its own soft shadow
+/// (toasts, status chips).
+pub fn badge(text: impl Into<String>, bg: Color) -> Element {
+    let mut label = widgets::text(text);
+    if let Some((_, ts)) = &mut label.text {
+        ts.color = Color::WHITE;
+        ts.weight = 600.0;
+    }
+    Element {
+        role: Role::Group,
+        background: Some(bg),
+        corner_radius: 10.0,
+        shadow: Some(Shadow::soft()),
+        style: LayoutStyle {
+            padding: Edges {
+                left: Dim::px(18.0),
+                right: Dim::px(18.0),
+                top: Dim::px(12.0),
+                bottom: Dim::px(12.0),
+            },
+            ..LayoutStyle::default()
+        },
+        children: vec![label],
+        ..Element::default()
+    }
+}
 
 /// Styled text of `size`/`weight`/`color` (helper for the typography below).
 fn styled(s: impl Into<String>, size: f32, weight: f32, color: Color) -> Element {
