@@ -8,14 +8,10 @@ pub fn main_app() -> App {
     App::new(build)
 }
 fn build(cx: &mut BuildCx) -> Element {
-    theme::screen("Image", body(cx))
-}
-
-fn body(cx: &mut BuildCx) -> Element {
     let _ = cx;
     let img = TestPattern.frame_at(0.5, 96, 64);
-    widgets::column(vec![
-        widgets::text("Image viewer").id("title"),
+    theme::center_screen(theme::panel_centered(widgets::column(vec![
+        theme::caption("Image viewer").id("title"),
         widgets::image(img).id("photo"),
-    ])
+    ])))
 }

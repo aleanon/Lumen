@@ -8,14 +8,10 @@ pub fn main_app() -> App {
     App::new(build)
 }
 fn build(cx: &mut BuildCx) -> Element {
-    theme::screen("SVG", body(cx))
-}
-
-fn body(cx: &mut BuildCx) -> Element {
     let _ = cx;
     let img = lumen_render::svg::render(ICON, 64, 64, lumen_core::Color::WHITE);
-    widgets::column(vec![
-        widgets::text("SVG asset").id("title"),
+    theme::center_screen(theme::panel_centered(widgets::column(vec![
         widgets::image(img).id("icon"),
-    ])
+        theme::caption("SVG asset").id("title"),
+    ])))
 }

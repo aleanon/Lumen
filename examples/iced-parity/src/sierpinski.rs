@@ -26,13 +26,9 @@ fn tri(f: &mut lumen_render::canvas::Frame, a: Point, b: Point, c: Point, depth:
 }
 
 fn build(cx: &mut BuildCx) -> Element {
-    theme::screen("Sierpinski", body(cx))
-}
-
-fn body(cx: &mut BuildCx) -> Element {
     let depth = cx.signal("depth", || 4u32);
     let d = depth.get(cx.runtime());
-    let canvas = widgets::canvas(160.0, 150.0, move |f, size| {
+    let canvas = widgets::canvas(200.0, 180.0, move |f, size| {
         tri(
             f,
             Point::new(size.width / 2.0, 4.0),
@@ -42,15 +38,16 @@ fn body(cx: &mut BuildCx) -> Element {
         );
     })
     .id("fractal");
-    widgets::column(vec![
+    theme::center_screen(theme::panel_centered(widgets::column(vec![
         canvas,
-        widgets::row(vec![
-            widgets::button("-", move |rt| {
+        theme::button_row(vec![
+            theme::ghost_button("–", move |rt| {
                 depth.update(rt, |x| *x = x.saturating_sub(1))
             })
             .id("less"),
-            widgets::text(format!("depth {d}")).id("depth"),
-            widgets::button("+", move |rt| depth.update(rt, |x| *x = (*x + 1).min(7))).id("more"),
+            theme::fixed_width(theme::caption(format!("depth {d}")), 70.0).id("depth"),
+            theme::accent_button("+", move |rt| depth.update(rt, |x| *x = (*x + 1).min(7)))
+                .id("more"),
         ]),
-    ])
+    ])))
 }
