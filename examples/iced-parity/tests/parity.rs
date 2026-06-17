@@ -255,7 +255,14 @@ fn system_information() {
     let mut a = iced_parity::system_information::main_app().run_headless(Size::new(260.0, 160.0));
     a.pump();
     let t = tree(&mut a);
-    assert!(t.contains("OS: ") && t.contains("Arch: ") && t.contains("CPUs: "));
+    assert!(
+        t.contains("OS:") && t.contains("Arch:") && t.contains("CPUs:"),
+        "labels"
+    );
+    assert!(
+        t.contains(std::env::consts::OS),
+        "shows the actual OS value"
+    );
 }
 
 #[test]

@@ -63,6 +63,14 @@ impl Frame {
         self.fill(&Circle::new(center, radius).to_path(0.1), color);
     }
 
+    /// Fill a rounded rectangle with a solid color.
+    pub fn fill_rounded_rect(&mut self, rect: Rect, radius: f64, color: Color) {
+        self.fill(
+            &kurbo::RoundedRect::from_rect(rect, radius).to_path(0.1),
+            color,
+        );
+    }
+
     /// Run `draw` with `transform` composed onto the current one (e.g. a
     /// rotation about a pivot), restoring afterward.
     pub fn with_transform(&mut self, transform: Affine, draw: impl FnOnce(&mut Frame)) {

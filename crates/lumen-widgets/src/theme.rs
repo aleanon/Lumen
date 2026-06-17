@@ -73,6 +73,11 @@ fn panel(mut body: Element, align: Align) -> Element {
     if !body.children.is_empty() {
         body.style.row_gap = Dim::px(14.0);
         body.style.column_gap = Dim::px(12.0);
+        // Centre the body's own children too, so the content (not just the
+        // body block) is centred within the panel.
+        if matches!(align, Align::Center) {
+            body.style.align_items = Some(Align::Center);
+        }
     }
     Element {
         role: Role::Group,
@@ -131,6 +136,12 @@ pub fn center_screen(body: Element) -> Element {
         children: vec![body],
         ..Element::default()
     }
+}
+
+/// Give `el` a fixed width in px (handy for progress bars, strips, fields).
+pub fn fixed_width(mut el: Element, px: f32) -> Element {
+    el.style.width = Dim::px(px);
+    el
 }
 
 /// A horizontal row of controls with comfortable spacing between them.
