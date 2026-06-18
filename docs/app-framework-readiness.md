@@ -2,10 +2,11 @@
 
 *Status: analysis as of 2026-06-18. Companion to `.ai_docs/06-task-graph.md`.*
 
-> **Progress:** A2, A3, C2 (top-level), and E3 are **done**. Everything else is
-> triaged in `docs/backlog.md` as either *sandbox-blocked* (real OS/AT/codec/
-> signing/device infra needed to verify) or *scope-deferred* (large change needing
-> review or an ADR-003 dependency).
+> **Progress:** A2, A3, C2 (top-level), E3, and **A1 (the renderer abstraction)**
+> are done; the whole iced-parity gallery is redesigned to the hero style. The
+> remaining scope-deferred work (A1's GPU backend, B2/B3, C1, D1, E1, E2) is large
+> and tracked in `docs/backlog.md`; sandbox-blocked items need real OS/AT/codec/
+> signing/device infra to verify.
 
 ## 1. The core finding
 
@@ -76,7 +77,11 @@ project's discipline: a portable API surfaced on the agent + synthesizable in
 
 ### Phase A — A shippable desktop runtime (highest priority)
 
-- **A1. Pluggable renderer + GPU surface backend.** Make the runtime **generic
+- **A1. Pluggable renderer + GPU surface backend. ◑ abstraction done.** The
+  `Renderer` trait + `CpuRenderer` ship; `Headless` holds a `Box<dyn Renderer>`
+  (`set_renderer`/`renderer_name`), so the runtime is now generic over the
+  backend (tested by swapping one in). *Remaining:* the GPU surface backend
+  itself (paths via `lyon` — ADR; gradients; glyph atlas; layers). Make the runtime **generic
   over the renderer** — a `Renderer`/`Surface` trait the shell selects at startup
   — so backends are *added*, never hand-swapped. **tiny-skia stays** as the
   deterministic CPU **reference renderer** (the golden contract, headless/CI) and

@@ -15,6 +15,11 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
   keeps its last frame and reports `E0701` (subtree `error_boundary` already
   existed).
 - **E3** — `build_node` consumes the `Element` (per-node clones → moves).
+- **A1 (abstraction)** — `Renderer` trait + `CpuRenderer`; `Headless` is generic
+  over a `Box<dyn Renderer>` (`set_renderer`/`renderer_name`). GPU backend remains.
+- **Gallery redesign** — every iced-parity example now matches the stopwatch hero
+  style (the plain ones — gradient/events/styling/websocket/pane_grid — elevated;
+  the rest already conformed).
 - Prior: live-window agent endpoint; design-analysis APCA contrast; resize fix;
   paint caches (text/shadow) + shadow-ring blit + hover.
 
@@ -52,13 +57,17 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
 
 ## 🏗 Scope-deferred (doable here, but large / needs review or an ADR)
 
-- **A1 — Pluggable renderer + GPU surface backend.** Introduce a `Renderer`/
-  `Surface` trait so tiny-skia (reference) and a GPU backend coexist; build the
-  GPU surface path (rect — have; **paths via `lyon`** — new dep/ADR; gradients;
-  glyph atlas; layers). *Why deferred:* multi-day effort + a new dependency; the
-  trait alone (one backend) is churn without the GPU path. *First step:* land the
-  `Renderer` trait with the CPU impl behind it (no behaviour change), then add
-  the GPU backend incrementally; lavapipe makes headless GPU testing possible.
+- **A1 — GPU surface backend** *(abstraction done; this is the remaining half).*
+  The `Renderer` trait + CPU backend ship. Build the GPU surface path behind the
+  same trait: rect (have); **paths via `lyon`** — new dep/ADR; gradients; glyph
+  atlas; layers. *Why deferred:* multi-day effort + a new dependency. *First
+  step:* a `GpuRenderer: Renderer` rendering rects/images to a texture (extend
+  the existing offscreen `gpu.rs`), parity-tested vs CPU on lavapipe; add paths
+  next.
+- **B2 — Rich `TextStyle`** *(blast radius confirmed: ~17 `TextStyle { … }`
+  literal sites across crates/tests/examples).* Add `line_height`/`letter_spacing`
+  (default no-op) + parley wiring; update every literal. Deferred as a focused
+  pass — mechanical but wide, and low urgency now the gallery looks right.
 - **E1 — Slim `Element` / leaf-content enum.** *Why deferred:* changes the public
   `Element` field surface (`text`/`image`/`canvas` → `content`), touching every
   widget constructor, `theme`, and all examples — a broad breaking refactor best
@@ -73,10 +82,9 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
   on `.lss` change call `Headless::set_stylesheet`. *Why deferred:* needs the
   dev-server wire protocol fleshed out; moderate. *First step:* a `--watch <lss>`
   flag on the `win` example that reloads one stylesheet (tier-1) over the bridge.
-- **B2/B3 — Rich `TextStyle` + assets.** Additive (`line_height`,
-  letter-spacing, decoration default to no-op; image codecs behind a cache).
-  *Why deferred:* text-stack/public-API changes deserve a focused pass; goldens
-  protect since defaults are no-ops.
+- **B3 — Assets.** Image codecs behind a shared cache; declarative asset refs.
+  New deps (codecs) → ADR. *First step:* PNG/JPEG decode behind the existing
+  `RgbaImage` path.
 - **D1 — Motion system** (springs, interruptible gestures, shared-element
   transitions). Large; the virtual-clock + `animate()` substrate is in place.
 
