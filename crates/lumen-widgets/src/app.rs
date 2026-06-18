@@ -81,6 +81,7 @@ impl App {
             size,
             scale: 1.0,
             clock_ms: 0.0,
+            renderer: Box::new(lumen_render::CpuRenderer),
             text: TextEngine::new(),
             text_cache: HashMap::new(),
             shadow_cache: HashMap::new(),
@@ -179,6 +180,9 @@ pub struct Headless {
     /// HiDPI scale factor: the frame is rendered at `size * scale` physical px.
     scale: f64,
     clock_ms: f64,
+    /// The pluggable frame renderer (A1). Defaults to the CPU reference renderer;
+    /// `set_renderer` swaps in another backend (e.g. GPU) at runtime.
+    renderer: Box<dyn lumen_render::Renderer>,
     text: TextEngine,
     /// Cache of rasterized text keyed by (string, size bits, weight bits, sRGB
     /// color): static labels then cost one memcpy per frame instead of a full
@@ -1017,7 +1021,20 @@ impl Headless {
         // byte-identical to the unscaled path (goldens unaffected).
         let pw = (self.size.width * self.scale).round().max(1.0) as u32;
         let ph = (self.size.height * self.scale).round().max(1.0) as u32;
-        cpu::render_scaled(&dl, pw, ph, self.scale, Color::srgb8(255, 255, 255, 255))
+        self.renderer
+            .render_frame(&dl, pw, ph, self.scale, Color::srgb8(255, 255, 255, 255))
+    }
+
+    /// Swap the frame renderer backend (A1 — the runtime is generic over it).
+    /// Defaults to the CPU reference renderer.
+    pub fn set_renderer(&mut self, renderer: Box<dyn lumen_render::Renderer>) {
+        self.renderer = renderer;
+        self.pump();
+    }
+
+    /// The active renderer backend's name (e.g. `"cpu"`).
+    pub fn renderer_name(&self) -> &'static str {
+        self.renderer.name()
     }
 
     /// A deterministic APCA text-contrast report over the current frame's
