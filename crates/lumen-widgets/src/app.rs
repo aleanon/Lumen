@@ -606,14 +606,8 @@ impl Headless {
         let mut layout = LayoutTree::new();
         let mut meta = HashMap::new();
         let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::new();
-        let (_root_node, root_lnode) = self.build_node(
-            root_el,
-            &mut tree,
-            &mut layout,
-            &mut meta,
-            &mut built,
-            None,
-        );
+        let (_root_node, root_lnode) =
+            self.build_node(root_el, &mut tree, &mut layout, &mut meta, &mut built, None);
 
         layout.compute(root_lnode, self.size);
         if self.rtl {
@@ -844,9 +838,7 @@ impl Headless {
             // Hover feedback: lighten a dark control / darken a light one while
             // the pointer is over a clickable node. Automatic for every button.
             if let Some(c) = bg {
-                if m.on_click.is_some()
-                    && self.tree.flags(node).contains(NodeFlags::HOVERED)
-                {
+                if m.on_click.is_some() && self.tree.flags(node).contains(NodeFlags::HOVERED) {
                     bg = Some(hover_tint(c));
                 }
             }
@@ -877,8 +869,8 @@ impl Headless {
                     let sw = (w + 2.0 * margin).ceil() as u32;
                     let sh_px = (h + 2.0 * margin).ceil() as u32;
                     let mut sdl = DisplayList::new();
-                    let base =
-                        Rect::new(margin, margin, margin + w, margin + h).inflate(sh.spread, sh.spread);
+                    let base = Rect::new(margin, margin, margin + w, margin + h)
+                        .inflate(sh.spread, sh.spread);
                     for i in 0..8u32 {
                         let frac = i as f64 / 8.0; // 0 (outer) .. ~1 (inner)
                         let grow = sh.blur * (1.0 - frac);
@@ -984,9 +976,9 @@ impl Headless {
                 let img = if let Some(cached) = self.text_cache.get(&key) {
                     cached.clone()
                 } else {
-                    let block =
-                        self.text
-                            .layout(txt, *ts, &[], None, lumen_text::TextAlign::Start);
+                    let block = self
+                        .text
+                        .layout(txt, *ts, &[], None, lumen_text::TextAlign::Start);
                     let img = block.render(0, 0, Color::srgb8(255, 255, 255, 0)); // transparent bg
                     const CAP: usize = 512;
                     if self.text_cache.len() >= CAP {
@@ -1088,7 +1080,11 @@ fn panic_msg(payload: &Box<dyn std::any::Any + Send>) -> String {
 /// light one (perceptually, in Oklab). Subtle but visible.
 fn hover_tint(c: Color) -> Color {
     let lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
-    let target = if lum < 0.5 { Color::WHITE } else { Color::BLACK };
+    let target = if lum < 0.5 {
+        Color::WHITE
+    } else {
+        Color::BLACK
+    };
     c.lerp_oklab(target, 0.12)
 }
 

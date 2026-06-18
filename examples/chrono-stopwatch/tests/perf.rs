@@ -23,5 +23,8 @@ fn time_running_pumps() {
         a.advance(16.0); // advance clock + pump (one frame)
     }
     let per = t.elapsed().as_secs_f64() * 1000.0 / n as f64;
-    println!("\nchrono pump (running): {per:.2} ms/frame  ->  ~{:.0} fps", 1000.0 / per);
+    println!(
+        "\nchrono pump (running): {per:.2} ms/frame  ->  ~{:.0} fps",
+        1000.0 / per
+    );
 }

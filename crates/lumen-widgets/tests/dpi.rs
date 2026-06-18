@@ -56,17 +56,26 @@ fn box_bounds(a: &lumen_widgets::Headless) -> (f64, f64, f64, f64) {
 fn raster_scales_but_layout_stays_logical() {
     let mut a = app().run_headless(Size::new(200.0, 200.0));
     a.pump();
-    assert_eq!((a.screenshot().width(), a.screenshot().height()), (200, 200));
+    assert_eq!(
+        (a.screenshot().width(), a.screenshot().height()),
+        (200, 200)
+    );
     let logical = box_bounds(&a); // centred: ~ (75, 75, 50, 50)
     assert!((logical.0 - 75.0).abs() < 1.0 && (logical.1 - 75.0).abs() < 1.0);
 
     // Go HiDPI: the frame doubles in physical px...
     a.set_scale(2.0);
-    assert_eq!((a.screenshot().width(), a.screenshot().height()), (400, 400));
+    assert_eq!(
+        (a.screenshot().width(), a.screenshot().height()),
+        (400, 400)
+    );
     // ...but the logical layout (hit-test geometry) is unchanged.
     assert_eq!(box_bounds(&a), logical);
 
     // Back to 1x restores the original frame size.
     a.set_scale(1.0);
-    assert_eq!((a.screenshot().width(), a.screenshot().height()), (200, 200));
+    assert_eq!(
+        (a.screenshot().width(), a.screenshot().height()),
+        (200, 200)
+    );
 }

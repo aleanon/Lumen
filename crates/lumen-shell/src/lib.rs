@@ -106,7 +106,10 @@ fn agent_conn(stream: TcpStream, proxy: EventLoopProxy<ShellEvent>) {
         }
         let (tx, rx) = mpsc::channel();
         if proxy
-            .send_event(ShellEvent::Agent { req: line, reply: tx })
+            .send_event(ShellEvent::Agent {
+                req: line,
+                reply: tx,
+            })
             .is_err()
         {
             break; // event loop has exited
@@ -145,7 +148,8 @@ impl ApplicationHandler<ShellEvent> for Shell {
     fn user_event(&mut self, _el: &ActiveEventLoop, event: ShellEvent) {
         let ShellEvent::Agent { req, reply } = event;
         let resp = if let Some(h) = &mut self.headless {
-            let v = serde_json::from_str::<serde_json::Value>(&req).unwrap_or(serde_json::Value::Null);
+            let v =
+                serde_json::from_str::<serde_json::Value>(&req).unwrap_or(serde_json::Value::Null);
             let out = lumen_agent::dispatch(h, &v);
             if let Some(p) = &mut self.presenter {
                 p.present(&h.screenshot());

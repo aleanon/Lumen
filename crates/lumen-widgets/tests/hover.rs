@@ -57,7 +57,9 @@ fn button_tints_on_hover() {
     let rest = sample(&mut a, 0.5, 0.62);
 
     // Move the pointer over the button (its centre is the window centre).
-    a.inject(Event::PointerMove(PointerEvent::at(Point::new(100.0, 100.0))));
+    a.inject(Event::PointerMove(PointerEvent::at(Point::new(
+        100.0, 100.0,
+    ))));
     a.pump();
     let hovered = sample(&mut a, 0.5, 0.62);
 
@@ -70,7 +72,11 @@ fn button_tints_on_hover() {
     // Move away: back to the resting colour.
     a.inject(Event::PointerMove(PointerEvent::at(Point::new(5.0, 5.0))));
     a.pump();
-    assert_eq!(sample(&mut a, 0.5, 0.62), rest, "leaving restores the colour");
+    assert_eq!(
+        sample(&mut a, 0.5, 0.62),
+        rest,
+        "leaving restores the colour"
+    );
 }
 
 /// Sample a pixel at fractional (fx, fy) of the frame.
