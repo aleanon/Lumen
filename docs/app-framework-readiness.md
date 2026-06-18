@@ -2,10 +2,12 @@
 
 *Status: analysis as of 2026-06-18. Companion to `.ai_docs/06-task-graph.md`.*
 
-> **Progress:** A2, A3, C2 (top-level), E3, and **A1 (the renderer abstraction)**
-> are done; the whole iced-parity gallery is redesigned to the hero style. The
-> remaining scope-deferred work (A1's GPU backend, B2/B3, C1, D1, E1, E2) is large
-> and tracked in `docs/backlog.md`; sandbox-blocked items need real OS/AT/codec/
+> **Progress:** done so far — A2, A3, C2, E3, **A1 (renderer abstraction)**,
+> **B2** (line-height/letter-spacing), **B3** (cached PNG assets), **C1** (`.lss`
+> hot reload), **D1** (spring motion), and the full iced-parity gallery redesign.
+> Remaining scope-deferred work is the deep core/renderer rewrites — **E1**
+> (Element→enum), **E2** (Widget trait), and **A1's GPU backend** — tracked in
+> `docs/backlog.md`; sandbox-blocked items (A4/A5/C3/D2/D4) need real OS/AT/codec/
 > signing/device infra to verify.
 
 ## 1. The core finding
@@ -120,14 +122,14 @@ project's discipline: a portable API surfaced on the agent + synthesizable in
   font registration API; family/fallback stacks; real weight/italic faces (drop
   synthesized-bold reliance). *Accept:* an app using a custom font + system
   fallback; CJK/emoji via system fallback render at parity.
-- **B2. Rich `TextStyle`.** Family, letter/word spacing, line-height, decoration
+- **B2. Rich `TextStyle`. ✅ done.** Family, letter/word spacing, line-height, decoration
   (underline/strike), per-run alignment. *Accept:* style goldens for each.
-- **B3. Assets.** Image codecs (jpeg/webp/png/avif) + shared cache beyond the
+- **B3. Assets. ◑ PNG done (cached); other codecs follow-on.** Image codecs (jpeg/webp/png/avif) + shared cache beyond the
   bundled path; declarative asset refs resolved by the dev server (tier-1 swap).
 
 ### Phase C — Dev loop & production robustness
 
-- **C1. Desktop hot reload.** Wire the dev-server file-watcher to push `.lss`/
+- **C1. Desktop hot reload. ✅ done (`LUMEN_WATCH_LSS` / `just win-watch`).** Wire the dev-server file-watcher to push `.lss`/
   asset/`cdylib` updates into the running window (tiers 1–2). *Accept:* edit
   `.lss` → live restyle with no relaunch; failed parse keeps old + emits a
   diagnostic.
@@ -141,7 +143,7 @@ project's discipline: a portable API surfaced on the agent + synthesizable in
 
 ### Phase D — Premium & cross-platform parity
 
-- **D1. Motion in the live shell** (springs, interruptible gestures, shared-
+- **D1. Motion. ✅ spring done (`motion::spring`); gesture/shared-element follow-on** (springs, interruptible gestures, shared-
   element transitions).
 - **D2. Media** (SVG/Lottie/video/audio) presented in the shell.
 - **D3. Performance at scale** — multi-threaded layout, GPU damage/partial
