@@ -2,6 +2,11 @@
 
 *Status: analysis as of 2026-06-18. Companion to `.ai_docs/06-task-graph.md`.*
 
+> **Progress:** A2, A3, C2 (top-level), and E3 are **done**. Everything else is
+> triaged in `docs/backlog.md` as either *sandbox-blocked* (real OS/AT/codec/
+> signing/device infra needed to verify) or *scope-deferred* (large change needing
+> review or an ADR-003 dependency).
+
 ## 1. The core finding
 
 The task graph marks **M0–M7 complete (☑)** — including web, desktop system
@@ -121,9 +126,10 @@ project's discipline: a portable API surfaced on the agent + synthesizable in
   asset/`cdylib` updates into the running window (tiers 1–2). *Accept:* edit
   `.lss` → live restyle with no relaunch; failed parse keeps old + emits a
   diagnostic.
-- **C2. Error boundaries.** Panic recovery scoped to UI subtrees in the live
-  shell + crash/diagnostic reporting (the model exists in `boundary`). *Accept:*
-  an injected panic is contained; the app stays alive; structured diagnostic.
+- **C2. Error boundaries. ✅ done.** Subtree `error_boundary` already existed;
+  added top-level containment — `rebuild()` catches build/layout/paint panics, the
+  window keeps its last frame and reports `E0701`, clearing on the next clean
+  build. *Remaining:* a crash-reporting *hook* (telemetry sink) — backlog.
 - **C3. Packaging hardening.** Turn `lumen package` into real signed/notarized
   per-OS installers + delta auto-update + size/supply-chain gates. *Accept:*
   installable signed artifact per desktop OS.
@@ -191,12 +197,10 @@ struct):**
   per frame — negligible vs rasterization) and a touch more boilerplate. *Accept:*
   an external crate defines a leaf widget (custom layout/paint/event/semantics)
   and the agent drives it unmodified — the T7.2 acceptance, but real.
-- **E3. `build_node` consumes the `Element` tree.** Flip `build_node(&Element)` →
-  `build_node(Element)` so each node's fields **move** into `NodeMeta` instead of
-  cloning (the 256 B `LayoutStyle`, the `image` pixel `Vec`, strings/`Vec`s;
-  `Rc` handlers move without a refcount bump). `rebuild()` drops the tree right
-  after, so nothing else reads it. Small, self-contained, independent of E1/E2.
-  *Accept:* no per-node field clones remain in the build path; goldens unchanged.
+- **E3. `build_node` consumes the `Element` tree. ✅ done.** Flipped
+  `build_node(&Element)` → `build_node(Element)`; each node's fields now **move**
+  into `NodeMeta` (the 256 B `LayoutStyle`, the `image` pixel `Vec`, strings/
+  `Vec`s; `Rc` handlers without a refcount bump). Goldens unchanged.
 
 ## 5. Sequencing & rationale
 
