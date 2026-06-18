@@ -138,6 +138,37 @@ project's discipline: a portable API surfaced on the agent + synthesizable in
 - **D4. Web + mobile shell parity** — bring `-web`/`-android`/`-ios` shells up to
   the desktop runtime's capability bar.
 
+### Phase E — Core ergonomics & type design (debt)
+
+*Cross-cutting; not user-visible, but it shapes extensibility and the third-party
+widget story. Can run in parallel with A–D.*
+
+- **E1. Slim `Element` / leaf-content enum.** `Element` is a 728-byte flat struct
+  (256 B of which is `LayoutStyle`) that carries the *union* of every widget
+  kind's fields — `text`/`image`/`canvas`/`scroll`/handlers — nearly all unused
+  per node, and it lets illegal combinations exist (text **and** image **and**
+  canvas at once). `NodeMeta` (retained per node) inherits the same width.
+  Replace the mutually-exclusive leaf fields with a `content: NodeContent` enum
+  (`Box`/`Text`/`Image`/`Canvas`/`Custom`) while keeping the common fields
+  (id/role/style/children) flat. *Why this shape:* `Element` is a transient
+  build-time *description* lowered into the compact tree+SoA, so the win is type
+  safety + clone/alloc cost, not steady-state footprint; an enum keeps the
+  `dyn`-free, `Clone`, diffable properties the determinism thesis depends on.
+  *Accept:* `size_of::<Element>()` and `NodeMeta` drop materially; invalid leaf
+  combinations are unrepresentable; goldens unchanged.
+- **E2. Implement the spec's `Widget` trait (`02 §3`).** Today there is **no
+  `Widget` trait** — `02-spec-core.md` specifies an opaque `Element` + a `Widget`
+  trait (composite `build()`, leaf layout/paint/event + mandatory `semantics()`),
+  but the implementation exposes one public kitchen-sink struct and offers custom
+  leaves only via the `canvas` closure. This blocks the stated 1.0 goal that
+  "third-party (and agent-written) widgets are first-class via the `Widget` trait"
+  (`01 §1.6`) and M7's plugin ecosystem (T7.2). Composites stay functions
+  returning `Element`; leaves become `Widget` impls lowered to
+  `NodeContent::Custom(Box<dyn LeafWidget>)` (a transient build output, so the
+  "no trait objects in *stored* state" discipline holds). *Accept:* an external
+  crate defines a leaf widget (custom layout/paint/event/semantics) and the agent
+  drives it unmodified — the T7.2 acceptance, but real.
+
 ## 5. Sequencing & rationale
 
 ```
@@ -151,6 +182,8 @@ B (fonts/assets)  → real content
 C (hot reload, error boundaries, packaging) → dev velocity + ship
         ↓
 D (motion, media, perf-at-scale, web/mobile parity) → premium + ubiquity
+
+E (core type design: slim Element, Widget trait) — parallel; gates third-party widgets
 ```
 
 Phase A is the unlock: without it nothing reaches a human as a native app.
