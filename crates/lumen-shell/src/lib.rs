@@ -14,11 +14,14 @@ use lumen_core::events::{
 };
 use lumen_render::RgbaImage;
 use lumen_widgets::{App, Headless};
+use std::io::{BufRead, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
 /// Extension trait adding `run()` to [`App`] (02 §8).
@@ -33,9 +36,31 @@ impl RunExt for App {
     }
 }
 
+/// A message delivered into the winit event loop from a background thread —
+/// currently just an agent JSON-RPC request awaiting a reply.
+enum ShellEvent {
+    /// One JSON-RPC request line; the response string is sent back on `reply`.
+    Agent {
+        req: String,
+        reply: mpsc::Sender<String>,
+    },
+}
+
 /// Open a window and run `app` at `size`.
+///
+/// If `LUMEN_AGENT_ADDR` is set (e.g. `127.0.0.1:9230`), a background thread
+/// accepts newline-delimited JSON-RPC and forwards each request onto the event
+/// loop, so an AI can observe (`ui.screenshot`/`ui.getTree`) and drive
+/// (`input.click`/`type`/…) the **live** window over the agent protocol.
 pub fn run(app: App, size: Size) {
-    let event_loop = EventLoop::new().expect("event loop");
+    let event_loop = EventLoop::<ShellEvent>::with_user_event()
+        .build()
+        .expect("event loop");
+    if let Some(addr) = std::env::var_os("LUMEN_AGENT_ADDR") {
+        let addr = addr.to_string_lossy().into_owned();
+        let proxy = event_loop.create_proxy();
+        std::thread::spawn(move || serve_agent(&addr, proxy));
+    }
     let mut shell = Shell {
         app: Some(app),
         size,
@@ -46,6 +71,47 @@ pub fn run(app: App, size: Size) {
         last_frame: Instant::now(),
     };
     event_loop.run_app(&mut shell).expect("run app");
+}
+
+/// Accept agent connections and bridge each request line onto the event loop.
+fn serve_agent(addr: &str, proxy: EventLoopProxy<ShellEvent>) {
+    let listener = match TcpListener::bind(addr) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("lumen agent: cannot bind {addr}: {e}");
+            return;
+        }
+    };
+    eprintln!("lumen agent: listening on {addr} (newline-delimited JSON-RPC)");
+    for stream in listener.incoming().flatten() {
+        let proxy = proxy.clone();
+        std::thread::spawn(move || agent_conn(stream, proxy));
+    }
+}
+
+/// Serve one connection: each line is a JSON-RPC request; reply with one line.
+fn agent_conn(stream: TcpStream, proxy: EventLoopProxy<ShellEvent>) {
+    let Ok(read_half) = stream.try_clone() else {
+        return;
+    };
+    let mut writer = stream;
+    for line in std::io::BufReader::new(read_half).lines() {
+        let Ok(line) = line else { break };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let (tx, rx) = mpsc::channel();
+        if proxy
+            .send_event(ShellEvent::Agent { req: line, reply: tx })
+            .is_err()
+        {
+            break; // event loop has exited
+        }
+        let Ok(resp) = rx.recv() else { break };
+        if writeln!(writer, "{resp}").is_err() || writer.flush().is_err() {
+            break;
+        }
+    }
 }
 
 struct Shell {
@@ -60,7 +126,26 @@ struct Shell {
     last_frame: Instant,
 }
 
-impl ApplicationHandler for Shell {
+impl ApplicationHandler<ShellEvent> for Shell {
+    /// An agent request arrived from the server thread: dispatch it against the
+    /// live runtime (same `dispatch` the headless agent uses), present any
+    /// resulting frame so the window reflects the action, and reply.
+    fn user_event(&mut self, _el: &ActiveEventLoop, event: ShellEvent) {
+        let ShellEvent::Agent { req, reply } = event;
+        let resp = if let Some(h) = &mut self.headless {
+            let v = serde_json::from_str::<serde_json::Value>(&req).unwrap_or(serde_json::Value::Null);
+            let out = lumen_agent::dispatch(h, &v);
+            if let Some(p) = &mut self.presenter {
+                p.present(&h.screenshot());
+            }
+            out.to_string()
+        } else {
+            r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"app not ready"}}"#
+                .to_string()
+        };
+        let _ = reply.send(resp);
+    }
+
     fn resumed(&mut self, el: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -74,6 +159,11 @@ impl ApplicationHandler for Shell {
         let window = Arc::new(el.create_window(attrs).expect("window"));
         let presenter = Presenter::new(window.clone());
         let app = self.app.take().expect("app");
+        // Size the runtime from the surface's *actual* pixel size (not the
+        // requested logical size) so the rasterized frame matches the surface
+        // 1:1 from the first frame — no upscaling blur even on HiDPI.
+        let phys = window.inner_size();
+        self.size = Size::new(phys.width.max(1) as f64, phys.height.max(1) as f64);
         self.headless = Some(app.run_headless(self.size));
         self.presenter = Some(presenter);
         window.request_redraw(); // paint the first frame
@@ -85,8 +175,19 @@ impl ApplicationHandler for Shell {
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(s) => {
+                let (w, h) = (s.width.max(1), s.height.max(1));
+                self.size = Size::new(w as f64, h as f64);
                 if let Some(p) = &mut self.presenter {
-                    p.resize(s.width.max(1), s.height.max(1));
+                    p.resize(w, h);
+                }
+                // Re-layout + repaint at the new size so hit-testing and
+                // rasterization track the window; then present immediately so
+                // the resize feels live (one pump, crisp 1:1 blit).
+                if let Some(h) = &mut self.headless {
+                    h.resize(self.size);
+                }
+                if let (Some(h), Some(p)) = (&mut self.headless, &mut self.presenter) {
+                    p.present(&h.screenshot());
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {

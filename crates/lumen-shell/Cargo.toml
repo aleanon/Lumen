@@ -15,3 +15,7 @@ kurbo = { workspace = true }
 # Desktop windowing + GPU surface presentation (ADR-001).
 winit = { workspace = true }
 wgpu = { workspace = true }
+# Optional embedded agent endpoint (LUMEN_AGENT_ADDR): lets an AI observe and
+# drive the *live* window over the same JSON-RPC the headless agent speaks.
+lumen-agent = { workspace = true }
+serde_json = { workspace = true }
