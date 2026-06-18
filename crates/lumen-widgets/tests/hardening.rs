@@ -52,6 +52,70 @@ fn app_survives_panicking_subtree() {
 }
 
 #[test]
+fn app_survives_root_build_panic() {
+    use lumen_core::events::{Event, PointerButton, PointerEvent, PointerKind};
+    use lumen_core::geometry::Point;
+    use lumen_core::semantics::{Action, Role};
+    use lumen_core::Color;
+    use lumen_layout::{Align, Dim, Display, LayoutStyle};
+    use std::rc::Rc;
+    quiet_panics();
+
+    // The root build panics once a signal flips; a full-window clickable box
+    // (no text → it isn't shrunk to text size) flips it.
+    let mut h = App::new(|cx: &mut BuildCx| {
+        let boom = cx.signal("boom", || false);
+        if boom.get(cx.runtime()) {
+            panic!("root exploded");
+        }
+        Element {
+            id: Some("boom".into()),
+            role: Role::Button,
+            background: Some(Color::srgb8(0x30, 0x60, 0x90, 0xff)),
+            focusable: true,
+            actions: vec![Action::Click],
+            on_click: Some(Rc::new(move |rt| boom.set(rt, true))),
+            style: LayoutStyle {
+                display: Display::Flex,
+                width: Dim::pct(1.0),
+                height: Dim::pct(1.0),
+                align_items: Some(Align::Center),
+                justify_content: Some(Align::Center),
+                ..LayoutStyle::default()
+            },
+            children: vec![widgets::text("press").id("ok")],
+            ..Element::default()
+        }
+    })
+    .run_headless(Size::new(120.0, 60.0));
+    h.pump();
+    assert!(label(&h, "ok").is_some(), "good frame built");
+    let good = h.screenshot();
+
+    // Click the centre → handler sets the signal → the next build panics.
+    let pe = PointerEvent {
+        pos: Point::new(60.0, 30.0),
+        button: PointerButton::Left,
+        pointer: PointerKind::Mouse,
+        modifiers: Default::default(),
+        click_count: 1,
+    };
+    h.inject(Event::PointerDown(pe));
+    h.inject(Event::PointerUp(pe));
+    h.pump(); // routes the click, then the panicking rebuild — contained
+
+    // The window survived: previous frame kept, panic surfaced as a diagnostic.
+    assert!(
+        h.diagnostics()
+            .iter()
+            .any(|d| d.code == lumen_core::codes::E0701),
+        "contained build panic should surface as E0701"
+    );
+    assert_eq!(h.screenshot(), good, "last good frame is preserved");
+    h.pump(); // still contained, no propagation
+}
+
+#[test]
 fn parser_and_selector_never_panic_on_fuzz() {
     use lumen_core::semantics::{resolve_one, Role, SemanticsNode};
     // A deterministic pseudo-random byte/char generator.

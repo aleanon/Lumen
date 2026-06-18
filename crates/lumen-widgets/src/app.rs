@@ -88,6 +88,7 @@ impl App {
             meta: HashMap::new(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
             sem_root: None,
+            build_panic: None,
             focused_id: focused,
             hovered_id: None,
             pressed: None,
@@ -193,6 +194,9 @@ pub struct Headless {
     meta: HashMap<NodeIndex, NodeMeta>,
     frame: RgbaImage,
     sem_root: Option<SemanticsNode>,
+    /// If the last build panicked, the contained diagnostic (the previous good
+    /// frame is kept). Cleared on the next successful build (C2 / T7.3).
+    build_panic: Option<lumen_core::Diagnostic>,
     focused_id: Option<StableId>,
     hovered_id: Option<StableId>,
     pressed: Option<NodeIndex>,
@@ -333,7 +337,11 @@ impl Headless {
     /// Structured diagnostics for the current frame (e.g. `W0103` layout
     /// overflow). Lets an agent detect and fix layout bugs by code.
     pub fn diagnostics(&self) -> Vec<lumen_core::Diagnostic> {
-        crate::audit::check_overflow(&self.semantics_doc().root)
+        let mut diags = crate::audit::check_overflow(&self.semantics_doc().root);
+        if let Some(d) = &self.build_panic {
+            diags.push(d.clone());
+        }
+        diags
     }
 
     // --- desktop system integration (T5.2) ---------------------------------
@@ -567,7 +575,26 @@ impl Headless {
 
     // --- rebuild ------------------------------------------------------------
 
+    /// Rebuild, containing any panic in the build/layout/paint so a buggy frame
+    /// can't take down the window (C2 / T7.3). On panic the previous good frame
+    /// is kept and a structured `E0701` diagnostic is recorded; a clean build
+    /// clears it.
     fn rebuild(&mut self) {
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.rebuild_inner()));
+        match result {
+            Ok(()) => self.build_panic = None,
+            Err(payload) => {
+                let msg = panic_msg(&payload);
+                self.build_panic = Some(lumen_core::Diagnostic::new(
+                    lumen_core::codes::E0701,
+                    format!("build panicked (frame contained): {msg}"),
+                ));
+            }
+        }
+    }
+
+    fn rebuild_inner(&mut self) {
         let (root_el, requests) = {
             let mut cx = BuildCx::new(&self.rt, self.clock_ms);
             let el = (self.root)(&mut cx);
@@ -1043,6 +1070,17 @@ impl Headless {
             child = self.tree.next_sibling(child);
         }
         s
+    }
+}
+
+/// Extract a human-readable message from a caught panic payload.
+fn panic_msg(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "panic".to_string()
     }
 }
 
