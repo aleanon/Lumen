@@ -46,6 +46,7 @@ shell renders on the CPU.
 
 | Area | Current state | Evidence |
 |---|---|---|
+| **Renderer abstraction** | None — the CPU renderer is hardwired in `Headless::paint`/the shell. The runtime should be **generic over a renderer** so tiny-skia (reference) and a GPU backend coexist and others can be added. | `paint()` calls `cpu::render_scaled` directly. |
 | **GPU rendering** | Shell CPU-rasterizes the whole display list, uploads a full-window texture, blits it. The `lumen-render::gpu` backend is offscreen-only and supports just rects+images. | `Presenter::present` blits `h.screenshot()`; `gpu.rs` doc: "M0 implements … solid Rect fills and Image blits". |
 | **Keyboard modifiers** | Hardcoded empty — no Ctrl/Shift/Alt in the live app. | `modifiers: Modifiers::empty()` ×3 in `window_event`. |
 | **IME / text composition** | No `WindowEvent::Ime` handling in the shell (the *model* exists in `lumen-text`). | no `Ime` arm. |
@@ -70,20 +71,29 @@ project's discipline: a portable API surfaced on the agent + synthesizable in
 
 ### Phase A — A shippable desktop runtime (highest priority)
 
-- **A1. GPU surface renderer.** Render the display list directly to the window
-  surface: rect/quad pipeline (have), path/stroke tessellation (lyon — new dep,
-  ADR), gradients, a glyph atlas for text, and layer clip/opacity/blend. Replace
-  the CPU-raster+blit path in `lumen-shell`; keep the CPU renderer as the golden
-  reference. *Accept:* chrono + gallery render on GPU within the §4 perceptual
-  threshold of the CPU goldens; per-frame CPU encode in the tens of µs; resize
-  stays crisp; idle/damage contracts intact.
-- **A2. Complete desktop input.** `ModifiersChanged` → real modifiers; winit
-  `Ime` events → composition into the text stack; key repeat; trackpad/precise
-  scroll; visible focus traversal. *Accept:* agent + `lumen-test` drive a Ctrl/
-  Shift chord and an IME compose sequence against the **live** shell.
-- **A3. DPI / HiDPI.** Per-window `scale_factor`; layout in logical px, rasterize
-  at physical; handle `ScaleFactorChanged`. *Accept:* goldens at 1× and 2×; crisp
-  at fractional scale; pointer hit-testing correct under scaling.
+- **A1. Pluggable renderer + GPU surface backend.** Make the runtime **generic
+  over the renderer** — a `Renderer`/`Surface` trait the shell selects at startup
+  — so backends are *added*, never hand-swapped. **tiny-skia stays** as the
+  deterministic CPU **reference renderer** (the golden contract, headless/CI) and
+  a valid runtime choice; it is **not replaced**. Add a GPU surface backend
+  alongside it: rect/quad pipeline (have), path/stroke tessellation (lyon — new
+  dep, ADR), gradients, a glyph atlas, layer clip/opacity/blend. Leave room for
+  future backends (e.g. a Vello-class compute rasterizer, T6.1) behind the same
+  trait. *Accept:* one app renders identically (within the §4 perceptual
+  threshold) under the CPU and GPU backends; backend is runtime-selectable; the
+  CPU path stays bit-exact for goldens; GPU per-frame CPU encode in the tens of
+  µs; resize stays crisp; idle/damage contracts intact.
+- **A2. Complete desktop input. ✅ done.** `ModifiersChanged` → real modifiers
+  (applied to pointer/key/wheel events); winit `Ime` events → `Preedit`/`Commit`
+  into the text stack (`set_ime_allowed`); direct `KeyEvent::text` → `TextInput`
+  when no IME is composing; key repeat already passed through. *Remaining:*
+  visible focus-ring styling. (`map_modifiers` unit-tested.)
+- **A3. DPI / HiDPI. ✅ done.** Runtime is logical-px; rasterizes at physical via
+  `cpu::render_scaled` + `Headless::scale`/`set_scale`; shell reads
+  `scale_factor`, derives logical size, converts pointer coords to logical, and
+  handles `ScaleFactorChanged`. scale 1.0 stays byte-identical (goldens
+  unaffected); layout/hit-testing stay logical (tested). *Remaining:* multi-
+  monitor per-window scale (ties to A4 multi-window).
 - **A4. Wire `system` to the OS.** Window title/min-size/fullscreen, real
   clipboard (text/image/files), native menu bar + context menus, native file/
   color dialogs, OS drag-and-drop, notifications — all behind the *existing*
