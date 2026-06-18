@@ -254,7 +254,13 @@ impl<'a> Renderer<'a> {
         if sw == 0 || sh == 0 {
             return;
         }
-        let src_pm = img.crop(sx, sy, sw, sh).to_pixmap();
+        // Avoid copying when the whole image is used (the common case for
+        // cached text/shadow sprites): crop allocates and copies every pixel.
+        let src_pm = if sx == 0 && sy == 0 && sw == img.width() && sh == img.height() {
+            img.to_pixmap()
+        } else {
+            img.crop(sx, sy, sw, sh).to_pixmap()
+        };
         let local = Transform::from_row(
             (dst.width() / sw as f64) as f32,
             0.0,
