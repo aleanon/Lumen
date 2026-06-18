@@ -580,7 +580,7 @@ impl Headless {
         let mut meta = HashMap::new();
         let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::new();
         let (_root_node, root_lnode) = self.build_node(
-            &root_el,
+            root_el,
             &mut tree,
             &mut layout,
             &mut meta,
@@ -713,7 +713,7 @@ impl Headless {
     #[allow(clippy::too_many_arguments)]
     fn build_node(
         &mut self,
-        el: &Element,
+        el: Element,
         tree: &mut Tree,
         layout: &mut LayoutTree,
         meta: &mut HashMap<NodeIndex, NodeMeta>,
@@ -747,7 +747,7 @@ impl Headless {
         tree.set_flags(node, flags);
 
         // Text nodes get a fixed size from measurement.
-        let mut style = el.style.clone();
+        let mut style = el.style;
         if let Some((txt, ts)) = &el.text {
             let block = self
                 .text
@@ -756,9 +756,10 @@ impl Headless {
             style.height = Dim::px(block.height().ceil());
         }
 
+        // Consume the children (move, not clone) and recurse.
         let child_built: Vec<(NodeIndex, LayoutNode)> = el
             .children
-            .iter()
+            .into_iter()
             .map(|c| self.build_node(c, tree, layout, meta, built, Some(node)))
             .collect();
         let child_lnodes: Vec<LayoutNode> = child_built.iter().map(|(_, l)| *l).collect();
@@ -768,30 +769,31 @@ impl Headless {
             layout.container(style, &child_lnodes)
         };
 
+        // Move the remaining fields into the retained NodeMeta (no clones).
         meta.insert(
             node,
             NodeMeta {
-                id: el.id.clone(),
+                id: el.id,
                 role: el.role,
-                label: el.label.clone(),
-                value: el.value.clone(),
-                classes: el.classes.clone(),
-                actions: el.actions.clone(),
-                states: el.states.clone(),
+                label: el.label,
+                value: el.value,
+                classes: el.classes,
+                actions: el.actions,
+                states: el.states,
                 scroll: el.scroll,
                 focusable: el.focusable,
                 elide: el.elide_semantics,
-                on_click: el.on_click.clone(),
-                on_wheel: el.on_wheel.clone(),
-                on_drag: el.on_drag.clone(),
-                on_drop: el.on_drop.clone(),
-                on_text: el.on_text.clone(),
+                on_click: el.on_click,
+                on_wheel: el.on_wheel,
+                on_drag: el.on_drag,
+                on_drop: el.on_drop,
+                on_text: el.on_text,
                 background: el.background,
                 corner_radius: el.corner_radius,
                 shadow: el.shadow,
-                text: el.text.clone(),
-                image: el.image.clone(),
-                canvas: el.canvas.clone(),
+                text: el.text,
+                image: el.image,
+                canvas: el.canvas,
             },
         );
         built.push((node, lnode));
