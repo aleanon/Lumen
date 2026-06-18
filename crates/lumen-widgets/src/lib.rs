@@ -17,6 +17,7 @@ pub mod element;
 pub mod forms;
 pub mod i18n;
 pub mod markdown;
+pub mod motion;
 pub mod nav;
 pub mod system;
 pub mod theme;
