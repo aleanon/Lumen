@@ -87,6 +87,8 @@ pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
                         font_size: 12.0,
                         weight: 400.0,
                         color: Color::srgb8(0x44, 0x44, 0x44, 0xff),
+                        line_height: None,
+                        letter_spacing: 0.0,
                     },
                 )),
                 ..Element::default()

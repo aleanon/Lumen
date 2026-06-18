@@ -33,6 +33,8 @@ fn style() -> TextStyle {
         font_size: 24.0,
         weight: 400.0,
         color: Color::BLACK,
+        line_height: None,
+        letter_spacing: 0.0,
     }
 }
 

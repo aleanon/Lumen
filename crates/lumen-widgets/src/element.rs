@@ -201,6 +201,8 @@ impl Element {
                     font_size: 16.0,
                     weight: 400.0,
                     color: Color::WHITE,
+                    line_height: None,
+                    letter_spacing: 0.0,
                 },
             )),
             ..Element::default()

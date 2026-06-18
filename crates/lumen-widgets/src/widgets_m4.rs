@@ -283,6 +283,8 @@ pub fn rich_text(runs: &[Run]) -> Element {
                     font_size: r.size,
                     weight: 400.0,
                     color: r.color,
+                    line_height: None,
+                    letter_spacing: 0.0,
                 },
             )),
             ..Element::default()

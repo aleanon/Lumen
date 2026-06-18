@@ -37,6 +37,8 @@ pub fn rating(cx: &BuildCx, name: &str, max: usize) -> Element {
                         font_size: 18.0,
                         weight: 400.0,
                         color: Color::srgb8(0xf5, 0xa6, 0x23, 0xff),
+                        line_height: None,
+                        letter_spacing: 0.0,
                     },
                 )),
                 on_click: Some(Rc::new(move |rt| value.set(rt, i + 1))),

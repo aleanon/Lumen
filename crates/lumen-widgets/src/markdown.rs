@@ -52,6 +52,8 @@ fn heading(text: &str, size: f32) -> Element {
                 font_size: size,
                 weight: 400.0,
                 color: Color::BLACK,
+                line_height: None,
+                letter_spacing: 0.0,
             },
         )),
         ..Element::default()
@@ -69,6 +71,8 @@ fn code_block(code: &str) -> Element {
                 font_size: 13.0,
                 weight: 400.0,
                 color: Color::srgb8(0x33, 0x33, 0x33, 0xff),
+                line_height: None,
+                letter_spacing: 0.0,
             },
         )),
         ..Element::default()
@@ -101,6 +105,8 @@ fn inline(text: &str) -> Element {
                     font_size: 14.0,
                     weight: 400.0,
                     color,
+                    line_height: None,
+                    letter_spacing: 0.0,
                 },
             )),
             ..Element::default()

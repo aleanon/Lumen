@@ -51,6 +51,12 @@ pub struct TextStyle {
     /// Font weight (100–900; 400 = regular, 700 = bold). The bundled font is a
     /// single weight, so heavier values render as synthesized bold.
     pub weight: f32,
+    /// Line height as a multiple of font size (`None` = the font's natural
+    /// metrics). E.g. `Some(1.4)` for airy body text (B2).
+    pub line_height: Option<f32>,
+    /// Extra tracking between characters, in logical px (`0.0` = none). Positive
+    /// loosens (good for upper-case captions); negative tightens (B2).
+    pub letter_spacing: f32,
 }
 
 impl Default for TextStyle {
@@ -59,6 +65,8 @@ impl Default for TextStyle {
             font_size: 16.0,
             color: Color::BLACK,
             weight: 400.0,
+            line_height: None,
+            letter_spacing: 0.0,
         }
     }
 }
@@ -67,6 +75,18 @@ impl TextStyle {
     /// This style at `weight` (e.g. `700.0` for bold).
     pub fn weight(mut self, weight: f32) -> Self {
         self.weight = weight;
+        self
+    }
+
+    /// This style with line height set to `multiple` × the font size (B2).
+    pub fn line_height(mut self, multiple: f32) -> Self {
+        self.line_height = Some(multiple);
+        self
+    }
+
+    /// This style with `px` of extra letter tracking (B2).
+    pub fn letter_spacing(mut self, px: f32) -> Self {
+        self.letter_spacing = px;
         self
     }
 }
@@ -128,6 +148,12 @@ impl TextEngine {
             base.weight,
         )));
         builder.push_default(StyleProperty::Brush(base.color.to_srgb8()));
+        if let Some(lh) = base.line_height {
+            builder.push_default(StyleProperty::LineHeight(lh));
+        }
+        if base.letter_spacing != 0.0 {
+            builder.push_default(StyleProperty::LetterSpacing(base.letter_spacing));
+        }
         for (range, style) in ranges {
             builder.push(StyleProperty::FontSize(style.font_size), range.clone());
             builder.push(
