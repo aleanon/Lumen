@@ -22,10 +22,34 @@ run name *args:
         cargo run -q -p iced-parity --example show -- "$name"   # iced-parity gallery example
     fi
 
-# Open an iced-parity gallery example in a real interactive desktop window
-# (winit + wgpu); blocks until closed. `just win list` shows the names.
+# Open an example in a real interactive desktop window (winit + wgpu); blocks
+# until closed. Standalone example crates with their own `examples/win.rs` (e.g.
+# chrono-stopwatch) run themselves; everything else is an iced-parity gallery
+# name. `just win list` shows the gallery names.
 win name:
-    cargo run -q -p iced-parity --example win -- "{{name}}"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="{{name}}"
+    # Release: a debug build of the CPU renderer + text stack is ~35x slower,
+    # which shows up as a low animation frame rate and laggy resize.
+    if [[ -f "examples/$name/examples/win.rs" ]]; then
+        cargo run -q --release -p "$name" --example win        # standalone example crate
+    else
+        cargo run -q --release -p iced-parity --example win -- "$name"   # gallery example
+    fi
+
+# Open an example window with the embedded agent endpoint enabled, so an AI can
+# observe + drive the live window over JSON-RPC. Default addr 127.0.0.1:9230.
+win-agent name addr="127.0.0.1:9230":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="{{name}}"
+    export LUMEN_AGENT_ADDR="{{addr}}"
+    if [[ -f "examples/$name/examples/win.rs" ]]; then
+        cargo run -q --release -p "$name" --example win
+    else
+        cargo run -q --release -p iced-parity --example win -- "$name"
+    fi
 
 # List the example packages.
 examples:

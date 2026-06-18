@@ -1,0 +1,30 @@
+[package]
+name = "chrono-stopwatch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "chrono_stopwatch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "chrono-stopwatch"
+path = "src/main.rs"
+
+[dependencies]
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+lumen-widgets = { workspace = true }
+lumen-layout = { workspace = true }
+lumen-agent = { workspace = true }
+kurbo = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Opens a real desktop window for `cargo run -p chrono-stopwatch --example win`
+# (wired to `just win chrono-stopwatch`).
+lumen-shell = { workspace = true }

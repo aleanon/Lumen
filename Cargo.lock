@@ -413,6 +413,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chrono-stopwatch"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-agent",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+ "serde_json",
+]
+
+[[package]]
 name = "ciborium"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1898,6 +1912,8 @@ version = "0.0.0"
 dependencies = [
  "kurbo",
  "lumen-core",
+ "serde",
+ "serde_json",
  "tiny-skia",
  "wgpu",
 ]
@@ -1907,9 +1923,11 @@ name = "lumen-shell"
 version = "0.0.0"
 dependencies = [
  "kurbo",
+ "lumen-agent",
  "lumen-core",
  "lumen-render",
  "lumen-widgets",
+ "serde_json",
  "wgpu",
  "winit",
 ]

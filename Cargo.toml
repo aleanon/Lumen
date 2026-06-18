@@ -35,6 +35,7 @@ members = [
     "examples/gallery",
     "examples/agent-gauntlet-2",
     "examples/iced-parity",
+    "examples/chrono-stopwatch",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
