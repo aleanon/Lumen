@@ -143,6 +143,24 @@ project's discipline: a portable API surfaced on the agent + synthesizable in
 *Cross-cutting; not user-visible, but it shapes extensibility and the third-party
 widget story. Can run in parallel with A–D.*
 
+**Two non-issues to clear up first (they are *not* reasons to keep the flat
+struct):**
+
+1. **Clone cost is orthogonal — it's just E3 below.** No widget is ever cloned
+   wholesale; the per-node field clones happen only because `build_node` *borrows*
+   the soon-to-be-dropped `Element`. Consuming it (E3) turns those into moves
+   regardless of whether nodes are a struct, an enum, or `Box<dyn Widget>` (a
+   trait object relocates as a cheap pointer move).
+2. **Diffing is not a live requirement, and a hash/`PartialEq` solves it.** The
+   tree is **full-rebuilt every pump** (`rebuild()` makes a fresh `Tree`/`meta`);
+   nothing diffs `Element`s today, so "the flat struct is diffable" buys nothing
+   now. When memoization is wanted (skip rebuilding unchanged subtrees), the spec
+   already prescribes the mechanism: `#[component]` *"PartialEq on props skips
+   rebuild"* (02 §3). A trait can carry `PartialEq`/`changed(&prev)`/`state_hash`
+   — retain only the prev hash/props, not the prev widget. (Prefer `PartialEq`:
+   exact, no collision risk; hash data not closures; pair with stable keys for
+   identity.) So a `Widget` trait loses no diff/memo capability.
+
 - **E1. Slim `Element` / leaf-content enum.** `Element` is a 728-byte flat struct
   (256 B of which is `LayoutStyle`) that carries the *union* of every widget
   kind's fields — `text`/`image`/`canvas`/`scroll`/handlers — nearly all unused
@@ -152,10 +170,10 @@ widget story. Can run in parallel with A–D.*
   (`Box`/`Text`/`Image`/`Canvas`/`Custom`) while keeping the common fields
   (id/role/style/children) flat. *Why this shape:* `Element` is a transient
   build-time *description* lowered into the compact tree+SoA, so the win is type
-  safety + clone/alloc cost, not steady-state footprint; an enum keeps the
-  `dyn`-free, `Clone`, diffable properties the determinism thesis depends on.
-  *Accept:* `size_of::<Element>()` and `NodeMeta` drop materially; invalid leaf
-  combinations are unrepresentable; goldens unchanged.
+  safety + clone/alloc cost, not steady-state footprint; an enum keeps it
+  `dyn`-free and simple to introspect. *Accept:* `size_of::<Element>()` and
+  `NodeMeta` drop materially; invalid leaf combinations are unrepresentable;
+  goldens unchanged.
 - **E2. Implement the spec's `Widget` trait (`02 §3`).** Today there is **no
   `Widget` trait** — `02-spec-core.md` specifies an opaque `Element` + a `Widget`
   trait (composite `build()`, leaf layout/paint/event + mandatory `semantics()`),
@@ -164,10 +182,21 @@ widget story. Can run in parallel with A–D.*
   "third-party (and agent-written) widgets are first-class via the `Widget` trait"
   (`01 §1.6`) and M7's plugin ecosystem (T7.2). Composites stay functions
   returning `Element`; leaves become `Widget` impls lowered to
-  `NodeContent::Custom(Box<dyn LeafWidget>)` (a transient build output, so the
-  "no trait objects in *stored* state" discipline holds). *Accept:* an external
-  crate defines a leaf widget (custom layout/paint/event/semantics) and the agent
-  drives it unmodified — the T7.2 acceptance, but real.
+  `NodeContent::Custom(Box<dyn LeafWidget>)` — a *transient build output*, so the
+  "no trait objects in *stored* state" discipline holds (note `NodeMeta` already
+  carries `Rc<dyn Fn>` handlers per build; that rule is about the serializable
+  signal store, not the per-frame node tree). Memoization rides the trait via
+  `PartialEq`/hash (see non-issue 2). The remaining real trade-offs are only
+  vtable dispatch in the layout/paint/event hot paths (one indirect call per leaf
+  per frame — negligible vs rasterization) and a touch more boilerplate. *Accept:*
+  an external crate defines a leaf widget (custom layout/paint/event/semantics)
+  and the agent drives it unmodified — the T7.2 acceptance, but real.
+- **E3. `build_node` consumes the `Element` tree.** Flip `build_node(&Element)` →
+  `build_node(Element)` so each node's fields **move** into `NodeMeta` instead of
+  cloning (the 256 B `LayoutStyle`, the `image` pixel `Vec`, strings/`Vec`s;
+  `Rc` handlers move without a refcount bump). `rebuild()` drops the tree right
+  after, so nothing else reads it. Small, self-contained, independent of E1/E2.
+  *Accept:* no per-node field clones remain in the build path; goldens unchanged.
 
 ## 5. Sequencing & rationale
 
@@ -183,7 +212,7 @@ C (hot reload, error boundaries, packaging) → dev velocity + ship
         ↓
 D (motion, media, perf-at-scale, web/mobile parity) → premium + ubiquity
 
-E (core type design: slim Element, Widget trait) — parallel; gates third-party widgets
+E (core type design: E3 build_node move fix · E1 leaf-content enum · E2 Widget trait) — parallel; E2 gates third-party widgets
 ```
 
 Phase A is the unlock: without it nothing reaches a human as a native app.
