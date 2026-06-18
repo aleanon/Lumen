@@ -5,6 +5,7 @@
 //! (wgpu) and damage-aware presentation arrive in T0.11.
 #![warn(missing_docs)]
 
+pub mod analysis;
 pub mod canvas;
 pub mod cpu;
 pub mod display_list;
@@ -21,3 +22,8 @@ pub use display_list::{
     GradientStop, ImageId, RoundedRect, ShaderId, SpreadMode, UniformBlock,
 };
 pub use image::RgbaImage;
+
+pub use analysis::{
+    analyze_contrast, apca_lc, resolve_backdrop, ContrastLevel, ContrastReport, TargetContrast,
+    TextTarget,
+};

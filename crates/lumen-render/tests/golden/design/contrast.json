@@ -1,0 +1,50 @@
+{
+  "schema": "lumen-design/contrast/1",
+  "targets": [
+    {
+      "node": "node-11",
+      "label": "Heading (near-white)",
+      "region": {
+        "x": 64.0,
+        "y": 64.0,
+        "w": 256.0,
+        "h": 32.0
+      },
+      "foreground": "#f2f4f8ff",
+      "background": "#23272fff",
+      "apca_lc": -97.4,
+      "level": "body_text",
+      "passes_body_text": true
+    },
+    {
+      "node": "node-12",
+      "label": "Body (mid-gray)",
+      "region": {
+        "x": 64.0,
+        "y": 120.0,
+        "w": 256.0,
+        "h": 30.0
+      },
+      "foreground": "#9aa0aaff",
+      "background": "#23272fff",
+      "apca_lc": -47.4,
+      "level": "non_text",
+      "passes_body_text": false
+    },
+    {
+      "node": "node-13",
+      "label": "Muted caption (too dim)",
+      "region": {
+        "x": 64.0,
+        "y": 220.0,
+        "w": 256.0,
+        "h": 30.0
+      },
+      "foreground": "#444a55ff",
+      "background": "#23272fff",
+      "apca_lc": -8.6,
+      "level": "fail",
+      "passes_body_text": false
+    }
+  ]
+}

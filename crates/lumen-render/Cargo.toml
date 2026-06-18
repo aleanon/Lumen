@@ -10,6 +10,9 @@ publish = false
 [dependencies]
 lumen-core = { workspace = true }
 kurbo = { workspace = true }
+# Design-analysis reports serialize to JSON for the agent protocol (whitelisted,
+# ADR-003).
+serde = { workspace = true }
 # CPU reference renderer (ADR-002). `png-format` provides PNG encode/decode for
 # RgbaImage, avoiding the non-whitelisted `image` crate (see decision log).
 tiny-skia = { workspace = true, features = ["png-format"] }
@@ -19,3 +22,7 @@ tiny-skia = { workspace = true, features = ["png-format"] }
 # a browser-only production presenter, not part of the deterministic core.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = { workspace = true }
+
+[dev-dependencies]
+# Golden JSON for the design-analysis tests.
+serde_json = { workspace = true }
