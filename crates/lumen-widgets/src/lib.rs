@@ -10,6 +10,7 @@
 
 pub mod a11y;
 pub mod app;
+pub mod asset;
 pub mod audit;
 pub mod boundary;
 pub mod design;
