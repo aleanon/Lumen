@@ -29,13 +29,16 @@ fn build(cx: &mut BuildCx) -> Element {
 fn body(cx: &mut BuildCx) -> Element {
     let log = cx.signal("log", Vec::<String>::new);
     let lines = log.get(cx.runtime());
-    let draft = widgets::text_field_basic(cx, "draft", "").id("draft");
+    let draft = theme::fixed_width(
+        widgets::text_field_basic(cx, "draft", "").id("draft"),
+        200.0,
+    );
     let mut col = vec![
-        widgets::text("WebSocket chat").id("title"),
-        widgets::row(vec![draft, widgets::button("Send", |_| {}).id("send")]),
+        theme::heading("WebSocket chat").id("title"),
+        widgets::row(vec![draft, theme::accent_button("Send", |_| {}).id("send")]),
     ];
     for (i, line) in lines.iter().enumerate() {
-        col.push(widgets::text(line.clone()).id(format!("msg-{i}")));
+        col.push(theme::caption(line.clone()).id(format!("msg-{i}")));
     }
     widgets::column(col).id("root")
 }

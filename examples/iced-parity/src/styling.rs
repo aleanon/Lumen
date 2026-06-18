@@ -1,4 +1,5 @@
-//! styling — theme a widget tree from `.lss`.
+//! styling — theme a widget tree from `.lss` (the `#title` colour comes from a
+//! token), shown as a centred hero panel.
 use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 const LSS: &str = "@tokens { accent: #1a73e8ff; }\n#title { color: $accent; }\n";
@@ -7,14 +8,12 @@ const LSS: &str = "@tokens { accent: #1a73e8ff; }\n#title { color: $accent; }\n"
 pub fn main_app() -> App {
     App::new(build).stylesheet(LSS)
 }
-fn build(cx: &mut BuildCx) -> Element {
-    theme::screen("Styling", body(cx))
-}
 
-fn body(cx: &mut BuildCx) -> Element {
+fn build(cx: &mut BuildCx) -> Element {
     let _ = cx;
-    widgets::column(vec![
+    theme::center_screen(theme::panel_centered(widgets::column(vec![
+        theme::caption("THEMED FROM .LSS"),
         widgets::text("Styled title").id("title"),
-        widgets::button("A button", |_| {}).id("button"),
-    ])
+        theme::accent_button("A button", |_| {}).id("button"),
+    ])))
 }

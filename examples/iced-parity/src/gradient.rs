@@ -1,7 +1,8 @@
-//! gradient — a linear gradient fill on a Canvas (E8.6).
+//! gradient — a bold linear-gradient strip on a Canvas (E8.6), presented as a
+//! centred hero panel like the rest of the gallery.
 use kurbo::Rect;
 use lumen_core::Color;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the gradient app.
 pub fn main_app() -> App {
@@ -10,9 +11,9 @@ pub fn main_app() -> App {
 
 fn build(cx: &mut BuildCx) -> Element {
     let _ = cx;
-    widgets::column(vec![
-        widgets::text("Linear gradient").id("title"),
-        widgets::canvas(220.0, 80.0, |f, size| {
+    theme::center_screen(theme::panel_centered(widgets::column(vec![
+        theme::caption("LINEAR GRADIENT").id("title"),
+        widgets::canvas(300.0, 140.0, |f, size| {
             f.linear_gradient_rect(
                 Rect::new(0.0, 0.0, size.width, size.height),
                 Color::srgb8(0x1a, 0x73, 0xe8, 0xff),
@@ -20,5 +21,6 @@ fn build(cx: &mut BuildCx) -> Element {
             );
         })
         .id("gradient"),
-    ])
+        theme::caption("blue to rose, interpolated in Oklab"),
+    ])))
 }

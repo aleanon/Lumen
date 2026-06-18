@@ -1389,6 +1389,7 @@ dependencies = [
  "kurbo",
  "lumen-agent",
  "lumen-core",
+ "lumen-layout",
  "lumen-render",
  "lumen-shell",
  "lumen-widgets",
