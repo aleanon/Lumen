@@ -79,6 +79,7 @@ impl App {
             root: self.root,
             rt: Runtime::new(),
             size,
+            scale: 1.0,
             clock_ms: 0.0,
             text: TextEngine::new(),
             text_cache: HashMap::new(),
@@ -171,7 +172,11 @@ struct NodeMeta {
 pub struct Headless {
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     rt: Runtime,
+    /// Logical size (the coordinate space for layout, events, and the display
+    /// list). The rasterized frame is this times [`Headless::scale`].
     size: Size,
+    /// HiDPI scale factor: the frame is rendered at `size * scale` physical px.
+    scale: f64,
     clock_ms: f64,
     text: TextEngine,
     /// Cache of rasterized text keyed by (string, size bits, weight bits, sRGB
@@ -246,6 +251,22 @@ impl Headless {
     /// The current surface size (logical px).
     pub fn size(&self) -> Size {
         self.size
+    }
+
+    /// The current HiDPI scale factor (physical px per logical px).
+    pub fn scale(&self) -> f64 {
+        self.scale
+    }
+
+    /// Set the HiDPI scale factor and repaint at the new physical resolution.
+    /// Layout (logical) is unaffected; only the rasterized frame's pixel size
+    /// changes. The desktop shell calls this on `ScaleFactorChanged`. No-op if
+    /// unchanged or non-positive.
+    pub fn set_scale(&mut self, scale: f64) {
+        if scale > 0.0 && scale != self.scale {
+            self.scale = scale;
+            self.pump();
+        }
     }
 
     /// The most recent rendered frame.
@@ -970,12 +991,12 @@ impl Headless {
 
     fn paint(&mut self) -> RgbaImage {
         let (dl, _) = self.build_display_list();
-        cpu::render(
-            &dl,
-            self.size.width as u32,
-            self.size.height as u32,
-            Color::srgb8(255, 255, 255, 255),
-        )
+        // Layout/display list are in logical px; rasterize at physical px so the
+        // frame matches a HiDPI surface 1:1 (no upscaling blur). scale 1.0 is
+        // byte-identical to the unscaled path (goldens unaffected).
+        let pw = (self.size.width * self.scale).round().max(1.0) as u32;
+        let ph = (self.size.height * self.scale).round().max(1.0) as u32;
+        cpu::render_scaled(&dl, pw, ph, self.scale, Color::srgb8(255, 255, 255, 255))
     }
 
     /// A deterministic APCA text-contrast report over the current frame's

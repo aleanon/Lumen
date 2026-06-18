@@ -10,7 +10,8 @@
 
 use kurbo::{Point, Size, Vec2};
 use lumen_core::events::{
-    Event, Key, KeyEvent, Modifiers, NamedKey, PointerButton, PointerEvent, PointerKind, WheelEvent,
+    Event, ImeEvent, Key, KeyEvent, Modifiers, NamedKey, PointerButton, PointerEvent, PointerKind,
+    TextInputEvent, WheelEvent,
 };
 use lumen_render::RgbaImage;
 use lumen_widgets::{App, Headless};
@@ -20,7 +21,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
@@ -68,6 +69,9 @@ pub fn run(app: App, size: Size) {
         window: None,
         presenter: None,
         cursor: Point::ZERO,
+        scale: 1.0,
+        modifiers: Modifiers::empty(),
+        ime_active: false,
         last_frame: Instant::now(),
     };
     event_loop.run_app(&mut shell).expect("run app");
@@ -120,7 +124,15 @@ struct Shell {
     headless: Option<Headless>,
     window: Option<Arc<Window>>,
     presenter: Option<Presenter>,
+    /// Pointer position in *logical* px (physical ÷ scale), the runtime's space.
     cursor: Point,
+    /// HiDPI scale factor of the window.
+    scale: f64,
+    /// Current keyboard modifier state (Ctrl/Shift/Alt/Meta).
+    modifiers: Modifiers,
+    /// Whether an IME composition context is active (then text arrives via
+    /// `Ime::Commit`, not `KeyEvent::text`).
+    ime_active: bool,
     /// Wall-clock time of the previous presented frame; the delta drives the
     /// runtime's virtual clock. The shell is the *only* place wall time enters.
     last_frame: Instant,
@@ -157,14 +169,21 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 self.size.height,
             ));
         let window = Arc::new(el.create_window(attrs).expect("window"));
+        window.set_ime_allowed(true); // receive IME composition + commit
         let presenter = Presenter::new(window.clone());
         let app = self.app.take().expect("app");
-        // Size the runtime from the surface's *actual* pixel size (not the
-        // requested logical size) so the rasterized frame matches the surface
-        // 1:1 from the first frame — no upscaling blur even on HiDPI.
+        // Runtime works in logical px; the surface is physical. Derive the
+        // logical size from the surface's physical size and the scale factor so
+        // layout is DPI-correct and the frame matches the surface 1:1 (crisp).
+        self.scale = window.scale_factor();
         let phys = window.inner_size();
-        self.size = Size::new(phys.width.max(1) as f64, phys.height.max(1) as f64);
-        self.headless = Some(app.run_headless(self.size));
+        self.size = Size::new(
+            (phys.width.max(1) as f64 / self.scale).max(1.0),
+            (phys.height.max(1) as f64 / self.scale).max(1.0),
+        );
+        let mut headless = app.run_headless(self.size);
+        headless.set_scale(self.scale);
+        self.headless = Some(headless);
         self.presenter = Some(presenter);
         window.request_redraw(); // paint the first frame
         self.window = Some(window);
@@ -176,11 +195,11 @@ impl ApplicationHandler<ShellEvent> for Shell {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(s) => {
                 let (w, h) = (s.width.max(1), s.height.max(1));
-                self.size = Size::new(w as f64, h as f64);
+                self.size = Size::new(w as f64 / self.scale, h as f64 / self.scale);
                 if let Some(p) = &mut self.presenter {
-                    p.resize(w, h);
+                    p.resize(w, h); // surface is physical
                 }
-                // Re-layout + repaint at the new size so hit-testing and
+                // Re-layout + repaint at the new logical size so hit-testing and
                 // rasterization track the window; then present immediately so
                 // the resize feels live (one pump, crisp 1:1 blit).
                 if let Some(h) = &mut self.headless {
@@ -190,8 +209,27 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     p.present(&h.screenshot());
                 }
             }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                self.scale = scale_factor;
+                if let Some(h) = &mut self.headless {
+                    h.set_scale(scale_factor);
+                }
+                // Physical surface size follows from the (unchanged) logical size.
+                let pw = (self.size.width * self.scale).round().max(1.0) as u32;
+                let ph = (self.size.height * self.scale).round().max(1.0) as u32;
+                if let Some(p) = &mut self.presenter {
+                    p.resize(pw, ph);
+                }
+                if let (Some(h), Some(p)) = (&mut self.headless, &mut self.presenter) {
+                    p.present(&h.screenshot());
+                }
+            }
+            WindowEvent::ModifiersChanged(m) => {
+                self.modifiers = map_modifiers(m.state());
+            }
             WindowEvent::CursorMoved { position, .. } => {
-                self.cursor = Point::new(position.x, position.y);
+                // winit reports physical px; the runtime works in logical px.
+                self.cursor = Point::new(position.x / self.scale, position.y / self.scale);
                 self.inject(Event::PointerMove(PointerEvent::at(self.cursor)));
             }
             WindowEvent::MouseInput { state, button, .. } => {
@@ -199,7 +237,7 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     pos: self.cursor,
                     button: map_button(button),
                     pointer: PointerKind::Mouse,
-                    modifiers: Modifiers::empty(),
+                    modifiers: self.modifiers,
                     click_count: 1,
                 };
                 self.inject(if state == ElementState::Pressed {
@@ -218,14 +256,38 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 self.inject(Event::Wheel(WheelEvent {
                     pos: self.cursor,
                     delta: d,
-                    modifiers: Modifiers::empty(),
+                    modifiers: self.modifiers,
                 }));
             }
+            WindowEvent::Ime(ime) => match ime {
+                Ime::Enabled => self.ime_active = true,
+                Ime::Disabled => self.ime_active = false,
+                Ime::Preedit(text, cursor) => {
+                    self.inject(Event::ImePreedit(ImeEvent {
+                        preedit: text,
+                        cursor,
+                    }));
+                }
+                Ime::Commit(text) => {
+                    self.inject(Event::TextInput(TextInputEvent { text }));
+                }
+            },
             WindowEvent::KeyboardInput { event, .. } => {
+                // Direct (non-IME) text entry: when no IME context is composing,
+                // the key's resolved text is the committed character(s).
+                if event.state == ElementState::Pressed && !self.ime_active {
+                    if let Some(t) = &event.text {
+                        if !t.is_empty() && !t.chars().all(char::is_control) {
+                            self.inject(Event::TextInput(TextInputEvent {
+                                text: t.to_string(),
+                            }));
+                        }
+                    }
+                }
                 if let Some(k) = map_key(&event.logical_key) {
                     let ke = KeyEvent {
                         key: k,
-                        modifiers: Modifiers::empty(),
+                        modifiers: self.modifiers,
                         repeat: event.repeat,
                     };
                     self.inject(if event.state == ElementState::Pressed {
@@ -299,6 +361,23 @@ impl Shell {
             w.request_redraw(); // event-driven: redraw only after input
         }
     }
+}
+
+fn map_modifiers(s: winit::keyboard::ModifiersState) -> Modifiers {
+    let mut m = Modifiers::empty();
+    if s.shift_key() {
+        m |= Modifiers::SHIFT;
+    }
+    if s.control_key() {
+        m |= Modifiers::CTRL;
+    }
+    if s.alt_key() {
+        m |= Modifiers::ALT;
+    }
+    if s.super_key() {
+        m |= Modifiers::META;
+    }
+    m
 }
 
 fn map_button(b: MouseButton) -> PointerButton {
@@ -548,3 +627,27 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     return textureSample(t, s, in.uv);
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use winit::keyboard::ModifiersState;
+
+    #[test]
+    fn modifiers_map_to_lumen_flags() {
+        assert_eq!(map_modifiers(ModifiersState::empty()), Modifiers::empty());
+        assert_eq!(map_modifiers(ModifiersState::SHIFT), Modifiers::SHIFT);
+        assert_eq!(
+            map_modifiers(ModifiersState::CONTROL | ModifiersState::ALT),
+            Modifiers::CTRL | Modifiers::ALT
+        );
+        let all = ModifiersState::SHIFT
+            | ModifiersState::CONTROL
+            | ModifiersState::ALT
+            | ModifiersState::SUPER;
+        assert_eq!(
+            map_modifiers(all),
+            Modifiers::SHIFT | Modifiers::CTRL | Modifiers::ALT | Modifiers::META
+        );
+    }
+}

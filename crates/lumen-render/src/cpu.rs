@@ -32,6 +32,23 @@ pub fn render(list: &DisplayList, width: u32, height: u32, background: Color) ->
     r.finish()
 }
 
+/// Like [`render`], but rasterizes a display list authored in *logical* pixels
+/// at a *physical* resolution `scale`× larger (HiDPI). `width`/`height` are
+/// physical pixels; every command is scaled by `scale`. `scale == 1.0` is
+/// byte-identical to [`render`].
+pub fn render_scaled(
+    list: &DisplayList,
+    width: u32,
+    height: u32,
+    scale: f64,
+    background: Color,
+) -> RgbaImage {
+    let mut r = Renderer::new(width, height, 0.0, 0.0, &list.images);
+    r.base = Transform::from_scale(scale as f32, scale as f32);
+    r.run(list, background);
+    r.finish()
+}
+
 /// Re-render only the `dirty` rectangle, returning a `dirty`-sized image that is
 /// byte-identical to [`render`]'s output cropped to `dirty`.
 ///
