@@ -19,3 +19,6 @@ wgpu = { workspace = true }
 # drive the *live* window over the same JSON-RPC the headless agent speaks.
 lumen-agent = { workspace = true }
 serde_json = { workspace = true }
+# Optional `.lss` live-reload watcher (LUMEN_WATCH_LSS): tier-1 desktop hot
+# reload into the running window (C1).
+notify = { workspace = true }

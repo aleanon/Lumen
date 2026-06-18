@@ -1928,6 +1928,7 @@ dependencies = [
  "lumen-core",
  "lumen-render",
  "lumen-widgets",
+ "notify",
  "serde_json",
  "wgpu",
  "winit",

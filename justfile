@@ -51,6 +51,19 @@ win-agent name addr="127.0.0.1:9230":
         cargo run -q --release -p iced-parity --example win -- "$name"
     fi
 
+# Open an example window with tier-1 `.lss` hot reload: edits to <lss> reload
+# live in the running window (C1).
+win-watch name lss:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="{{name}}"
+    export LUMEN_WATCH_LSS="{{lss}}"
+    if [[ -f "examples/$name/examples/win.rs" ]]; then
+        cargo run -q --release -p "$name" --example win
+    else
+        cargo run -q --release -p iced-parity --example win -- "$name"
+    fi
+
 # List the example packages.
 examples:
     @ls examples

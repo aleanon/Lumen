@@ -45,6 +45,8 @@ enum ShellEvent {
         req: String,
         reply: mpsc::Sender<String>,
     },
+    /// New `.lss` source from the file-watcher (tier-1 hot reload, C1).
+    ReloadStyles(String),
 }
 
 /// Open a window and run `app` at `size`.
@@ -62,6 +64,11 @@ pub fn run(app: App, size: Size) {
         let proxy = event_loop.create_proxy();
         std::thread::spawn(move || serve_agent(&addr, proxy));
     }
+    if let Some(path) = std::env::var_os("LUMEN_WATCH_LSS") {
+        let path = path.to_string_lossy().into_owned();
+        let proxy = event_loop.create_proxy();
+        std::thread::spawn(move || watch_styles(&path, proxy));
+    }
     let mut shell = Shell {
         app: Some(app),
         size,
@@ -75,6 +82,41 @@ pub fn run(app: App, size: Size) {
         last_frame: Instant::now(),
     };
     event_loop.run_app(&mut shell).expect("run app");
+}
+
+/// Watch a `.lss` file and push its contents onto the event loop on every change
+/// (and once at startup) for tier-1 desktop hot reload (C1).
+fn watch_styles(path: &str, proxy: EventLoopProxy<ShellEvent>) {
+    use notify::{RecursiveMode, Watcher};
+    let (tx, rx) = mpsc::channel();
+    let mut watcher = match notify::recommended_watcher(move |res| {
+        let _ = tx.send(res);
+    }) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("lumen watch: {e}");
+            return;
+        }
+    };
+    if watcher
+        .watch(std::path::Path::new(path), RecursiveMode::NonRecursive)
+        .is_err()
+    {
+        eprintln!("lumen watch: cannot watch {path}");
+        return;
+    }
+    eprintln!("lumen watch: live-reloading {path}");
+    let push = |proxy: &EventLoopProxy<ShellEvent>| {
+        if let Ok(src) = std::fs::read_to_string(path) {
+            let _ = proxy.send_event(ShellEvent::ReloadStyles(src));
+        }
+    };
+    push(&proxy); // apply the current contents immediately
+    for res in rx {
+        if res.is_ok() {
+            push(&proxy);
+        }
+    }
 }
 
 /// Accept agent connections and bridge each request line onto the event loop.
@@ -146,20 +188,38 @@ impl ApplicationHandler<ShellEvent> for Shell {
     /// live runtime (same `dispatch` the headless agent uses), present any
     /// resulting frame so the window reflects the action, and reply.
     fn user_event(&mut self, _el: &ActiveEventLoop, event: ShellEvent) {
-        let ShellEvent::Agent { req, reply } = event;
-        let resp = if let Some(h) = &mut self.headless {
-            let v =
-                serde_json::from_str::<serde_json::Value>(&req).unwrap_or(serde_json::Value::Null);
-            let out = lumen_agent::dispatch(h, &v);
-            if let Some(p) = &mut self.presenter {
-                p.present(&h.screenshot());
+        match event {
+            ShellEvent::Agent { req, reply } => {
+                let resp = if let Some(h) = &mut self.headless {
+                    let v = serde_json::from_str::<serde_json::Value>(&req)
+                        .unwrap_or(serde_json::Value::Null);
+                    let out = lumen_agent::dispatch(h, &v);
+                    if let Some(p) = &mut self.presenter {
+                        p.present(&h.screenshot());
+                    }
+                    out.to_string()
+                } else {
+                    r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"app not ready"}}"#
+                        .to_string()
+                };
+                let _ = reply.send(resp);
             }
-            out.to_string()
-        } else {
-            r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"app not ready"}}"#
-                .to_string()
-        };
-        let _ = reply.send(resp);
+            ShellEvent::ReloadStyles(src) => {
+                // Tier-1 hot reload: apply the new stylesheet live; a parse error
+                // keeps the previous one and is reported (C1).
+                if let Some(h) = &mut self.headless {
+                    match h.set_stylesheet(&src) {
+                        lumen_widgets::ReloadResult::Ok => eprintln!("lumen reload: ok"),
+                        lumen_widgets::ReloadResult::Failed(d) => {
+                            eprintln!("lumen reload: rejected ({} diagnostics)", d.len())
+                        }
+                    }
+                    if let Some(p) = &mut self.presenter {
+                        p.present(&h.screenshot());
+                    }
+                }
+            }
+        }
     }
 
     fn resumed(&mut self, el: &ActiveEventLoop) {
