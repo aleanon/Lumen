@@ -81,6 +81,8 @@ impl App {
             size,
             clock_ms: 0.0,
             text: TextEngine::new(),
+            text_cache: HashMap::new(),
+            shadow_cache: HashMap::new(),
             tree: Tree::new(),
             meta: HashMap::new(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
@@ -172,6 +174,16 @@ pub struct Headless {
     size: Size,
     clock_ms: f64,
     text: TextEngine,
+    /// Cache of rasterized text keyed by (string, size bits, weight bits, sRGB
+    /// color): static labels then cost one memcpy per frame instead of a full
+    /// reshape + glyph raster. Cleared wholesale when it exceeds a cap so an
+    /// animated readout (many distinct strings) can't grow it without bound.
+    text_cache: HashMap<(String, u32, u32, u32), RgbaImage>,
+    /// Cache of rasterized drop shadows keyed by quantized (w, h, radius, blur,
+    /// spread, color). The stacked-rounded-rect penumbra is the single most
+    /// expensive thing in a typical frame; since it's static for a given box it
+    /// is rendered once and then blitted as one image.
+    shadow_cache: HashMap<(i32, i32, i32, i32, i32, u32), RgbaImage>,
     tree: Tree,
     meta: HashMap<NodeIndex, NodeMeta>,
     frame: RgbaImage,
@@ -216,6 +228,24 @@ impl Headless {
     /// Enqueue an event (OS or synthesized — same path).
     pub fn inject(&mut self, ev: Event) {
         self.input.push(ev);
+    }
+
+    /// Resize the render surface. Updates the size used for layout *and*
+    /// rasterization, then re-lays-out and repaints so hit-test bounds and the
+    /// rendered frame both track the new dimensions. The desktop shell calls
+    /// this on `WindowEvent::Resized`; without it, layout (hence every node's
+    /// hit rectangle) stays at the old size and the old-size frame gets
+    /// upscaled by the presenter (blur). No-op if the size is unchanged.
+    pub fn resize(&mut self, size: Size) {
+        if size != self.size {
+            self.size = size;
+            self.pump();
+        }
+    }
+
+    /// The current surface size (logical px).
+    pub fn size(&self) -> Size {
+        self.size
     }
 
     /// The most recent rendered frame.
@@ -421,8 +451,22 @@ impl Headless {
             }
             Event::PointerMove(pe) => {
                 let (_l, _e) = self.pointer.update(&self.tree, pe.pos);
-                let target = self.tree.hit_test(pe.pos);
-                self.hovered_id = target.and_then(|t| self.meta.get(&t).and_then(|m| m.id.clone()));
+                // Hover bubbles to the nearest ancestor with an id (like clicks
+                // bubble to an on_click ancestor), so hovering a button's child
+                // label still marks the button itself as hovered.
+                let mut n = self.tree.hit_test(pe.pos);
+                let mut id = None;
+                while let Some(node) = n {
+                    if let Some(m) = self.meta.get(&node) {
+                        if m.id.is_some() {
+                            id = m.id.clone();
+                            break;
+                        }
+                    }
+                    let p = self.tree.parent(node);
+                    n = p.is_some().then_some(p);
+                }
+                self.hovered_id = id;
                 if let Some(node) = self.pressed {
                     self.apply_drag(node, pe.pos);
                 }
@@ -735,8 +779,9 @@ impl Headless {
 
     // --- paint --------------------------------------------------------------
 
-    fn paint(&mut self) -> RgbaImage {
+    fn build_display_list(&mut self) -> (DisplayList, Vec<lumen_render::TextTarget>) {
         let mut dl = DisplayList::new();
+        let mut text_targets: Vec<lumen_render::TextTarget> = Vec::new();
         let order = self.tree.document_order();
         for node in order {
             let bounds = self.tree.bounds(node);
@@ -745,32 +790,102 @@ impl Headless {
             };
             // `.lss` overrides the widget's hardcoded background/radius.
             let css = self.node_style.get(&node);
-            let bg = css.and_then(|s| s.background).or(m.background);
+            let mut bg = css.and_then(|s| s.background).or(m.background);
+            // Hover feedback: lighten a dark control / darken a light one while
+            // the pointer is over a clickable node. Automatic for every button.
+            if let Some(c) = bg {
+                if m.on_click.is_some()
+                    && self.tree.flags(node).contains(NodeFlags::HOVERED)
+                {
+                    bg = Some(hover_tint(c));
+                }
+            }
             let radius = css
                 .and_then(|s| s.border_radius)
                 .map(|r| r as f64)
                 .unwrap_or(m.corner_radius);
             // Drop shadow: a soft penumbra approximated by stacked translucent
-            // rounded rects, fainter and larger outward (drawn before the box).
+            // rounded rects. The stack is static for a given box, so rasterize
+            // it once into a cached sprite and blit that each frame — otherwise
+            // (8 large translucent fills) it dominates frame time.
             if let Some(sh) = m.shadow {
-                let base = bounds
-                    .with_origin((bounds.x0 + sh.dx, bounds.y0 + sh.dy))
-                    .inflate(sh.spread, sh.spread);
+                let w = bounds.width();
+                let h = bounds.height();
+                let margin = (sh.spread.max(0.0) + sh.blur).ceil() + 2.0;
                 let [r, g, b, a] = sh.color.to_srgb8();
-                let layers = 8u32;
-                for i in 0..layers {
-                    let frac = i as f64 / layers as f64; // 0 (outer) .. ~1 (inner)
-                    let grow = sh.blur * (1.0 - frac);
-                    let alpha = (a as f64 * frac * frac / 2.0).round() as u8;
-                    if alpha == 0 {
-                        continue;
+                let key = (
+                    (w * 4.0).round() as i32,
+                    (h * 4.0).round() as i32,
+                    (radius * 4.0).round() as i32,
+                    (sh.blur * 4.0).round() as i32,
+                    (sh.spread * 4.0).round() as i32,
+                    u32::from_le_bytes([r, g, b, a]),
+                );
+                let sprite = if let Some(c) = self.shadow_cache.get(&key) {
+                    c.clone()
+                } else {
+                    let sw = (w + 2.0 * margin).ceil() as u32;
+                    let sh_px = (h + 2.0 * margin).ceil() as u32;
+                    let mut sdl = DisplayList::new();
+                    let base =
+                        Rect::new(margin, margin, margin + w, margin + h).inflate(sh.spread, sh.spread);
+                    for i in 0..8u32 {
+                        let frac = i as f64 / 8.0; // 0 (outer) .. ~1 (inner)
+                        let grow = sh.blur * (1.0 - frac);
+                        let alpha = (a as f64 * frac * frac / 2.0).round() as u8;
+                        if alpha == 0 {
+                            continue;
+                        }
+                        sdl.push(DrawCmd::Rect {
+                            rect: base.inflate(grow, grow),
+                            brush: Brush::Solid(Color::srgb8(r, g, b, alpha)),
+                            radii: CornerRadii::all(radius + grow),
+                            border: None,
+                        });
                     }
-                    dl.push(DrawCmd::Rect {
-                        rect: base.inflate(grow, grow),
-                        brush: Brush::Solid(Color::srgb8(r, g, b, alpha)),
-                        radii: CornerRadii::all(radius + grow),
-                        border: None,
+                    let img = cpu::render(&sdl, sw.max(1), sh_px.max(1), Color::TRANSPARENT);
+                    const CAP: usize = 64;
+                    if self.shadow_cache.len() >= CAP {
+                        self.shadow_cache.clear();
+                    }
+                    self.shadow_cache.insert(key, img.clone());
+                    img
+                };
+                let iw = sprite.width() as f64;
+                let ih = sprite.height() as f64;
+                let id = lumen_render::ImageId(dl.images.len() as u32);
+                dl.images.push(sprite);
+                // Integer placement + nearest sampling makes each blit a straight
+                // 1:1 copy (no resampling); a sub-pixel shadow shift is invisible.
+                let px = (bounds.x0 + sh.dx - margin).round();
+                let py = (bounds.y0 + sh.dy - margin).round();
+                // The opaque box bg (drawn next) covers the box interior, so blit
+                // only the surrounding penumbra: skip the largest rect provably
+                // under the rounded bg (box inset by its radius) and emit the rest
+                // as 4 bands. This is the frame's most expensive blit, and the
+                // interior is ~half its pixels.
+                let sx0 = (bounds.x0 - px + radius).ceil().clamp(0.0, iw);
+                let sy0 = (bounds.y0 - py + radius).ceil().clamp(0.0, ih);
+                let sx1 = (bounds.x0 - px + w - radius).floor().clamp(0.0, iw);
+                let sy1 = (bounds.y0 - py + h - radius).floor().clamp(0.0, ih);
+                let mut band = |x0: f64, y0: f64, x1: f64, y1: f64| {
+                    if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
+                        return;
+                    }
+                    dl.push(DrawCmd::Image {
+                        id,
+                        src_rect: Rect::new(x0, y0, x1, y1),
+                        dst_rect: Rect::new(px + x0, py + y0, px + x1, py + y1),
+                        quality: lumen_render::Filter::Nearest,
                     });
+                };
+                if sx1 > sx0 && sy1 > sy0 {
+                    band(0.0, 0.0, iw, sy0); // top
+                    band(0.0, sy1, iw, ih); // bottom
+                    band(0.0, sy0, sx0, sy1); // left
+                    band(sx1, sy0, iw, sy1); // right
+                } else {
+                    band(0.0, 0.0, iw, ih); // box too small to carve a hole
                 }
             }
             if let Some(bg) = bg {
@@ -807,10 +922,29 @@ impl Headless {
                 });
             }
             if let Some((txt, ts)) = &m.text {
-                let block = self
-                    .text
-                    .layout(txt, *ts, &[], None, lumen_text::TextAlign::Start);
-                let img = block.render(0, 0, Color::srgb8(255, 255, 255, 0)); // transparent bg
+                // Reuse a previously rasterized glyph image when the string and
+                // style are unchanged (the common case across animation frames).
+                let [cr, cg, cb, ca] = ts.color.to_srgb8();
+                let key = (
+                    txt.clone(),
+                    ts.font_size.to_bits(),
+                    ts.weight.to_bits(),
+                    u32::from_le_bytes([cr, cg, cb, ca]),
+                );
+                let img = if let Some(cached) = self.text_cache.get(&key) {
+                    cached.clone()
+                } else {
+                    let block =
+                        self.text
+                            .layout(txt, *ts, &[], None, lumen_text::TextAlign::Start);
+                    let img = block.render(0, 0, Color::srgb8(255, 255, 255, 0)); // transparent bg
+                    const CAP: usize = 512;
+                    if self.text_cache.len() >= CAP {
+                        self.text_cache.clear();
+                    }
+                    self.text_cache.insert(key, img.clone());
+                    img
+                };
                 let iw = img.width() as f64;
                 let ih = img.height() as f64;
                 let id = lumen_render::ImageId(dl.images.len() as u32);
@@ -821,14 +955,36 @@ impl Headless {
                     dst_rect: Rect::new(bounds.x0, bounds.y0, bounds.x0 + iw, bounds.y0 + ih),
                     quality: lumen_render::Filter::Nearest,
                 });
+                // Mirror the painted text as a design-analysis target: the
+                // foreground is the text's resolved color, the region its bounds.
+                text_targets.push(lumen_render::TextTarget {
+                    node: Some(format!("node-{}", node.index())),
+                    label: Some(txt.clone()),
+                    foreground: ts.color,
+                    region: bounds,
+                });
             }
         }
+        (dl, text_targets)
+    }
+
+    fn paint(&mut self) -> RgbaImage {
+        let (dl, _) = self.build_display_list();
         cpu::render(
             &dl,
             self.size.width as u32,
             self.size.height as u32,
             Color::srgb8(255, 255, 255, 255),
         )
+    }
+
+    /// A deterministic APCA text-contrast report over the current frame's
+    /// display list (prototype design-analysis surface, ADR pending). Each
+    /// finding is bound to the `node-<index>` id of the text node it assesses,
+    /// and contrast is measured against the *composited* backdrop.
+    pub fn contrast_report(&mut self) -> lumen_render::ContrastReport {
+        let (dl, targets) = self.build_display_list();
+        lumen_render::analyze_contrast(&dl, Color::srgb8(255, 255, 255, 255), &targets)
     }
 
     // --- semantics ----------------------------------------------------------
@@ -865,6 +1021,14 @@ impl Headless {
         }
         s
     }
+}
+
+/// A hover-state version of a control colour: lighten a dark fill, darken a
+/// light one (perceptually, in Oklab). Subtle but visible.
+fn hover_tint(c: Color) -> Color {
+    let lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    let target = if lum < 0.5 { Color::WHITE } else { Color::BLACK };
+    c.lerp_oklab(target, 0.12)
 }
 
 /// Helper: the center point of a rect (for synthesized clicks).
