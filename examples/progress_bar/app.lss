@@ -1,0 +1,26 @@
+@tokens {
+    page: #eef1f6ff;
+    surface: #ffffffff;
+    ink: #1b2230ff;
+    muted: #8b93a3ff;
+    track: #e8ebf2ff;
+    info: #2563ebff;
+    success: #16a34aff;
+    warn: #d97706ff;
+    danger: #dc2626ff;
+    accent: #6d5efcff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 22px; }
+.title { color: $ink; }
+.name { color: $ink; }
+.pct { color: $muted; }
+
+.track { background: $track; border-radius: 999px; }
+.fill { border-radius: 999px; }
+.fill.info { background: $info; }
+.fill.success { background: $success; }
+.fill.warn { background: $warn; }
+.fill.danger { background: $danger; }
+.fill.accent { background: $accent; }

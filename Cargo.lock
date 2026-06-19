@@ -513,6 +513,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ec7c5eb7a16992b1904d76c517d170ab353b0e0b3d5a0c81a8a0cd1037893cf"
 
 [[package]]
+name = "color_palette"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "com"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2776,6 +2788,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 
 [[package]]
+name = "progress_bar"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "proptest"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3277,6 +3301,18 @@ name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
+name = "sierpinski"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
 
 [[package]]
 name = "simd-adler32"

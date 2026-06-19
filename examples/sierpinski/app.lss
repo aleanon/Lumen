@@ -1,0 +1,14 @@
+@tokens {
+    page: #0c1020ff;
+    surface: #151c33ff;
+    ink: #eef2fbff;
+    muted: #8a93acff;
+    ghost: #232c46ff;
+    accent: #7c8cffff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 24px; }
+.title { color: $ink; }
+.depth { color: $accent; }
+.btn { background: $ghost; color: $ink; border-radius: 12px; }

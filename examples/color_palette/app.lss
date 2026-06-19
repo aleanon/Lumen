@@ -1,0 +1,13 @@
+@tokens {
+    page: #f3f4f9ff;
+    surface: #ffffffff;
+    ink: #1b2230ff;
+    muted: #8b93a3ff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 22px; }
+.title { color: $ink; }
+.subtitle { color: $muted; }
+.name { color: $ink; }
+.hex { color: $muted; }
