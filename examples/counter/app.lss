@@ -1,0 +1,31 @@
+@tokens {
+    page: #0e1118ff;
+    surface: #161c28ff;
+    ink: #f1f5fbff;
+    muted: #8b94a7ff;
+    accent: #4d7cfeff;
+    ghost: #232c3eff;
+    pos: #34d399ff;
+    neg: #fb7185ff;
+    zero: #9aa3b6ff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 26px; }
+
+.caption { color: $muted; }
+
+.value { color: $ink; }
+.value.pos { color: $pos; }
+.value.neg { color: $neg; }
+.value.zero { color: $ink; }
+
+.pill { border-radius: 999px; color: #0e1118ff; }
+.pill.pos { background: $pos; }
+.pill.neg { background: $neg; }
+.pill.zero { background: $zero; }
+
+.btn { border-radius: 13px; }
+.btn.accent { background: $accent; color: #ffffffff; }
+.btn.ghost { background: $ghost; color: $ink; }
+.btn.reset { background: #1b2333ff; color: $muted; }

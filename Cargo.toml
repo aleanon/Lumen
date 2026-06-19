@@ -37,6 +37,7 @@ members = [
     "examples/iced-parity",
     "examples/chrono-stopwatch",
     "examples/styling",
+    "examples/counter",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
