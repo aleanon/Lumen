@@ -2,13 +2,12 @@
 
 *Status: analysis as of 2026-06-18. Companion to `.ai_docs/06-task-graph.md`.*
 
-> **Progress:** done so far — A2, A3, C2, E3, **A1 (renderer abstraction)**,
-> **B2** (line-height/letter-spacing), **B3** (cached PNG assets), **C1** (`.lss`
-> hot reload), **D1** (spring motion), and the full iced-parity gallery redesign.
-> Remaining scope-deferred work is the deep core/renderer rewrites — **E1**
-> (Element→enum), **E2** (Widget trait), and **A1's GPU backend** — tracked in
-> `docs/backlog.md`; sandbox-blocked items (A4/A5/C3/D2/D4) need real OS/AT/codec/
-> signing/device infra to verify.
+> **Progress:** **all scope-deferred items implemented** — A1 (renderer
+> abstraction + GPU backend), B2, B3, C1, D1, E1 (Element→enum), E2 (Widget
+> trait), plus A2/A3/C2/E3 and the full iced-parity gallery redesign. Follow-on
+> *within* items: GPU path/gradient/glyph tessellation, jpeg/webp codecs,
+> gesture/shared-element motion. Sandbox-blocked items (A4/A5/C3/D2/D4) still need
+> real OS/AT/codec/signing/device infra to verify — see `docs/backlog.md`.
 
 ## 1. The core finding
 
@@ -79,7 +78,7 @@ project's discipline: a portable API surfaced on the agent + synthesizable in
 
 ### Phase A — A shippable desktop runtime (highest priority)
 
-- **A1. Pluggable renderer + GPU surface backend. ◑ abstraction done.** The
+- **A1. Pluggable renderer + GPU backend. ✅ trait + CPU + GPU backends done; path/gradient/glyph GPU tessellation follow-on.** The
   `Renderer` trait + `CpuRenderer` ship; `Headless` holds a `Box<dyn Renderer>`
   (`set_renderer`/`renderer_name`), so the runtime is now generic over the
   backend (tested by swapping one in). *Remaining:* the GPU surface backend

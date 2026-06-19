@@ -15,8 +15,10 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
   keeps its last frame and reports `E0701` (subtree `error_boundary` already
   existed).
 - **E3** — `build_node` consumes the `Element` (per-node clones → moves).
-- **A1 (abstraction)** — `Renderer` trait + `CpuRenderer`; `Headless` is generic
-  over a `Box<dyn Renderer>` (`set_renderer`/`renderer_name`). GPU backend remains.
+- **A1** — `Renderer` trait + `CpuRenderer` **and** `GpuRenderer` backends, runtime-
+  selectable. (GPU path/gradient/glyph tessellation follow-on.)
+- **B2/B3/C1/D1** — rich TextStyle; cached PNG assets; `.lss` hot reload; spring motion.
+- **E1/E2** — Element→NodeContent enum; LeafWidget trait (first-class custom leaves).
 - **Gallery redesign** — every iced-parity example now matches the stopwatch hero
   style (the plain ones — gradient/events/styling/websocket/pane_grid — elevated;
   the rest already conformed).
