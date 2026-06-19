@@ -751,7 +751,10 @@ impl Headless {
         let mut flags = NodeFlags::VISIBLE;
         let interactive = el.background.is_some()
             || el.on_click.is_some()
-            || matches!(el.content, NodeContent::Text(..) | NodeContent::Image(..))
+            || matches!(
+                el.content,
+                NodeContent::Text(..) | NodeContent::Image(..) | NodeContent::Custom(..)
+            )
             || el.on_wheel.is_some()
             || el.on_drag.is_some();
         if interactive {
@@ -776,6 +779,11 @@ impl Headless {
                 .layout(txt, *ts, &[], None, lumen_text::TextAlign::Start);
             style.width = Dim::px(block.width().ceil());
             style.height = Dim::px(block.height().ceil());
+        } else if let NodeContent::Custom(w) = &el.content {
+            // Size a custom leaf from its intrinsic measure (E2).
+            let s = w.measure(kurbo::Size::new(f64::INFINITY, f64::INFINITY));
+            style.width = Dim::px(s.width.max(0.0) as f32);
+            style.height = Dim::px(s.height.max(0.0) as f32);
         }
 
         // Consume the children (move, not clone) and recurse.
@@ -943,6 +951,19 @@ impl Headless {
                     bounds.x0, bounds.y0,
                 )));
                 draw(
+                    &mut frame,
+                    kurbo::Size::new(bounds.width(), bounds.height()),
+                );
+                for cmd in frame.into_cmds() {
+                    dl.push(cmd);
+                }
+            }
+            if let NodeContent::Custom(w) = &m.content {
+                // Paint a custom leaf via the same node-local Frame as Canvas (E2).
+                let mut frame = lumen_render::canvas::Frame::new(kurbo::Affine::translate((
+                    bounds.x0, bounds.y0,
+                )));
+                w.paint(
                     &mut frame,
                     kurbo::Size::new(bounds.width(), bounds.height()),
                 );

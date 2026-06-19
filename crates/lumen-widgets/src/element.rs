@@ -58,8 +58,22 @@ impl Shadow {
     }
 }
 
-/// A node's leaf content — text, image, or canvas. Mutually exclusive by
-/// construction (E1): a node is a container, *or* one kind of leaf.
+/// A custom leaf widget (E2 — the spec's `Widget` leaf archetype, 02 §3).
+/// Third-party / agent-authored leaves implement this to measure, paint, and
+/// contribute semantics; they are first-class via [`NodeContent::Custom`] and
+/// the runtime treats them like any built-in leaf. `semantics()` is **mandatory**
+/// (01 §1.6) — a leaf with no accessible role/label is a bug, not an option.
+pub trait LeafWidget {
+    /// Intrinsic size in logical px, given the available space.
+    fn measure(&self, available: kurbo::Size) -> kurbo::Size;
+    /// Paint into `frame` (node-local coords), sized to the node's bounds.
+    fn paint(&self, frame: &mut lumen_render::canvas::Frame, size: kurbo::Size);
+    /// Accessible (role, name). Drives semantics, test locators, and the agent.
+    fn semantics(&self) -> (Role, String);
+}
+
+/// A node's leaf content — mutually exclusive by construction (E1): a node is a
+/// container, *or* one kind of leaf.
 #[derive(Clone, Default)]
 pub enum NodeContent {
     /// No leaf content (a box / container).
@@ -71,6 +85,8 @@ pub enum NodeContent {
     Image(RgbaImage),
     /// An immediate-mode canvas draw callback (E8.1).
     Canvas(CanvasFn),
+    /// A custom leaf widget (E2): measures/paints/semantics via [`LeafWidget`].
+    Custom(Rc<dyn LeafWidget>),
 }
 
 /// A description of one node: type + props + children.

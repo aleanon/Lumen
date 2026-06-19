@@ -17,6 +17,19 @@ pub fn text(s: impl Into<String>) -> Element {
     Element::text(s)
 }
 
+/// Mount a custom leaf widget (E2): a third-party / agent-authored
+/// [`LeafWidget`] becomes a first-class node — measured, painted, and given
+/// semantics (its role/label) by the runtime, just like a built-in leaf.
+pub fn leaf(w: impl crate::LeafWidget + 'static) -> Element {
+    let (role, label) = w.semantics();
+    Element {
+        role,
+        label,
+        content: crate::NodeContent::Custom(Rc::new(w)),
+        ..Element::default()
+    }
+}
+
 /// An image of its own pixel size.
 pub fn image(img: RgbaImage) -> Element {
     let (w, h) = (img.width() as f32, img.height() as f32);
