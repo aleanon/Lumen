@@ -1,0 +1,57 @@
+@tokens {
+    page: #eef1f6ff;
+    surface: #ffffffff;
+    ink: #18212fff;
+    muted: #6b7686ff;
+    line: #e6e9efff;
+    info: #2563ebff;
+    success: #15a34aff;
+    warn: #d97706ff;
+    danger: #dc2626ff;
+    neutral: #64748bff;
+    info-soft: #e3edffff;
+    success-soft: #dcf5e4ff;
+    warn-soft: #fdefd3ff;
+    danger-soft: #fde4e4ff;
+}
+
+#page { background: $page; }
+#panel { background: $surface; border-radius: 22px; }
+
+#title { color: $ink; }
+.subtitle { color: $muted; }
+.section { color: $muted; }
+.swatch-name { color: $ink; }
+.swatch-hex { color: $muted; }
+
+.badge { color: #ffffffff; border-radius: 999px; }
+.badge.info { background: $info; }
+.badge.success { background: $success; }
+.badge.warn { background: $warn; }
+.badge.danger { background: $danger; }
+.badge.neutral { background: $neutral; }
+
+.btn { color: #ffffffff; border-radius: 10px; }
+.btn.info { background: $info; }
+.btn.success { background: $success; }
+.btn.warn { background: $warn; }
+.btn.danger { background: $danger; }
+.btn.ghost { background: #eef1f6ff; color: $ink; }
+
+.alert { border-radius: 12px; }
+.alert.info { background: $info-soft; }
+.alert.success { background: $success-soft; }
+.alert.warn { background: $warn-soft; }
+.alert.danger { background: $danger-soft; }
+
+.alert-title.info { color: $info; }
+.alert-title.success { color: $success; }
+.alert-title.warn { color: $warn; }
+.alert-title.danger { color: $danger; }
+.alert-body { color: $ink; }
+
+.swatch.info { background: $info; }
+.swatch.success { background: $success; }
+.swatch.warn { background: $warn; }
+.swatch.danger { background: $danger; }
+.swatch.neutral { background: $neutral; }
