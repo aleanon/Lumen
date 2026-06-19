@@ -22,6 +22,7 @@ pub mod motion;
 pub mod nav;
 pub mod system;
 pub mod theme;
+pub mod typed;
 pub mod undo;
 pub mod wcag;
 // ShaderWidget needs the wgpu GPU backend (CPU fallback included), which is not
@@ -36,3 +37,4 @@ pub mod widgets_m4;
 
 pub use app::{center, App, AppSnapshot, FrameStats, Headless, ReloadResult};
 pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
+pub use typed::Button;
