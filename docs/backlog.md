@@ -57,38 +57,18 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
   is heavy. *First step:* the deterministic software-decode CI path (D2) and the
   WASM/CPU golden path (D4) are the testable slices to start with.
 
-## 🏗 Scope-deferred (doable here, but large / needs review or an ADR)
+## 🔭 Follow-on within completed items (smaller, additive)
 
-- **A1 — GPU surface backend** *(abstraction done; this is the remaining half).*
-  The `Renderer` trait + CPU backend ship. Build the GPU surface path behind the
-  same trait: rect (have); **paths via `lyon`** — new dep/ADR; gradients; glyph
-  atlas; layers. *Why deferred:* multi-day effort + a new dependency. *First
-  step:* a `GpuRenderer: Renderer` rendering rects/images to a texture (extend
-  the existing offscreen `gpu.rs`), parity-tested vs CPU on lavapipe; add paths
-  next.
-- **B2 — Rich `TextStyle`** *(blast radius confirmed: ~17 `TextStyle { … }`
-  literal sites across crates/tests/examples).* Add `line_height`/`letter_spacing`
-  (default no-op) + parley wiring; update every literal. Deferred as a focused
-  pass — mechanical but wide, and low urgency now the gallery looks right.
-- **E1 — Slim `Element` / leaf-content enum.** *Why deferred:* changes the public
-  `Element` field surface (`text`/`image`/`canvas` → `content`), touching every
-  widget constructor, `theme`, and all examples — a broad breaking refactor best
-  reviewed as one PR. Goldens are the safety net. *First step:* introduce
-  `NodeContent` internally, migrate constructors, then flip the public fields.
-- **E2 — Implement the spec's `Widget` trait (`02 §3`).** Major architecture
-  (composites = functions; leaves = `dyn LeafWidget` lowered to
-  `NodeContent::Custom`); unlocks first-class third-party widgets (T7.2). Depends
-  on E1. Memoization rides `PartialEq`/hash on the trait (see readiness §E).
-- **C1 — Desktop hot reload.** Wire the dev-server file-watcher (the `notify`
-  dep is whitelisted) into the running shell via the `EventLoopProxy` bridge:
-  on `.lss` change call `Headless::set_stylesheet`. *Why deferred:* needs the
-  dev-server wire protocol fleshed out; moderate. *First step:* a `--watch <lss>`
-  flag on the `win` example that reloads one stylesheet (tier-1) over the bridge.
-- **B3 — Assets.** Image codecs behind a shared cache; declarative asset refs.
-  New deps (codecs) → ADR. *First step:* PNG/JPEG decode behind the existing
-  `RgbaImage` path.
-- **D1 — Motion system** (springs, interruptible gestures, shared-element
-  transitions). Large; the virtual-clock + `animate()` substrate is in place.
+The scope-deferred items are all implemented (see Done). These are the remaining
+*extensions* inside them, each additive and behind the now-shipped abstractions:
+
+- **A1 GPU** — path/stroke tessellation (`lyon` — ADR), gradients, glyph atlas,
+  layer clip/opacity, and HiDPI scaling on the GPU backend (renders 1:1 today).
+- **B3 codecs** — jpeg/webp/avif decode (new deps → ADR); PNG ships now.
+- **D1 motion** — gesture-driven interruptible animations + shared-element
+  transitions on top of the `motion::spring` primitive.
+- **B1 fonts** — custom/system font registration + `TextStyle` family (ADR-005
+  determinism considerations; see sandbox-blocked note).
 
 ## Notes
 
