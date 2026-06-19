@@ -165,6 +165,18 @@ struct NodeMeta {
     corner_radius: f64,
     shadow: Option<crate::element::Shadow>,
     content: NodeContent,
+    /// Left/top padding in px — own-text is painted at the padded (content-box)
+    /// origin, so a button label sits inside its padding instead of jammed into
+    /// the border-box corner.
+    pad: (f64, f64),
+}
+
+/// The px value of a [`Dim`] (0 for non-px / auto / percent).
+fn dim_px(d: Dim) -> f64 {
+    match d {
+        Dim::Px(v) => v as f64,
+        _ => 0.0,
+    }
 }
 
 /// A headless, CPU-rendered application instance (02 §8). Drives the same input
@@ -773,12 +785,17 @@ impl Headless {
 
         // Text nodes get a fixed size from measurement.
         let mut style = el.style;
+        let (pl, pt) = (dim_px(style.padding.left), dim_px(style.padding.top));
+        let (pr, pb) = (dim_px(style.padding.right), dim_px(style.padding.bottom));
+        let pad = (pl, pt);
         if let NodeContent::Text(txt, ts) = &el.content {
+            // Size the box to text *plus* padding so the label has room; it's
+            // then painted at the padded origin (centred for symmetric padding).
             let block = self
                 .text
                 .layout(txt, *ts, &[], None, lumen_text::TextAlign::Start);
-            style.width = Dim::px(block.width().ceil());
-            style.height = Dim::px(block.height().ceil());
+            style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
+            style.height = Dim::px(block.height().ceil() + (pt + pb) as f32);
         } else if let NodeContent::Custom(w) = &el.content {
             // Size a custom leaf from its intrinsic measure (E2).
             let s = w.measure(kurbo::Size::new(f64::INFINITY, f64::INFINITY));
@@ -822,6 +839,7 @@ impl Headless {
                 corner_radius: el.corner_radius,
                 shadow: el.shadow,
                 content: el.content,
+                pad,
             },
         );
         built.push((node, lnode));
@@ -1020,10 +1038,16 @@ impl Headless {
                 let ih = img.height() as f64;
                 let id = lumen_render::ImageId(dl.images.len() as u32);
                 dl.images.push(img);
+                // Paint at the padded (content-box) origin so a button label
+                // sits inside its padding (centred for symmetric padding) rather
+                // than jammed into the border-box corner. Plain text has no
+                // padding, so this is a no-op for it.
+                let tx = bounds.x0 + m.pad.0;
+                let ty = bounds.y0 + m.pad.1;
                 dl.push(DrawCmd::Image {
                     id,
                     src_rect: Rect::new(0.0, 0.0, iw, ih),
-                    dst_rect: Rect::new(bounds.x0, bounds.y0, bounds.x0 + iw, bounds.y0 + ih),
+                    dst_rect: Rect::new(tx, ty, tx + iw, ty + ih),
                     quality: lumen_render::Filter::Nearest,
                 });
                 // Mirror the painted text as a design-analysis target: the
