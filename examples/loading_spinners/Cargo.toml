@@ -1,0 +1,26 @@
+[package]
+name = "loading_spinners"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "loading_spinners"
+path = "src/lib.rs"
+
+[[bin]]
+name = "loading_spinners"
+path = "src/main.rs"
+
+[dependencies]
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+lumen-widgets = { workspace = true }
+lumen-layout = { workspace = true }
+kurbo = { workspace = true }
+
+[dev-dependencies]
+lumen-shell = { workspace = true }

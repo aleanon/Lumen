@@ -1,0 +1,21 @@
+@tokens {
+    page: #eef1f6ff;
+    surface: #ffffffff;
+    ink: #1b2230ff;
+    muted: #828b9cff;
+    accent: #5b5bf0ff;
+    ghost: #eceef5ff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 20px; }
+.title { color: $ink; }
+.body { color: $muted; }
+
+.scrim { background: #0b1220cc; }
+.dialog { background: $surface; border-radius: 18px; }
+.dialog-title { color: $ink; }
+.dialog-body { color: $muted; }
+
+.btn.accent { background: $accent; color: #ffffffff; border-radius: 11px; }
+.btn.ghost { background: $ghost; color: $ink; border-radius: 11px; }

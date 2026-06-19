@@ -1,0 +1,12 @@
+@tokens {
+    page: #0c0f1aff;
+    surface: #151a2aff;
+    ink: #eef2fbff;
+    muted: #8a93acff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 24px; }
+.title { color: $ink; }
+.subtitle { color: $muted; }
+.chip-name { color: $muted; }
