@@ -58,7 +58,7 @@ fn nav(cx: &BuildCx, name: &str, items: &[&str], dir: FlexDirection) -> Element 
                     flex_grow: if dir == FlexDirection::Row { 1.0 } else { 0.0 },
                     ..touch_style(8.0)
                 },
-                text: Some((
+                content: crate::NodeContent::Text(
                     (*label).to_string(),
                     TextStyle {
                         font_size: 13.0,
@@ -67,7 +67,7 @@ fn nav(cx: &BuildCx, name: &str, items: &[&str], dir: FlexDirection) -> Element 
                         line_height: None,
                         letter_spacing: 0.0,
                     },
-                )),
+                ),
                 on_click: Some(Rc::new(move |rt| selected.set(rt, i))),
                 ..Element::default()
             }
@@ -102,7 +102,7 @@ pub fn app_bar(title: impl Into<String>, actions: Vec<Element>) -> Element {
             flex_grow: 1.0,
             ..LayoutStyle::default()
         },
-        text: Some((
+        content: crate::NodeContent::Text(
             title.clone(),
             TextStyle {
                 font_size: 20.0,
@@ -111,7 +111,7 @@ pub fn app_bar(title: impl Into<String>, actions: Vec<Element>) -> Element {
                 line_height: None,
                 letter_spacing: 0.0,
             },
-        )),
+        ),
         ..Element::default()
     }
     .id("title")];
@@ -163,7 +163,7 @@ pub fn pull_to_refresh(
             min_height: Dim::px(24.0),
             ..LayoutStyle::default()
         },
-        text: Some((
+        content: crate::NodeContent::Text(
             if busy {
                 "Refreshing…"
             } else {
@@ -177,7 +177,7 @@ pub fn pull_to_refresh(
                 line_height: None,
                 letter_spacing: 0.0,
             },
-        )),
+        ),
         ..Element::default()
     }
     .id("refresh-indicator");
@@ -296,7 +296,7 @@ fn tap_button(label: &str, id: &str, on_click: impl Fn(&lumen_core::Runtime) + '
         background: Some(Color::srgb8(0xe8, 0xea, 0xed, 0xff)),
         corner_radius: 6.0,
         style: touch_style(8.0),
-        text: Some((
+        content: crate::NodeContent::Text(
             label.to_string(),
             TextStyle {
                 font_size: 18.0,
@@ -305,7 +305,7 @@ fn tap_button(label: &str, id: &str, on_click: impl Fn(&lumen_core::Runtime) + '
                 line_height: None,
                 letter_spacing: 0.0,
             },
-        )),
+        ),
         on_click: Some(Rc::new(on_click)),
         ..Element::default()
     }

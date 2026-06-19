@@ -22,7 +22,7 @@ fn cell(text: String, role: Role) -> Element {
             padding: Edges::all(Dim::px(4.0)),
             ..LayoutStyle::default()
         },
-        text: Some((text, TextStyle::default())),
+        content: crate::NodeContent::Text(text, TextStyle::default()),
         ..Element::default()
     }
 }
@@ -190,7 +190,7 @@ pub fn tree(cx: &BuildCx, name: &str, rows: &[TreeRow]) -> Element {
                 },
                 ..LayoutStyle::default()
             },
-            text: Some((label, TextStyle::default())),
+            content: crate::NodeContent::Text(label, TextStyle::default()),
             on_click: toggleable.then(|| {
                 Rc::new(move |rt: &lumen_core::Runtime| {
                     expanded.update(rt, |set| {
@@ -277,7 +277,7 @@ pub fn rich_text(runs: &[Run]) -> Element {
         .map(|r| Element {
             role: Role::Text,
             label: r.text.to_string(),
-            text: Some((
+            content: crate::NodeContent::Text(
                 r.text.to_string(),
                 TextStyle {
                     font_size: r.size,
@@ -286,7 +286,7 @@ pub fn rich_text(runs: &[Run]) -> Element {
                     line_height: None,
                     letter_spacing: 0.0,
                 },
-            )),
+            ),
             ..Element::default()
         })
         .collect();

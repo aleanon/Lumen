@@ -58,6 +58,21 @@ impl Shadow {
     }
 }
 
+/// A node's leaf content — text, image, or canvas. Mutually exclusive by
+/// construction (E1): a node is a container, *or* one kind of leaf.
+#[derive(Clone, Default)]
+pub enum NodeContent {
+    /// No leaf content (a box / container).
+    #[default]
+    None,
+    /// A text run and its style.
+    Text(String, TextStyle),
+    /// A bitmap image.
+    Image(RgbaImage),
+    /// An immediate-mode canvas draw callback (E8.1).
+    Canvas(CanvasFn),
+}
+
 /// A description of one node: type + props + children.
 #[derive(Clone)]
 pub struct Element {
@@ -79,8 +94,8 @@ pub struct Element {
     pub background: Option<Color>,
     /// Corner radius (px).
     pub corner_radius: f64,
-    /// Text content + its style.
-    pub text: Option<(String, TextStyle)>,
+    /// Leaf content — text, image, or canvas, mutually exclusive (E1).
+    pub content: NodeContent,
     /// Whether the node is keyboard-focusable.
     pub focusable: bool,
     /// Whether the node is elided from semantics (pure layout).
@@ -89,8 +104,6 @@ pub struct Element {
     pub states: Vec<SemState>,
     /// Scroll info for scroll containers (semantics).
     pub scroll: Option<ScrollInfo>,
-    /// Image content (the Image widget).
-    pub image: Option<RgbaImage>,
     /// Click handler.
     pub on_click: Option<Handler>,
     /// Wheel handler (scroll containers).
@@ -99,8 +112,6 @@ pub struct Element {
     pub on_drag: Option<DragHandler>,
     /// Drag-and-drop drop handler.
     pub on_drop: Option<DropHandler>,
-    /// Immediate-mode canvas draw callback (E8.1).
-    pub canvas: Option<CanvasFn>,
     /// Committed-text handler (text inputs).
     pub on_text: Option<TextHandler>,
     /// Optional drop shadow behind the box.
@@ -121,17 +132,15 @@ impl Default for Element {
             style: LayoutStyle::default(),
             background: None,
             corner_radius: 0.0,
-            text: None,
+            content: NodeContent::None,
             focusable: false,
             elide_semantics: false,
             states: Vec::new(),
             scroll: None,
-            image: None,
             on_click: None,
             on_wheel: None,
             on_drag: None,
             on_drop: None,
-            canvas: None,
             on_text: None,
             shadow: None,
             children: Vec::new(),
@@ -176,7 +185,7 @@ impl Element {
         Element {
             role: Role::Text,
             label: s.clone(),
-            text: Some((s, TextStyle::default())),
+            content: crate::NodeContent::Text(s, TextStyle::default()),
             ..Element::default()
         }
     }
@@ -195,7 +204,7 @@ impl Element {
                 padding: lumen_layout::Edges::all(Dim::px(8.0)),
                 ..LayoutStyle::default()
             },
-            text: Some((
+            content: crate::NodeContent::Text(
                 label,
                 TextStyle {
                     font_size: 16.0,
@@ -204,8 +213,17 @@ impl Element {
                     line_height: None,
                     letter_spacing: 0.0,
                 },
-            )),
+            ),
             ..Element::default()
+        }
+    }
+
+    /// Mutable access to this node's text style, if it is a text node — lets
+    /// helpers (theme typography) restyle a freshly-built text element (E1).
+    pub fn text_style_mut(&mut self) -> Option<&mut TextStyle> {
+        match &mut self.content {
+            NodeContent::Text(_, ts) => Some(ts),
+            _ => None,
         }
     }
 

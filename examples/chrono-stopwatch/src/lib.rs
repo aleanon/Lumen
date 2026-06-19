@@ -341,7 +341,7 @@ fn draw_dial(f: &mut Frame, frac: f64, pal: Pal) {
 
 fn styled_text(s: impl Into<String>, size: f32, weight: f32, color: Color) -> Element {
     let mut el = widgets::text(s);
-    if let Some((_, ts)) = &mut el.text {
+    if let Some(ts) = el.text_style_mut() {
         ts.font_size = size;
         ts.weight = weight;
         ts.color = color;
@@ -397,7 +397,7 @@ fn theme_toggle(is_dark: bool, pal: Pal, on_click: impl Fn(&Runtime) + 'static) 
         top: Dim::px(8.0),
         bottom: Dim::px(8.0),
     };
-    if let Some((_, ts)) = &mut el.text {
+    if let Some(ts) = el.text_style_mut() {
         ts.color = pal.ghost_text;
         ts.weight = 600.0;
         ts.font_size = 12.0;

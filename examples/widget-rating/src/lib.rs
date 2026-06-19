@@ -31,7 +31,7 @@ pub fn rating(cx: &BuildCx, name: &str, max: usize) -> Element {
                     padding: Edges::all(Dim::px(2.0)),
                     ..LayoutStyle::default()
                 },
-                text: Some((
+                content: lumen_widgets::NodeContent::Text(
                     if filled { "★" } else { "☆" }.to_string(),
                     TextStyle {
                         font_size: 18.0,
@@ -40,7 +40,7 @@ pub fn rating(cx: &BuildCx, name: &str, max: usize) -> Element {
                         line_height: None,
                         letter_spacing: 0.0,
                     },
-                )),
+                ),
                 on_click: Some(Rc::new(move |rt| value.set(rt, i + 1))),
                 ..Element::default()
             }

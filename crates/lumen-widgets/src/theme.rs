@@ -40,7 +40,7 @@ pub fn success() -> Color {
 /// (toasts, status chips).
 pub fn badge(text: impl Into<String>, bg: Color) -> Element {
     let mut label = widgets::text(text);
-    if let Some((_, ts)) = &mut label.text {
+    if let Some(ts) = label.text_style_mut() {
         ts.color = Color::WHITE;
         ts.weight = 600.0;
     }
@@ -66,7 +66,7 @@ pub fn badge(text: impl Into<String>, bg: Color) -> Element {
 /// Styled text of `size`/`weight`/`color` (helper for the typography below).
 fn styled(s: impl Into<String>, size: f32, weight: f32, color: Color) -> Element {
     let mut el = widgets::text(s);
-    if let Some((_, ts)) = &mut el.text {
+    if let Some(ts) = el.text_style_mut() {
         ts.font_size = size;
         ts.weight = weight;
         ts.color = color;
@@ -216,7 +216,7 @@ fn button_styled(
         top: Dim::px(12.0),
         bottom: Dim::px(12.0),
     };
-    if let Some((_, ts)) = &mut el.text {
+    if let Some(ts) = el.text_style_mut() {
         ts.color = fg;
         ts.weight = 600.0;
         ts.font_size = 16.0;

@@ -29,10 +29,10 @@ pub fn radio(cx: &BuildCx, group: &str, value: usize, label: impl Into<String>) 
             padding: Edges::all(Dim::px(4.0)),
             ..LayoutStyle::default()
         },
-        text: Some((
+        content: crate::NodeContent::Text(
             format!("{} {label}", if on { "◉" } else { "○" }),
             TextStyle::default(),
-        )),
+        ),
         on_click: Some(Rc::new(move |rt| selected.set(rt, value))),
         ..Element::default()
     }
@@ -58,7 +58,7 @@ pub fn select(cx: &BuildCx, name: &str, options: &[&str]) -> Element {
             min_width: Dim::px(120.0),
             ..LayoutStyle::default()
         },
-        text: Some((format!("{cur} ▾"), TextStyle::default())),
+        content: crate::NodeContent::Text(format!("{cur} ▾"), TextStyle::default()),
         on_click: Some(Rc::new(move |rt| {
             idx.update(rt, |x| *x = (*x + 1) % n.max(1))
         })),
@@ -81,7 +81,7 @@ pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
             Element {
                 role: Role::Tooltip,
                 label: text.clone(),
-                text: Some((
+                content: crate::NodeContent::Text(
                     text,
                     TextStyle {
                         font_size: 12.0,
@@ -90,7 +90,7 @@ pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
                         line_height: None,
                         letter_spacing: 0.0,
                     },
-                )),
+                ),
                 ..Element::default()
             },
         ],
@@ -118,7 +118,7 @@ pub fn menu(items: &[&str]) -> Element {
                     padding: Edges::all(Dim::px(6.0)),
                     ..LayoutStyle::default()
                 },
-                text: Some(((*t).to_string(), TextStyle::default())),
+                content: crate::NodeContent::Text((*t).to_string(), TextStyle::default()),
                 ..Element::default()
             })
             .collect(),
@@ -212,7 +212,7 @@ pub fn text_area(cx: &BuildCx, name: &str, initial: &str) -> Element {
             min_height: Dim::px(72.0),
             ..LayoutStyle::default()
         },
-        text: Some((shown, TextStyle::default())),
+        content: crate::NodeContent::Text(shown, TextStyle::default()),
         on_text: Some(Rc::new(move |rt, t| {
             let t = t.to_string();
             value.update(rt, |s| s.push_str(&t))

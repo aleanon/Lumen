@@ -83,10 +83,10 @@ fn home(buggy: bool) -> Element {
                         min_width: lumen_layout::Dim::px(200.0),
                         ..Default::default()
                     },
-                    text: Some((
+                    content: lumen_widgets::NodeContent::Text(
                         "overflowing content".into(),
                         lumen_text::TextStyle::default(),
-                    )),
+                    ),
                     ..Element::default()
                 }
                 .id("bug-child")],

@@ -158,7 +158,7 @@ pub fn tabs(cx: &BuildCx, name: &str, labels: &[&str]) -> Element {
                     padding: Edges::all(Dim::px(6.0)),
                     ..LayoutStyle::default()
                 },
-                text: Some((
+                content: crate::NodeContent::Text(
                     (*label).to_string(),
                     lumen_text::TextStyle {
                         font_size: 14.0,
@@ -167,7 +167,7 @@ pub fn tabs(cx: &BuildCx, name: &str, labels: &[&str]) -> Element {
                         line_height: None,
                         letter_spacing: 0.0,
                     },
-                )),
+                ),
                 on_click: Some(Rc::new(move |rt| selected.set(rt, i))),
                 ..Element::default()
             }

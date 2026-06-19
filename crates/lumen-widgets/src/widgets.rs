@@ -22,7 +22,7 @@ pub fn image(img: RgbaImage) -> Element {
     let (w, h) = (img.width() as f32, img.height() as f32);
     Element {
         role: Role::Image,
-        image: Some(img),
+        content: crate::NodeContent::Image(img),
         style: LayoutStyle {
             width: Dim::px(w),
             height: Dim::px(h),
@@ -234,7 +234,7 @@ pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
             min_width: Dim::px(120.0),
             ..LayoutStyle::default()
         },
-        text: Some((shown, TextStyle::default())),
+        content: crate::NodeContent::Text(shown, TextStyle::default()),
         on_text: Some(Rc::new(move |rt, t| {
             let t = t.to_string();
             value.update(rt, |s| s.push_str(&t))
@@ -258,7 +258,7 @@ pub fn canvas(
             height: Dim::px(height as f32),
             ..LayoutStyle::default()
         },
-        canvas: Some(std::rc::Rc::new(draw)),
+        content: crate::NodeContent::Canvas(std::rc::Rc::new(draw)),
         ..Element::default()
     }
 }

@@ -6,7 +6,7 @@
 //! lumen-text. Interactive state (focus/hover) is keyed by [`StableId`] so it
 //! survives the from-scratch rebuild.
 
-use crate::element::{BuildCx, Element, Handler};
+use crate::element::{BuildCx, Element, Handler, NodeContent};
 use kurbo::{Point, Rect, Size};
 use lumen_core::events::{Event, InputQueue, Key, NamedKey, PointerState};
 use lumen_core::semantics::{
@@ -17,7 +17,7 @@ use lumen_core::tree::{NodeFlags, Tree};
 use lumen_core::{Color, NodeIndex, StableId};
 use lumen_layout::{Dim, LayoutNode, LayoutStyle, LayoutTree};
 use lumen_render::{cpu, Brush, CornerRadii, DisplayList, DrawCmd, RgbaImage};
-use lumen_text::{TextEngine, TextStyle};
+use lumen_text::TextEngine;
 use std::collections::HashMap;
 
 /// Statistics for one rendered frame.
@@ -164,9 +164,7 @@ struct NodeMeta {
     background: Option<Color>,
     corner_radius: f64,
     shadow: Option<crate::element::Shadow>,
-    text: Option<(String, TextStyle)>,
-    image: Option<RgbaImage>,
-    canvas: Option<crate::element::CanvasFn>,
+    content: NodeContent,
 }
 
 /// A headless, CPU-rendered application instance (02 §8). Drives the same input
@@ -753,8 +751,7 @@ impl Headless {
         let mut flags = NodeFlags::VISIBLE;
         let interactive = el.background.is_some()
             || el.on_click.is_some()
-            || el.text.is_some()
-            || el.image.is_some()
+            || matches!(el.content, NodeContent::Text(..) | NodeContent::Image(..))
             || el.on_wheel.is_some()
             || el.on_drag.is_some();
         if interactive {
@@ -773,7 +770,7 @@ impl Headless {
 
         // Text nodes get a fixed size from measurement.
         let mut style = el.style;
-        if let Some((txt, ts)) = &el.text {
+        if let NodeContent::Text(txt, ts) = &el.content {
             let block = self
                 .text
                 .layout(txt, *ts, &[], None, lumen_text::TextAlign::Start);
@@ -816,9 +813,7 @@ impl Headless {
                 background: el.background,
                 corner_radius: el.corner_radius,
                 shadow: el.shadow,
-                text: el.text,
-                image: el.image,
-                canvas: el.canvas,
+                content: el.content,
             },
         );
         built.push((node, lnode));
@@ -943,7 +938,7 @@ impl Headless {
                 });
             }
             // Immediate-mode canvas: draw in node-local coords offset to bounds.
-            if let Some(draw) = &m.canvas {
+            if let NodeContent::Canvas(draw) = &m.content {
                 let mut frame = lumen_render::canvas::Frame::new(kurbo::Affine::translate((
                     bounds.x0, bounds.y0,
                 )));
@@ -955,7 +950,7 @@ impl Headless {
                     dl.push(cmd);
                 }
             }
-            if let Some(img) = &m.image {
+            if let NodeContent::Image(img) = &m.content {
                 let iw = img.width() as f64;
                 let ih = img.height() as f64;
                 let id = lumen_render::ImageId(dl.images.len() as u32);
@@ -967,7 +962,7 @@ impl Headless {
                     quality: lumen_render::Filter::Nearest,
                 });
             }
-            if let Some((txt, ts)) = &m.text {
+            if let NodeContent::Text(txt, ts) = &m.content {
                 // Reuse a previously rasterized glyph image when the string and
                 // style are unchanged (the common case across animation frames).
                 let [cr, cg, cb, ca] = ts.color.to_srgb8();

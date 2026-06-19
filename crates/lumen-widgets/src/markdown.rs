@@ -46,7 +46,7 @@ fn heading(text: &str, size: f32) -> Element {
     Element {
         role: lumen_core::semantics::Role::Text,
         label: text.to_string(),
-        text: Some((
+        content: crate::NodeContent::Text(
             text.to_string(),
             TextStyle {
                 font_size: size,
@@ -55,7 +55,7 @@ fn heading(text: &str, size: f32) -> Element {
                 line_height: None,
                 letter_spacing: 0.0,
             },
-        )),
+        ),
         ..Element::default()
     }
 }
@@ -65,7 +65,7 @@ fn code_block(code: &str) -> Element {
         role: lumen_core::semantics::Role::Text,
         label: code.trim_end().to_string(),
         background: Some(Color::srgb8(0xf2, 0xf2, 0xf4, 0xff)),
-        text: Some((
+        content: crate::NodeContent::Text(
             code.trim_end().to_string(),
             TextStyle {
                 font_size: 13.0,
@@ -74,7 +74,7 @@ fn code_block(code: &str) -> Element {
                 line_height: None,
                 letter_spacing: 0.0,
             },
-        )),
+        ),
         ..Element::default()
     }
 }
@@ -99,7 +99,7 @@ fn inline(text: &str) -> Element {
         runs.push(Element {
             role: lumen_core::semantics::Role::Text,
             label: cur.clone(),
-            text: Some((
+            content: crate::NodeContent::Text(
                 std::mem::take(cur),
                 TextStyle {
                     font_size: 14.0,
@@ -108,7 +108,7 @@ fn inline(text: &str) -> Element {
                     line_height: None,
                     letter_spacing: 0.0,
                 },
-            )),
+            ),
             ..Element::default()
         });
     };

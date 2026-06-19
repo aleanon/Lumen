@@ -114,7 +114,7 @@ pub fn form_field(cx: &BuildCx, name: &str, label: &str, validators: Vec<Validat
             min_width: Dim::px(180.0),
             ..LayoutStyle::default()
         },
-        text: Some((shown, TextStyle::default())),
+        content: crate::NodeContent::Text(shown, TextStyle::default()),
         on_text: Some(Rc::new(move |rt, t| {
             let t = t.to_string();
             value.update(rt, |s| s.push_str(&t))
@@ -129,7 +129,7 @@ pub fn form_field(cx: &BuildCx, name: &str, label: &str, validators: Vec<Validat
             Element {
                 role: Role::Text,
                 label: e.clone(),
-                text: Some((
+                content: crate::NodeContent::Text(
                     e.clone(),
                     TextStyle {
                         font_size: 12.0,
@@ -138,7 +138,7 @@ pub fn form_field(cx: &BuildCx, name: &str, label: &str, validators: Vec<Validat
                         line_height: None,
                         letter_spacing: 0.0,
                     },
-                )),
+                ),
                 ..Element::default()
             }
             .id(format!("{name}-error")),
