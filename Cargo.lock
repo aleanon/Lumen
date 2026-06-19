@@ -413,6 +413,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "changelog"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "chrono-stopwatch"
 version = "0.0.0"
 dependencies = [
@@ -2097,6 +2109,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "markdown"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3685,6 +3709,18 @@ checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "toast"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
 ]
 
 [[package]]

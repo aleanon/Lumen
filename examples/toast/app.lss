@@ -1,0 +1,35 @@
+@tokens {
+    page: #0b0f1aff;
+    surface: #141a28ff;
+    ink: #eef2fbff;
+    muted: #99a3baff;
+
+    info: #2f6bffff;
+    success: #1faa6aff;
+    warn: #e0a83bff;
+    danger: #e5484dff;
+
+    info-bg: #16223dff;
+    success-bg: #102a20ff;
+    warn-bg: #2c2410ff;
+    danger-bg: #2c1416ff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 22px; }
+.title { color: $ink; }
+.subtitle { color: $muted; }
+
+.toast { border-radius: 14px; }
+.toast .t-title { color: $ink; }
+.toast .t-body { color: $muted; }
+
+.toast.info { background: $info-bg; }
+.toast.success { background: $success-bg; }
+.toast.warn { background: $warn-bg; }
+.toast.danger { background: $danger-bg; }
+
+.bar.info { background: $info; border-radius: 4px; }
+.bar.success { background: $success; border-radius: 4px; }
+.bar.warn { background: $warn; border-radius: 4px; }
+.bar.danger { background: $danger; border-radius: 4px; }

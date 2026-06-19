@@ -1,0 +1,32 @@
+@tokens {
+    page: #0c0e16ff;
+    surface: #151926ff;
+    ink: #eef1f9ff;
+    muted: #868fa6ff;
+    rule: #232a3bff;
+
+    added: #1faa6aff;
+    added-bg: #0f2a1eff;
+    fixed: #e0a83bff;
+    fixed-bg: #2a2410ff;
+    changed: #3b82f6ff;
+    changed-bg: #112138ff;
+    removed: #e5484dff;
+    removed-bg: #2a1416ff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 22px; }
+.title { color: $ink; }
+.subtitle { color: $muted; }
+
+.ver { color: $ink; }
+.date { color: $muted; }
+.rule { background: $rule; border-radius: 2px; }
+.entry { color: $ink; }
+
+.badge { border-radius: 999px; }
+.badge.added { background: $added-bg; color: $added; }
+.badge.fixed { background: $fixed-bg; color: $fixed; }
+.badge.changed { background: $changed-bg; color: $changed; }
+.badge.removed { background: $removed-bg; color: $removed; }

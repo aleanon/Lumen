@@ -169,6 +169,10 @@ struct NodeMeta {
     /// origin, so a button label sits inside its padding instead of jammed into
     /// the border-box corner.
     pad: (f64, f64),
+    /// Content-box wrap width in px for a wrapping text paragraph (set when the
+    /// element carries an explicit pixel width). `None` = size-to-content, no
+    /// wrap. The paint pass must lay out with the same width as the measure pass.
+    wrap_width: Option<f32>,
 }
 
 /// The px value of a [`Dim`] (0 for non-px / auto / percent).
@@ -198,7 +202,7 @@ pub struct Headless {
     /// color): static labels then cost one memcpy per frame instead of a full
     /// reshape + glyph raster. Cleared wholesale when it exceeds a cap so an
     /// animated readout (many distinct strings) can't grow it without bound.
-    text_cache: HashMap<(String, u32, u32, u32), RgbaImage>,
+    text_cache: HashMap<(String, u32, u32, u32, u32), RgbaImage>,
     /// Cache of rasterized drop shadows keyed by quantized (w, h, radius, blur,
     /// spread, color). The stacked-rounded-rect penumbra is the single most
     /// expensive thing in a typical frame; since it's static for a given box it
@@ -788,14 +792,25 @@ impl Headless {
         let (pl, pt) = (dim_px(style.padding.left), dim_px(style.padding.top));
         let (pr, pb) = (dim_px(style.padding.right), dim_px(style.padding.bottom));
         let pad = (pl, pt);
+        let mut text_wrap: Option<f32> = None;
         if let NodeContent::Text(txt, ts) = &el.content {
-            // Size the box to text *plus* padding so the label has room; it's
-            // then painted at the padded origin (centred for symmetric padding).
+            // An explicit pixel width turns the label into a wrapping paragraph:
+            // we lay out into the content box (width minus horizontal padding) and
+            // keep that width, taking only the (wrapped) height from the block.
+            // Otherwise the box is sized to the unwrapped text *plus* padding so
+            // the label has room; it's then painted at the padded origin.
+            let wrap = match style.width {
+                Dim::Px(w) => Some((w - (pl + pr) as f32).max(0.0)),
+                _ => None,
+            };
             let block = self
                 .text
-                .layout(txt, *ts, &[], None, lumen_text::TextAlign::Start);
-            style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
+                .layout(txt, *ts, &[], wrap, lumen_text::TextAlign::Start);
+            if wrap.is_none() {
+                style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
+            }
             style.height = Dim::px(block.height().ceil() + (pt + pb) as f32);
+            text_wrap = wrap;
         } else if let NodeContent::Custom(w) = &el.content {
             // Size a custom leaf from its intrinsic measure (E2).
             let s = w.measure(kurbo::Size::new(f64::INFINITY, f64::INFINITY));
@@ -840,6 +855,7 @@ impl Headless {
                 shadow: el.shadow,
                 content: el.content,
                 pad,
+                wrap_width: text_wrap,
             },
         );
         built.push((node, lnode));
@@ -1019,13 +1035,14 @@ impl Headless {
                     ts.font_size.to_bits(),
                     ts.weight.to_bits(),
                     u32::from_le_bytes([cr, cg, cb, ca]),
+                    m.wrap_width.map(|w| w.to_bits()).unwrap_or(0),
                 );
                 let img = if let Some(cached) = self.text_cache.get(&key) {
                     cached.clone()
                 } else {
-                    let block = self
-                        .text
-                        .layout(txt, ts, &[], None, lumen_text::TextAlign::Start);
+                    let block =
+                        self.text
+                            .layout(txt, ts, &[], m.wrap_width, lumen_text::TextAlign::Start);
                     let img = block.render(0, 0, Color::srgb8(255, 255, 255, 0)); // transparent bg
                     const CAP: usize = 512;
                     if self.text_cache.len() >= CAP {
