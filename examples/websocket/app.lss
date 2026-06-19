@@ -1,0 +1,25 @@
+@tokens {
+    page: #0b0f1aff;
+    surface: #141a28ff;
+    ink: #eef2fbff;
+    muted: #8893abff;
+
+    in-bg: #1c2536ff;
+    out-bg: #3a6df0ff;
+    field-bg: #0e1422ff;
+    online: #38d39f;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 22px; }
+.title { color: $ink; }
+
+.dot { background: $online; border-radius: 999px; }
+.status { color: $online; }
+
+.bubble { border-radius: 14px; }
+.bubble.in { background: $in-bg; color: $ink; }
+.bubble.out { background: $out-bg; color: #ffffffff; }
+
+.field { background: $field-bg; color: $ink; border-radius: 12px; }
+.send { background: $out-bg; color: #ffffffff; border-radius: 12px; }

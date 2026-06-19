@@ -3619,6 +3619,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "system_information"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "taffy"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3917,6 +3929,18 @@ dependencies = [
  "sha1",
  "thiserror 1.0.69",
  "utf-8",
+]
+
+[[package]]
+name = "typed_form"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
 ]
 
 [[package]]
@@ -4280,6 +4304,19 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "websocket"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+ "tungstenite",
 ]
 
 [[package]]

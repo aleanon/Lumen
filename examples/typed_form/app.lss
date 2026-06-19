@@ -1,0 +1,15 @@
+@tokens {
+    page: #ece9f6;
+    surface: #ffffffff;
+    ink: #211b33ff;
+    muted: #7d7892ff;
+    accent: #6d4bf0ff;
+    ghost: #efecf8ff;
+    field: #f4f2fbff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 22px; }
+.title { color: $ink; }
+.subtitle { color: $muted; }
+.field-label { color: $muted; }

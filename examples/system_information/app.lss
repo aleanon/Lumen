@@ -1,0 +1,22 @@
+@tokens {
+    page: #070b12ff;
+    surface: #101726ff;
+    ink: #eef3fcff;
+    muted: #7e88a1ff;
+    tile: #0c1422ff;
+    accent: #3ddc97ff;
+    chip: #14203aff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 22px; }
+.title { color: $ink; }
+.subtitle { color: $muted; }
+
+.tile { background: $tile; border-radius: 16px; }
+.stat-label { color: $muted; }
+.stat-value { color: $ink; }
+.stat-accent { color: $accent; }
+
+.dot { background: $accent; border-radius: 999px; }
+.status { color: $accent; }
