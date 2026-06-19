@@ -984,6 +984,15 @@ impl Headless {
                 });
             }
             if let NodeContent::Text(txt, ts) = &m.content {
+                // Apply a `.lss` text colour to the glyphs (the cascade also
+                // drives background/radius above). Colour is size-neutral, so it
+                // doesn't desync the layout box measured at build time; `.lss`
+                // font-size/weight on text remain follow-on (they'd need the
+                // measure pass to consult the cascade too).
+                let mut ts = *ts;
+                if let Some(c) = css.and_then(|s| s.color) {
+                    ts.color = c;
+                }
                 // Reuse a previously rasterized glyph image when the string and
                 // style are unchanged (the common case across animation frames).
                 let [cr, cg, cb, ca] = ts.color.to_srgb8();
@@ -998,7 +1007,7 @@ impl Headless {
                 } else {
                     let block = self
                         .text
-                        .layout(txt, *ts, &[], None, lumen_text::TextAlign::Start);
+                        .layout(txt, ts, &[], None, lumen_text::TextAlign::Start);
                     let img = block.render(0, 0, Color::srgb8(255, 255, 255, 0)); // transparent bg
                     const CAP: usize = 512;
                     if self.text_cache.len() >= CAP {
