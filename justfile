@@ -25,7 +25,8 @@ run name *args:
 # Open an example in a real interactive desktop window (winit + wgpu); blocks
 # until closed. Standalone example crates with their own `examples/win.rs` (e.g.
 # chrono-stopwatch) run themselves; everything else is an iced-parity gallery
-# name. `just win list` shows the gallery names.
+# name. `just win list` shows the gallery names. If a standalone crate has an
+# `app.lss`, tier-1 hot reload is enabled automatically — edits reload live.
 win name:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -33,6 +34,10 @@ win name:
     # Release: a debug build of the CPU renderer + text stack is ~35x slower,
     # which shows up as a low animation frame rate and laggy resize.
     if [[ -f "examples/$name/examples/win.rs" ]]; then
+        # Auto-watch the crate's stylesheet so `.lss` edits hot-reload (C1).
+        if [[ -f "examples/$name/app.lss" ]]; then
+            export LUMEN_WATCH_LSS="examples/$name/app.lss"
+        fi
         cargo run -q --release -p "$name" --example win        # standalone example crate
     else
         cargo run -q --release -p iced-parity --example win -- "$name"   # gallery example
