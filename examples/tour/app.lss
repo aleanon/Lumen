@@ -1,0 +1,26 @@
+@tokens {
+    page: #edeef7ff;
+    surface: #ffffffff;
+    ink: #1b2130ff;
+    muted: #8990a3ff;
+    accent: #6d5efcff;
+    ghost: #eceef5ff;
+    dot: #dde0ecff;
+    soft: #efecffff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 24px; }
+
+.kicker { color: $accent; }
+.title { color: $ink; }
+.body { color: $muted; }
+
+.hero { background: $soft; border-radius: 18px; }
+.hero-num { color: $accent; }
+
+.dot { background: $dot; border-radius: 999px; }
+.dot.on { background: $accent; }
+
+.btn.next { background: $accent; color: #ffffffff; border-radius: 12px; }
+.btn.back { background: $ghost; color: $ink; border-radius: 12px; }

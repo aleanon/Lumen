@@ -1,0 +1,26 @@
+@tokens {
+    page: #0d1017ff;
+    surface: #151b26ff;
+    ink: #eef2f8ff;
+    muted: #7d8799ff;
+    well: #0f141dff;
+    primary: #38bdf8ff;
+    secondary: #a78bfaff;
+    danger: #fb7185ff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 22px; }
+
+.title { color: $ink; }
+.subtitle { color: $muted; }
+.section { color: $muted; }
+.event { color: $ink; }
+
+.well { background: $well; border-radius: 14px; }
+.logline { color: $muted; }
+
+.btn { border-radius: 11px; color: #0d1017ff; }
+.btn.primary { background: $primary; }
+.btn.secondary { background: $secondary; }
+.btn.danger { background: $danger; color: #ffffffff; }

@@ -39,6 +39,9 @@ members = [
     "examples/styling",
     "examples/counter",
     "examples/todos",
+    "examples/clock",
+    "examples/tour",
+    "examples/events",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
