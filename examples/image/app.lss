@@ -1,0 +1,15 @@
+@tokens {
+    page: #0a0d15ff;
+    surface: #141a27ff;
+    ink: #eef2fbff;
+    muted: #8b94abff;
+    frame: #0a0d15ff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 22px; }
+.title { color: $ink; }
+.subtitle { color: $muted; }
+.hero { background: $frame; border-radius: 14px; }
+.thumb { background: $frame; border-radius: 8px; }
+.meta { color: $muted; }

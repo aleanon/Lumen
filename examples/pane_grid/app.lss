@@ -1,0 +1,32 @@
+@tokens {
+    page: #0b0e16ff;
+    bar: #11151fff;
+    sidebar: #0e1220ff;
+    editor: #141a28ff;
+    ink: #e9edf7ff;
+    muted: #7e879eff;
+    accent: #4f8cff;
+    keyword: #c98bff;
+    string: #7fd49a;
+    gutter: #4a5468ff;
+    row-active: #1b2236ff;
+}
+
+#page { background: $page; }
+#bar { background: $bar; }
+.app-title { color: $ink; }
+.app-sub { color: $muted; }
+
+#left { background: $sidebar; }
+#right { background: $editor; }
+
+.section { color: $muted; }
+.file { color: $muted; }
+.file.active { background: $row-active; color: $ink; border-radius: 6px; }
+
+.tab { color: $ink; }
+.gutter { color: $gutter; }
+.code { color: $ink; }
+.kw { color: $keyword; }
+.str { color: $string; }
+.cm { color: $muted; }

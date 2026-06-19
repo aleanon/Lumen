@@ -1590,6 +1590,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "image"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2625,6 +2637,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pane_grid"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3522,6 +3546,18 @@ checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
 name = "styling"
 version = "0.0.0"
 dependencies = [
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
+name = "svg"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
  "lumen-core",
  "lumen-layout",
  "lumen-render",
