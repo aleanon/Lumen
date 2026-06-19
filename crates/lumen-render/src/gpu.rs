@@ -31,6 +31,27 @@ struct RectInstance {
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
+/// The GPU backend as a runtime-selectable [`Renderer`](crate::Renderer) (A1).
+/// Covers the command set the offscreen backend supports (solid rects + image
+/// blits — which includes rasterized text/shadow images); paths/gradients/layers
+/// and HiDPI scaling on the GPU are follow-on, so it renders at 1:1.
+impl crate::Renderer for GpuRenderer {
+    fn render_frame(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        _scale: f64,
+        background: Color,
+    ) -> RgbaImage {
+        self.render(list, width, height, background)
+    }
+
+    fn name(&self) -> &'static str {
+        "gpu"
+    }
+}
+
 impl GpuRenderer {
     /// Create a headless renderer, or `None` if no adapter is available.
     pub fn new() -> Option<GpuRenderer> {
