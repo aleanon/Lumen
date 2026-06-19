@@ -284,3 +284,13 @@ fn websocket_echo() {
     let reply = iced_parity::websocket::echo_once(&format!("ws://127.0.0.1:{port}/"), "ping");
     assert_eq!(reply.as_deref(), Some("ping"), "websocket round-trip");
 }
+
+#[test]
+fn typed_form_builds() {
+    let mut a = iced_parity::typed_form::main_app().run_headless(Size::new(360.0, 300.0));
+    a.pump();
+    let t = tree(&mut a);
+    assert!(
+        t.contains("Preferences") && t.contains("Ada Lovelace") && t.contains("Email me updates")
+    );
+}

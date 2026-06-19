@@ -3,7 +3,9 @@
 
 use lumen_core::events::{Event, PointerButton, PointerEvent, PointerKind};
 use lumen_core::geometry::{Point, Size};
-use lumen_widgets::{col, widgets, App, BuildCx, Button, Headless};
+use lumen_widgets::{
+    col, widgets, App, BuildCx, Button, Checkbox, Element, Headless, Slider, Text, TextField,
+};
 
 fn center(a: &Headless, id: &str) -> Point {
     fn find(n: &lumen_core::semantics::SemanticsNode, id: &str) -> Option<kurbo::Rect> {
@@ -57,4 +59,43 @@ fn typed_button_builds_lowers_and_clicks() {
 
     // Type safety (compile-time, not asserted here): `Button` exposes no
     // `.on_drag()` / `.letter_spacing()` — those methods simply don't exist on it.
+}
+
+#[test]
+fn typed_text_typography_lowers() {
+    // Text typography flows through to a measurable layout difference.
+    let plain: Element = Text::new("WWWWW").into();
+    let spaced: Element = Text::new("WWWWW").letter_spacing(6.0).bold().into();
+    let mut a = App::new(move |_cx: &mut BuildCx| col![plain.clone(), spaced.clone()])
+        .run_headless(Size::new(300.0, 120.0));
+    a.pump();
+    // (Just exercising the build path; the text-stack tests already prove the
+    // letter-spacing widens. Here we assert the typed widgets build + render.)
+    assert!(a.semantics_json().to_string().contains("WWWWW"));
+}
+
+#[test]
+fn typed_stateful_widgets_build() {
+    // The stateful typed widgets lower and appear in the tree, mixed in a col!.
+    let mut a = App::new(|cx: &mut BuildCx| {
+        col![
+            Text::new("Settings").bold().size(20.0).id("title"),
+            Checkbox::new(cx, "notify", "Notify me").id("chk"),
+            Slider::new(cx, "vol", 0.0, 100.0).id("vol"),
+            TextField::new(cx, "name", "Ada").id("name"),
+        ]
+    })
+    .run_headless(Size::new(280.0, 220.0));
+    a.pump();
+    let tree = a.semantics_json().to_string();
+    for id in [
+        "\"title\"",
+        "\"chk\"",
+        "\"vol\"",
+        "\"name\"",
+        "Notify me",
+        "Ada",
+    ] {
+        assert!(tree.contains(id), "missing {id} in {tree}");
+    }
 }

@@ -23,6 +23,7 @@ pub mod system_information;
 pub mod toast;
 pub mod todos;
 pub mod tour;
+pub mod typed_form;
 pub mod websocket;
 
 use lumen_widgets::App;
@@ -50,6 +51,7 @@ pub const EXAMPLES: &[&str] = &[
     "image",
     "system_information",
     "websocket",
+    "typed_form",
 ];
 
 /// Build the [`App`] for a gallery example by `name`, or `None` if unknown.
@@ -79,6 +81,7 @@ pub fn app_for(name: &str) -> Option<App> {
         "image" => image::main_app(),
         "system_information" => system_information::main_app(),
         "websocket" => websocket::main_app(),
+        "typed_form" => typed_form::main_app(),
         _ => return None,
     })
 }

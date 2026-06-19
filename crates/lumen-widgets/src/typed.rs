@@ -11,9 +11,10 @@
 //! a typed facade layered on top. Mix typed widgets and raw `Element`s freely
 //! via the [`col!`](crate::col)/[`row!`](crate::row) macros.
 
-use crate::Element;
+use crate::{widgets, BuildCx, Element};
 use lumen_core::state::Runtime;
 use lumen_core::Color;
+use lumen_render::RgbaImage;
 
 /// Generate the universal modifiers (`id`/`class`/`background`/`style`) and the
 /// `From<W> for Element` lowering for a typed widget that stores its `Element`
@@ -93,6 +94,126 @@ impl Button {
 }
 
 styled!(Button);
+
+/// A text run. Exposes only typography — size, weight, colour, line-height,
+/// letter-spacing — and the universal modifiers. No event handlers.
+pub struct Text {
+    el: Element,
+}
+
+impl Text {
+    /// Text labelled `s`.
+    pub fn new(s: impl Into<String>) -> Self {
+        Text {
+            el: widgets::text(s),
+        }
+    }
+    /// Font size in logical px.
+    pub fn size(mut self, px: f32) -> Self {
+        if let Some(ts) = self.el.text_style_mut() {
+            ts.font_size = px;
+        }
+        self
+    }
+    /// Font weight (100–900).
+    pub fn weight(mut self, w: f32) -> Self {
+        if let Some(ts) = self.el.text_style_mut() {
+            ts.weight = w;
+        }
+        self
+    }
+    /// Bold (weight 700).
+    pub fn bold(self) -> Self {
+        self.weight(700.0)
+    }
+    /// Text colour.
+    pub fn color(mut self, c: Color) -> Self {
+        if let Some(ts) = self.el.text_style_mut() {
+            ts.color = c;
+        }
+        self
+    }
+    /// Line height as a multiple of font size (B2).
+    pub fn line_height(mut self, multiple: f32) -> Self {
+        if let Some(ts) = self.el.text_style_mut() {
+            ts.line_height = Some(multiple);
+        }
+        self
+    }
+    /// Extra letter tracking, px (B2).
+    pub fn letter_spacing(mut self, px: f32) -> Self {
+        if let Some(ts) = self.el.text_style_mut() {
+            ts.letter_spacing = px;
+        }
+        self
+    }
+}
+
+styled!(Text);
+
+/// An image at its own pixel size. Universal modifiers only.
+pub struct Image {
+    el: Element,
+}
+
+impl Image {
+    /// An image from decoded pixels.
+    pub fn new(img: RgbaImage) -> Self {
+        Image {
+            el: widgets::image(img),
+        }
+    }
+}
+
+styled!(Image);
+
+/// A self-stateful checkbox (state keyed by `name`). Universal modifiers only.
+pub struct Checkbox {
+    el: Element,
+}
+
+impl Checkbox {
+    /// A checkbox with `label`, state stored under `name`.
+    pub fn new(cx: &BuildCx, name: &str, label: impl Into<String>) -> Self {
+        Checkbox {
+            el: widgets::checkbox(cx, name, label),
+        }
+    }
+}
+
+styled!(Checkbox);
+
+/// A self-stateful slider over `[min, max]` (value keyed by `name`).
+pub struct Slider {
+    el: Element,
+}
+
+impl Slider {
+    /// A slider over `[min, max]`, value stored under `name`.
+    pub fn new(cx: &BuildCx, name: &str, min: f64, max: f64) -> Self {
+        Slider {
+            el: widgets::slider(cx, name, min, max),
+        }
+    }
+}
+
+styled!(Slider);
+
+/// A self-stateful single-line text field (value keyed by `name`).
+pub struct TextField {
+    el: Element,
+}
+
+impl TextField {
+    /// A text field with `initial` contents, stored under `name`.
+    pub fn new(cx: &BuildCx, name: &str, initial: &str) -> Self {
+        TextField {
+            el: widgets::text_field_basic(cx, name, initial),
+        }
+    }
+}
+
+styled!(TextField);
 
 /// A column of heterogeneous children — typed widgets and/or `Element`s — each
 /// lowered via `Into<Element>`: `col![Button::new("ok").primary(), text("hi")]`.

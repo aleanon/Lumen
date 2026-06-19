@@ -37,4 +37,4 @@ pub mod widgets_m4;
 
 pub use app::{center, App, AppSnapshot, FrameStats, Headless, ReloadResult};
 pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
-pub use typed::Button;
+pub use typed::{Button, Checkbox, Image, Slider, Text, TextField};
