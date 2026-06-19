@@ -1,4 +1,4 @@
-//! `just win pane_grid` (or `just win-watch pane_grid examples/pane_grid/app.lss`).
+//! `just run pane_grid` (or `just run-hot pane_grid` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

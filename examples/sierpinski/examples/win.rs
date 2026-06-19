@@ -1,4 +1,4 @@
-//! `just win sierpinski` (or `just win-watch sierpinski examples/sierpinski/app.lss`).
+//! `just run sierpinski` (or `just run-hot sierpinski` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

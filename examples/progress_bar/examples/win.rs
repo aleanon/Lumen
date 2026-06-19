@@ -1,4 +1,4 @@
-//! `just win progress_bar` (or `just win-watch progress_bar examples/progress_bar/app.lss`).
+//! `just run progress_bar` (or `just run-hot progress_bar` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

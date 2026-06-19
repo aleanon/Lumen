@@ -1,6 +1,6 @@
 //! `cargo run -p iced-parity --example win -- <name>` opens an iced-parity
 //! example in a real interactive desktop window (winit + wgpu, via
-//! `lumen-shell`). Blocks until the window is closed. Wired to `just win <name>`.
+//! `lumen-shell`). Blocks until the window is closed. Wired to `just run <name>` (or `just run-hot <name>` for live `.lss` reload).
 //! `win list` prints the available names.
 //!
 //! This is the windowed counterpart to the headless `show` target; both share

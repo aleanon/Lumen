@@ -1,4 +1,4 @@
-//! `just win modal` (or `just win-watch modal examples/modal/app.lss`).
+//! `just run modal` (or `just run-hot modal` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

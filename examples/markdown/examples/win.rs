@@ -1,4 +1,4 @@
-//! `just win markdown` (or `just win-watch markdown examples/markdown/app.lss`).
+//! `just run markdown` (or `just run-hot markdown` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

@@ -1,4 +1,4 @@
-//! `just win typed_form` (or `just win-watch typed_form examples/typed_form/app.lss`).
+//! `just run typed_form` (or `just run-hot typed_form` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

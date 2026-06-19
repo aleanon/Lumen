@@ -1,4 +1,4 @@
-//! `just win image` (or `just win-watch image examples/image/app.lss`).
+//! `just run image` (or `just run-hot image` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

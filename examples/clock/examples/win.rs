@@ -1,4 +1,4 @@
-//! `just win clock` (or `just win-watch clock examples/clock/app.lss`).
+//! `just run clock` (or `just run-hot clock` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

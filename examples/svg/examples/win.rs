@@ -1,4 +1,4 @@
-//! `just win svg` (or `just win-watch svg examples/svg/app.lss`).
+//! `just run svg` (or `just run-hot svg` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

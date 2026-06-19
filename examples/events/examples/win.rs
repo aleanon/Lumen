@@ -1,4 +1,4 @@
-//! `just win events` (or `just win-watch events examples/events/app.lss`).
+//! `just run events` (or `just run-hot events` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

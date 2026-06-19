@@ -1,4 +1,4 @@
-//! `just win todos` (or `just win-watch todos examples/todos/app.lss`).
+//! `just run todos` (or `just run-hot todos` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

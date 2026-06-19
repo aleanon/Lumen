@@ -1,4 +1,4 @@
-//! `just win color_palette` (or `just win-watch color_palette examples/color_palette/app.lss`).
+//! `just run color_palette` (or `just run-hot color_palette` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

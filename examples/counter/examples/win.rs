@@ -1,4 +1,4 @@
-//! `just win counter` (or `just win-watch counter examples/counter/app.lss`).
+//! `just run counter` (or `just run-hot counter` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

@@ -1,4 +1,4 @@
-//! `just win system_information` (or `just win-watch system_information examples/system_information/app.lss`).
+//! `just run system_information` (or `just run-hot system_information` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

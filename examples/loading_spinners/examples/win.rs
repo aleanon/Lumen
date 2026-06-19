@@ -1,4 +1,4 @@
-//! `just win loading_spinners` (or `just win-watch loading_spinners examples/loading_spinners/app.lss`).
+//! `just run loading_spinners` (or `just run-hot loading_spinners` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

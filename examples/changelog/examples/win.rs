@@ -1,4 +1,4 @@
-//! `just win changelog` (or `just win-watch changelog examples/changelog/app.lss`).
+//! `just run changelog` (or `just run-hot changelog` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

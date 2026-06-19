@@ -1,4 +1,4 @@
-//! `just win websocket` (or `just win-watch websocket examples/websocket/app.lss`).
+//! `just run websocket` (or `just run-hot websocket` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 

@@ -1,4 +1,4 @@
-//! `just win gradient` (or `just win-watch gradient examples/gradient/app.lss`).
+//! `just run gradient` (or `just run-hot gradient` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 
