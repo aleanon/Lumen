@@ -1,4 +1,4 @@
-//! `just win chart` (or `just win-watch chart examples/chart/app.lss`).
+//! `just run chart` (or `just run-hot chart` for live `.lss` reload).
 use lumen_core::geometry::Size;
 use lumen_shell::RunExt;
 
