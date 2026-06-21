@@ -904,10 +904,10 @@ impl Headless {
                 .and_then(|s| s.border_radius)
                 .map(|r| r as f64)
                 .unwrap_or(m.corner_radius);
-            // Drop shadow: a soft penumbra approximated by stacked translucent
-            // rounded rects. The stack is static for a given box, so rasterize
-            // it once into a cached sprite and blit that each frame — otherwise
-            // (8 large translucent fills) it dominates frame time.
+            // Drop shadow: a soft penumbra — the shadow shape rasterized once and
+            // Gaussian-blurred (the shared blur primitive). The sprite is static
+            // for a given box, so cache it and blit each frame rather than
+            // re-blurring (a large per-frame blur would dominate frame time).
             if let Some(sh) = m.shadow {
                 let w = bounds.width();
                 let h = bounds.height();
@@ -929,21 +929,16 @@ impl Headless {
                     let mut sdl = DisplayList::new();
                     let base = Rect::new(margin, margin, margin + w, margin + h)
                         .inflate(sh.spread, sh.spread);
-                    for i in 0..8u32 {
-                        let frac = i as f64 / 8.0; // 0 (outer) .. ~1 (inner)
-                        let grow = sh.blur * (1.0 - frac);
-                        let alpha = (a as f64 * frac * frac / 2.0).round() as u8;
-                        if alpha == 0 {
-                            continue;
-                        }
-                        sdl.push(DrawCmd::Rect {
-                            rect: base.inflate(grow, grow),
-                            brush: Brush::Solid(Color::srgb8(r, g, b, alpha)),
-                            radii: CornerRadii::all(radius + grow),
-                            border: None,
-                        });
-                    }
-                    let img = cpu::render(&sdl, sw.max(1), sh_px.max(1), Color::TRANSPARENT);
+                    // Rasterize the solid shadow shape, then blur it into a soft
+                    // penumbra. The margin reserves room for the blur to spread.
+                    sdl.push(DrawCmd::Rect {
+                        rect: base,
+                        brush: Brush::Solid(Color::srgb8(r, g, b, a)),
+                        radii: CornerRadii::all((radius + sh.spread).max(0.0)),
+                        border: None,
+                    });
+                    let solid = cpu::render(&sdl, sw.max(1), sh_px.max(1), Color::TRANSPARENT);
+                    let img = solid.blurred(sh.blur.round().max(0.0) as u32);
                     const CAP: usize = 64;
                     if self.shadow_cache.len() >= CAP {
                         self.shadow_cache.clear();
@@ -987,6 +982,17 @@ impl Headless {
                 } else {
                     band(0.0, 0.0, iw, ih); // box too small to carve a hole
                 }
+            }
+            // Glass: blur the painted backdrop within this node's box before its
+            // (translucent) fill goes on top. Emitted after the shadow so it
+            // filters everything behind, but before bg/children.
+            if let Some(blur) = css.and_then(|s| s.backdrop_blur) {
+                dl.push(DrawCmd::BackdropFilter {
+                    rect: bounds,
+                    radii: CornerRadii::all(radius),
+                    blur,
+                    saturate: css.and_then(|s| s.backdrop_saturate).unwrap_or(1.0),
+                });
             }
             if let Some(bg) = bg {
                 dl.push(DrawCmd::Rect {

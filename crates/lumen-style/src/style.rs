@@ -44,6 +44,10 @@ pub struct Style {
     pub font_size: Option<f32>,
     /// `font-weight`.
     pub font_weight: Option<u16>,
+    /// `backdrop-filter: blur(...)` radius in px (glass).
+    pub backdrop_blur: Option<f32>,
+    /// `backdrop-filter: saturate(...)` multiplier (`1.0` = none).
+    pub backdrop_saturate: Option<f32>,
 }
 
 impl Style {
@@ -124,7 +128,48 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "opacity" => style.opacity = as_number(&v).map(|n| n as f32),
         "font-size" => style.font_size = as_px(&v),
         "font-weight" => style.font_weight = as_number(&v).map(|n| n as u16),
+        "backdrop-filter" => apply_backdrop(style, &v),
         _ => {}
+    }
+}
+
+/// Parse `backdrop-filter: blur(<px>) [saturate(<n>|<pct>)]` into the typed
+/// glass fields. Filter functions beyond `blur`/`saturate` are ignored.
+fn apply_backdrop(style: &mut Style, v: &Value) {
+    let mut one = |f: &Value| {
+        if let Value::Function(name, args) = f {
+            let a = flat_args(args);
+            match name.as_str() {
+                "blur" => {
+                    if let Some(px) = a.first().and_then(|x| as_px(x)) {
+                        style.backdrop_blur = Some(px);
+                    }
+                }
+                "saturate" => {
+                    if let Some(s) = a.first().and_then(|x| as_saturate(x)) {
+                        style.backdrop_saturate = Some(s);
+                    }
+                }
+                _ => {}
+            }
+        }
+    };
+    match v {
+        Value::List(items) => {
+            for it in items {
+                one(it);
+            }
+        }
+        other => one(other),
+    }
+}
+
+/// A `saturate()` argument: a bare number (`1.8`) or a percentage (`180%`).
+fn as_saturate(v: &Value) -> Option<f32> {
+    match v {
+        Value::Number(n, Unit::Percent) => Some(*n as f32 / 100.0),
+        Value::Number(n, _) => Some(*n as f32),
+        _ => None,
     }
 }
 

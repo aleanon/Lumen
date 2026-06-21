@@ -252,6 +252,19 @@ pub enum DrawCmd {
         /// Uniforms (carry the CPU fallback color).
         uniforms: UniformBlock,
     },
+    /// Blur (and optionally saturate) the already-painted backdrop within a
+    /// rounded-rect region — the glass `backdrop-filter`. Emitted *before* the
+    /// node's translucent fill, so it filters everything painted behind it.
+    BackdropFilter {
+        /// Region to filter, in window coordinates.
+        rect: Rect,
+        /// Rounded-corner clip for the region.
+        radii: CornerRadii,
+        /// Blur radius in logical px (`0` = none).
+        blur: f32,
+        /// Saturation multiplier applied to the blurred backdrop (`1.0` = none).
+        saturate: f32,
+    },
 }
 
 /// A complete display list plus the resources its commands reference.

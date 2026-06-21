@@ -104,6 +104,45 @@ impl RgbaImage {
         }
     }
 
+    /// A Gaussian-ish blur (three box-blur passes) with the given radius in
+    /// pixels. The reusable blur primitive behind soft shadows and the glass
+    /// `backdrop-filter`. Edges clamp (the border pixel is extended), and each
+    /// channel — including alpha — is blurred straight, which is fine for the
+    /// (near-)opaque backdrops and shadow sprites it is used on.
+    pub fn blurred(&self, radius: u32) -> RgbaImage {
+        if radius == 0 || self.width == 0 || self.height == 0 {
+            return self.clone();
+        }
+        let (w, h, r) = (self.width as usize, self.height as usize, radius as usize);
+        let mut a = self.pixels.clone();
+        let mut b = vec![0u8; a.len()];
+        for _ in 0..3 {
+            box_blur_h(&a, &mut b, w, h, r);
+            box_blur_v(&b, &mut a, w, h, r);
+        }
+        RgbaImage {
+            width: self.width,
+            height: self.height,
+            pixels: a,
+        }
+    }
+
+    /// Scale colour saturation in place around per-pixel luma (`1.0` = no-op,
+    /// `>1` more vivid — the "vibrancy" half of a glass `backdrop-filter`).
+    pub fn saturate(&mut self, factor: f32) {
+        if (factor - 1.0).abs() < 1e-3 {
+            return;
+        }
+        for px in self.pixels.chunks_exact_mut(4) {
+            let (r, g, b) = (px[0] as f32, px[1] as f32, px[2] as f32);
+            let luma = 0.299 * r + 0.587 * g + 0.114 * b;
+            let f = |c: f32| (luma + (c - luma) * factor).clamp(0.0, 255.0) as u8;
+            px[0] = f(r);
+            px[1] = f(g);
+            px[2] = f(b);
+        }
+    }
+
     /// Count of pixels that differ from `other` (images must be the same size).
     pub fn diff_count(&self, other: &RgbaImage) -> usize {
         if self.width != other.width || self.height != other.height {
@@ -120,5 +159,47 @@ impl RgbaImage {
 impl std::fmt::Debug for RgbaImage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "RgbaImage({}x{})", self.width, self.height)
+    }
+}
+
+/// One horizontal box-blur pass (running window sum per channel, edges clamped).
+fn box_blur_h(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize) {
+    let win = (2 * r + 1) as u32;
+    let clamp = |v: i64| v.clamp(0, w as i64 - 1) as usize;
+    for y in 0..h {
+        let base = y * w * 4;
+        for c in 0..4 {
+            let mut sum: u32 = 0;
+            for k in -(r as i64)..=(r as i64) {
+                sum += src[base + clamp(k) * 4 + c] as u32;
+            }
+            for x in 0..w {
+                dst[base + x * 4 + c] = (sum / win) as u8;
+                let out = clamp(x as i64 - r as i64);
+                let inn = clamp(x as i64 + r as i64 + 1);
+                sum = sum - src[base + out * 4 + c] as u32 + src[base + inn * 4 + c] as u32;
+            }
+        }
+    }
+}
+
+/// One vertical box-blur pass (column running sum per channel, edges clamped).
+fn box_blur_v(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize) {
+    let win = (2 * r + 1) as u32;
+    let clamp = |v: i64| v.clamp(0, h as i64 - 1) as usize;
+    for x in 0..w {
+        let col = x * 4;
+        for c in 0..4 {
+            let mut sum: u32 = 0;
+            for k in -(r as i64)..=(r as i64) {
+                sum += src[clamp(k) * w * 4 + col + c] as u32;
+            }
+            for y in 0..h {
+                dst[y * w * 4 + col + c] = (sum / win) as u8;
+                let out = clamp(y as i64 - r as i64);
+                let inn = clamp(y as i64 + r as i64 + 1);
+                sum = sum - src[out * w * 4 + col + c] as u32 + src[inn * w * 4 + col + c] as u32;
+            }
+        }
     }
 }

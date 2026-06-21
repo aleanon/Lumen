@@ -69,6 +69,17 @@ The scope-deferred items are all implemented (see Done). These are the remaining
   transitions on top of the `motion::spring` primitive.
 - **B1 fonts** — custom/system font registration + `TextStyle` family (ADR-005
   determinism considerations; see sandbox-blocked note).
+- **Glass refraction (Liquid Glass)** — the `backdrop-filter: blur()/saturate()`
+  primitive ships (CPU renderer + `.lss` cascade + `examples/glass`). The
+  remaining Apple "Liquid Glass" look is *refraction/lensing*: bending the
+  blurred backdrop with a per-pixel displacement (a rounded-rect normal/height
+  map) plus a moving specular highlight. *First step:* a `DrawCmd` displacement
+  variant (or extend `BackdropFilter` with an optional displacement map) sampled
+  deterministically on the CPU backend, with the GPU path as a shader. Needs the
+  edge-normal model worked out; larger than the blur slice, hence deferred.
+  Also pending: GPU-backend support for `BackdropFilter` (CPU is the contract;
+  the GPU backend only handles Rect/Image today) and a hairline rim border for
+  the glass edge (borders aren't plumbed from `.lss`/`Element` yet).
 
 ## Notes
 

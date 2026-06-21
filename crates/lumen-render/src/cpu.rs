@@ -154,7 +154,83 @@ impl<'a> Renderer<'a> {
                 CornerRadii::ZERO,
                 None,
             ),
+            DrawCmd::BackdropFilter {
+                rect,
+                radii,
+                blur,
+                saturate,
+            } => self.backdrop_filter(*rect, *radii, *blur, *saturate),
         }
+    }
+
+    /// Glass `backdrop-filter`: snapshot the painted backdrop under `rect`, blur
+    /// (+ optionally saturate) it, and composite it back clipped to the rounded
+    /// rect — so the node's translucent fill (drawn next) reads as frosted glass.
+    fn backdrop_filter(&mut self, rect: Rect, radii: CornerRadii, blur: f32, saturate: f32) {
+        if blur <= 0.0 && (saturate - 1.0).abs() < 1e-3 {
+            return;
+        }
+        // Map the region to physical pixels (HiDPI scale / damage origin).
+        let mut pts = [
+            tiny_skia::Point::from_xy(rect.x0 as f32, rect.y0 as f32),
+            tiny_skia::Point::from_xy(rect.x1 as f32, rect.y1 as f32),
+        ];
+        self.base.map_points(&mut pts);
+        let scale = if rect.width() > 0.0 {
+            ((pts[1].x - pts[0].x) as f64 / rect.width())
+                .abs()
+                .max(1e-6)
+        } else {
+            1.0
+        };
+        let (w, h) = (self.width as i64, self.height as i64);
+        let blur_px = (blur as f64 * scale).round().max(0.0) as i64;
+        let pad = blur_px;
+        let rx0 = ((pts[0].x as f64).floor() as i64 - pad).clamp(0, w);
+        let ry0 = ((pts[0].y as f64).floor() as i64 - pad).clamp(0, h);
+        let rx1 = ((pts[1].x as f64).ceil() as i64 + pad).clamp(0, w);
+        let ry1 = ((pts[1].y as f64).ceil() as i64 + pad).clamp(0, h);
+        let (rw, rh) = (rx1 - rx0, ry1 - ry0);
+        if rw <= 0 || rh <= 0 {
+            return;
+        }
+
+        // Snapshot the current target, crop the padded region, filter it.
+        let snap = RgbaImage::from_pixmap(self.layers.last().expect("base layer"));
+        let mut region = snap.crop(rx0 as u32, ry0 as u32, rw as u32, rh as u32);
+        if blur_px > 0 {
+            region = region.blurred(blur_px as u32);
+        }
+        region.saturate(saturate);
+
+        // Composite back, clipped to the (physical) rounded rect.
+        let phys_rect = Rect::new(
+            pts[0].x as f64,
+            pts[0].y as f64,
+            pts[1].x as f64,
+            pts[1].y as f64,
+        );
+        let phys_radii = CornerRadii {
+            tl: radii.tl * scale,
+            tr: radii.tr * scale,
+            br: radii.br * scale,
+            bl: radii.bl * scale,
+        };
+        let mask = path_mask(
+            self.width,
+            self.height,
+            &rounded_rect_path(phys_rect, phys_radii),
+            Transform::identity(),
+        );
+        let region_pm = region.to_pixmap();
+        self.top().draw_pixmap(
+            rx0 as i32,
+            ry0 as i32,
+            region_pm.as_ref(),
+            &PixmapPaint::default(),
+            Transform::identity(),
+            mask.as_ref(),
+        );
     }
 
     fn draw_rect(

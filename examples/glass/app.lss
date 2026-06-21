@@ -1,0 +1,22 @@
+@tokens {
+    ink: #ffffffff;
+    sub: #e7ecffcc;
+    chip-ink: #f4f7ffff;
+}
+
+/* The frosted panel: a translucent white tint over a blurred, slightly more
+   vivid backdrop. The blur is what makes it read as glass. */
+.glass {
+    background: #ffffff26;
+    border-radius: 28px;
+    backdrop-filter: blur(18px) saturate(140%);
+}
+.title { color: $ink; }
+.subtitle { color: $sub; }
+
+.chip {
+    background: #ffffff33;
+    border-radius: 999px;
+    color: $chip-ink;
+    backdrop-filter: blur(8px);
+}
