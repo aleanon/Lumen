@@ -425,6 +425,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "chart"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "chrono-stopwatch"
 version = "0.0.0"
 dependencies = [

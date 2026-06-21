@@ -18,8 +18,8 @@ pub fn text(s: impl Into<String>) -> Element {
 }
 
 /// Mount a custom leaf widget (E2): a third-party / agent-authored
-/// [`LeafWidget`] becomes a first-class node — measured, painted, and given
-/// semantics (its role/label) by the runtime, just like a built-in leaf.
+/// [`crate::LeafWidget`] becomes a first-class node — measured, painted, and
+/// given semantics (its role/label) by the runtime, just like a built-in leaf.
 pub fn leaf(w: impl crate::LeafWidget + 'static) -> Element {
     let (role, label) = w.semantics();
     Element {

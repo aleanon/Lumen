@@ -812,10 +812,27 @@ impl Headless {
             style.height = Dim::px(block.height().ceil() + (pt + pb) as f32);
             text_wrap = wrap;
         } else if let NodeContent::Custom(w) = &el.content {
-            // Size a custom leaf from its intrinsic measure (E2).
-            let s = w.measure(kurbo::Size::new(f64::INFINITY, f64::INFINITY));
-            style.width = Dim::px(s.width.max(0.0) as f32);
-            style.height = Dim::px(s.height.max(0.0) as f32);
+            // Size a custom leaf from its intrinsic measure (E2), but let an
+            // explicit `width`/`height` win so a leaf can flex/fill (e.g. a chart
+            // at `width: 100%`). The measure sees the constrained axes as available
+            // space; only an `Auto` axis is replaced by the intrinsic result.
+            let avail = kurbo::Size::new(
+                match style.width {
+                    Dim::Px(v) => v as f64,
+                    _ => f64::INFINITY,
+                },
+                match style.height {
+                    Dim::Px(v) => v as f64,
+                    _ => f64::INFINITY,
+                },
+            );
+            let s = w.measure(avail);
+            if matches!(style.width, Dim::Auto) {
+                style.width = Dim::px(s.width.max(0.0) as f32);
+            }
+            if matches!(style.height, Dim::Auto) {
+                style.height = Dim::px(s.height.max(0.0) as f32);
+            }
         }
 
         // Consume the children (move, not clone) and recurse.
@@ -988,8 +1005,12 @@ impl Headless {
                     &mut frame,
                     kurbo::Size::new(bounds.width(), bounds.height()),
                 );
-                for cmd in frame.into_cmds() {
+                let (cmds, texts) = frame.into_parts();
+                for cmd in cmds {
                     dl.push(cmd);
+                }
+                for t in texts {
+                    Self::rasterize_frame_text(&mut self.text, &mut self.text_cache, &mut dl, t);
                 }
             }
             if let NodeContent::Custom(w) = &m.content {
@@ -1001,8 +1022,12 @@ impl Headless {
                     &mut frame,
                     kurbo::Size::new(bounds.width(), bounds.height()),
                 );
-                for cmd in frame.into_cmds() {
+                let (cmds, texts) = frame.into_parts();
+                for cmd in cmds {
                     dl.push(cmd);
+                }
+                for t in texts {
+                    Self::rasterize_frame_text(&mut self.text, &mut self.text_cache, &mut dl, t);
                 }
             }
             if let NodeContent::Image(img) = &m.content {
@@ -1078,6 +1103,70 @@ impl Headless {
             }
         }
         (dl, text_targets)
+    }
+
+    /// Rasterize a [`FrameText`] (from a canvas / custom-leaf `fill_text`) into an
+    /// image blit on `dl`, anchored per its opts. A free fn over the two fields it
+    /// needs (not `&mut self`) so it composes with the `&self.meta` borrow held by
+    /// the paint loop. Shares the glyph cache with own-text painting.
+    fn rasterize_frame_text(
+        text: &mut TextEngine,
+        cache: &mut HashMap<(String, u32, u32, u32, u32), RgbaImage>,
+        dl: &mut DisplayList,
+        t: lumen_render::canvas::FrameText,
+    ) {
+        use lumen_render::canvas::{AnchorX, AnchorY};
+        let ts = lumen_text::TextStyle {
+            font_size: t.opts.size,
+            weight: t.opts.weight,
+            color: t.opts.color,
+            line_height: None,
+            letter_spacing: 0.0,
+        };
+        let [cr, cg, cb, ca] = ts.color.to_srgb8();
+        let key = (
+            t.text.clone(),
+            ts.font_size.to_bits(),
+            ts.weight.to_bits(),
+            u32::from_le_bytes([cr, cg, cb, ca]),
+            0, // no wrap
+        );
+        let img = if let Some(cached) = cache.get(&key) {
+            cached.clone()
+        } else {
+            let block = text.layout(&t.text, ts, &[], None, lumen_text::TextAlign::Start);
+            let img = block.render(0, 0, Color::srgb8(255, 255, 255, 0));
+            const CAP: usize = 512;
+            if cache.len() >= CAP {
+                cache.clear();
+            }
+            cache.insert(key, img.clone());
+            img
+        };
+        let iw = img.width() as f64;
+        let ih = img.height() as f64;
+        // Offset the anchor point to the box's top-left, then snap to whole px so
+        // the nearest-sampled blit stays crisp.
+        let dx = match t.opts.anchor_x {
+            AnchorX::Start => 0.0,
+            AnchorX::Center => -iw / 2.0,
+            AnchorX::End => -iw,
+        };
+        let dy = match t.opts.anchor_y {
+            AnchorY::Top => 0.0,
+            AnchorY::Middle => -ih / 2.0,
+            AnchorY::Bottom => -ih,
+        };
+        let x = (t.pos.x + dx).round();
+        let y = (t.pos.y + dy).round();
+        let id = lumen_render::ImageId(dl.images.len() as u32);
+        dl.images.push(img);
+        dl.push(DrawCmd::Image {
+            id,
+            src_rect: Rect::new(0.0, 0.0, iw, ih),
+            dst_rect: Rect::new(x, y, x + iw, y + ih),
+            quality: lumen_render::Filter::Nearest,
+        });
     }
 
     fn paint(&mut self) -> RgbaImage {

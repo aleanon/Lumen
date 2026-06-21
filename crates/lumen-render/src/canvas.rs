@@ -7,10 +7,77 @@ use crate::display_list::{Brush, CornerRadii, DrawCmd, FillOrStroke};
 use kurbo::{Affine, BezPath, Circle, Point, Rect, Shape};
 use lumen_core::Color;
 
+/// Horizontal anchor for [`Frame::fill_text`] — which part of the text box sits
+/// at the given point.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AnchorX {
+    /// The point is the text's left edge.
+    #[default]
+    Start,
+    /// The point is the text's horizontal centre.
+    Center,
+    /// The point is the text's right edge.
+    End,
+}
+
+/// Vertical anchor for [`Frame::fill_text`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AnchorY {
+    /// The point is the text's top edge.
+    #[default]
+    Top,
+    /// The point is the text's vertical middle.
+    Middle,
+    /// The point is the text's bottom edge.
+    Bottom,
+}
+
+/// Text styling for [`Frame::fill_text`]. A plain struct (lumen-render can't
+/// depend on lumen-text), resolved into shaped glyphs by the widget runtime.
+#[derive(Clone, Copy, Debug)]
+pub struct TextOpts {
+    /// Font size in logical px.
+    pub size: f32,
+    /// Font weight (400 = regular, 700 = bold).
+    pub weight: f32,
+    /// Fill colour.
+    pub color: Color,
+    /// Horizontal anchor.
+    pub anchor_x: AnchorX,
+    /// Vertical anchor.
+    pub anchor_y: AnchorY,
+}
+
+impl Default for TextOpts {
+    fn default() -> TextOpts {
+        TextOpts {
+            size: 14.0,
+            weight: 400.0,
+            color: Color::BLACK,
+            anchor_x: AnchorX::Start,
+            anchor_y: AnchorY::Top,
+        }
+    }
+}
+
+/// A deferred text-draw intent recorded by [`Frame::fill_text`]. The `Frame`
+/// can't shape text itself (no `TextEngine` here), so the widget runtime
+/// rasterizes these against its text stack after the draw closure runs.
+#[derive(Clone, Debug)]
+pub struct FrameText {
+    /// Anchor point in window coordinates (transform already applied).
+    pub pos: Point,
+    /// The string to draw (single line).
+    pub text: String,
+    /// Styling + anchoring.
+    pub opts: TextOpts,
+}
+
 /// A drawing surface that accumulates [`DrawCmd`]s in node-local coordinates.
 #[derive(Default)]
 pub struct Frame {
     cmds: Vec<DrawCmd>,
+    texts: Vec<FrameText>,
     transform: Affine,
 }
 
@@ -19,6 +86,7 @@ impl Frame {
     pub fn new(transform: Affine) -> Frame {
         Frame {
             cmds: Vec::new(),
+            texts: Vec::new(),
             transform,
         }
     }
@@ -108,8 +176,54 @@ impl Frame {
         });
     }
 
+    /// Draw a single line of text with its `opts.anchor_*` point at `pos`. The
+    /// frame can't shape glyphs itself, so this records a [`FrameText`] intent
+    /// that the widget runtime rasterizes against its text stack (`into_parts`).
+    /// The transform's translation positions the text; font size is not scaled
+    /// (use it for translate-only transforms, like axis/label placement).
+    pub fn fill_text(&mut self, pos: Point, text: impl Into<String>, opts: TextOpts) {
+        let p = self.transform * pos;
+        self.texts.push(FrameText {
+            pos: p,
+            text: text.into(),
+            opts,
+        });
+    }
+
     /// Consume the frame, returning its commands.
     pub fn into_cmds(self) -> Vec<DrawCmd> {
         self.cmds
+    }
+
+    /// Consume the frame, returning its draw commands and deferred text intents.
+    pub fn into_parts(self) -> (Vec<DrawCmd>, Vec<FrameText>) {
+        (self.cmds, self.texts)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fill_text_records_intent_with_transform_applied() {
+        // The frame's origin transform offsets the anchor point, but draw
+        // commands and text intents are separate channels (into_parts).
+        let mut f = Frame::new(Affine::translate((100.0, 50.0)));
+        f.fill_text(
+            Point::new(10.0, 8.0),
+            "42",
+            TextOpts {
+                size: 12.0,
+                anchor_x: AnchorX::Center,
+                ..TextOpts::default()
+            },
+        );
+        let (cmds, texts) = f.into_parts();
+        assert!(cmds.is_empty(), "fill_text emits no draw cmd directly");
+        assert_eq!(texts.len(), 1);
+        assert_eq!(texts[0].text, "42");
+        assert_eq!(texts[0].pos, Point::new(110.0, 58.0));
+        assert_eq!(texts[0].opts.anchor_x, AnchorX::Center);
     }
 }
