@@ -56,6 +56,16 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
   + new deps; browser/iOS CI and devices; the Android emulator exists locally but
   is heavy. *First step:* the deterministic software-decode CI path (D2) and the
   WASM/CPU golden path (D4) are the testable slices to start with.
+- **Async runtime + HTTP/WS client + `WasmSpawner`** (the data layer's Part D).
+  *Done already (no deps):* the executor/data layer — `Spawner` + `Sink` +
+  `cx.resource`/`cx.task` + `InlineSpawner`/`ManualSpawner`/`ThreadPoolSpawner`,
+  shell waker (`lumen_core::tasks`, `examples/data`). *Why blocked:* a bundled
+  async runtime + HTTP/WS client (`tokio`+`reqwest`, or blocking `ureq`) and
+  `wasm_bindgen_futures` are ADR-003 escalations. *First step:* evaluate `ureq`
+  (blocking, tiny — the thread pool already provides concurrency) for a `lumen-net`
+  convenience crate; `WasmSpawner` = `spawn_local` for browser parity. Until then a
+  fetcher can already do blocking I/O on the thread pool; only the bundled
+  transport + wasm executor are missing.
 
 ## 🔭 Follow-on within completed items (smaller, additive)
 

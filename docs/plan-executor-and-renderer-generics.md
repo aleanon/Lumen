@@ -4,6 +4,15 @@
 generics-vs-dyn discussion. Two workstreams that converge on a single
 `App<R = CpuRenderer, E = InlineSpawner>` shape.*
 
+> **Status (2026-06-22): Parts A, B, C implemented and shipped.** Renderer is a
+> defaulted generic (`App<R=CpuRenderer>`); the data layer (`lumen_core::tasks` +
+> `cx.resource`/`cx.task`, `Headless<R,E>`, Inline/Manual/ThreadPool spawners,
+> shell waker) is live; `examples/data` demonstrates it. **No new dependencies**
+> were added. Only **Part D** (async runtime + HTTP client + `WasmSpawner`)
+> remains — it is the sole ADR-003 escalation and stays deferred (see
+> `docs/backlog.md`). Commits: renderer generics; tasks foundation; reactive data
+> layer; ThreadPool + shell waker; data example.
+
 ## Goals
 
 1. **Data layer.** First-class async/background work that feeds results back into

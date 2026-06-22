@@ -11,8 +11,10 @@ a cross-platform native app framework.** A developer can build, test, and
 agent-drive a UI today; they cannot yet ship a real app to end users on all four
 targets. The gaps are concentrated in three places, none of them the core:
 
-1. **The data layer** — there is no async/networking story, so apps can't fetch
-   from a server or disk without freezing the UI thread.
+1. **The data layer** — *mostly built (2026-06-22):* `cx.resource`/`cx.task` +
+   a thread-pool executor feed background results into state without freezing the
+   UI thread. What remains is a bundled async runtime + HTTP client and a wasm
+   executor (Part D, ADR-003).
 2. **The render path** — every shell CPU-rasterizes the whole window and blits it
    as one texture per frame; the GPU display-list backend exists but is offscreen
    and covers only rects+images. There is no true GPU rendering in any live shell.
@@ -36,18 +38,21 @@ results will arrive through.
 
 ## Blockers — cannot ship a real app
 
-### 1. No async / data layer  *(the single biggest gap)*
-- **Evidence:** no `tokio`/`async`/HTTP client anywhere in `lumen-widgets`/
-  `lumen-core`; the `websocket` example uses a **blocking** `tungstenite` round
-  trip; decision log: "`resource()` … only the transport is missing … PENDING
-  (ADR-003)."
-- **What exists:** the architecture is ready — host tasks can `inject()`
-  completion events into the one queue; the intended sugar is a reactive
-  `resource()`.
-- **What remains:** an ADR-003-whitelisted async runtime + HTTP/WS client, a
-  `resource()`/async-effect primitive that spawns off-thread and feeds results
-  back via `inject()`, and cancellation/loading/error states. Without this, "real
-  applications" (which are mostly I/O) can't be written idiomatically.
+### 1. Async / data layer  *(was the single biggest gap — now largely built)*
+- **DONE (2026-06-22):** `lumen_core::tasks` + `cx.resource`/`cx.resource_blocking`
+  /`cx.task`/`cx.task_blocking` ship. Background work runs on a `Spawner`
+  (`Headless<R, E>`, defaulted generic) — `InlineSpawner` (deterministic default),
+  `ManualSpawner` (tests), `ThreadPoolSpawner` (live shell). Results feed back via
+  a deferred-op channel drained on the UI thread (pump stays pure). `Resource<T,E>`
+  is data+flags with stale-while-revalidate; refetch is dep-hash-tracked with
+  generation-guarded cancellation. The shell wires a waker so results schedule a
+  frame. `examples/data` demonstrates it. **No new dependencies.**
+- **REMAINS (Part D, ADR-003):** an async *runtime* + HTTP/WS client (so fetchers
+  do real non-blocking network I/O — evaluate blocking `ureq` first since the
+  thread pool already gives concurrency), and a `WasmSpawner` for browser parity.
+  Today a fetcher can already do blocking I/O on the thread pool; what's missing
+  is the bundled transport + the wasm executor. The `websocket` example still uses
+  a blocking `tungstenite` round-trip pending this.
 
 ### 2. No true GPU rendering — full-frame CPU raster every frame
 - **Evidence:** `Presenter::present` does `create_texture` + `queue.write_texture`
@@ -135,10 +140,12 @@ results will arrive through.
 
 ## Recommended sequence (highest leverage first)
 
-1. **Async/data layer** (Blocker #1) — unlocks *real apps*; architecture already
-   supports it via `inject()`. ADR for the runtime + HTTP/WS, then `resource()`.
-2. **GPU surface backend** (Blocker #2) — the perf/quality unlock across *all*
-   platforms; one backend behind the existing trait benefits desktop+mobile+web.
+1. ~~**Async/data layer**~~ **(Blocker #1 — DONE 2026-06-22)** `cx.resource`/`cx.task`
+   + Inline/Manual/ThreadPool executors ship. Remaining: a bundled async runtime +
+   HTTP client and a `WasmSpawner` (Part D, ADR-003).
+2. **GPU surface backend** (Blocker #2) — *now the top remaining blocker.* The
+   perf/quality unlock across *all* platforms; one backend behind the existing
+   `Renderer` trait (now a defaulted generic) benefits desktop+mobile+web.
 3. **Desktop OS integration** (Blocker #3) — clipboard first (most testable),
    then menus/dialogs/DnD/multi-window. Makes desktop genuinely shippable.
 4. **Turnkey mobile/web loops** (Blocker #4) — promote the `render_into` cores to
