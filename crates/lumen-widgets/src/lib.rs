@@ -36,5 +36,8 @@ pub mod widgets_m3;
 pub mod widgets_m4;
 
 pub use app::{center, App, AppSnapshot, FrameStats, Headless, ReloadResult};
+/// Re-exported so downstream crates can bound on the renderer backend (e.g.
+/// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
+pub use lumen_render::{CpuRenderer, Renderer};
 pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
 pub use typed::{Button, Checkbox, Image, Slider, Text, TextField};

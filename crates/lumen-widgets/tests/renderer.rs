@@ -1,5 +1,6 @@
 //! A1: the runtime is generic over the renderer — the CPU reference renderer is
-//! the default, and a different backend can be swapped in at runtime.
+//! the default, an alternate backend is chosen at construction (`with_renderer`),
+//! and runtime swapping is retained for the `Box<dyn Renderer>` opt-in.
 
 use lumen_core::geometry::Size;
 use lumen_core::Color;
@@ -25,24 +26,41 @@ fn px(img: &RgbaImage, x: u32, y: u32) -> [u8; 4] {
 }
 
 #[test]
-fn renderer_is_pluggable() {
-    let mut a = App::new(|_cx: &mut BuildCx| theme::center_screen(theme::display("hi")))
+fn renderer_is_pluggable_at_construction() {
+    let build = |_cx: &mut BuildCx| theme::center_screen(theme::display("hi"));
+
+    let mut cpu_app = App::new(build).run_headless(Size::new(80.0, 60.0));
+    cpu_app.pump();
+    assert_eq!(cpu_app.renderer_name(), "cpu", "CPU is the default backend");
+    let cpu_frame = cpu_app.screenshot();
+
+    // Alternate backend selected at construction: App<SolidRed>.
+    let mut red_app = App::new(build)
+        .with_renderer(SolidRed)
         .run_headless(Size::new(80.0, 60.0));
-    a.pump();
-    assert_eq!(a.renderer_name(), "cpu", "CPU is the default backend");
-    let cpu_frame = a.screenshot();
+    red_app.pump();
+    assert_eq!(red_app.renderer_name(), "solid-red");
+    let red_frame = red_app.screenshot();
 
-    a.set_renderer(Box::new(SolidRed));
-    assert_eq!(a.renderer_name(), "solid-red");
-    let red_frame = a.screenshot();
-
-    assert_ne!(
-        cpu_frame, red_frame,
-        "swapping the backend changes the output"
-    );
+    assert_ne!(cpu_frame, red_frame, "the backend changes the output");
     assert_eq!(
         px(&red_frame, 10, 10),
         [255, 0, 0, 255],
         "alt backend painted"
     );
+}
+
+#[test]
+fn boxed_backend_is_swappable_at_runtime() {
+    // The `Box<dyn Renderer>` opt-in keeps the type stable, so a same-type swap
+    // is still legal — runtime backend selection for consumers who want it.
+    let boxed: Box<dyn Renderer> = Box::new(SolidRed);
+    let mut a = App::new(|_cx: &mut BuildCx| theme::display("x"))
+        .with_renderer(boxed)
+        .run_headless(Size::new(60.0, 40.0));
+    a.pump();
+    assert_eq!(a.renderer_name(), "solid-red");
+
+    a.set_renderer(Box::new(lumen_render::CpuRenderer)); // same type: Box<dyn Renderer>
+    assert_eq!(a.renderer_name(), "cpu", "swapped to CPU at runtime");
 }

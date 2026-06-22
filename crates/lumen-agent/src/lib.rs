@@ -10,14 +10,14 @@
 use kurbo::Point;
 use lumen_core::events::{Event, Key, KeyEvent, Modifiers, NamedKey, PointerEvent, TextInputEvent};
 use lumen_core::semantics::{resolve_one, SemanticsNode};
-use lumen_widgets::{center, Headless};
+use lumen_widgets::{center, Headless, Renderer};
 use serde_json::{json, Value};
 use std::net::TcpListener;
 
 mod base64;
 
 /// Dispatch one JSON-RPC request against `app`, returning the JSON-RPC response.
-pub fn dispatch(app: &mut Headless, req: &Value) -> Value {
+pub fn dispatch<R: Renderer>(app: &mut Headless<R>, req: &Value) -> Value {
     let id = req.get("id").cloned().unwrap_or(Value::Null);
     let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
     let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -36,10 +36,10 @@ type RpcResult = Result<Value, (i64, String)>;
 /// diagnostics, apply `fixer` to each, and repeat until the app is clean or
 /// `max_iters` is reached — the agent's detect → diagnose → fix → verify loop,
 /// with no human in the loop. Returns the number of repair rounds taken.
-pub fn auto_repair(
-    app: &mut Headless,
+pub fn auto_repair<R: Renderer>(
+    app: &mut Headless<R>,
     max_iters: usize,
-    mut fixer: impl FnMut(&mut Headless, &lumen_core::Diagnostic) -> bool,
+    mut fixer: impl FnMut(&mut Headless<R>, &lumen_core::Diagnostic) -> bool,
 ) -> usize {
     for round in 0..max_iters {
         app.pump();
@@ -97,7 +97,7 @@ impl Session {
     /// Dispatch a JSON-RPC request, recording replayable steps. `session.*`
     /// methods are handled here; everything else delegates to [`dispatch`] and
     /// successful input methods are recorded.
-    pub fn dispatch(&mut self, app: &mut Headless, req: &Value) -> Value {
+    pub fn dispatch<R: Renderer>(&mut self, app: &mut Headless<R>, req: &Value) -> Value {
         let id = req.get("id").cloned().unwrap_or(Value::Null);
         let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -140,9 +140,9 @@ impl Session {
         }
     }
 
-    fn handle_session(
+    fn handle_session<R: Renderer>(
         &mut self,
-        app: &mut Headless,
+        app: &mut Headless<R>,
         method: &str,
         params: &Value,
     ) -> Option<RpcResult> {
@@ -154,7 +154,7 @@ impl Session {
         }
     }
 
-    fn assert_text(&mut self, app: &mut Headless, params: &Value) -> RpcResult {
+    fn assert_text<R: Renderer>(&mut self, app: &mut Headless<R>, params: &Value) -> RpcResult {
         let selector = sel(params)?.to_string();
         let expected = params
             .get("equals")
@@ -174,7 +174,7 @@ impl Session {
         }
     }
 
-    fn assert_state(&mut self, app: &mut Headless, params: &Value) -> RpcResult {
+    fn assert_state<R: Renderer>(&mut self, app: &mut Headless<R>, params: &Value) -> RpcResult {
         let selector = sel(params)?.to_string();
         let state = params
             .get("state")
@@ -239,7 +239,7 @@ fn export_test(fn_name: &str, app_expr: &str, header: &str, steps: &[Step]) -> S
     s
 }
 
-fn handle(app: &mut Headless, method: &str, params: &Value) -> RpcResult {
+fn handle<R: Renderer>(app: &mut Headless<R>, method: &str, params: &Value) -> RpcResult {
     match method {
         "ui.getTree" => {
             let raw = params.get("raw").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -380,7 +380,7 @@ fn sel(params: &Value) -> Result<&str, (i64, String)> {
         .ok_or((-32602, "missing `selector`".to_string()))
 }
 
-fn resolve(app: &Headless, selector: &str) -> Result<SemanticsNode, (i64, String)> {
+fn resolve<R: Renderer>(app: &Headless<R>, selector: &str) -> Result<SemanticsNode, (i64, String)> {
     let root = app.semantics_doc().root.elided();
     match resolve_one(&root, selector) {
         Ok(id) => find_node(&root, id)
@@ -390,7 +390,7 @@ fn resolve(app: &Headless, selector: &str) -> Result<SemanticsNode, (i64, String
     }
 }
 
-fn resolve_action(app: &mut Headless, params: &Value) -> Result<SemanticsNode, (i64, String)> {
+fn resolve_action<R: Renderer>(app: &mut Headless<R>, params: &Value) -> Result<SemanticsNode, (i64, String)> {
     app.pump();
     resolve(app, sel(params)?)
 }
@@ -465,15 +465,15 @@ pub fn mcp_manifest() -> Value {
 /// Serve the agent protocol on `listener` for one connection, driving `app`.
 /// Blocking and single-threaded (the app lives here). Returns when the client
 /// disconnects.
-pub fn serve_one(listener: &TcpListener, app: &mut Headless) -> std::io::Result<()> {
+pub fn serve_one<R: Renderer>(listener: &TcpListener, app: &mut Headless<R>) -> std::io::Result<()> {
     serve_one_session(listener, app, &mut Session::new())
 }
 
 /// Like [`serve_one`], but records the connection into `session` so it can be
 /// exported as a regression suite (`session.exportTest`).
-pub fn serve_one_session(
+pub fn serve_one_session<R: Renderer>(
     listener: &TcpListener,
-    app: &mut Headless,
+    app: &mut Headless<R>,
     session: &mut Session,
 ) -> std::io::Result<()> {
     let (stream, _) = listener.accept()?;

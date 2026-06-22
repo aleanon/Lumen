@@ -29,30 +29,51 @@ pub struct FrameStats {
     pub painted: bool,
 }
 
-/// An application: a root build closure plus an optional stylesheet.
-pub struct App {
+/// An application: a root build closure, an optional stylesheet, and the frame
+/// renderer backend `R` (defaults to the deterministic [`lumen_render::CpuRenderer`]). The
+/// runtime is generic over `R` — zero-cost by default; a consumer who wants
+/// dynamic backend selection uses `R = Box<dyn Renderer>` (see the blanket
+/// `Renderer` impl in `lumen-render`).
+pub struct App<R = lumen_render::CpuRenderer> {
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     #[allow(dead_code)]
     stylesheet: Option<String>,
+    renderer: R,
 }
 
-impl App {
-    /// Create an app from its root build closure (02 §8).
+impl App<lumen_render::CpuRenderer> {
+    /// Create an app from its root build closure (02 §8), on the default CPU
+    /// reference renderer.
     pub fn new(root: impl Fn(&mut BuildCx) -> Element + 'static) -> App {
         App {
             root: Box::new(root),
             stylesheet: None,
+            renderer: lumen_render::CpuRenderer,
         }
     }
+}
 
+impl<R: lumen_render::Renderer> App<R> {
     /// Attach a stylesheet (parsed in M1; stored for now).
-    pub fn stylesheet(mut self, lss: &str) -> App {
+    pub fn stylesheet(mut self, lss: &str) -> App<R> {
         self.stylesheet = Some(lss.to_string());
         self
     }
 
-    /// Run headless on the CPU renderer at `size` (no OS dependencies).
-    pub fn run_headless(self, size: Size) -> Headless {
+    /// Swap the frame renderer backend, changing the app's `R` type (typestate
+    /// builder). The CPU reference renderer is the default; the shell hands in a
+    /// GPU backend (constructed post-surface), and a consumer wanting runtime
+    /// selection passes a `Box<dyn Renderer>`.
+    pub fn with_renderer<R2: lumen_render::Renderer>(self, renderer: R2) -> App<R2> {
+        App {
+            root: self.root,
+            stylesheet: self.stylesheet,
+            renderer,
+        }
+    }
+
+    /// Run headless at `size` (no OS dependencies).
+    pub fn run_headless(self, size: Size) -> Headless<R> {
         self.boot(size, None).0
     }
 
@@ -63,7 +84,7 @@ impl App {
         self,
         size: Size,
         snap: AppSnapshot,
-    ) -> (Headless, Vec<lumen_core::Diagnostic>) {
+    ) -> (Headless<R>, Vec<lumen_core::Diagnostic>) {
         self.boot(size, Some(snap))
     }
 
@@ -71,7 +92,7 @@ impl App {
         self,
         size: Size,
         restore: Option<AppSnapshot>,
-    ) -> (Headless, Vec<lumen_core::Diagnostic>) {
+    ) -> (Headless<R>, Vec<lumen_core::Diagnostic>) {
         // Focus is host state (not in the reactive store), so it is carried on
         // the snapshot and re-applied directly.
         let focused = restore.as_ref().and_then(|s| s.focused.clone());
@@ -81,7 +102,7 @@ impl App {
             size,
             scale: 1.0,
             clock_ms: 0.0,
-            renderer: Box::new(lumen_render::CpuRenderer),
+            renderer: self.renderer,
             text: TextEngine::new(),
             text_cache: HashMap::new(),
             shadow_cache: HashMap::new(),
@@ -185,7 +206,7 @@ fn dim_px(d: Dim) -> f64 {
 
 /// A headless, CPU-rendered application instance (02 §8). Drives the same input
 /// queue as a real shell, so tests and the agent exercise the real paths.
-pub struct Headless {
+pub struct Headless<R = lumen_render::CpuRenderer> {
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     rt: Runtime,
     /// Logical size (the coordinate space for layout, events, and the display
@@ -194,9 +215,11 @@ pub struct Headless {
     /// HiDPI scale factor: the frame is rendered at `size * scale` physical px.
     scale: f64,
     clock_ms: f64,
-    /// The pluggable frame renderer (A1). Defaults to the CPU reference renderer;
-    /// `set_renderer` swaps in another backend (e.g. GPU) at runtime.
-    renderer: Box<dyn lumen_render::Renderer>,
+    /// The frame renderer backend `R` (A1). The runtime is generic over it,
+    /// chosen at construction (`App::with_renderer`); defaults to the CPU
+    /// reference renderer. Zero-cost by default; `R = Box<dyn Renderer>` opts
+    /// into dynamic dispatch.
+    renderer: R,
     text: TextEngine,
     /// Cache of rasterized text keyed by (string, size bits, weight bits, sRGB
     /// color): static labels then cost one memcpy per frame instead of a full
@@ -235,7 +258,7 @@ pub struct Headless {
     rtl: bool,
 }
 
-impl Headless {
+impl<R: lumen_render::Renderer> Headless<R> {
     /// Process the input queue, then rebuild/layout/paint/semantics one turn.
     pub fn pump(&mut self) -> FrameStats {
         let mut events = Vec::new();
@@ -1186,9 +1209,11 @@ impl Headless {
             .render_frame(&dl, pw, ph, self.scale, Color::srgb8(255, 255, 255, 255))
     }
 
-    /// Swap the frame renderer backend (A1 — the runtime is generic over it).
-    /// Defaults to the CPU reference renderer.
-    pub fn set_renderer(&mut self, renderer: Box<dyn lumen_render::Renderer>) {
+    /// Replace the frame renderer with another of the *same* type `R`, then
+    /// re-render. (The backend type is chosen at construction via
+    /// `App::with_renderer`; this only swaps the instance — e.g. a reconfigured
+    /// `Box<dyn Renderer>` when `R` is the boxed escape-hatch type.)
+    pub fn set_renderer(&mut self, renderer: R) {
         self.renderer = renderer;
         self.pump();
     }

@@ -73,3 +73,24 @@ impl Renderer for CpuRenderer {
         "cpu"
     }
 }
+
+/// A boxed renderer is itself a renderer — the dynamic-dispatch escape hatch. The
+/// runtime is generic over `R: Renderer` (zero-cost by default); a consumer who
+/// wants a backend chosen at runtime instantiates the runtime with
+/// `R = Box<dyn Renderer>` and pays one vtable hop, by their own choice.
+impl<R: Renderer + ?Sized> Renderer for Box<R> {
+    fn render_frame(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+    ) -> RgbaImage {
+        (**self).render_frame(list, width, height, scale, background)
+    }
+
+    fn name(&self) -> &'static str {
+        (**self).name()
+    }
+}
