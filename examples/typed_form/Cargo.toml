@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "typed_form"
 path = "src/main.rs"
 
+[[example]]
+name = "typed_form-win"
+path = "examples/win.rs"
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }

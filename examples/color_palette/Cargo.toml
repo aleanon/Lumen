@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "color_palette"
 path = "src/main.rs"
 
+[[example]]
+name = "color_palette-win"
+path = "examples/win.rs"
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }

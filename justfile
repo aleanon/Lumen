@@ -12,7 +12,7 @@ run name *args:
     # Release: a debug build of the CPU renderer + text stack is ~35x slower,
     # which shows up as a low animation frame rate and laggy resize.
     if [[ -f "examples/$name/examples/win.rs" ]]; then
-        cargo run -q --release -p "$name" --example win        # standalone example crate
+        cargo run -q --release -p "$name" --example "$name-win"  # standalone example crate
     elif [[ -d "examples/$name" && -f "examples/$name/src/main.rs" ]]; then
         cargo run -p "$name" {{args}}                          # binary example (headless smoke)
     else
@@ -34,7 +34,7 @@ run-hot name lss="":
     fi
     export LUMEN_WATCH_LSS="$lss"
     if [[ -f "examples/$name/examples/win.rs" ]]; then
-        cargo run -q --release -p "$name" --example win
+        cargo run -q --release -p "$name" --example "$name-win"
     else
         cargo run -q --release -p iced-parity --example win -- "$name"
     fi
@@ -46,7 +46,7 @@ run-agent name addr="127.0.0.1:9230":
     name="{{name}}"
     export LUMEN_AGENT_ADDR="{{addr}}"
     if [[ -f "examples/$name/examples/win.rs" ]]; then
-        cargo run -q --release -p "$name" --example win
+        cargo run -q --release -p "$name" --example "$name-win"
     else
         cargo run -q --release -p iced-parity --example win -- "$name"
     fi

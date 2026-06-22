@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "system_information"
 path = "src/main.rs"
 
+[[example]]
+name = "system_information-win"
+path = "examples/win.rs"
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }

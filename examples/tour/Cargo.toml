@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "tour"
 path = "src/main.rs"
 
+[[example]]
+name = "tour-win"
+path = "examples/win.rs"
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }

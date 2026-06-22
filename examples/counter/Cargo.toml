@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "counter"
 path = "src/main.rs"
 
+[[example]]
+name = "counter-win"
+path = "examples/win.rs"
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }

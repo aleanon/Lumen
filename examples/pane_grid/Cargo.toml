@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "pane_grid"
 path = "src/main.rs"
 
+[[example]]
+name = "pane_grid-win"
+path = "examples/win.rs"
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }

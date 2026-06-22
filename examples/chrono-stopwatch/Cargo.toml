@@ -15,6 +15,10 @@ path = "src/lib.rs"
 name = "chrono-stopwatch"
 path = "src/main.rs"
 
+[[example]]
+name = "chrono-stopwatch-win"
+path = "examples/win.rs"
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }
