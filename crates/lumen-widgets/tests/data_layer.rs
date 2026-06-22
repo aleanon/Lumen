@@ -18,7 +18,10 @@ fn settle(a: &mut ManualApp) {
 }
 
 fn click(a: &mut ManualApp, id: &str) {
-    fn find(n: &lumen_core::semantics::SemanticsNode, id: &str) -> Option<lumen_core::geometry::Rect> {
+    fn find(
+        n: &lumen_core::semantics::SemanticsNode,
+        id: &str,
+    ) -> Option<lumen_core::geometry::Rect> {
         if n.id.as_ref().map(|i| i.as_str()) == Some(id) {
             return Some(n.bounds);
         }
@@ -70,9 +73,13 @@ fn dep_change_refetches_keeping_stale_value() {
     let build = |cx: &mut BuildCx| {
         let id = cx.signal("id", || 1i32);
         let cur = id.get(cx.runtime());
-        let r =
-            cx.resource_blocking::<i32, lumen_widgets::TaskError, _>("user", cur, move |id| Ok(id * 10));
-        let shown = r.value.map(|v| v.to_string()).unwrap_or_else(|| "none".into());
+        let r = cx.resource_blocking::<i32, lumen_widgets::TaskError, _>("user", cur, move |id| {
+            Ok(id * 10)
+        });
+        let shown = r
+            .value
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "none".into());
 
         let mut bump = lumen_widgets::widgets::button("bump", move |rt| id.update(rt, |v| *v += 1));
         bump = bump.id("bump");
@@ -152,5 +159,8 @@ fn boxed_executor_opt_in_compiles_and_runs() {
         .run_headless(Size::new(60.0, 30.0));
     a.pump(); // inline runs the job during dispatch; result queued
     a.pump(); // drains → applied
-    assert!(a.semantics_json().to_string().contains('5'), "boxed inline resolved");
+    assert!(
+        a.semantics_json().to_string().contains('5'),
+        "boxed inline resolved"
+    );
 }

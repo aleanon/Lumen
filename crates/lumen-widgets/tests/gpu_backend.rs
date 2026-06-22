@@ -57,8 +57,8 @@ fn boxed_renderer_opt_in_compiles_and_runs() {
 
 #[test]
 fn default_runtime_is_cpu() {
-    let mut a = App::new(|_cx: &mut BuildCx| theme::display("Default"))
-        .run_headless(Size::new(80.0, 40.0));
+    let mut a =
+        App::new(|_cx: &mut BuildCx| theme::display("Default")).run_headless(Size::new(80.0, 40.0));
     a.pump();
     assert_eq!(a.renderer_name(), "cpu");
 }

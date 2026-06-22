@@ -97,7 +97,11 @@ impl Session {
     /// Dispatch a JSON-RPC request, recording replayable steps. `session.*`
     /// methods are handled here; everything else delegates to [`dispatch`] and
     /// successful input methods are recorded.
-    pub fn dispatch<R: Renderer, E: Spawner>(&mut self, app: &mut Headless<R, E>, req: &Value) -> Value {
+    pub fn dispatch<R: Renderer, E: Spawner>(
+        &mut self,
+        app: &mut Headless<R, E>,
+        req: &Value,
+    ) -> Value {
         let id = req.get("id").cloned().unwrap_or(Value::Null);
         let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -154,7 +158,11 @@ impl Session {
         }
     }
 
-    fn assert_text<R: Renderer, E: Spawner>(&mut self, app: &mut Headless<R, E>, params: &Value) -> RpcResult {
+    fn assert_text<R: Renderer, E: Spawner>(
+        &mut self,
+        app: &mut Headless<R, E>,
+        params: &Value,
+    ) -> RpcResult {
         let selector = sel(params)?.to_string();
         let expected = params
             .get("equals")
@@ -174,7 +182,11 @@ impl Session {
         }
     }
 
-    fn assert_state<R: Renderer, E: Spawner>(&mut self, app: &mut Headless<R, E>, params: &Value) -> RpcResult {
+    fn assert_state<R: Renderer, E: Spawner>(
+        &mut self,
+        app: &mut Headless<R, E>,
+        params: &Value,
+    ) -> RpcResult {
         let selector = sel(params)?.to_string();
         let state = params
             .get("state")
@@ -239,7 +251,11 @@ fn export_test(fn_name: &str, app_expr: &str, header: &str, steps: &[Step]) -> S
     s
 }
 
-fn handle<R: Renderer, E: Spawner>(app: &mut Headless<R, E>, method: &str, params: &Value) -> RpcResult {
+fn handle<R: Renderer, E: Spawner>(
+    app: &mut Headless<R, E>,
+    method: &str,
+    params: &Value,
+) -> RpcResult {
     match method {
         "ui.getTree" => {
             let raw = params.get("raw").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -380,7 +396,10 @@ fn sel(params: &Value) -> Result<&str, (i64, String)> {
         .ok_or((-32602, "missing `selector`".to_string()))
 }
 
-fn resolve<R: Renderer, E: Spawner>(app: &Headless<R, E>, selector: &str) -> Result<SemanticsNode, (i64, String)> {
+fn resolve<R: Renderer, E: Spawner>(
+    app: &Headless<R, E>,
+    selector: &str,
+) -> Result<SemanticsNode, (i64, String)> {
     let root = app.semantics_doc().root.elided();
     match resolve_one(&root, selector) {
         Ok(id) => find_node(&root, id)
@@ -390,7 +409,10 @@ fn resolve<R: Renderer, E: Spawner>(app: &Headless<R, E>, selector: &str) -> Res
     }
 }
 
-fn resolve_action<R: Renderer, E: Spawner>(app: &mut Headless<R, E>, params: &Value) -> Result<SemanticsNode, (i64, String)> {
+fn resolve_action<R: Renderer, E: Spawner>(
+    app: &mut Headless<R, E>,
+    params: &Value,
+) -> Result<SemanticsNode, (i64, String)> {
     app.pump();
     resolve(app, sel(params)?)
 }
@@ -465,7 +487,10 @@ pub fn mcp_manifest() -> Value {
 /// Serve the agent protocol on `listener` for one connection, driving `app`.
 /// Blocking and single-threaded (the app lives here). Returns when the client
 /// disconnects.
-pub fn serve_one<R: Renderer, E: Spawner>(listener: &TcpListener, app: &mut Headless<R, E>) -> std::io::Result<()> {
+pub fn serve_one<R: Renderer, E: Spawner>(
+    listener: &TcpListener,
+    app: &mut Headless<R, E>,
+) -> std::io::Result<()> {
     serve_one_session(listener, app, &mut Session::new())
 }
 

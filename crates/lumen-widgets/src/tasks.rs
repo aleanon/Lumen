@@ -174,8 +174,7 @@ impl BuildCx<'_> {
     {
         let dh = hash_deps(&deps);
         let sig = self.signal::<ResourceCell<T, E>>(key, ResourceCell::default);
-        let (changed, gen) =
-            sig.with(self.runtime(), |c| (!c.started || c.deps_hash != dh, c.gen));
+        let (changed, gen) = sig.with(self.runtime(), |c| (!c.started || c.deps_hash != dh, c.gen));
         if changed {
             let new_gen = gen + 1;
             sig.update(self.runtime(), move |c| {
@@ -184,9 +183,7 @@ impl BuildCx<'_> {
                 c.gen = new_gen;
                 c.started = true;
             });
-            self.tasks
-                .borrow_mut()
-                .push(make_req(deps, sig, new_gen));
+            self.tasks.borrow_mut().push(make_req(deps, sig, new_gen));
         }
         sig.with(self.runtime(), |c| Resource {
             value: c.value.clone(),
@@ -198,12 +195,8 @@ impl BuildCx<'_> {
     /// Spawn a long-lived async task (e.g. a stream) once per (key, deps). The
     /// closure gets a [`crate::Sink`] to push results back over time (`sink.set` /
     /// `sink.update` a signal). Use for streaming/subscriptions.
-    pub fn task<D, Fut>(
-        &self,
-        key: &str,
-        deps: D,
-        f: impl FnOnce(D, Sink) -> Fut + Send + 'static,
-    ) where
+    pub fn task<D, Fut>(&self, key: &str, deps: D, f: impl FnOnce(D, Sink) -> Fut + Send + 'static)
+    where
         D: Hash + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
@@ -214,12 +207,8 @@ impl BuildCx<'_> {
 
     /// Spawn a blocking task (e.g. a heavy compute job streaming progress) once
     /// per (key, deps). The closure gets a [`crate::Sink`] to push results/progress.
-    pub fn task_blocking<D>(
-        &self,
-        key: &str,
-        deps: D,
-        f: impl FnOnce(D, Sink) + Send + 'static,
-    ) where
+    pub fn task_blocking<D>(&self, key: &str, deps: D, f: impl FnOnce(D, Sink) + Send + 'static)
+    where
         D: Hash + Send + 'static,
     {
         self.task_impl(key, deps, |deps| {

@@ -77,11 +77,7 @@ impl Sink {
     }
 
     /// Update `sig` in place (applied next turn).
-    pub fn update<T: State + Send>(
-        &self,
-        sig: Signal<T>,
-        f: impl FnOnce(&mut T) + Send + 'static,
-    ) {
+    pub fn update<T: State + Send>(&self, sig: Signal<T>, f: impl FnOnce(&mut T) + Send + 'static) {
         self.mutate(move |rt| sig.update(rt, f));
     }
 }

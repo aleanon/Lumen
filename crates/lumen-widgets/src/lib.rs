@@ -37,11 +37,11 @@ pub mod widgets_m3;
 pub mod widgets_m4;
 
 pub use app::{center, App, AppSnapshot, FrameStats, Headless, ReloadResult};
+pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
+/// The data layer: executors + the `Sink` background work pushes results through.
+pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
 /// Re-exported so downstream crates can bound on the renderer backend (e.g.
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
 pub use lumen_render::{CpuRenderer, Renderer};
-/// The data layer: executors + the `Sink` background work pushes results through.
-pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
 pub use tasks::{Resource, TaskError};
-pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
 pub use typed::{Button, Checkbox, Image, Slider, Text, TextField};
