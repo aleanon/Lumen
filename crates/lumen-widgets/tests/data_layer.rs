@@ -135,3 +135,22 @@ fn blocking_task_streams_progress_into_a_signal() {
         "streamed to 3"
     );
 }
+
+#[test]
+fn boxed_executor_opt_in_compiles_and_runs() {
+    // The dynamic-dispatch opt-in for the executor: instantiate with
+    // `E = Box<dyn Spawner>` (the blanket `impl Spawner for Box<S>`). Here the
+    // boxed executor is the inline one, so a resource settles within two pumps.
+    use lumen_core::tasks::{InlineSpawner, Spawner};
+    let boxed: Box<dyn Spawner> = Box::new(InlineSpawner);
+    let build = |cx: &mut BuildCx| {
+        let r = cx.resource_blocking::<i32, lumen_widgets::TaskError, _>("b", (), |()| Ok(5));
+        Element::text(r.value.map(|v| v.to_string()).unwrap_or_else(|| "…".into()))
+    };
+    let mut a = App::new(build)
+        .with_executor(boxed)
+        .run_headless(Size::new(60.0, 30.0));
+    a.pump(); // inline runs the job during dispatch; result queued
+    a.pump(); // drains → applied
+    assert!(a.semantics_json().to_string().contains('5'), "boxed inline resolved");
+}

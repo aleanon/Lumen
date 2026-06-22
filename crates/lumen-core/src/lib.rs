@@ -29,3 +29,5 @@ pub use diagnostics::{codes, Diagnostic, Severity, SourceSpan};
 pub use identity::{NodeIndex, StableId};
 pub use state::{Runtime, Signal};
 pub use tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
+#[cfg(not(target_arch = "wasm32"))]
+pub use tasks::ThreadPoolSpawner;

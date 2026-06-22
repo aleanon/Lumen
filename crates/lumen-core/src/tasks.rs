@@ -204,6 +204,59 @@ impl Spawner for ManualSpawner {
     }
 }
 
+/// A real executor backed by a small pool of OS threads (native only — wasm has
+/// no threads). `spawn_blocking` queues the closure; `spawn` queues
+/// `block_on(fut)`. The default for desktop/Android shells.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct ThreadPoolSpawner {
+    tx: std::sync::mpsc::Sender<Box<dyn FnOnce() + Send>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ThreadPoolSpawner {
+    /// A pool with `workers` threads (clamped to ≥1).
+    pub fn new(workers: usize) -> ThreadPoolSpawner {
+        let (tx, rx) = std::sync::mpsc::channel::<Box<dyn FnOnce() + Send>>();
+        let rx = Arc::new(std::sync::Mutex::new(rx));
+        for _ in 0..workers.max(1) {
+            let rx = Arc::clone(&rx);
+            std::thread::spawn(move || loop {
+                // Hold the lock only across recv; run the job unlocked so workers
+                // run jobs concurrently.
+                let job = {
+                    let guard = rx.lock().expect("pool rx");
+                    guard.recv()
+                };
+                match job {
+                    Ok(j) => j(),
+                    Err(_) => break, // sender dropped → shut down
+                }
+            });
+        }
+        ThreadPoolSpawner { tx }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for ThreadPoolSpawner {
+    fn default() -> ThreadPoolSpawner {
+        let n = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        ThreadPoolSpawner::new(n)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Spawner for ThreadPoolSpawner {
+    fn spawn(&self, fut: BoxFuture) {
+        let _ = self.tx.send(Box::new(move || block_on(fut)));
+    }
+    fn spawn_blocking(&self, f: Box<dyn FnOnce() + Send>) {
+        let _ = self.tx.send(f);
+    }
+}
+
 /// A minimal `block_on`: poll the future, parking the thread until woken. Used by
 /// the inline/manual executors (std has no `block_on`).
 fn block_on(mut fut: BoxFuture) {
@@ -251,6 +304,18 @@ mod tests {
         ex.spawn(Box::pin(async move { sink.set(sig, 9) }));
         rt.drain_deferred();
         assert_eq!(sig.get(&rt), 9, "both ran inline; last write wins");
+    }
+
+    #[test]
+    fn thread_pool_runs_work_off_thread() {
+        use std::sync::mpsc::channel;
+        let pool = ThreadPoolSpawner::new(2);
+        let (tx, rx) = channel();
+        pool.spawn_blocking(Box::new(move || tx.send(7).unwrap()));
+        assert_eq!(rx.recv().unwrap(), 7, "blocking job ran on the pool");
+        let (tx2, rx2) = channel();
+        pool.spawn(Box::pin(async move { tx2.send(9).unwrap() }));
+        assert_eq!(rx2.recv().unwrap(), 9, "future job ran on the pool");
     }
 
     #[test]

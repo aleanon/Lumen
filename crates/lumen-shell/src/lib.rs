@@ -47,7 +47,15 @@ enum ShellEvent {
     },
     /// New `.lss` source from the file-watcher (tier-1 hot reload, C1).
     ReloadStyles(String),
+    /// A background task pushed a result; schedule a frame to apply it (the data
+    /// layer waker target).
+    Wake,
 }
+
+/// The shell's concrete runtime: CPU reference renderer + a real thread-pool
+/// executor for the data layer.
+type ShellApp = App<lumen_widgets::CpuRenderer, lumen_core::tasks::ThreadPoolSpawner>;
+type ShellHeadless = Headless<lumen_widgets::CpuRenderer, lumen_core::tasks::ThreadPoolSpawner>;
 
 /// Open a window and run `app` at `size`.
 ///
@@ -69,8 +77,12 @@ pub fn run(app: App, size: Size) {
         let proxy = event_loop.create_proxy();
         std::thread::spawn(move || watch_styles(&path, proxy));
     }
+    // Upgrade the default inline executor to a real thread pool for the live app,
+    // so `cx.resource`/`cx.task` run off the UI thread.
+    let app = app.with_executor(lumen_core::tasks::ThreadPoolSpawner::default());
     let mut shell = Shell {
         app: Some(app),
+        proxy: event_loop.create_proxy(),
         size,
         headless: None,
         window: None,
@@ -164,9 +176,12 @@ fn agent_conn(stream: TcpStream, proxy: EventLoopProxy<ShellEvent>) {
 }
 
 struct Shell {
-    app: Option<App>,
+    app: Option<ShellApp>,
+    /// Event-loop proxy used to build the data-layer waker (so background results
+    /// schedule a frame).
+    proxy: EventLoopProxy<ShellEvent>,
     size: Size,
-    headless: Option<Headless>,
+    headless: Option<ShellHeadless>,
     window: Option<Arc<Window>>,
     presenter: Option<Presenter>,
     /// Pointer position in *logical* px (physical ÷ scale), the runtime's space.
@@ -219,6 +234,16 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     }
                 }
             }
+            ShellEvent::Wake => {
+                // A background result is queued; pump applies it (drains the
+                // deferred-op queue) and we present the new frame.
+                if let Some(h) = &mut self.headless {
+                    h.pump();
+                    if let Some(p) = &mut self.presenter {
+                        p.present(&h.screenshot());
+                    }
+                }
+            }
         }
     }
 
@@ -247,6 +272,12 @@ impl ApplicationHandler<ShellEvent> for Shell {
         );
         let mut headless = app.run_headless(self.size);
         headless.set_scale(self.scale);
+        // Wake the loop when a background task pushes a result, so it gets applied
+        // and presented (the data-layer waker).
+        let proxy = self.proxy.clone();
+        headless.set_waker(std::sync::Arc::new(move || {
+            let _ = proxy.send_event(ShellEvent::Wake);
+        }));
         self.headless = Some(headless);
         self.presenter = Some(presenter);
         window.request_redraw(); // paint the first frame
