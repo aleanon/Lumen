@@ -298,15 +298,30 @@ pub struct FrameRequests {
     pub continuous: bool,
     /// Absolute virtual-clock deadlines (ms) at which the UI wants a frame.
     pub wakes: Vec<f64>,
+    /// Background-work spawn requests this build emitted (the data layer). The
+    /// runtime dispatches them after the build, on its executor (see `tasks`).
+    pub tasks: Vec<TaskRequest>,
+}
+
+/// A request to run background work, recorded during build and dispatched by the
+/// runtime *after* the build (it owns the executor + the deferred-op channel, so
+/// the executor never leaks into `BuildCx`). Each variant is "given a [`Sink`](lumen_core::tasks::Sink),
+/// do the work" — the runtime mints the sink at dispatch and runs it.
+pub enum TaskRequest {
+    /// CPU-bound work for `spawn_blocking`.
+    Blocking(Box<dyn FnOnce(lumen_core::tasks::Sink) + Send>),
+    /// Async work for `spawn` — a factory that, given the sink, yields the future.
+    Future(Box<dyn FnOnce(lumen_core::tasks::Sink) -> lumen_core::tasks::BoxFuture + Send>),
 }
 
 /// The build context handed to the root closure and components. Exposes signal
-/// creation, the (virtual) clock, and time-driven animation requests.
+/// creation, the (virtual) clock, time-driven animation, and background tasks.
 pub struct BuildCx<'a> {
     rt: &'a Runtime,
     now_ms: f64,
     requests: RefCell<Vec<f64>>,
     continuous: Cell<bool>,
+    pub(crate) tasks: RefCell<Vec<TaskRequest>>,
 }
 
 impl<'a> BuildCx<'a> {
@@ -316,6 +331,7 @@ impl<'a> BuildCx<'a> {
             now_ms,
             requests: RefCell::new(Vec::new()),
             continuous: Cell::new(false),
+            tasks: RefCell::new(Vec::new()),
         }
     }
 
@@ -354,11 +370,12 @@ impl<'a> BuildCx<'a> {
         self.wake_at(self.now_ms + dt_ms);
     }
 
-    /// Take the animation/timer requests this build emitted.
+    /// Take the animation/timer/task requests this build emitted.
     pub(crate) fn take_requests(self) -> FrameRequests {
         FrameRequests {
             continuous: self.continuous.get(),
             wakes: self.requests.into_inner(),
+            tasks: self.tasks.into_inner(),
         }
     }
 }

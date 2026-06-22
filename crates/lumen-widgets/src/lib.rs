@@ -29,6 +29,7 @@ pub mod wcag;
 // built on wasm; on the web, shaders are a WebGPU presenter concern.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod shader;
+pub mod tasks;
 pub mod widgets;
 pub mod widgets_extra;
 pub mod widgets_m1;
@@ -39,5 +40,8 @@ pub use app::{center, App, AppSnapshot, FrameStats, Headless, ReloadResult};
 /// Re-exported so downstream crates can bound on the renderer backend (e.g.
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
 pub use lumen_render::{CpuRenderer, Renderer};
+/// The data layer: executors + the `Sink` background work pushes results through.
+pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
+pub use tasks::{Resource, TaskError};
 pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
 pub use typed::{Button, Checkbox, Image, Slider, Text, TextField};

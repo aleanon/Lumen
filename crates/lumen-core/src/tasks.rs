@@ -141,8 +141,8 @@ impl<S: Spawner + ?Sized> Spawner for Box<S> {
 /// The deterministic default: runs blocking work inline and block-on's futures to
 /// completion on the calling thread. No threads ⇒ goldens/tests stay bit-stable
 /// and resources resolve "immediately" in virtual time. (A truly-suspending
-/// future would block the UI thread — use [`ThreadPoolSpawner`] / async for real
-/// I/O; this is for tests and ready/compute work.)
+/// future would block the UI thread — use a thread-pool / async executor for
+/// real I/O; this is for tests and ready/compute work.)
 #[derive(Default, Clone, Copy)]
 pub struct InlineSpawner;
 

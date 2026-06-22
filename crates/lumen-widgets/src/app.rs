@@ -34,28 +34,30 @@ pub struct FrameStats {
 /// runtime is generic over `R` — zero-cost by default; a consumer who wants
 /// dynamic backend selection uses `R = Box<dyn Renderer>` (see the blanket
 /// `Renderer` impl in `lumen-render`).
-pub struct App<R = lumen_render::CpuRenderer> {
+pub struct App<R = lumen_render::CpuRenderer, E = lumen_core::tasks::InlineSpawner> {
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     #[allow(dead_code)]
     stylesheet: Option<String>,
     renderer: R,
+    executor: E,
 }
 
-impl App<lumen_render::CpuRenderer> {
+impl App<lumen_render::CpuRenderer, lumen_core::tasks::InlineSpawner> {
     /// Create an app from its root build closure (02 §8), on the default CPU
-    /// reference renderer.
+    /// reference renderer and the deterministic inline executor.
     pub fn new(root: impl Fn(&mut BuildCx) -> Element + 'static) -> App {
         App {
             root: Box::new(root),
             stylesheet: None,
             renderer: lumen_render::CpuRenderer,
+            executor: lumen_core::tasks::InlineSpawner,
         }
     }
 }
 
-impl<R: lumen_render::Renderer> App<R> {
+impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
     /// Attach a stylesheet (parsed in M1; stored for now).
-    pub fn stylesheet(mut self, lss: &str) -> App<R> {
+    pub fn stylesheet(mut self, lss: &str) -> App<R, E> {
         self.stylesheet = Some(lss.to_string());
         self
     }
@@ -64,16 +66,30 @@ impl<R: lumen_render::Renderer> App<R> {
     /// builder). The CPU reference renderer is the default; the shell hands in a
     /// GPU backend (constructed post-surface), and a consumer wanting runtime
     /// selection passes a `Box<dyn Renderer>`.
-    pub fn with_renderer<R2: lumen_render::Renderer>(self, renderer: R2) -> App<R2> {
+    pub fn with_renderer<R2: lumen_render::Renderer>(self, renderer: R2) -> App<R2, E> {
         App {
             root: self.root,
             stylesheet: self.stylesheet,
             renderer,
+            executor: self.executor,
+        }
+    }
+
+    /// Swap the background-work executor, changing the app's `E` type (typestate
+    /// builder). Defaults to the deterministic [`InlineSpawner`](lumen_core::tasks::InlineSpawner);
+    /// the shell hands in a real thread-pool / async executor, and a consumer
+    /// wanting runtime selection passes a `Box<dyn Spawner>`.
+    pub fn with_executor<E2: lumen_core::tasks::Spawner>(self, executor: E2) -> App<R, E2> {
+        App {
+            root: self.root,
+            stylesheet: self.stylesheet,
+            renderer: self.renderer,
+            executor,
         }
     }
 
     /// Run headless at `size` (no OS dependencies).
-    pub fn run_headless(self, size: Size) -> Headless<R> {
+    pub fn run_headless(self, size: Size) -> Headless<R, E> {
         self.boot(size, None).0
     }
 
@@ -84,7 +100,7 @@ impl<R: lumen_render::Renderer> App<R> {
         self,
         size: Size,
         snap: AppSnapshot,
-    ) -> (Headless<R>, Vec<lumen_core::Diagnostic>) {
+    ) -> (Headless<R, E>, Vec<lumen_core::Diagnostic>) {
         self.boot(size, Some(snap))
     }
 
@@ -92,7 +108,7 @@ impl<R: lumen_render::Renderer> App<R> {
         self,
         size: Size,
         restore: Option<AppSnapshot>,
-    ) -> (Headless<R>, Vec<lumen_core::Diagnostic>) {
+    ) -> (Headless<R, E>, Vec<lumen_core::Diagnostic>) {
         // Focus is host state (not in the reactive store), so it is carried on
         // the snapshot and re-applied directly.
         let focused = restore.as_ref().and_then(|s| s.focused.clone());
@@ -103,6 +119,8 @@ impl<R: lumen_render::Renderer> App<R> {
             scale: 1.0,
             clock_ms: 0.0,
             renderer: self.renderer,
+            executor: self.executor,
+            task_waker: None,
             text: TextEngine::new(),
             text_cache: HashMap::new(),
             shadow_cache: HashMap::new(),
@@ -206,7 +224,7 @@ fn dim_px(d: Dim) -> f64 {
 
 /// A headless, CPU-rendered application instance (02 §8). Drives the same input
 /// queue as a real shell, so tests and the agent exercise the real paths.
-pub struct Headless<R = lumen_render::CpuRenderer> {
+pub struct Headless<R = lumen_render::CpuRenderer, E = lumen_core::tasks::InlineSpawner> {
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     rt: Runtime,
     /// Logical size (the coordinate space for layout, events, and the display
@@ -220,6 +238,14 @@ pub struct Headless<R = lumen_render::CpuRenderer> {
     /// reference renderer. Zero-cost by default; `R = Box<dyn Renderer>` opts
     /// into dynamic dispatch.
     renderer: R,
+    /// The background-work executor `E` (the data layer). Generic, chosen at
+    /// construction (`App::with_executor`); defaults to the deterministic inline
+    /// executor. `E = Box<dyn Spawner>` opts into dynamic dispatch.
+    executor: E,
+    /// Host waker: wakes the event loop when a background result is queued, so a
+    /// frame gets scheduled. Set by the shell; `None` headless (the next manual
+    /// `pump` drains the deferred-op queue).
+    task_waker: Option<lumen_core::tasks::WakeFn>,
     text: TextEngine,
     /// Cache of rasterized text keyed by (string, size bits, weight bits, sRGB
     /// color): static labels then cost one memcpy per frame instead of a full
@@ -258,9 +284,13 @@ pub struct Headless<R = lumen_render::CpuRenderer> {
     rtl: bool,
 }
 
-impl<R: lumen_render::Renderer> Headless<R> {
+impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// Process the input queue, then rebuild/layout/paint/semantics one turn.
     pub fn pump(&mut self) -> FrameStats {
+        // Apply any background-task results first (on the UI thread), so the build
+        // sees fresh state. Keeps `pump` a pure function of (state, queued
+        // events + deferred ops, clock).
+        self.rt.drain_deferred();
         let mut events = Vec::new();
         while let Some(ev) = self.input.pop() {
             events.push(ev);
@@ -642,6 +672,23 @@ impl<R: lumen_render::Renderer> Headless<R> {
             (el, cx.take_requests())
         };
         self.requests = requests;
+
+        // Dispatch background-work requests this build emitted, on the executor.
+        // The runtime owns the executor + the deferred-op channel, so it mints
+        // the sink here (the executor never leaked into `BuildCx`). Results flow
+        // back through the channel and are applied at the top of the next pump.
+        let tasks = std::mem::take(&mut self.requests.tasks);
+        for req in tasks {
+            let sink = self.rt.make_sink_with(self.task_waker.clone());
+            match req {
+                crate::element::TaskRequest::Blocking(job) => {
+                    self.executor.spawn_blocking(Box::new(move || job(sink)));
+                }
+                crate::element::TaskRequest::Future(make) => {
+                    self.executor.spawn(make(sink));
+                }
+            }
+        }
 
         let mut tree = Tree::new();
         let mut layout = LayoutTree::new();
@@ -1221,6 +1268,20 @@ impl<R: lumen_render::Renderer> Headless<R> {
     /// The active renderer backend's name (e.g. `"cpu"`).
     pub fn renderer_name(&self) -> &'static str {
         self.renderer.name()
+    }
+
+    /// Shared reference to the background-work executor `E`. Lets a test reach a
+    /// [`ManualSpawner`](lumen_core::tasks::ManualSpawner) after it has been moved
+    /// into the runtime (to `run_pending` between pumps).
+    pub fn executor(&self) -> &E {
+        &self.executor
+    }
+
+    /// Set the host waker invoked when a background result is queued (the shell
+    /// wires an event-loop wake so results schedule a frame). Headless leaves it
+    /// unset; the next manual `pump` drains the deferred-op queue regardless.
+    pub fn set_waker(&mut self, waker: lumen_core::tasks::WakeFn) {
+        self.task_waker = Some(waker);
     }
 
     /// A deterministic APCA text-contrast report over the current frame's
