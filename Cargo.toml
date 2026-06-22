@@ -39,6 +39,7 @@ members = [
     "examples/styling",
     "examples/counter",
     "examples/todos",
+    "examples/catalog",
     "examples/data",
     "examples/glass",
     "examples/chart",

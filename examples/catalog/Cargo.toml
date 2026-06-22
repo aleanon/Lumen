@@ -1,0 +1,30 @@
+[package]
+name = "catalog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "catalog"
+path = "src/lib.rs"
+
+[[bin]]
+name = "catalog"
+path = "src/main.rs"
+
+[[example]]
+name = "catalog-win"
+path = "examples/win.rs"
+
+[dependencies]
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+lumen-widgets = { workspace = true }
+lumen-layout = { workspace = true }
+kurbo = { workspace = true }
+
+[dev-dependencies]
+lumen-shell = { workspace = true }

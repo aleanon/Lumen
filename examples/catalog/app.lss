@@ -1,0 +1,27 @@
+@tokens {
+    page: #05070dff;
+    surface: #0c1120ff;
+    ink: #eaf0ffff;
+    muted: #7c87a4ff;
+    faint: #4a5474ff;
+    header: #0a1d3aff;
+    rowalt: #0e1322ff;
+    track: #182036ff;
+}
+
+#page { background: $page; }
+#card { background: $surface; border-radius: 20px; }
+#header { background: $header; border-radius: 16px; }
+.title { color: $ink; }
+.subtitle { color: $muted; }
+.count { color: #5bd2a0ff; }
+
+.row { background: $surface; }
+.row-alt { background: $rowalt; }
+.name { color: $ink; }
+.meta { color: $muted; }
+.idx { color: $faint; }
+.loading { color: $faint; }
+
+.scrollbar-track { background: $track; border-radius: 3px; }
+.scrollbar-thumb { background: #3a86ffff; border-radius: 3px; }
