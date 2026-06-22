@@ -172,9 +172,17 @@ pub struct StateSnapshot(pub serde_json::Value);
 
 /// The reactive runtime and state store. Cheap to clone (shared, interior
 /// mutability) so it can be handed to read/write contexts.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Runtime {
     inner: Rc<RefCell<Inner>>,
+    /// Channel for off-thread results (the data layer); see [`crate::tasks`].
+    deferred: Rc<crate::tasks::DeferredChannel>,
+}
+
+impl Default for Runtime {
+    fn default() -> Runtime {
+        Runtime::new()
+    }
 }
 
 impl ReadCx for Runtime {
@@ -194,7 +202,15 @@ impl WriteCx for Runtime {
 impl Runtime {
     /// A fresh, empty runtime.
     pub fn new() -> Runtime {
-        Runtime::default()
+        Runtime {
+            inner: Rc::new(RefCell::new(Inner::default())),
+            deferred: Rc::new(crate::tasks::DeferredChannel::new()),
+        }
+    }
+
+    /// The deferred-op channel (data layer). Internal accessor for `tasks`.
+    pub(crate) fn deferred(&self) -> &crate::tasks::DeferredChannel {
+        &self.deferred
     }
 
     /// Total number of scope runs since creation — used by tests to assert that
