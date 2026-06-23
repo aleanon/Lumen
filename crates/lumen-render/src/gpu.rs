@@ -4,9 +4,10 @@
 //! [`RgbaImage`], with no window or display required. Supported commands:
 //! solid-fill [`DrawCmd::Rect`] — square or rounded, with an optional centered
 //! border, via a rounded-box SDF with 1px analytic AA (R1.2); solid-fill/stroke
-//! [`DrawCmd::Path`] tessellated by `lyon` with MSAA edge AA (R1.3); and
-//! [`DrawCmd::Image`] blits. Gradient brushes, layers, glyph runs, and shaders
-//! on the GPU are later R1 sub-phases. Parity with the CPU reference is gated by
+//! [`DrawCmd::Path`] tessellated by `lyon` with MSAA edge AA (R1.3);
+//! gradient-filled rects (linear/radial/conic) via an Oklab ramp texture (R1.4);
+//! and [`DrawCmd::Image`] blits. Layers, glyph runs, and shaders on the GPU are
+//! later R1 sub-phases. Parity with the CPU reference is gated by
 //! `tests/cpu_vs_gpu` (05 §4).
 
 use crate::display_list::{Brush, DisplayList, DrawCmd, FillOrStroke};
@@ -21,8 +22,11 @@ pub struct GpuRenderer {
     rect_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
     path_pipeline: wgpu::RenderPipeline,
+    gradient_pipeline: wgpu::RenderPipeline,
     image_bgl: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// Linear, clamp-to-edge sampler for 1-D gradient ramp textures (R1.4).
+    ramp_sampler: wgpu::Sampler,
     /// MSAA sample count for the offscreen target (4/2/1, whatever the adapter
     /// supports for `TARGET_FORMAT`). Gives anti-aliasing to tessellated paths
     /// (R1.3); the SDF rect fill is alpha-coverage based and unaffected.
@@ -36,6 +40,24 @@ struct PathVertex {
     pos: [f32; 2],
     color: [f32; 4],
 }
+
+/// A gradient-filled rect instance (R1.4). The ramp colors live in a per-instance
+/// 1-D texture; this carries only the rect and the spatial mapping.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GradInstance {
+    /// `[x0, y0, width, height]`.
+    rect: [f32; 4],
+    /// linear: `[start.x, start.y, end.x, end.y]`; radial: `[cx, cy, radius, _]`;
+    /// conic: `[cx, cy, start_angle, _]`.
+    g0: [f32; 4],
+    /// `[kind (0=linear,1=radial,2=conic), spread (0=pad,1=repeat,2=reflect), _, _]`.
+    meta: [f32; 4],
+}
+
+/// Texels per gradient ramp texture (1-D). Dense enough that linear filtering
+/// reproduces the CPU's Oklab ramp within the gradient tolerance.
+const RAMP_TEXELS: u32 = 512;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -258,6 +280,39 @@ impl GpuRenderer {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "path_fs",
+                targets: &[Some(target.clone())],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample,
+            multiview: None,
+            cache: None,
+        });
+
+        // Gradient pipeline (R1.4): per-instance rect + ramp texture; the
+        // fragment computes the spatial parameter and samples the ramp.
+        let gradient_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("gradient-layout"),
+            bind_group_layouts: &[&viewport_bgl, &image_bgl],
+            push_constant_ranges: &[],
+        });
+        let gradient_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("gradient"),
+            layout: Some(&gradient_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "gradient_vs",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<GradInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "gradient_fs",
                 targets: &[Some(target)],
                 compilation_options: Default::default(),
             }),
@@ -272,6 +327,14 @@ impl GpuRenderer {
             label: Some("nearest"),
             ..Default::default()
         });
+        let ramp_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("ramp-linear"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
 
         Some(GpuRenderer {
             device,
@@ -279,8 +342,10 @@ impl GpuRenderer {
             rect_pipeline,
             image_pipeline,
             path_pipeline,
+            gradient_pipeline,
             image_bgl,
             sampler,
+            ramp_sampler,
             sample_count,
         })
     }
@@ -363,6 +428,11 @@ impl GpuRenderer {
         }
         let mut images: Vec<ImageDraw> = Vec::new();
         let mut path_geo = PathGeometry::default();
+        struct GradDraw {
+            instance: GradInstance,
+            bind: wgpu::BindGroup,
+        }
+        let mut gradients: Vec<GradDraw> = Vec::new();
         for cmd in &list.cmds {
             match cmd {
                 // Solid-fill/stroke paths → lyon triangles (R1.3). Gradient
@@ -372,6 +442,21 @@ impl GpuRenderer {
                     brush: Brush::Solid(c),
                     style,
                 } => path_geo.add(path, [c.r, c.g, c.b, c.a], *style),
+                // Gradient-filled rects → ramp-texture sampling (R1.4). Square
+                // corners only for now (corpus); rounded gradient rects later.
+                DrawCmd::Rect {
+                    rect,
+                    brush:
+                        brush @ (Brush::LinearGradient { .. }
+                        | Brush::RadialGradient { .. }
+                        | Brush::ConicGradient { .. }),
+                    ..
+                } => {
+                    if let Some((instance, stops)) = grad_instance(rect, brush) {
+                        let bind = self.upload_ramp(stops);
+                        gradients.push(GradDraw { instance, bind });
+                    }
+                }
                 // Solid-fill rects (square or rounded, with optional centered
                 // border) go through the rounded-box SDF pipeline (R1.2).
                 // Gradient-filled rects are R1.4.
@@ -464,6 +549,18 @@ impl GpuRenderer {
             })
         });
 
+        // Per-gradient instance buffers, created up front so they outlive the pass.
+        let gradient_buffers: Vec<wgpu::Buffer> = gradients
+            .iter()
+            .map(|g| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("grad-instance"),
+                    contents: bytemuck_lite::bytes_of(&g.instance),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+            })
+            .collect();
+
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let bg = [
@@ -496,6 +593,15 @@ impl GpuRenderer {
                 pass.set_bind_group(0, &viewport_bg, &[]);
                 pass.set_vertex_buffer(0, rect_buf.slice(..));
                 pass.draw(0..6, 0..rects.len() as u32);
+            }
+            if !gradients.is_empty() {
+                pass.set_pipeline(&self.gradient_pipeline);
+                pass.set_bind_group(0, &viewport_bg, &[]);
+                for (g, buf) in gradients.iter().zip(&gradient_buffers) {
+                    pass.set_bind_group(1, &g.bind, &[]);
+                    pass.set_vertex_buffer(0, buf.slice(..));
+                    pass.draw(0..6, 0..1);
+                }
             }
             if let (Some(vbuf), Some(ibuf)) = (&path_vbuf, &path_ibuf) {
                 pass.set_pipeline(&self.path_pipeline);
@@ -558,6 +664,57 @@ impl GpuRenderer {
         drop(data);
         readback.unmap();
         RgbaImage::from_raw(width, height, pixels)
+    }
+
+    /// Bake a gradient's stops into a 1-D ramp texture (Oklab, shared with the
+    /// CPU sampler) and bind it with the linear ramp sampler.
+    fn upload_ramp(&self, stops: &[crate::display_list::GradientStop]) -> wgpu::BindGroup {
+        let texels = crate::gradient::bake_ramp(stops, RAMP_TEXELS);
+        let size = wgpu::Extent3d {
+            width: RAMP_TEXELS,
+            height: 1,
+            depth_or_array_layers: 1,
+        };
+        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("ramp"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TARGET_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &texels,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(RAMP_TEXELS * 4),
+                rows_per_image: Some(1),
+            },
+            size,
+        );
+        let view = tex.create_view(&Default::default());
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ramp-bg"),
+            layout: &self.image_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.ramp_sampler),
+                },
+            ],
+        })
     }
 
     fn upload_image(&self, img: &RgbaImage) -> wgpu::BindGroup {
@@ -898,6 +1055,66 @@ impl PathGeometry {
     }
 }
 
+/// Build a [`GradInstance`] (and borrow the stops to bake) from a gradient brush
+/// filling `rect`. Returns `None` for a solid brush.
+fn grad_instance<'a>(
+    rect: &kurbo::Rect,
+    brush: &'a Brush,
+) -> Option<(GradInstance, &'a [crate::display_list::GradientStop])> {
+    let r = [
+        rect.x0 as f32,
+        rect.y0 as f32,
+        rect.width() as f32,
+        rect.height() as f32,
+    ];
+    let spread = |s: crate::display_list::SpreadMode| match s {
+        crate::display_list::SpreadMode::Pad => 0.0,
+        crate::display_list::SpreadMode::Repeat => 1.0,
+        crate::display_list::SpreadMode::Reflect => 2.0,
+    };
+    match brush {
+        Brush::Solid(_) => None,
+        Brush::LinearGradient {
+            start,
+            end,
+            stops,
+            spread: sp,
+        } => Some((
+            GradInstance {
+                rect: r,
+                g0: [start.x as f32, start.y as f32, end.x as f32, end.y as f32],
+                meta: [0.0, spread(*sp), 0.0, 0.0],
+            },
+            stops,
+        )),
+        Brush::RadialGradient {
+            center,
+            radius,
+            stops,
+            spread: sp,
+        } => Some((
+            GradInstance {
+                rect: r,
+                g0: [center.x as f32, center.y as f32, *radius as f32, 0.0],
+                meta: [1.0, spread(*sp), 0.0, 0.0],
+            },
+            stops,
+        )),
+        Brush::ConicGradient {
+            center,
+            start_angle,
+            stops,
+        } => Some((
+            GradInstance {
+                rect: r,
+                g0: [center.x as f32, center.y as f32, *start_angle as f32, 0.0],
+                meta: [2.0, 0.0, 0.0, 0.0],
+            },
+            stops,
+        )),
+    }
+}
+
 /// Convert a kurbo `BezPath` to a lyon `Path`, pairing begin/end per subpath.
 fn to_lyon_path(path: &kurbo::BezPath) -> lyon::path::Path {
     use kurbo::PathEl;
@@ -1094,6 +1311,61 @@ fn path_vs(@location(0) p: vec2<f32>, @location(1) color: vec4<f32>) -> PathVsOu
 @fragment
 fn path_fs(in: PathVsOut) -> @location(0) vec4<f32> {
     return in.color;
+}
+
+// --- gradients (R1.4) -------------------------------------------------------
+// The ramp texture (Oklab-baked on the CPU) is bound in group 1; the fragment
+// computes the spatial parameter t and samples it.
+
+struct GradVsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) wpx: vec2<f32>,
+    @location(1) g0: vec4<f32>,
+    @location(2) gmeta: vec4<f32>,
+};
+
+@vertex
+fn gradient_vs(@builtin(vertex_index) vi: u32,
+               @location(0) rect: vec4<f32>,
+               @location(1) g0: vec4<f32>,
+               @location(2) gmeta: vec4<f32>) -> GradVsOut {
+    let c = corner(vi);
+    let px = rect.xy + c * rect.zw;
+    var o: GradVsOut;
+    o.pos = to_ndc(px);
+    o.wpx = px;
+    o.g0 = g0;
+    o.gmeta = gmeta;
+    return o;
+}
+
+fn apply_spread(t: f32, spread: f32) -> f32 {
+    if (spread < 0.5) {            // pad
+        return clamp(t, 0.0, 1.0);
+    } else if (spread < 1.5) {     // repeat
+        return fract(t);
+    } else {                       // reflect
+        let m = t - 2.0 * floor(t * 0.5);
+        return select(m, 2.0 - m, m > 1.0);
+    }
+}
+
+@fragment
+fn gradient_fs(in: GradVsOut) -> @location(0) vec4<f32> {
+    let kind = in.gmeta.x;
+    var t: f32;
+    if (kind < 0.5) {                       // linear
+        let d = in.g0.zw - in.g0.xy;
+        t = dot(in.wpx - in.g0.xy, d) / max(dot(d, d), 1e-6);
+        t = apply_spread(t, in.gmeta.y);
+    } else if (kind < 1.5) {                // radial
+        t = length(in.wpx - in.g0.xy) / max(in.g0.z, 1e-6);
+        t = apply_spread(t, in.gmeta.y);
+    } else {                                // conic
+        let a = atan2(in.wpx.y - in.g0.y, in.wpx.x - in.g0.x) - in.g0.z;
+        t = fract(a / 6.283185307179586);
+    }
+    return textureSample(img_tex, img_samp, vec2<f32>(clamp(t, 0.0, 1.0), 0.5));
 }
 "#;
 

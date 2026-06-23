@@ -23,6 +23,7 @@ pub mod analysis;
 pub mod canvas;
 pub mod cpu;
 pub mod display_list;
+pub mod gradient;
 // The GPU backend (wgpu) is unavailable on wasm; the web shell renders on the CPU.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu;

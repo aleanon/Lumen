@@ -580,21 +580,4 @@ fn bake_stops(stops: &[GradientStop]) -> Vec<TsStop> {
     out
 }
 
-/// Sample a stop list at `t` in `[0, 1]`, interpolating in Oklab.
-fn sample_stops_oklab(stops: &[GradientStop], t: f32) -> Color {
-    if stops.is_empty() {
-        return Color::BLACK;
-    }
-    if t <= stops[0].offset {
-        return stops[0].color;
-    }
-    for pair in stops.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
-        if t <= b.offset {
-            let span = (b.offset - a.offset).max(f32::EPSILON);
-            let f = (t - a.offset) / span;
-            return a.color.lerp_oklab(b.color, f);
-        }
-    }
-    stops[stops.len() - 1].color
-}
+use crate::gradient::sample_stops_oklab;
