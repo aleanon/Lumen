@@ -5,6 +5,14 @@
 CpuRenderer>`) and to `cross-platform-readiness.md` (Blocker #2 + the "Perf at
 scale" polish line). This plan is the work that runs **behind** that seam.*
 
+> **Status (2026-06-24).** R0 ✅ done (corpus diff harness + capability ratchet).
+> R1 offscreen backend ✅ done — `GpuRenderer` matches the CPU reference within
+> tolerance for rects (R1.2), paths (R1.3, `lyon`+MSAA), gradients (R1.4, Oklab
+> ramp), layers/clip/opacity (R1.5, render-to-texture + gamma-space blending),
+> and HiDPI (R1.6), gated at 1× and 2×. Remaining in R1: **R1.1 live `wgpu`
+> surface in the shell** (display-dependent), non-source-over blends, rounded
+> gradient rects, and `BackdropFilter` on GPU. R2–R4 pending.
+>
 > **Scope.** Turns the five priority recommendations into committable phases:
 > (1) a real GPU surface backend, (2) activating the dormant dirty-flag /
 > incremental-layout / damage path, (3) a glyph atlas, (4) multi-threaded layout,
