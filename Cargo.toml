@@ -102,6 +102,7 @@ taffy = "0.7"
 parley = { version = "0.3", default-features = false, features = ["std"] }
 swash = "0.2"
 wgpu = "22"
+lyon = "1.0"
 winit = "0.30"
 raw-window-handle = "0.6"
 smol_str = "0.3"

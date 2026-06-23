@@ -108,14 +108,15 @@ fn capability_ratchet_covers_the_live_subset() {
     assert!(gpu_supported(Cap::RectSolid));
     assert!(gpu_supported(Cap::Image));
     assert!(gpu_supported(Cap::RectRounded)); // R1.2
-    for cap in [Cap::Path, Cap::Gradient, Cap::Layer, Cap::Shader] {
+    assert!(gpu_supported(Cap::Path)); // R1.3
+    for cap in [Cap::Gradient, Cap::Layer, Cap::Shader] {
         assert!(
             !gpu_supported(cap),
             "{cap:?} is not GPU-live yet; flip it in R1 when it matches CPU"
         );
     }
     // Every supported capability must have at least one corpus scene.
-    for cap in [Cap::RectSolid, Cap::Image, Cap::RectRounded] {
+    for cap in [Cap::RectSolid, Cap::Image, Cap::RectRounded, Cap::Path] {
         assert!(
             corpus().iter().any(|s| s.cap == cap),
             "no corpus scene exercises {cap:?}"

@@ -22,6 +22,9 @@ tiny-skia = { workspace = true, features = ["png-format"] }
 # a browser-only production presenter, not part of the deterministic core.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = { workspace = true }
+# Path/stroke tessellation → GPU triangles (ADR-006, R1.3). GPU-only; the CPU
+# reference renderer uses tiny-skia for paths.
+lyon = { workspace = true }
 
 [dev-dependencies]
 # Golden JSON for the design-analysis tests.

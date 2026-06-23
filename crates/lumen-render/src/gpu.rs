@@ -3,12 +3,13 @@
 //! Renders the display list to an offscreen texture and reads it back to an
 //! [`RgbaImage`], with no window or display required. Supported commands:
 //! solid-fill [`DrawCmd::Rect`] — square or rounded, with an optional centered
-//! border, via a rounded-box SDF with 1px analytic AA (R1.2) — and
-//! [`DrawCmd::Image`] blits. Gradient-filled rects, paths, layers, glyph runs,
-//! and shaders on the GPU are later R1 sub-phases. Parity with the CPU reference
-//! is gated by `tests/cpu_vs_gpu` (05 §4).
+//! border, via a rounded-box SDF with 1px analytic AA (R1.2); solid-fill/stroke
+//! [`DrawCmd::Path`] tessellated by `lyon` with MSAA edge AA (R1.3); and
+//! [`DrawCmd::Image`] blits. Gradient brushes, layers, glyph runs, and shaders
+//! on the GPU are later R1 sub-phases. Parity with the CPU reference is gated by
+//! `tests/cpu_vs_gpu` (05 §4).
 
-use crate::display_list::{Brush, DisplayList, DrawCmd};
+use crate::display_list::{Brush, DisplayList, DrawCmd, FillOrStroke};
 use crate::image::RgbaImage;
 use lumen_core::Color;
 use std::borrow::Cow;
@@ -19,8 +20,21 @@ pub struct GpuRenderer {
     queue: wgpu::Queue,
     rect_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
+    path_pipeline: wgpu::RenderPipeline,
     image_bgl: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// MSAA sample count for the offscreen target (4/2/1, whatever the adapter
+    /// supports for `TARGET_FORMAT`). Gives anti-aliasing to tessellated paths
+    /// (R1.3); the SDF rect fill is alpha-coverage based and unaffected.
+    sample_count: u32,
+}
+
+/// One tessellated path vertex (logical px position + straight-alpha color).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PathVertex {
+    pos: [f32; 2],
+    color: [f32; 4],
 }
 
 #[repr(C)]
@@ -98,6 +112,18 @@ impl GpuRenderer {
         ))
         .ok()?;
 
+        // Pick the best MSAA level the adapter supports for our target format
+        // (paths get geometry AA from it). downlevel hardware may only do 1×.
+        let flags = adapter.get_texture_format_features(TARGET_FORMAT).flags;
+        let sample_count = [4u32, 2, 1]
+            .into_iter()
+            .find(|&n| flags.sample_count_supported(n))
+            .unwrap_or(1);
+        let multisample = wgpu::MultisampleState {
+            count: sample_count,
+            ..Default::default()
+        };
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("lumen-shaders"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(SHADER)),
@@ -174,7 +200,7 @@ impl GpuRenderer {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample,
             multiview: None,
             cache: None,
         });
@@ -200,12 +226,44 @@ impl GpuRenderer {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "image_fs",
+                targets: &[Some(target.clone())],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample,
+            multiview: None,
+            cache: None,
+        });
+
+        // Tessellated-path pipeline (R1.3): non-instanced (pos, color) triangles.
+        let path_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("path-layout"),
+            bind_group_layouts: &[&viewport_bgl],
+            push_constant_ranges: &[],
+        });
+        let path_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("path"),
+            layout: Some(&path_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "path_vs",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<PathVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "path_fs",
                 targets: &[Some(target)],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample,
             multiview: None,
             cache: None,
         });
@@ -220,8 +278,10 @@ impl GpuRenderer {
             queue,
             rect_pipeline,
             image_pipeline,
+            path_pipeline,
             image_bgl,
             sampler,
+            sample_count,
         })
     }
 
@@ -236,6 +296,7 @@ impl GpuRenderer {
         use wgpu::util::DeviceExt;
         let device = &self.device;
 
+        // Single-sample resolve target — the texture we read back.
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("target"),
             size: wgpu::Extent3d {
@@ -252,6 +313,32 @@ impl GpuRenderer {
         });
         let view = target.create_view(&Default::default());
 
+        // When MSAA is available, draw into a multisampled attachment and resolve
+        // into `target`; otherwise draw straight into `target`.
+        let msaa_tex = (self.sample_count > 1).then(|| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("msaa"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: self.sample_count,
+                dimension: wgpu::TextureDimension::D2,
+                format: TARGET_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            })
+        });
+        let msaa_view = msaa_tex
+            .as_ref()
+            .map(|t| t.create_view(&Default::default()));
+        let (attach_view, resolve_target) = match &msaa_view {
+            Some(v) => (v, Some(&view)),
+            None => (&view, None),
+        };
+
         let viewport = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport"),
             contents: bytemuck_lite::bytes_of(&[width as f32, height as f32, 0.0, 0.0]),
@@ -267,15 +354,24 @@ impl GpuRenderer {
             }],
         });
 
-        // Collect rect instances; images are drawn individually (own textures).
+        // Collect rect instances; images are drawn individually (own textures);
+        // paths are tessellated into one shared vertex/index buffer.
         let mut rects: Vec<RectInstance> = Vec::new();
         struct ImageDraw {
             instance: RectInstance,
             bind: wgpu::BindGroup,
         }
         let mut images: Vec<ImageDraw> = Vec::new();
+        let mut path_geo = PathGeometry::default();
         for cmd in &list.cmds {
             match cmd {
+                // Solid-fill/stroke paths → lyon triangles (R1.3). Gradient
+                // paths are R1.4.
+                DrawCmd::Path {
+                    path,
+                    brush: Brush::Solid(c),
+                    style,
+                } => path_geo.add(path, [c.r, c.g, c.b, c.a], *style),
                 // Solid-fill rects (square or rounded, with optional centered
                 // border) go through the rounded-box SDF pipeline (R1.2).
                 // Gradient-filled rects are R1.4.
@@ -352,6 +448,22 @@ impl GpuRenderer {
             })
             .collect();
 
+        // Tessellated-path buffers (empty when no paths).
+        let path_vbuf = (!path_geo.vertices.is_empty()).then(|| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("path-verts"),
+                contents: bytemuck_lite::cast_slice(&path_geo.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            })
+        });
+        let path_ibuf = (!path_geo.indices.is_empty()).then(|| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("path-idx"),
+                contents: bytemuck_lite::cast_slice(&path_geo.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            })
+        });
+
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let bg = [
@@ -363,8 +475,8 @@ impl GpuRenderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("main"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
+                    view: attach_view,
+                    resolve_target,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: bg[0],
@@ -384,6 +496,13 @@ impl GpuRenderer {
                 pass.set_bind_group(0, &viewport_bg, &[]);
                 pass.set_vertex_buffer(0, rect_buf.slice(..));
                 pass.draw(0..6, 0..rects.len() as u32);
+            }
+            if let (Some(vbuf), Some(ibuf)) = (&path_vbuf, &path_ibuf) {
+                pass.set_pipeline(&self.path_pipeline);
+                pass.set_bind_group(0, &viewport_bg, &[]);
+                pass.set_vertex_buffer(0, vbuf.slice(..));
+                pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..path_geo.indices.len() as u32, 0, 0..1);
             }
             if !images.is_empty() {
                 pass.set_pipeline(&self.image_pipeline);
@@ -724,6 +843,103 @@ fn padded_bytes_per_row(width: u32) -> u32 {
     unpadded.div_ceil(align) * align
 }
 
+/// Accumulated triangle geometry for all `DrawCmd::Path`s in a frame (R1.3).
+#[derive(Default)]
+struct PathGeometry {
+    vertices: Vec<PathVertex>,
+    indices: Vec<u32>,
+}
+
+impl PathGeometry {
+    /// Tessellate one kurbo path (filled or stroked) into the shared buffers.
+    fn add(&mut self, path: &kurbo::BezPath, color: [f32; 4], style: FillOrStroke) {
+        use lyon::tessellation::{
+            BuffersBuilder, FillOptions, FillTessellator, FillVertex, StrokeOptions,
+            StrokeTessellator, StrokeVertex, VertexBuffers,
+        };
+        let lp = to_lyon_path(path);
+        let mut buf: VertexBuffers<PathVertex, u32> = VertexBuffers::new();
+        let ok = match style {
+            FillOrStroke::Fill => {
+                let opts = FillOptions::tolerance(0.05)
+                    .with_fill_rule(lyon::tessellation::FillRule::NonZero);
+                FillTessellator::new()
+                    .tessellate_path(
+                        &lp,
+                        &opts,
+                        &mut BuffersBuilder::new(&mut buf, |v: FillVertex| PathVertex {
+                            pos: [v.position().x, v.position().y],
+                            color,
+                        }),
+                    )
+                    .is_ok()
+            }
+            FillOrStroke::Stroke { width } => {
+                // tiny-skia defaults: butt caps, miter joins, miter limit 4.
+                let opts = StrokeOptions::tolerance(0.05).with_line_width(width as f32);
+                StrokeTessellator::new()
+                    .tessellate_path(
+                        &lp,
+                        &opts,
+                        &mut BuffersBuilder::new(&mut buf, |v: StrokeVertex| PathVertex {
+                            pos: [v.position().x, v.position().y],
+                            color,
+                        }),
+                    )
+                    .is_ok()
+            }
+        };
+        if !ok {
+            return;
+        }
+        let base = self.vertices.len() as u32;
+        self.vertices.extend_from_slice(&buf.vertices);
+        self.indices.extend(buf.indices.iter().map(|i| base + i));
+    }
+}
+
+/// Convert a kurbo `BezPath` to a lyon `Path`, pairing begin/end per subpath.
+fn to_lyon_path(path: &kurbo::BezPath) -> lyon::path::Path {
+    use kurbo::PathEl;
+    use lyon::geom::point;
+    let mut b = lyon::path::Path::builder();
+    let mut open = false;
+    for el in path.elements() {
+        match el {
+            PathEl::MoveTo(p) => {
+                if open {
+                    b.end(false);
+                }
+                b.begin(point(p.x as f32, p.y as f32));
+                open = true;
+            }
+            PathEl::LineTo(p) => {
+                b.line_to(point(p.x as f32, p.y as f32));
+            }
+            PathEl::QuadTo(c, p) => {
+                b.quadratic_bezier_to(point(c.x as f32, c.y as f32), point(p.x as f32, p.y as f32));
+            }
+            PathEl::CurveTo(c1, c2, p) => {
+                b.cubic_bezier_to(
+                    point(c1.x as f32, c1.y as f32),
+                    point(c2.x as f32, c2.y as f32),
+                    point(p.x as f32, p.y as f32),
+                );
+            }
+            PathEl::ClosePath => {
+                if open {
+                    b.close();
+                    open = false;
+                }
+            }
+        }
+    }
+    if open {
+        b.end(false);
+    }
+    b.build()
+}
+
 /// Minimal block-on for wgpu's native futures (they resolve without an external
 /// executor on native backends). Avoids a `pollster` dependency.
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
@@ -858,6 +1074,26 @@ fn image_vs(@builtin(vertex_index) vi: u32,
 @fragment
 fn image_fs(in: VsOut) -> @location(0) vec4<f32> {
     return textureSample(img_tex, img_samp, in.uv) * in.color;
+}
+
+// --- tessellated paths (R1.3) -----------------------------------------------
+
+struct PathVsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@vertex
+fn path_vs(@location(0) p: vec2<f32>, @location(1) color: vec4<f32>) -> PathVsOut {
+    var o: PathVsOut;
+    o.pos = to_ndc(p);
+    o.color = color;
+    return o;
+}
+
+@fragment
+fn path_fs(in: PathVsOut) -> @location(0) vec4<f32> {
+    return in.color;
 }
 "#;
 

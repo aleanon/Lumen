@@ -61,7 +61,10 @@ pub enum Cap {
 /// *today*. Each R1 sub-phase adds one here and the corresponding corpus
 /// scene(s) become a hard parity gate. See the module docs.
 pub fn gpu_supported(cap: Cap) -> bool {
-    matches!(cap, Cap::RectSolid | Cap::Image | Cap::RectRounded)
+    matches!(
+        cap,
+        Cap::RectSolid | Cap::Image | Cap::RectRounded | Cap::Path
+    )
 }
 
 /// A named scene plus the capability it exercises.
