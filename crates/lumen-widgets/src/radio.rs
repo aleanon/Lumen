@@ -86,6 +86,14 @@ impl Radio {
         };
         Radio { el }
     }
+
+    /// Set the label text colour (e.g. to match a dark theme).
+    pub fn color(mut self, c: Color) -> Radio {
+        if let Some(ts) = self.el.children.last_mut().and_then(|e| e.text_style_mut()) {
+            ts.color = c;
+        }
+        self
+    }
 }
 
 impl_common!(Radio);

@@ -29,6 +29,8 @@ impl Scrollable {
 
         let mut inner = Element::column(children);
         inner.style.margin.top = Dim::px(-(y as f32));
+        // Fill the viewport width so rows can right-align (flex_grow) within it.
+        inner.style.width = Dim::pct(1.0);
 
         let el = Element {
             role: Role::ScrollArea,

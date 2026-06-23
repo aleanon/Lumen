@@ -11,7 +11,7 @@ use lumen_widgets::{
     Slider, Space, TextField, TextInput,
 };
 
-use lumen_layout::{Align, Dim};
+use lumen_layout::{Align, Dim, Edges};
 
 /// Build the gallery app.
 pub fn main_app() -> App {
@@ -127,6 +127,7 @@ fn build(cx: &mut BuildCx) -> Element {
         "CheckBox",
         vec![row_full(vec![
             CheckBox::new(cx, "notify", "Email me updates")
+                .color(pal.ink)
                 .id("notify")
                 .into(),
             Space::new().into(),
@@ -144,9 +145,13 @@ fn build(cx: &mut BuildCx) -> Element {
         "Radio (group) — switches theme",
         vec![row_full(vec![
             Radio::new(cx, "theme", "Light", "Light")
+                .color(pal.ink)
                 .id("r-light")
                 .into(),
-            Radio::new(cx, "theme", "Dark", "Dark").id("r-dark").into(),
+            Radio::new(cx, "theme", "Dark", "Dark")
+                .color(pal.ink)
+                .id("r-dark")
+                .into(),
             Space::new().into(),
             result(if cur_theme.is_empty() {
                 "Light".to_string()
@@ -212,22 +217,34 @@ fn build(cx: &mut BuildCx) -> Element {
         list.iter()
             .enumerate()
             .map(|(i, item)| {
+                // A compact, theme-aware delete button (no big white square).
+                let mut del = Button::new("×")
+                    .background(pal.divider)
+                    .text_color(pal.muted)
+                    .on_press(move |rt| {
+                        items.update(rt, |v| {
+                            if i < v.len() {
+                                v.remove(i);
+                            }
+                        })
+                    });
+                {
+                    let e = del.element_mut();
+                    e.corner_radius = 7.0;
+                    e.style.padding = Edges {
+                        left: Dim::px(9.0),
+                        right: Dim::px(9.0),
+                        top: Dim::px(2.0),
+                        bottom: Dim::px(2.0),
+                    };
+                }
                 let mut row = row_full(vec![
                     {
                         let mut l = Label::new(format!("{}. {item}", i + 1)).color(pal.ink);
                         l.element_mut().style.flex_grow = 1.0;
                         l.into()
                     },
-                    Button::new("×")
-                        .ghost()
-                        .on_press(move |rt| {
-                            items.update(rt, |v| {
-                                if i < v.len() {
-                                    v.remove(i);
-                                }
-                            })
-                        })
-                        .into(),
+                    del.into(),
                 ])
                 .padding(2.0);
                 row.element_mut().style.height = Dim::px(ITEM_H as f32);

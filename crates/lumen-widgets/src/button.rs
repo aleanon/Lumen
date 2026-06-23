@@ -67,6 +67,14 @@ impl Button {
         self
     }
 
+    /// Set the label colour (independent of `primary`/`ghost`).
+    pub fn text_color(mut self, c: Color) -> Button {
+        if let Some(ts) = self.el.text_style_mut() {
+            ts.color = c;
+        }
+        self
+    }
+
     /// Quiet (ghost) emphasis.
     pub fn ghost(mut self) -> Button {
         self.el.background = Some(Color::srgb8(0xe9, 0xeb, 0xef, 0xff));
