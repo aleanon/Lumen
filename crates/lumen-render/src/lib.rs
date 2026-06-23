@@ -3,6 +3,20 @@
 //! M0 lands the backend-independent display list ([`DrawCmd`]) and the CPU
 //! reference renderer ([`cpu::render`], tiny-skia, ADR-002). The GPU backend
 //! (wgpu) and damage-aware presentation arrive in T0.11.
+//!
+//! ## Regression harness (rendering & performance plan, R0)
+//!
+//! The CPU renderer is the deterministic golden reference; the GPU backend and
+//! the damage/incremental path are measured against it by a shared harness in
+//! `tests/common`:
+//! - **`cpu_vs_gpu`** — the GPU must match CPU within a perceptual ΔE budget
+//!   (`Tolerance::PARITY`: unscaled Oklab ΔE ≤ 0.04 on ≥ 99.5% of pixels) for
+//!   every command class it claims to support. It self-skips (logging, never
+//!   silently passing) when no wgpu adapter is present, so it runs on a GPU box
+//!   / GPU-CI and no-ops on headless CI.
+//! - **`damage_equivalence`** — `cpu::render_damage(dl, dirty)` must be
+//!   byte-identical to a full render cropped to `dirty`; the invariant R2 keeps.
+//! - **`diff_harness`** — self-tests proving the comparators detect divergence.
 #![warn(missing_docs)]
 
 pub mod analysis;
