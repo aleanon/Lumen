@@ -125,7 +125,8 @@ results will arrive through.
   top of `motion::spring`.
 - Perf at scale: **layout is single-threaded** (only render culling uses scoped
   threads, `scene.rs`); GPU damage/partial redraw; the `01 §9` budgets on real
-  runners.
+  runners. *Planned: `docs/plan-rendering-performance.md` Phases R2 (damage/
+  incremental) + R4 (threaded layout).*
 - Glass refraction/lensing (Liquid Glass) + glass rim border (borders aren't
   plumbed from `.lss`/`Element` yet).
 
@@ -146,6 +147,9 @@ results will arrive through.
 2. **GPU surface backend** (Blocker #2) — *now the top remaining blocker.* The
    perf/quality unlock across *all* platforms; one backend behind the existing
    `Renderer` trait (now a defaulted generic) benefits desktop+mobile+web.
+   *This and the perf-at-scale items below (GPU backend, damage/incremental
+   layout, glyph atlas, multi-threaded layout) are now planned with phases and
+   subtasks in `docs/plan-rendering-performance.md` — Phases R0–R4.*
 3. **Desktop OS integration** (Blocker #3) — clipboard first (most testable),
    then menus/dialogs/DnD/multi-window. Makes desktop genuinely shippable.
 4. **Turnkey mobile/web loops** (Blocker #4) — promote the `render_into` cores to

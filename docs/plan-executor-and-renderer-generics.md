@@ -26,6 +26,14 @@ generics-vs-dyn discussion. Two workstreams that converge on a single
 Both follow one library principle: **expose the static/generic form; let the
 consumer erase to a trait object only where and when they want dynamism.**
 
+> **Companion plan.** This document covers the renderer *seam* (the `App<R>`
+> type plumbing), not what runs behind it. The GPU surface backend, damage /
+> incremental layout, glyph atlas, and multi-threaded layout — the
+> priority-ordered rendering/performance recommendations — are planned with
+> phases and subtasks in **`docs/plan-rendering-performance.md`** (Phases R0–R4).
+> Part A here is the prerequisite that lets that backend slot in via
+> `with_renderer(GpuRenderer::new()?)`.
+
 ## Foundational invariant (do not violate)
 
 `pump()` is a pure function of *(state, queued events, clock)* — this is what
