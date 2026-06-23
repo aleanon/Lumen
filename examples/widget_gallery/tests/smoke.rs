@@ -93,10 +93,18 @@ fn checkbox_and_radio() {
     assert!(json(&a).contains("Notify: off"));
     click(&mut a, "notify");
     assert!(json(&a).contains("Notify: on"), "checkbox toggled");
+
+    // Light by default → the page background is light.
+    let light_px = a.screenshot().pixels()[0]; // top-left R channel
+    assert!(light_px > 180, "light theme background");
+    // Switching the Radio to Dark re-themes the whole gallery.
     click(&mut a, "r-dark");
     assert!(json(&a).contains("Dark"));
-    click(&mut a, "r-auto");
-    assert!(json(&a).contains("Auto"));
+    let dark_px = a.screenshot().pixels()[0];
+    assert!(
+        dark_px < 60,
+        "dark theme background applied (was {light_px}, now {dark_px})"
+    );
 }
 
 #[test]

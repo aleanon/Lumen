@@ -115,6 +115,8 @@ impl PickList {
             menu.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
             menu.corner_radius = 8.0;
             menu.shadow = Some(crate::element::Shadow::soft());
+            // Paint above sibling content below the trigger, and escape clips.
+            menu.overlay = true;
             // Click-away / Escape closes the dropdown (light dismiss).
             menu.on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
             menu.style.position = Position::Absolute;

@@ -145,6 +145,10 @@ pub struct Element {
     /// Clip descendants to this element's (rounded) bounds — `overflow: hidden`.
     /// Used by scroll viewports so off-screen content doesn't paint outside.
     pub clip: bool,
+    /// Paint this element's subtree in a final top pass, above the rest of the UI
+    /// and escaping ancestor clips — a portal/overlay (dropdown menus, popovers,
+    /// tooltips). Layout/hit-testing are unchanged; only paint order moves.
+    pub overlay: bool,
     /// Optional drop shadow behind the box.
     pub shadow: Option<Shadow>,
     /// Children.
@@ -176,6 +180,7 @@ impl Default for Element {
             on_key: None,
             on_dismiss: None,
             clip: false,
+            overlay: false,
             shadow: None,
             children: Vec::new(),
         }
@@ -317,6 +322,11 @@ impl Element {
     /// Clip descendants to this element's bounds (`overflow: hidden`).
     pub fn clip(mut self, on: bool) -> Self {
         self.clip = on;
+        self
+    }
+    /// Paint this subtree on top of everything (a portal/overlay).
+    pub fn overlay(mut self, on: bool) -> Self {
+        self.overlay = on;
         self
     }
     /// Replace the children.

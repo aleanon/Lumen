@@ -207,6 +207,7 @@ struct NodeMeta {
     background: Option<Color>,
     corner_radius: f64,
     clip: bool,
+    overlay: bool,
     shadow: Option<crate::element::Shadow>,
     content: NodeContent,
     /// Left/top padding in px — own-text is painted at the padded (content-box)
@@ -1023,6 +1024,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 background: el.background,
                 corner_radius: el.corner_radius,
                 clip: el.clip,
+                overlay: el.overlay,
                 shadow: el.shadow,
                 content: el.content,
                 pad,
@@ -1039,20 +1041,54 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let mut dl = DisplayList::new();
         let mut text_targets: Vec<lumen_render::TextTarget> = Vec::new();
         let order = self.tree.document_order();
-        // Clip stack (overflow:hidden): a `clip` node opens a `PushLayer` masked
-        // to its bounds; it stays open across the node's descendants (contiguous
-        // in preorder) and closes when traversal returns to its depth or above.
+        // Preorder depth of every node, and a partition into the main pass and the
+        // overlay pass (nodes inside an `overlay` subtree). Overlays paint last so
+        // they sit above the rest of the UI and escape ancestor clips (dropdown
+        // menus, popovers, tooltips). Both subsets keep document order.
         let root = order.first().copied();
         let mut depth: HashMap<NodeIndex, u32> = HashMap::new();
-        let mut clip_stack: Vec<u32> = Vec::new();
+        let mut main_order: Vec<NodeIndex> = Vec::new();
+        let mut overlay_order: Vec<NodeIndex> = Vec::new();
+        let mut overlay_depths: Vec<u32> = Vec::new();
         for node in order {
-            let bounds = self.tree.bounds(node);
             let d = if Some(node) == root {
                 0
             } else {
                 depth.get(&self.tree.parent(node)).map_or(0, |p| p + 1)
             };
             depth.insert(node, d);
+            while overlay_depths.last().is_some_and(|&od| d <= od) {
+                overlay_depths.pop();
+            }
+            let is_root = self.meta.get(&node).is_some_and(|m| m.overlay);
+            let inside = !overlay_depths.is_empty() || is_root;
+            if is_root {
+                overlay_depths.push(d);
+            }
+            if inside {
+                overlay_order.push(node);
+            } else {
+                main_order.push(node);
+            }
+        }
+        self.emit_pass(&main_order, &depth, &mut dl, &mut text_targets);
+        self.emit_pass(&overlay_order, &depth, &mut dl, &mut text_targets);
+        (dl, text_targets)
+    }
+
+    /// Emit draw commands for `order` (a document-ordered node subset), opening/
+    /// closing `overflow:hidden` clip layers via a depth-keyed stack.
+    fn emit_pass(
+        &mut self,
+        order: &[NodeIndex],
+        depth: &HashMap<NodeIndex, u32>,
+        dl: &mut DisplayList,
+        text_targets: &mut Vec<lumen_render::TextTarget>,
+    ) {
+        let mut clip_stack: Vec<u32> = Vec::new();
+        for &node in order {
+            let bounds = self.tree.bounds(node);
+            let d = depth.get(&node).copied().unwrap_or(0);
             while clip_stack.last().is_some_and(|&cd| d <= cd) {
                 dl.push(DrawCmd::PopLayer);
                 clip_stack.pop();
@@ -1200,7 +1236,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     dl.push(cmd);
                 }
                 for t in texts {
-                    Self::rasterize_frame_text(&mut self.text, &mut self.text_cache, &mut dl, t);
+                    Self::rasterize_frame_text(&mut self.text, &mut self.text_cache, dl, t);
                 }
             }
             if let NodeContent::Custom(w) = &m.content {
@@ -1217,7 +1253,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     dl.push(cmd);
                 }
                 for t in texts {
-                    Self::rasterize_frame_text(&mut self.text, &mut self.text_cache, &mut dl, t);
+                    Self::rasterize_frame_text(&mut self.text, &mut self.text_cache, dl, t);
                 }
             }
             if let NodeContent::Image(img) = &m.content {
@@ -1292,11 +1328,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 });
             }
         }
-        // Close any clip layers still open at the end of traversal.
+        // Close any clip layers still open at the end of the pass.
         for _ in 0..clip_stack.len() {
             dl.push(DrawCmd::PopLayer);
         }
-        (dl, text_targets)
     }
 
     /// Rasterize a [`FrameText`] (from a canvas / custom-leaf `fill_text`) into an

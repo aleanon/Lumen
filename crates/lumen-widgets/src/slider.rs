@@ -40,13 +40,17 @@ impl Slider {
             },
             ..Element::default()
         };
+        // Centre the thumb on the value's position along the *full* track so it
+        // sits directly under the pointer while dragging (clamped to the ends),
+        // rather than lagging behind (which `frac * (W - THUMB)` would do).
+        let thumb_left = (frac * W - THUMB / 2.0).clamp(0.0, W - THUMB);
         let thumb = Element {
             background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
             corner_radius: THUMB / 2.0,
             style: LayoutStyle {
                 position: Position::Absolute,
                 inset: Edges {
-                    left: Dim::px((frac * (W - THUMB)) as f32),
+                    left: Dim::px(thumb_left as f32),
                     top: Dim::px(0.0),
                     ..Edges::AUTO
                 },

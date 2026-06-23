@@ -360,15 +360,20 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 }));
             }
             WindowEvent::Ime(ime) => match ime {
-                Ime::Enabled => self.ime_active = true,
-                Ime::Disabled => self.ime_active = false,
+                // `ime_active` means *composing a preedit* — not merely that IME
+                // is enabled. Otherwise platforms that fire `Ime::Enabled` for
+                // every focused field (e.g. X11) would suppress ordinary typing,
+                // which arrives as `KeyEvent::text`, never as `Ime::Commit`.
+                Ime::Enabled | Ime::Disabled => self.ime_active = false,
                 Ime::Preedit(text, cursor) => {
+                    self.ime_active = !text.is_empty();
                     self.inject(Event::ImePreedit(ImeEvent {
                         preedit: text,
                         cursor,
                     }));
                 }
                 Ime::Commit(text) => {
+                    self.ime_active = false;
                     self.inject(Event::TextInput(TextInputEvent { text }));
                 }
             },
