@@ -14,6 +14,8 @@ use parley::{
     PositionedLayoutItem, StyleProperty,
 };
 use std::borrow::Cow;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use swash::scale::{Render, ScaleContext, Source};
 use swash::zeno::Format;
 use swash::FontRef;
@@ -28,6 +30,69 @@ pub use editor::{Preedit, TextEditor};
 
 /// Brush carried through parley to each glyph run: straight sRGB RGBA8.
 type Brush = [u8; 4];
+
+// --- per-glyph raster cache (R3.1) ------------------------------------------
+//
+// Text was rasterized whole-string into a sprite (cached per string in the
+// widget layer). That re-rasterizes every glyph whenever a string changes — a
+// 1-char edit to an animated readout reshapes and re-renders the whole line.
+// Here we cache the swash alpha bitmap per *glyph* (font + id + size + embolden
+// + variation coords), so a changed string only rasterizes glyphs it hasn't
+// seen. Output is byte-identical (the pen is snapped to whole px, so a glyph's
+// bitmap is position-independent), so goldens are unaffected.
+
+/// Identifies a rasterized glyph bitmap. The bundled font is the only face
+/// (ADR-005); `font_index`/`data_len` distinguish faces defensively.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct GlyphKey {
+    font_index: u32,
+    data_len: u32,
+    glyph_id: u32,
+    size_bits: u32,
+    embolden_bits: u32,
+    coords_hash: u64,
+}
+
+/// A cached swash alpha glyph (placement + coverage bitmap).
+#[derive(Clone)]
+struct CachedGlyph {
+    left: i32,
+    top: i32,
+    width: u32,
+    height: u32,
+    data: Vec<u8>,
+}
+
+/// Clear the cache above this many glyphs (keeps a long-running session bounded;
+/// a full Latin+punctuation set is well under this).
+const GLYPH_CACHE_CAP: usize = 8192;
+
+thread_local! {
+    static GLYPH_CACHE: RefCell<HashMap<GlyphKey, Option<CachedGlyph>>> =
+        RefCell::new(HashMap::new());
+    /// Count of actual swash rasterizations (cache misses) — for tests/diagnostics.
+    static GLYPH_RASTERS: Cell<u64> = const { Cell::new(0) };
+}
+
+fn coords_hash(coords: &[i16]) -> u64 {
+    // FNV-1a over the fixed-point variation coords (empty for the static font).
+    let mut h = 0xcbf29ce484222325u64;
+    for &c in coords {
+        h = (h ^ (c as u16 as u64)).wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+#[cfg(test)]
+fn reset_glyph_cache() {
+    GLYPH_CACHE.with(|c| c.borrow_mut().clear());
+    GLYPH_RASTERS.with(|n| n.set(0));
+}
+
+#[cfg(test)]
+fn glyph_rasters() -> u64 {
+    GLYPH_RASTERS.with(|n| n.get())
+}
 
 /// Horizontal alignment of wrapped lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -310,22 +375,52 @@ impl TextBlock {
                 } else {
                     0.0
                 };
+                let coords = run.normalized_coords();
                 let mut scaler = ctx
                     .builder(font_ref)
                     .size(run.font_size())
                     .hint(true)
-                    .normalized_coords(run.normalized_coords())
+                    .normalized_coords(coords)
                     .build();
+                let key_base = GlyphKey {
+                    font_index: font.index,
+                    data_len: font.data.as_ref().len() as u32,
+                    glyph_id: 0,
+                    size_bits: run.font_size().to_bits(),
+                    embolden_bits: strength.to_bits(),
+                    coords_hash: coords_hash(coords),
+                };
                 for glyph in glyph_run.positioned_glyphs() {
-                    let mut render = Render::new(&[Source::Outline]);
-                    render.format(Format::Alpha);
-                    if strength != 0.0 {
-                        render.embolden(strength);
-                    }
-                    let Some(image) = render.render(&mut scaler, glyph.id) else {
-                        continue;
+                    let key = GlyphKey {
+                        glyph_id: glyph.id as u32,
+                        ..key_base
                     };
-                    blit_alpha(&mut pixels, w, h, &image, glyph.x, glyph.y, color);
+                    GLYPH_CACHE.with(|c| {
+                        let mut cache = c.borrow_mut();
+                        if cache.len() >= GLYPH_CACHE_CAP && !cache.contains_key(&key) {
+                            cache.clear();
+                        }
+                        let entry = cache.entry(key).or_insert_with(|| {
+                            GLYPH_RASTERS.with(|n| n.set(n.get() + 1));
+                            let mut render = Render::new(&[Source::Outline]);
+                            render.format(Format::Alpha);
+                            if strength != 0.0 {
+                                render.embolden(strength);
+                            }
+                            render
+                                .render(&mut scaler, glyph.id)
+                                .map(|image| CachedGlyph {
+                                    left: image.placement.left,
+                                    top: image.placement.top,
+                                    width: image.placement.width,
+                                    height: image.placement.height,
+                                    data: image.data,
+                                })
+                        });
+                        if let Some(g) = entry.as_ref() {
+                            blit_alpha(&mut pixels, w, h, g, glyph.x, glyph.y, color);
+                        }
+                    });
                 }
             }
         }
@@ -333,21 +428,21 @@ impl TextBlock {
     }
 }
 
-/// Composite a swash alpha glyph image onto the target at the glyph pen
-/// position, in straight-alpha sRGB.
+/// Composite a cached alpha glyph onto the target at the glyph pen position, in
+/// straight-alpha sRGB.
 fn blit_alpha(
     pixels: &mut [u8],
     w: u32,
     h: u32,
-    image: &swash::scale::image::Image,
+    g: &CachedGlyph,
     pen_x: f32,
     pen_y: f32,
     color: Brush,
 ) {
-    let gx = pen_x.round() as i32 + image.placement.left;
-    let gy = pen_y.round() as i32 - image.placement.top;
-    let gw = image.placement.width as i32;
-    let gh = image.placement.height as i32;
+    let gx = pen_x.round() as i32 + g.left;
+    let gy = pen_y.round() as i32 - g.top;
+    let gw = g.width as i32;
+    let gh = g.height as i32;
     for row in 0..gh {
         let py = gy + row;
         if py < 0 || py >= h as i32 {
@@ -358,7 +453,7 @@ fn blit_alpha(
             if pxc < 0 || pxc >= w as i32 {
                 continue;
             }
-            let a = image.data[(row * gw + col) as usize] as f32 / 255.0;
+            let a = g.data[(row * gw + col) as usize] as f32 / 255.0;
             if a <= 0.0 {
                 continue;
             }
@@ -372,5 +467,62 @@ fn blit_alpha(
             let dst_a = pixels[idx + 3] as f32 / 255.0;
             pixels[idx + 3] = ((src_a + dst_a * (1.0 - src_a)) * 255.0).round() as u8;
         }
+    }
+}
+
+#[cfg(test)]
+mod glyph_cache_tests {
+    //! R3.1: the per-glyph raster cache rasterizes each glyph once and reuses it
+    //! across strings, and the cached path is byte-identical to a fresh render.
+    use super::*;
+
+    fn style() -> TextStyle {
+        TextStyle {
+            font_size: 24.0,
+            color: Color::srgb8(0, 0, 0, 255),
+            weight: 400.0,
+            line_height: None,
+            letter_spacing: 0.0,
+        }
+    }
+
+    fn render_str(te: &mut TextEngine, s: &str) -> RgbaImage {
+        let block = te.layout(s, style(), &[], None, TextAlign::Start);
+        block.render(0, 0, Color::srgb8(255, 255, 255, 0))
+    }
+
+    #[test]
+    fn only_new_glyphs_are_rasterized() {
+        reset_glyph_cache();
+        let mut te = TextEngine::new();
+
+        render_str(&mut te, "abc");
+        let after_abc = glyph_rasters();
+        assert_eq!(
+            after_abc, 3,
+            "three distinct glyphs (a, b, c) rasterized once"
+        );
+
+        // A 1-character extension rasterizes only the new glyph.
+        render_str(&mut te, "abcd");
+        assert_eq!(glyph_rasters(), after_abc + 1, "only 'd' is new");
+
+        // Re-rendering already-seen glyphs (reordered) rasterizes nothing.
+        render_str(&mut te, "cab");
+        assert_eq!(glyph_rasters(), after_abc + 1, "all glyphs already cached");
+    }
+
+    #[test]
+    fn cached_render_is_byte_identical() {
+        reset_glyph_cache();
+        let mut te = TextEngine::new();
+        let first = render_str(&mut te, "Hello, world");
+        // Second render hits the glyph cache for every glyph.
+        let cached = render_str(&mut te, "Hello, world");
+        assert_eq!(
+            first.pixels(),
+            cached.pixels(),
+            "the cached glyph path must be byte-identical"
+        );
     }
 }
