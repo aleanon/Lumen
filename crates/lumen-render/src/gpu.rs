@@ -6,9 +6,15 @@
 //! border, via a rounded-box SDF with 1px analytic AA (R1.2); solid-fill/stroke
 //! [`DrawCmd::Path`] tessellated by `lyon` with MSAA edge AA (R1.3);
 //! gradient-filled rects (linear/radial/conic) via an Oklab ramp texture (R1.4);
-//! and [`DrawCmd::Image`] blits. Layers, glyph runs, and shaders on the GPU are
-//! later R1 sub-phases. Parity with the CPU reference is gated by
-//! `tests/cpu_vs_gpu` (05 §4).
+//! [`DrawCmd::PushLayer`]/[`DrawCmd::PopLayer`] via recursive render-to-texture
+//! compositing with rounded-rect clip + group opacity (R1.5); and
+//! [`DrawCmd::Image`] blits. Glyph runs (R3) and shaders are still pending.
+//! Parity with the CPU reference is gated by `tests/cpu_vs_gpu` (05 §4).
+//!
+//! Blending matches the CPU by happening in **gamma space**: the target is a
+//! non-sRGB `Rgba8Unorm` holding sRGB-encoded bytes, fragments sRGB-encode their
+//! (linear) colors, and image/ramp textures store raw sRGB sampled without
+//! decode — so fixed-function blends compose premultiplied sRGB like tiny-skia.
 
 use crate::display_list::{Brush, DisplayList, DrawCmd, FillOrStroke};
 use crate::image::RgbaImage;
@@ -23,6 +29,7 @@ pub struct GpuRenderer {
     image_pipeline: wgpu::RenderPipeline,
     path_pipeline: wgpu::RenderPipeline,
     gradient_pipeline: wgpu::RenderPipeline,
+    composite_pipeline: wgpu::RenderPipeline,
     image_bgl: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// Linear, clamp-to-edge sampler for 1-D gradient ramp textures (R1.4).
@@ -59,6 +66,29 @@ struct GradInstance {
 /// reproduces the CPU's Oklab ramp within the gradient tolerance.
 const RAMP_TEXELS: u32 = 512;
 
+/// A layer-composite instance (R1.5): draws a child layer's texture over the
+/// parent, masked to a rounded-rect clip and scaled by group opacity.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CompositeInstance {
+    /// Clip rect `[x0, y0, w, h]` (the composite quad); full frame if no clip.
+    rect: [f32; 4],
+    /// Clip corner radii `[tl, tr, br, bl]`.
+    radii: [f32; 4],
+    /// `[opacity, has_clip (0/1), _, _]`.
+    params: [f32; 4],
+}
+
+/// GPU resources that must outlive `queue.submit` (textures referenced by the
+/// recorded command buffer). Dropped after submit returns.
+#[derive(Default)]
+struct KeepAlive {
+    textures: Vec<wgpu::Texture>,
+    views: Vec<wgpu::TextureView>,
+    buffers: Vec<wgpu::Buffer>,
+    binds: Vec<wgpu::BindGroup>,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct RectInstance {
@@ -87,7 +117,11 @@ impl RectInstance {
     }
 }
 
-const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+// A *non*-sRGB target holding sRGB-encoded bytes, so fixed-function blending
+// happens in gamma space — matching the tiny-skia CPU reference (which blends
+// premultiplied sRGB directly). Fragments output sRGB-encoded color; image and
+// ramp textures store raw sRGB bytes and are sampled without decode (R1.5).
+const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// The GPU backend as a runtime-selectable [`Renderer`](crate::Renderer) (A1).
 /// Covers the command set the offscreen backend supports (solid rects — square
@@ -155,7 +189,8 @@ impl GpuRenderer {
             label: Some("viewport"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                // FRAGMENT too: the composite shader reads viewport.size (R1.5).
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -313,7 +348,45 @@ impl GpuRenderer {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "gradient_fs",
-                targets: &[Some(target)],
+                targets: &[Some(target.clone())],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample,
+            multiview: None,
+            cache: None,
+        });
+
+        // Layer-composite pipeline (R1.5): child texture + rounded clip + opacity.
+        let composite_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("composite-layout"),
+            bind_group_layouts: &[&viewport_bgl, &image_bgl],
+            push_constant_ranges: &[],
+        });
+        let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("composite"),
+            layout: Some(&composite_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "composite_vs",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<CompositeInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                // Child layers are stored premultiplied (alpha-blended over a
+                // transparent clear), so composite with premultiplied src-over.
+                entry_point: "composite_fs",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: TARGET_FORMAT,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
@@ -343,6 +416,7 @@ impl GpuRenderer {
             image_pipeline,
             path_pipeline,
             gradient_pipeline,
+            composite_pipeline,
             image_bgl,
             sampler,
             ramp_sampler,
@@ -360,50 +434,10 @@ impl GpuRenderer {
     ) -> RgbaImage {
         use wgpu::util::DeviceExt;
         let device = &self.device;
+        let mut keep = KeepAlive::default();
+        let mut encoder = device.create_command_encoder(&Default::default());
 
-        // Single-sample resolve target — the texture we read back.
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("target"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TARGET_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = target.create_view(&Default::default());
-
-        // When MSAA is available, draw into a multisampled attachment and resolve
-        // into `target`; otherwise draw straight into `target`.
-        let msaa_tex = (self.sample_count > 1).then(|| {
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("msaa"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: self.sample_count,
-                dimension: wgpu::TextureDimension::D2,
-                format: TARGET_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            })
-        });
-        let msaa_view = msaa_tex
-            .as_ref()
-            .map(|t| t.create_view(&Default::default()));
-        let (attach_view, resolve_target) = match &msaa_view {
-            Some(v) => (v, Some(&view)),
-            None => (&view, None),
-        };
-
+        // Shared viewport uniform (logical = physical here; HiDPI is R1.6).
         let viewport = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport"),
             contents: bytemuck_lite::bytes_of(&[width as f32, height as f32, 0.0, 0.0]),
@@ -419,31 +453,193 @@ impl GpuRenderer {
             }],
         });
 
-        // Collect rect instances; images are drawn individually (own textures);
-        // paths are tessellated into one shared vertex/index buffer.
+        // The whole list is the root layer, cleared to the opaque background.
+        let root = self.encode_layer(
+            device,
+            &mut encoder,
+            &mut keep,
+            &viewport_bg,
+            width,
+            height,
+            &list.cmds,
+            list,
+            Some(background),
+        );
+
+        // Readback from the resolved root texture.
+        let bpr = padded_bytes_per_row(width);
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback"),
+            size: (bpr * height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: &root,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &readback,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bpr),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(Some(encoder.finish()));
+        drop(keep);
+
+        let slice = readback.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        self.device.poll(wgpu::Maintain::Wait);
+        let data = slice.get_mapped_range();
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for row in 0..height {
+            let start = (row * bpr) as usize;
+            pixels.extend_from_slice(&data[start..start + (width * 4) as usize]);
+        }
+        drop(data);
+        readback.unmap();
+        RgbaImage::from_raw(width, height, pixels)
+    }
+
+    /// Render one layer (a slice of commands) into its own resolved single-sample
+    /// texture (R1.5). Nested `PushLayer`/`PopLayer` spans recurse first (their
+    /// passes are recorded into `encoder` before this layer's), then composite
+    /// over this layer with a rounded-rect clip + group opacity.
+    ///
+    /// `clear` is the opaque background for the root; child layers clear to
+    /// transparent. Resources are parked in `keep` so they outlive submit.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_layer(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        keep: &mut KeepAlive,
+        viewport_bg: &wgpu::BindGroup,
+        width: u32,
+        height: u32,
+        cmds: &[DrawCmd],
+        list: &DisplayList,
+        clear: Option<Color>,
+    ) -> wgpu::Texture {
+        use wgpu::util::DeviceExt;
+
+        // --- collect this level's geometry + composite the children ---------
         let mut rects: Vec<RectInstance> = Vec::new();
+        let mut path_geo = PathGeometry::default();
         struct ImageDraw {
             instance: RectInstance,
             bind: wgpu::BindGroup,
         }
         let mut images: Vec<ImageDraw> = Vec::new();
-        let mut path_geo = PathGeometry::default();
         struct GradDraw {
             instance: GradInstance,
             bind: wgpu::BindGroup,
         }
         let mut gradients: Vec<GradDraw> = Vec::new();
-        for cmd in &list.cmds {
-            match cmd {
-                // Solid-fill/stroke paths → lyon triangles (R1.3). Gradient
-                // paths are R1.4.
+        struct Composite {
+            instance: CompositeInstance,
+            bind: wgpu::BindGroup,
+        }
+        let mut composites: Vec<Composite> = Vec::new();
+
+        let mut i = 0;
+        while i < cmds.len() {
+            match &cmds[i] {
+                DrawCmd::PushLayer { clip, opacity, .. } => {
+                    // Find the matching PopLayer (accounting for nesting).
+                    let start = i + 1;
+                    let mut depth = 1;
+                    let mut j = start;
+                    while j < cmds.len() {
+                        match &cmds[j] {
+                            DrawCmd::PushLayer { .. } => depth += 1,
+                            DrawCmd::PopLayer => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    let inner = &cmds[start..j.min(cmds.len())];
+                    let child = self.encode_layer(
+                        device,
+                        encoder,
+                        keep,
+                        viewport_bg,
+                        width,
+                        height,
+                        inner,
+                        list,
+                        None,
+                    );
+                    let child_view = child.create_view(&Default::default());
+                    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("composite-bg"),
+                        layout: &self.image_bgl,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&child_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.sampler),
+                            },
+                        ],
+                    });
+                    let (rect, radii, has_clip) = match clip {
+                        Some(rr) => (
+                            [
+                                rr.rect.x0 as f32,
+                                rr.rect.y0 as f32,
+                                rr.rect.width() as f32,
+                                rr.rect.height() as f32,
+                            ],
+                            [
+                                rr.radii.tl as f32,
+                                rr.radii.tr as f32,
+                                rr.radii.br as f32,
+                                rr.radii.bl as f32,
+                            ],
+                            1.0,
+                        ),
+                        None => ([0.0, 0.0, width as f32, height as f32], [0.0; 4], 0.0),
+                    };
+                    composites.push(Composite {
+                        instance: CompositeInstance {
+                            rect,
+                            radii,
+                            params: [*opacity, has_clip, 0.0, 0.0],
+                        },
+                        bind,
+                    });
+                    keep.textures.push(child);
+                    keep.views.push(child_view);
+                    i = j + 1;
+                }
+                DrawCmd::PopLayer => i += 1, // unmatched; ignore
                 DrawCmd::Path {
                     path,
                     brush: Brush::Solid(c),
                     style,
-                } => path_geo.add(path, [c.r, c.g, c.b, c.a], *style),
-                // Gradient-filled rects → ramp-texture sampling (R1.4). Square
-                // corners only for now (corpus); rounded gradient rects later.
+                } => {
+                    path_geo.add(path, [c.r, c.g, c.b, c.a], *style);
+                    i += 1;
+                }
                 DrawCmd::Rect {
                     rect,
                     brush:
@@ -456,10 +652,8 @@ impl GpuRenderer {
                         let bind = self.upload_ramp(stops);
                         gradients.push(GradDraw { instance, bind });
                     }
+                    i += 1;
                 }
-                // Solid-fill rects (square or rounded, with optional centered
-                // border) go through the rounded-box SDF pipeline (R1.2).
-                // Gradient-filled rects are R1.4.
                 DrawCmd::Rect {
                     rect,
                     brush: Brush::Solid(c),
@@ -487,6 +681,7 @@ impl GpuRenderer {
                         bcolor,
                         misc: [bw, 0.0, 0.0, 0.0],
                     });
+                    i += 1;
                 }
                 DrawCmd::Image { id, dst_rect, .. } => {
                     if let Some(img) = list.images.get(id.0 as usize) {
@@ -504,12 +699,28 @@ impl GpuRenderer {
                             bind,
                         });
                     }
+                    i += 1;
                 }
-                _ => { /* gradients/paths/layers/glyphs/shader: GPU later */ }
+                // CPU draws a Shader as its deterministic fallback solid rect.
+                DrawCmd::Shader { rect, uniforms, .. } => {
+                    let c = uniforms.fallback;
+                    rects.push(RectInstance::plain(
+                        [
+                            rect.x0 as f32,
+                            rect.y0 as f32,
+                            rect.width() as f32,
+                            rect.height() as f32,
+                        ],
+                        [c.r, c.g, c.b, c.a],
+                    ));
+                    i += 1;
+                }
+                // GlyphRun (R3) and BackdropFilter: not on the GPU yet.
+                _ => i += 1,
             }
         }
 
-        // A non-empty buffer is required even with zero rects (draw count 0).
+        // --- buffers (local; moved into `keep` after the pass) --------------
         let empty = [RectInstance::plain([0.0; 4], [0.0; 4])];
         let rect_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("rects"),
@@ -520,8 +731,6 @@ impl GpuRenderer {
             },
             usage: wgpu::BufferUsages::VERTEX,
         });
-
-        // Per-image instance buffers, created up front so they outlive the pass.
         let image_buffers: Vec<wgpu::Buffer> = images
             .iter()
             .map(|img| {
@@ -532,8 +741,26 @@ impl GpuRenderer {
                 })
             })
             .collect();
-
-        // Tessellated-path buffers (empty when no paths).
+        let gradient_buffers: Vec<wgpu::Buffer> = gradients
+            .iter()
+            .map(|g| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("grad-instance"),
+                    contents: bytemuck_lite::bytes_of(&g.instance),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+            })
+            .collect();
+        let composite_buffers: Vec<wgpu::Buffer> = composites
+            .iter()
+            .map(|c| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("composite-instance"),
+                    contents: bytemuck_lite::bytes_of(&c.instance),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+            })
+            .collect();
         let path_vbuf = (!path_geo.vertices.is_empty()).then(|| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("path-verts"),
@@ -549,37 +776,61 @@ impl GpuRenderer {
             })
         });
 
-        // Per-gradient instance buffers, created up front so they outlive the pass.
-        let gradient_buffers: Vec<wgpu::Buffer> = gradients
-            .iter()
-            .map(|g| {
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("grad-instance"),
-                    contents: bytemuck_lite::bytes_of(&g.instance),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
+        // --- this layer's targets (MSAA → resolved single-sample) -----------
+        let resolved = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("layer"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TARGET_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let resolved_view = resolved.create_view(&Default::default());
+        let msaa_tex = (self.sample_count > 1).then(|| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("layer-msaa"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: self.sample_count,
+                dimension: wgpu::TextureDimension::D2,
+                format: TARGET_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
             })
-            .collect();
+        });
+        let msaa_view = msaa_tex
+            .as_ref()
+            .map(|t| t.create_view(&Default::default()));
+        let (attach_view, resolve_target) = match &msaa_view {
+            Some(v) => (v, Some(&resolved_view)),
+            None => (&resolved_view, None),
+        };
 
-        let mut encoder = device.create_command_encoder(&Default::default());
+        let clear_color = clear.unwrap_or(Color::TRANSPARENT);
         {
-            let bg = [
-                background.r as f64,
-                background.g as f64,
-                background.b as f64,
-                background.a as f64,
-            ];
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main"),
+                label: Some("layer-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: attach_view,
                     resolve_target,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: bg[0],
-                            g: bg[1],
-                            b: bg[2],
-                            a: bg[3],
+                            r: clear_color.r as f64,
+                            g: clear_color.g as f64,
+                            b: clear_color.b as f64,
+                            a: clear_color.a as f64,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -590,13 +841,13 @@ impl GpuRenderer {
             });
             if !rects.is_empty() {
                 pass.set_pipeline(&self.rect_pipeline);
-                pass.set_bind_group(0, &viewport_bg, &[]);
+                pass.set_bind_group(0, viewport_bg, &[]);
                 pass.set_vertex_buffer(0, rect_buf.slice(..));
                 pass.draw(0..6, 0..rects.len() as u32);
             }
             if !gradients.is_empty() {
                 pass.set_pipeline(&self.gradient_pipeline);
-                pass.set_bind_group(0, &viewport_bg, &[]);
+                pass.set_bind_group(0, viewport_bg, &[]);
                 for (g, buf) in gradients.iter().zip(&gradient_buffers) {
                     pass.set_bind_group(1, &g.bind, &[]);
                     pass.set_vertex_buffer(0, buf.slice(..));
@@ -605,65 +856,48 @@ impl GpuRenderer {
             }
             if let (Some(vbuf), Some(ibuf)) = (&path_vbuf, &path_ibuf) {
                 pass.set_pipeline(&self.path_pipeline);
-                pass.set_bind_group(0, &viewport_bg, &[]);
+                pass.set_bind_group(0, viewport_bg, &[]);
                 pass.set_vertex_buffer(0, vbuf.slice(..));
                 pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..path_geo.indices.len() as u32, 0, 0..1);
             }
             if !images.is_empty() {
                 pass.set_pipeline(&self.image_pipeline);
-                pass.set_bind_group(0, &viewport_bg, &[]);
+                pass.set_bind_group(0, viewport_bg, &[]);
                 for (img, buf) in images.iter().zip(&image_buffers) {
                     pass.set_bind_group(1, &img.bind, &[]);
                     pass.set_vertex_buffer(0, buf.slice(..));
                     pass.draw(0..6, 0..1);
                 }
             }
+            // Composite child layers last (on top), in command order.
+            if !composites.is_empty() {
+                pass.set_pipeline(&self.composite_pipeline);
+                pass.set_bind_group(0, viewport_bg, &[]);
+                for (c, buf) in composites.iter().zip(&composite_buffers) {
+                    pass.set_bind_group(1, &c.bind, &[]);
+                    pass.set_vertex_buffer(0, buf.slice(..));
+                    pass.draw(0..6, 0..1);
+                }
+            }
         }
 
-        // Readback.
-        let bpr = padded_bytes_per_row(width);
-        let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: (bpr * height) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
-                texture: &target,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::ImageCopyBuffer {
-                buffer: &readback,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bpr),
-                    rows_per_image: Some(height),
-                },
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-        self.queue.submit(Some(encoder.finish()));
-
-        let slice = readback.slice(..);
-        slice.map_async(wgpu::MapMode::Read, |_| {});
-        self.device.poll(wgpu::Maintain::Wait);
-        let data = slice.get_mapped_range();
-        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-        for row in 0..height {
-            let start = (row * bpr) as usize;
-            pixels.extend_from_slice(&data[start..start + (width * 4) as usize]);
+        // Park everything the recorded pass referenced until after submit.
+        keep.buffers.push(rect_buf);
+        keep.buffers.extend(image_buffers);
+        keep.buffers.extend(gradient_buffers);
+        keep.buffers.extend(composite_buffers);
+        keep.buffers.extend(path_vbuf);
+        keep.buffers.extend(path_ibuf);
+        keep.binds.extend(images.into_iter().map(|d| d.bind));
+        keep.binds.extend(gradients.into_iter().map(|d| d.bind));
+        keep.binds.extend(composites.into_iter().map(|d| d.bind));
+        if let Some(t) = msaa_tex {
+            keep.textures.push(t);
         }
-        drop(data);
-        readback.unmap();
-        RgbaImage::from_raw(width, height, pixels)
+        keep.views.extend(msaa_view);
+        keep.views.push(resolved_view);
+        resolved
     }
 
     /// Bake a gradient's stops into a 1-D ramp texture (Oklab, shared with the
@@ -1195,6 +1429,14 @@ fn to_ndc(px: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(ndc, 0.0, 1.0);
 }
 
+// Encode linear-light → sRGB (the target is non-sRGB so we encode in-shader,
+// keeping blending in gamma space). Matches `Color::to_srgb8`'s transfer.
+fn lin_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let lo = c * 12.92;
+    let hi = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, c <= vec3<f32>(0.0031308));
+}
+
 // --- rounded-rect SDF fill + centered border (R1.2) -------------------------
 
 struct RectVsOut {
@@ -1259,14 +1501,15 @@ fn over(src: vec4<f32>, dst: vec4<f32>) -> vec4<f32> {
 @fragment
 fn rect_fs(in: RectVsOut) -> @location(0) vec4<f32> {
     let sd = sd_round_box(in.wpx - in.center, in.half, in.radii);
-    // Fill covers the path interior (sd < 0), AA over a 1px ramp.
+    // Fill covers the path interior (sd < 0), AA over a 1px ramp. Colors are
+    // sRGB-encoded so compositing happens in gamma space (CPU parity).
     let fill_cov = clamp(0.5 - sd, 0.0, 1.0);
-    var col = vec4<f32>(in.color.rgb, in.color.a * fill_cov);
+    var col = vec4<f32>(lin_to_srgb(in.color.rgb), in.color.a * fill_cov);
     if (in.bwidth > 0.0) {
         // Centered stroke: a band of width bwidth straddling sd == 0.
         let half_bw = in.bwidth * 0.5;
         let stroke_cov = clamp(0.5 - (abs(sd) - half_bw), 0.0, 1.0);
-        let stroke = vec4<f32>(in.bcolor.rgb, in.bcolor.a * stroke_cov);
+        let stroke = vec4<f32>(lin_to_srgb(in.bcolor.rgb), in.bcolor.a * stroke_cov);
         col = over(stroke, col);
     }
     if (col.a <= 0.0) { discard; }
@@ -1310,7 +1553,7 @@ fn path_vs(@location(0) p: vec2<f32>, @location(1) color: vec4<f32>) -> PathVsOu
 
 @fragment
 fn path_fs(in: PathVsOut) -> @location(0) vec4<f32> {
-    return in.color;
+    return vec4<f32>(lin_to_srgb(in.color.rgb), in.color.a);
 }
 
 // --- gradients (R1.4) -------------------------------------------------------
@@ -1366,6 +1609,49 @@ fn gradient_fs(in: GradVsOut) -> @location(0) vec4<f32> {
         t = fract(a / 6.283185307179586);
     }
     return textureSample(img_tex, img_samp, vec2<f32>(clamp(t, 0.0, 1.0), 0.5));
+}
+
+// --- layer compositing (R1.5) -----------------------------------------------
+// Samples a child layer (group 1, premultiplied) over the parent, masked to a
+// rounded-rect clip and scaled by group opacity.
+
+struct CompVsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) wpx: vec2<f32>,
+    @location(1) rect: vec4<f32>,
+    @location(2) radii: vec4<f32>,
+    @location(3) params: vec4<f32>,
+};
+
+@vertex
+fn composite_vs(@builtin(vertex_index) vi: u32,
+                @location(0) rect: vec4<f32>,
+                @location(1) radii: vec4<f32>,
+                @location(2) params: vec4<f32>) -> CompVsOut {
+    let c = corner(vi);
+    let px = rect.xy + c * rect.zw;
+    var o: CompVsOut;
+    o.pos = to_ndc(px);
+    o.wpx = px;
+    o.rect = rect;
+    o.radii = radii;
+    o.params = params;
+    return o;
+}
+
+@fragment
+fn composite_fs(in: CompVsOut) -> @location(0) vec4<f32> {
+    // Child stored premultiplied; sample 1:1 at this pixel.
+    let child = textureSample(img_tex, img_samp, in.wpx / viewport.size);
+    var cov = 1.0;
+    if (in.params.y > 0.5) {
+        let center = in.rect.xy + in.rect.zw * 0.5;
+        let half = in.rect.zw * 0.5;
+        let sd = sd_round_box(in.wpx - center, half, in.radii);
+        cov = clamp(0.5 - sd, 0.0, 1.0);
+    }
+    let k = cov * in.params.x;          // clip coverage × group opacity
+    return child * k;                   // scale premultiplied color + alpha
 }
 "#;
 

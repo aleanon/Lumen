@@ -63,7 +63,7 @@ pub enum Cap {
 pub fn gpu_supported(cap: Cap) -> bool {
     matches!(
         cap,
-        Cap::RectSolid | Cap::Image | Cap::RectRounded | Cap::Path | Cap::Gradient
+        Cap::RectSolid | Cap::Image | Cap::RectRounded | Cap::Path | Cap::Gradient | Cap::Layer
     )
 }
 

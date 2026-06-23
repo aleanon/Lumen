@@ -110,12 +110,12 @@ fn capability_ratchet_covers_the_live_subset() {
     assert!(gpu_supported(Cap::RectRounded)); // R1.2
     assert!(gpu_supported(Cap::Path)); // R1.3
     assert!(gpu_supported(Cap::Gradient)); // R1.4
-    for cap in [Cap::Layer, Cap::Shader] {
-        assert!(
-            !gpu_supported(cap),
-            "{cap:?} is not GPU-live yet; flip it in R1 when it matches CPU"
-        );
-    }
+    assert!(gpu_supported(Cap::Layer)); // R1.5
+                                        // Shader is the last class still pending on the GPU.
+    assert!(
+        !gpu_supported(Cap::Shader),
+        "Shader is not GPU-live yet; flip it when it matches CPU"
+    );
     // Every supported capability must have at least one corpus scene.
     for cap in [
         Cap::RectSolid,
@@ -123,6 +123,7 @@ fn capability_ratchet_covers_the_live_subset() {
         Cap::RectRounded,
         Cap::Path,
         Cap::Gradient,
+        Cap::Layer,
     ] {
         assert!(
             corpus().iter().any(|s| s.cap == cap),
