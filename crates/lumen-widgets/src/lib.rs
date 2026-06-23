@@ -13,18 +13,25 @@ pub mod app;
 pub mod asset;
 pub mod audit;
 pub mod boundary;
+pub mod button;
+pub mod container;
 pub mod design;
 pub mod element;
 pub mod forms;
 pub mod i18n;
+pub mod label;
 pub mod markdown;
 pub mod motion;
 pub mod nav;
+pub mod scrollable;
+pub mod slider;
 pub mod system;
+pub mod text_input;
 pub mod theme;
 pub mod typed;
 pub mod undo;
 pub mod wcag;
+mod widget;
 // ShaderWidget needs the wgpu GPU backend (CPU fallback included), which is not
 // built on wasm; on the web, shaders are a WebGPU presenter concern.
 #[cfg(not(target_arch = "wasm32"))]
@@ -44,4 +51,11 @@ pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
 pub use lumen_render::{CpuRenderer, Renderer};
 pub use tasks::{Resource, TaskError};
-pub use typed::{Button, Checkbox, Image, Slider, Text, TextField};
+pub use typed::{Checkbox, Image, Text, TextField};
+// The per-file typed widgets (each builds its `Element` inside `::new()`).
+pub use button::Button;
+pub use container::Container;
+pub use label::Label;
+pub use scrollable::Scrollable;
+pub use slider::Slider;
+pub use text_input::TextInput;

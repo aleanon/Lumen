@@ -12,7 +12,6 @@
 //! via the [`col!`](crate::col)/[`row!`](crate::row) macros.
 
 use crate::{widgets, BuildCx, Element};
-use lumen_core::state::Runtime;
 use lumen_core::Color;
 use lumen_render::RgbaImage;
 
@@ -50,50 +49,6 @@ macro_rules! styled {
         }
     };
 }
-
-/// A push button. Exposes only button-relevant modifiers — a press handler and
-/// visual emphasis — plus the universal ones. It cannot be given text tracking,
-/// a drag handler, or other non-button settings: those methods don't exist.
-pub struct Button {
-    el: Element,
-}
-
-impl Button {
-    /// A button labelled `label` (accent/primary style by default).
-    pub fn new(label: impl Into<String>) -> Self {
-        Button {
-            el: Element::button(label),
-        }
-    }
-
-    /// Run `f` when the button is pressed.
-    pub fn on_press(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
-        self.el = self.el.on_click(f);
-        self
-    }
-
-    /// Accent (primary) emphasis — the default, but explicit reads clearly.
-    pub fn primary(mut self) -> Self {
-        self.el.background = Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff));
-        if let Some(ts) = self.el.text_style_mut() {
-            ts.color = Color::WHITE;
-            ts.weight = 600.0;
-        }
-        self
-    }
-
-    /// Quiet (ghost) emphasis.
-    pub fn ghost(mut self) -> Self {
-        self.el.background = Some(Color::srgb8(0xe9, 0xeb, 0xef, 0xff));
-        if let Some(ts) = self.el.text_style_mut() {
-            ts.color = Color::srgb8(0x1f, 0x23, 0x29, 0xff);
-            ts.weight = 600.0;
-        }
-        self
-    }
-}
-
-styled!(Button);
 
 /// A text run. Exposes only typography — size, weight, colour, line-height,
 /// letter-spacing — and the universal modifiers. No event handlers.
@@ -182,22 +137,6 @@ impl Checkbox {
 }
 
 styled!(Checkbox);
-
-/// A self-stateful slider over `[min, max]` (value keyed by `name`).
-pub struct Slider {
-    el: Element,
-}
-
-impl Slider {
-    /// A slider over `[min, max]`, value stored under `name`.
-    pub fn new(cx: &BuildCx, name: &str, min: f64, max: f64) -> Self {
-        Slider {
-            el: widgets::slider(cx, name, min, max),
-        }
-    }
-}
-
-styled!(Slider);
 
 /// A self-stateful single-line text field (value keyed by `name`).
 pub struct TextField {
