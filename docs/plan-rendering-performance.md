@@ -227,10 +227,25 @@ for culling. Extend it to layout for very large non-virtualized trees.
   (ADR-003-friendly). This is the model to copy.
 - Layout (`lumen-layout`) is **single-threaded**.
 
+> **Architectural finding (2026-06-24).** Layout is delegated to **taffy**
+> (`TaffyTree::compute_layout`, ADR-004), which solves the whole tree serially in
+> one call and is *not* externally parallelizable across disjoint subtrees of a
+> single tree (shared internal measure cache; one `&mut TaffyTree`). R4's premise
+> — "the SoA design already invites it" — actually refers to the **culling** pass
+> in `scene.rs` (which is threaded), not to layout. So R4 as written cannot be a
+> small drop-in: parallelizing the layout *solve* requires either (a) splitting
+> independent regions into separate `TaffyTree`s computed on scoped threads and
+> stitched by offset (a real change to how `lumen-widgets` drives layout), or
+> (b) contributing parallelism upstream to taffy, or (c) replacing taffy
+> (contradicts ADR-004). **Recommendation:** pursue (a) only for genuinely large
+> non-virtualized trees, gated behind a node-count threshold and a 1-vs-N
+> byte-identical test; treat it as its own design task, not a quick win.
+
 ## Steps (each independently green)
 - **R4.1 — Find the parallel seam.** Identify independent layout subtrees (flex/grid
   children whose sizes don't depend on siblings once the parent's available space
-  is known) — the natural fork points. Document the dependency rule.
+  is known) — the natural fork points. Document the dependency rule. *(Blocked on
+  the taffy constraint above — needs the multi-`TaffyTree` split first.)*
 - **R4.2 — Threshold + scoped fork.** Below N nodes, stay serial (threading
   overhead isn't worth it — same policy as `scene.rs`); above it, lay out
   independent subtrees on scoped threads, join, then finalize parent-dependent
