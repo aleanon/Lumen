@@ -61,7 +61,7 @@ pub enum Cap {
 /// *today*. Each R1 sub-phase adds one here and the corresponding corpus
 /// scene(s) become a hard parity gate. See the module docs.
 pub fn gpu_supported(cap: Cap) -> bool {
-    matches!(cap, Cap::RectSolid | Cap::Image)
+    matches!(cap, Cap::RectSolid | Cap::Image | Cap::RectRounded)
 }
 
 /// A named scene plus the capability it exercises.
@@ -87,13 +87,32 @@ pub struct Tolerance {
 }
 
 impl Tolerance {
-    /// The CPU↔GPU parity budget. `delta_e_oklab` is *unscaled* Euclidean Oklab
-    /// distance (range ~0–1.5, JND ≈ 0.02), so the ceiling is small: at most
-    /// 0.5% of pixels (AA edges, sub-pixel rounding) may exceed ΔE 0.04.
+    /// Parity for **edge-free** content (axis-aligned solid rects, nearest
+    /// images): `delta_e_oklab` is *unscaled* Euclidean Oklab distance (range
+    /// ~0–1.5, JND ≈ 0.02), so the ceiling is tight — at most 0.5% of pixels may
+    /// exceed ΔE 0.04.
     pub const PARITY: Tolerance = Tolerance {
         max_delta_e: 0.04,
         max_frac_over: 0.005,
     };
+
+    /// Parity for **anti-aliased** content (rounded corners, paths, gradients):
+    /// CPU (tiny-skia analytic coverage) and GPU (SDF/shader AA) differ along
+    /// the ~1px edge seam, so a larger share of pixels may exceed the ceiling.
+    /// The ceiling itself stays tight, so a *wrong* color/shape/position (which
+    /// moves many interior pixels) still fails.
+    pub const AA: Tolerance = Tolerance {
+        max_delta_e: 0.04,
+        max_frac_over: 0.04,
+    };
+}
+
+/// The parity tolerance appropriate for a capability's content.
+pub fn tolerance(cap: Cap) -> Tolerance {
+    match cap {
+        Cap::RectSolid | Cap::Image => Tolerance::PARITY,
+        _ => Tolerance::AA,
+    }
 }
 
 /// A per-pixel comparison report over two equal-sized frames.

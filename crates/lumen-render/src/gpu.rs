@@ -1,11 +1,12 @@
 //! The GPU backend (wgpu, ADR-001), offscreen.
 //!
 //! Renders the display list to an offscreen texture and reads it back to an
-//! [`RgbaImage`], with no window or display required. M0 implements the two
-//! command classes app UIs use — solid [`DrawCmd::Rect`] fills and
-//! [`DrawCmd::Image`] blits — which is enough to render `examples/hello` on the
-//! GPU and to parity-test against the CPU reference renderer (05 §4). Gradients,
-//! paths, layers, glyph runs, and shaders on the GPU are later work.
+//! [`RgbaImage`], with no window or display required. Supported commands:
+//! solid-fill [`DrawCmd::Rect`] — square or rounded, with an optional centered
+//! border, via a rounded-box SDF with 1px analytic AA (R1.2) — and
+//! [`DrawCmd::Image`] blits. Gradient-filled rects, paths, layers, glyph runs,
+//! and shaders on the GPU are later R1 sub-phases. Parity with the CPU reference
+//! is gated by `tests/cpu_vs_gpu` (05 §4).
 
 use crate::display_list::{Brush, DisplayList, DrawCmd};
 use crate::image::RgbaImage;
@@ -25,16 +26,38 @@ pub struct GpuRenderer {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct RectInstance {
+    /// `[x0, y0, width, height]` in logical px.
     rect: [f32; 4],
+    /// Fill color (straight alpha).
     color: [f32; 4],
+    /// Corner radii `[tl, tr, br, bl]` in logical px.
+    radii: [f32; 4],
+    /// Border color (straight alpha); ignored when `misc.x == 0`.
+    bcolor: [f32; 4],
+    /// `[border_width, 0, 0, 0]`.
+    misc: [f32; 4],
+}
+
+impl RectInstance {
+    /// A plain instance (square corners, no border) — used for image blits.
+    fn plain(rect: [f32; 4], color: [f32; 4]) -> RectInstance {
+        RectInstance {
+            rect,
+            color,
+            radii: [0.0; 4],
+            bcolor: [0.0; 4],
+            misc: [0.0; 4],
+        }
+    }
 }
 
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 /// The GPU backend as a runtime-selectable [`Renderer`](crate::Renderer) (A1).
-/// Covers the command set the offscreen backend supports (solid rects + image
-/// blits — which includes rasterized text/shadow images); paths/gradients/layers
-/// and HiDPI scaling on the GPU are follow-on, so it renders at 1:1.
+/// Covers the command set the offscreen backend supports (solid rects — square
+/// or rounded with a centered border — and image blits, which include
+/// rasterized text/shadow sprites); paths/gradients/layers and HiDPI scaling on
+/// the GPU are follow-on, so it renders at 1:1.
 impl crate::Renderer for GpuRenderer {
     fn render_frame(
         &mut self,
@@ -136,7 +159,10 @@ impl GpuRenderer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<RectInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x4, 1 => Float32x4, 2 => Float32x4,
+                        3 => Float32x4, 4 => Float32x4
+                    ],
                 }],
                 compilation_options: Default::default(),
             },
@@ -250,32 +276,50 @@ impl GpuRenderer {
         let mut images: Vec<ImageDraw> = Vec::new();
         for cmd in &list.cmds {
             match cmd {
+                // Solid-fill rects (square or rounded, with optional centered
+                // border) go through the rounded-box SDF pipeline (R1.2).
+                // Gradient-filled rects are R1.4.
                 DrawCmd::Rect {
                     rect,
                     brush: Brush::Solid(c),
-                    ..
-                } => rects.push(RectInstance {
-                    rect: [
-                        rect.x0 as f32,
-                        rect.y0 as f32,
-                        rect.width() as f32,
-                        rect.height() as f32,
-                    ],
-                    color: [c.r, c.g, c.b, c.a],
-                }),
+                    radii,
+                    border,
+                } => {
+                    let (bcolor, bw) = match border {
+                        Some(b) => ([b.color.r, b.color.g, b.color.b, b.color.a], b.width as f32),
+                        None => ([0.0; 4], 0.0),
+                    };
+                    rects.push(RectInstance {
+                        rect: [
+                            rect.x0 as f32,
+                            rect.y0 as f32,
+                            rect.width() as f32,
+                            rect.height() as f32,
+                        ],
+                        color: [c.r, c.g, c.b, c.a],
+                        radii: [
+                            radii.tl as f32,
+                            radii.tr as f32,
+                            radii.br as f32,
+                            radii.bl as f32,
+                        ],
+                        bcolor,
+                        misc: [bw, 0.0, 0.0, 0.0],
+                    });
+                }
                 DrawCmd::Image { id, dst_rect, .. } => {
                     if let Some(img) = list.images.get(id.0 as usize) {
                         let bind = self.upload_image(img);
                         images.push(ImageDraw {
-                            instance: RectInstance {
-                                rect: [
+                            instance: RectInstance::plain(
+                                [
                                     dst_rect.x0 as f32,
                                     dst_rect.y0 as f32,
                                     dst_rect.width() as f32,
                                     dst_rect.height() as f32,
                                 ],
-                                color: [1.0, 1.0, 1.0, 1.0],
-                            },
+                                [1.0, 1.0, 1.0, 1.0],
+                            ),
                             bind,
                         });
                     }
@@ -284,13 +328,12 @@ impl GpuRenderer {
             }
         }
 
+        // A non-empty buffer is required even with zero rects (draw count 0).
+        let empty = [RectInstance::plain([0.0; 4], [0.0; 4])];
         let rect_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("rects"),
             contents: if rects.is_empty() {
-                bytemuck_lite::cast_slice(&[RectInstance {
-                    rect: [0.0; 4],
-                    color: [0.0; 4],
-                }])
+                bytemuck_lite::cast_slice(&empty)
             } else {
                 bytemuck_lite::cast_slice(&rects)
             },
@@ -713,28 +756,88 @@ fn corner(i: u32) -> vec2<f32> {
     return c[i];
 }
 
-fn place(rect: vec4<f32>, c: vec2<f32>) -> vec4<f32> {
-    let px = rect.xy + c * rect.zw;
+fn to_ndc(px: vec2<f32>) -> vec4<f32> {
     let ndc = vec2<f32>(px.x / viewport.size.x * 2.0 - 1.0,
                         1.0 - px.y / viewport.size.y * 2.0);
     return vec4<f32>(ndc, 0.0, 1.0);
 }
 
+// --- rounded-rect SDF fill + centered border (R1.2) -------------------------
+
+struct RectVsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) wpx: vec2<f32>,
+    @location(2) center: vec2<f32>,
+    @location(3) half: vec2<f32>,
+    @location(4) radii: vec4<f32>,
+    @location(5) bcolor: vec4<f32>,
+    @location(6) bwidth: f32,
+};
+
 @vertex
 fn rect_vs(@builtin(vertex_index) vi: u32,
            @location(0) rect: vec4<f32>,
-           @location(1) color: vec4<f32>) -> VsOut {
+           @location(1) color: vec4<f32>,
+           @location(2) radii: vec4<f32>,
+           @location(3) bcolor: vec4<f32>,
+           @location(4) misc: vec4<f32>) -> RectVsOut {
     let c = corner(vi);
-    var o: VsOut;
-    o.pos = place(rect, c);
+    let bw = misc.x;
+    // Inflate the quad so the AA falloff and the outer half of a centered
+    // border (which straddles the path edge) are inside the rasterized area.
+    let margin = bw * 0.5 + 1.5;
+    let origin = rect.xy - vec2<f32>(margin, margin);
+    let size = rect.zw + vec2<f32>(margin * 2.0, margin * 2.0);
+    let px = origin + c * size;
+    var o: RectVsOut;
+    o.pos = to_ndc(px);
     o.color = color;
-    o.uv = c;
+    o.wpx = px;
+    o.center = rect.xy + rect.zw * 0.5;
+    o.half = rect.zw * 0.5;
+    o.radii = radii;
+    o.bcolor = bcolor;
+    o.bwidth = bw;
     return o;
 }
 
+// Signed distance to a rounded box with per-corner radii. `p` is relative to the
+// box center; `b` is the half-size; radii order is (tl, tr, br, bl).
+fn sd_round_box(p: vec2<f32>, b: vec2<f32>, radii: vec4<f32>) -> f32 {
+    let rmax = min(b.x, b.y);
+    // Pick the corner radius for this quadrant (y is downward).
+    var r: f32;
+    if (p.x > 0.0) { r = select(radii.w, radii.z, p.y > 0.0); }   // tr / br
+    else           { r = select(radii.x, radii.y, p.y > 0.0); }   // tl / bl
+    r = clamp(r, 0.0, rmax);
+    let q = abs(p) - b + vec2<f32>(r, r);
+    return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - r;
+}
+
+// Straight-alpha source-over of `src` onto `dst`.
+fn over(src: vec4<f32>, dst: vec4<f32>) -> vec4<f32> {
+    let a = src.a + dst.a * (1.0 - src.a);
+    if (a <= 0.0) { return vec4<f32>(0.0); }
+    let rgb = (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / a;
+    return vec4<f32>(rgb, a);
+}
+
 @fragment
-fn rect_fs(in: VsOut) -> @location(0) vec4<f32> {
-    return in.color;
+fn rect_fs(in: RectVsOut) -> @location(0) vec4<f32> {
+    let sd = sd_round_box(in.wpx - in.center, in.half, in.radii);
+    // Fill covers the path interior (sd < 0), AA over a 1px ramp.
+    let fill_cov = clamp(0.5 - sd, 0.0, 1.0);
+    var col = vec4<f32>(in.color.rgb, in.color.a * fill_cov);
+    if (in.bwidth > 0.0) {
+        // Centered stroke: a band of width bwidth straddling sd == 0.
+        let half_bw = in.bwidth * 0.5;
+        let stroke_cov = clamp(0.5 - (abs(sd) - half_bw), 0.0, 1.0);
+        let stroke = vec4<f32>(in.bcolor.rgb, in.bcolor.a * stroke_cov);
+        col = over(stroke, col);
+    }
+    if (col.a <= 0.0) { discard; }
+    return col;
 }
 
 @group(1) @binding(0) var img_tex: texture_2d<f32>;
@@ -746,7 +849,7 @@ fn image_vs(@builtin(vertex_index) vi: u32,
             @location(1) color: vec4<f32>) -> VsOut {
     let c = corner(vi);
     var o: VsOut;
-    o.pos = place(rect, c);
+    o.pos = to_ndc(rect.xy + c * rect.zw);
     o.color = color;
     o.uv = c;
     return o;

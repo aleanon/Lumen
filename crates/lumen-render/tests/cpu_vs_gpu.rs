@@ -38,7 +38,12 @@ fn gpu_matches_cpu_for_supported_capabilities() {
         let gpu_img = gpu.render(&s.dl, W, H, bg());
         assert_eq!(gpu_img.width(), W, "{} width", s.name);
         assert_eq!(gpu_img.height(), H, "{} height", s.name);
-        assert_frames_close(&cpu_img, &gpu_img, Tolerance::PARITY, s.name);
+        let d = frame_diff(&cpu_img, &gpu_img);
+        eprintln!(
+            "cpu_vs_gpu: {} ({:?}) max ΔE {:.4}, {} px differ",
+            s.name, s.cap, d.max_delta_e, d.differing
+        );
+        assert_frames_close(&cpu_img, &gpu_img, tolerance(s.cap), s.name);
         checked += 1;
     }
 
