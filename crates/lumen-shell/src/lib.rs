@@ -342,11 +342,16 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 });
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                // winit's convention is positive-y = wheel up (away from the
+                // user); negate so the runtime's wheel delta means "scroll the
+                // content toward its end" (wheel down → positive → list moves
+                // down). Handlers and the agent's `input.scroll` all use that
+                // natural sign.
                 let d = match delta {
                     MouseScrollDelta::LineDelta(x, y) => {
-                        Vec2::new(x as f64 * 40.0, y as f64 * 40.0)
+                        Vec2::new(x as f64 * 40.0, -(y as f64) * 40.0)
                     }
-                    MouseScrollDelta::PixelDelta(p) => Vec2::new(p.x, p.y),
+                    MouseScrollDelta::PixelDelta(p) => Vec2::new(p.x, -p.y),
                 };
                 self.inject(Event::Wheel(WheelEvent {
                     pos: self.cursor,
@@ -497,6 +502,10 @@ fn map_key(k: &winit::keyboard::Key) -> Option<Key> {
         WK::Named(WNK::ArrowRight) => Some(Key::Named(NamedKey::ArrowRight)),
         WK::Named(WNK::ArrowUp) => Some(Key::Named(NamedKey::ArrowUp)),
         WK::Named(WNK::ArrowDown) => Some(Key::Named(NamedKey::ArrowDown)),
+        WK::Named(WNK::Home) => Some(Key::Named(NamedKey::Home)),
+        WK::Named(WNK::End) => Some(Key::Named(NamedKey::End)),
+        WK::Named(WNK::PageUp) => Some(Key::Named(NamedKey::PageUp)),
+        WK::Named(WNK::PageDown) => Some(Key::Named(NamedKey::PageDown)),
         WK::Character(s) => Some(Key::Character(s.as_str().into())),
         _ => None,
     }

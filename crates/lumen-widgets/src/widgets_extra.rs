@@ -277,7 +277,9 @@ pub fn pane_grid(cx: &BuildCx, name: &str, first: Element, second: Element) -> E
     Element {
         role: Role::Group,
         value: Some(format!("{:.2}", r)),
-        on_drag: Some(Rc::new(move |rt, frac| ratio.set(rt, frac.clamp(0.1, 0.9)))),
+        on_drag: Some(Rc::new(move |rt, frac, _| {
+            ratio.set(rt, frac.clamp(0.1, 0.9))
+        })),
         style: LayoutStyle {
             display: Display::Flex,
             flex_direction: FlexDirection::Row,

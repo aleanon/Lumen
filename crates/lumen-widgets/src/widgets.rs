@@ -183,7 +183,9 @@ pub fn slider(cx: &BuildCx, name: &str, min: f64, max: f64) -> Element {
             height: Dim::px(THUMB as f32),
             ..LayoutStyle::default()
         },
-        on_drag: Some(Rc::new(move |rt, f| value.set(rt, min + f * (max - min)))),
+        on_drag: Some(Rc::new(move |rt, f, _| {
+            value.set(rt, min + f * (max - min))
+        })),
         children: vec![track, thumb],
         ..Element::default()
     }

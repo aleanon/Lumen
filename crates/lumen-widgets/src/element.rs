@@ -18,10 +18,16 @@ use std::rc::Rc;
 pub type Handler = Rc<dyn Fn(&Runtime)>;
 /// A wheel handler receiving the vertical delta (logical px).
 pub type WheelHandler = Rc<dyn Fn(&Runtime, f64)>;
-/// A drag handler receiving the pointer's fraction along the node's main axis.
-pub type DragHandler = Rc<dyn Fn(&Runtime, f64)>;
+/// A drag handler receiving the pointer's fraction along the node's width and
+/// height (`frac_x`, `frac_y`), each clamped to `0.0..=1.0`. Horizontal controls
+/// (sliders, the pane-grid split) use `frac_x`; vertical ones (a scrollbar) use
+/// `frac_y`.
+pub type DragHandler = Rc<dyn Fn(&Runtime, f64, f64)>;
 /// A committed-text handler (text inputs).
 pub type TextHandler = Rc<dyn Fn(&Runtime, &str)>;
+/// A key handler on the focused node, receiving each `KeyDown` (the node decides
+/// what to do — e.g. a list handling PageUp/Down/Home/End/arrows).
+pub type KeyHandler = Rc<dyn Fn(&Runtime, &lumen_core::events::KeyEvent)>;
 /// A drop handler receiving the dropped payload (T5.2 drag-and-drop).
 pub type DropHandler = Rc<dyn Fn(&Runtime, &lumen_core::events::DropData)>;
 /// An immediate-mode draw callback (E8.1 Canvas): paints into a `Frame` sized to
@@ -130,6 +136,8 @@ pub struct Element {
     pub on_drop: Option<DropHandler>,
     /// Committed-text handler (text inputs).
     pub on_text: Option<TextHandler>,
+    /// Key handler invoked on the focused node for each `KeyDown`.
+    pub on_key: Option<KeyHandler>,
     /// Optional drop shadow behind the box.
     pub shadow: Option<Shadow>,
     /// Children.
@@ -158,6 +166,7 @@ impl Default for Element {
             on_drag: None,
             on_drop: None,
             on_text: None,
+            on_key: None,
             shadow: None,
             children: Vec::new(),
         }
@@ -279,6 +288,16 @@ impl Element {
         f: impl Fn(&Runtime, &lumen_core::events::DropData) + 'static,
     ) -> Self {
         self.on_drop = Some(Rc::new(f));
+        self
+    }
+    /// Set the key handler (fires on this node while it is focused).
+    pub fn on_key(mut self, f: impl Fn(&Runtime, &lumen_core::events::KeyEvent) + 'static) -> Self {
+        self.on_key = Some(Rc::new(f));
+        self
+    }
+    /// Mark the node keyboard-focusable (so it can receive `on_key`).
+    pub fn focusable(mut self) -> Self {
+        self.focusable = true;
         self
     }
     /// Replace the children.

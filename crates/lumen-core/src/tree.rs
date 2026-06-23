@@ -174,21 +174,31 @@ impl Tree {
     // --- hot-data accessors -------------------------------------------------
 
     /// The window-space bounds of `n` — the single source of truth shared with
-    /// semantics and `ui.getLayout` (02 §5).
+    /// semantics and `ui.getLayout` (02 §5). Bounds-checked: a stale index (from
+    /// a node that no longer exists after a rebuild) returns the empty rect rather
+    /// than panicking, so a late event can never crash the runtime.
     pub fn bounds(&self, n: NodeIndex) -> Rect {
-        self.bounds[n.index() as usize]
+        self.bounds
+            .get(n.index() as usize)
+            .copied()
+            .unwrap_or(Rect::ZERO)
     }
     pub fn set_bounds(&mut self, n: NodeIndex, r: Rect) {
         self.bounds[n.index() as usize] = r;
     }
     pub fn z(&self, n: NodeIndex) -> u32 {
-        self.z[n.index() as usize]
+        self.z.get(n.index() as usize).copied().unwrap_or(0)
     }
     pub fn set_z(&mut self, n: NodeIndex, z: u32) {
         self.z[n.index() as usize] = z;
     }
+    /// Bounds-checked (see [`bounds`](Self::bounds)): a stale index returns
+    /// `NodeFlags::empty()`.
     pub fn flags(&self, n: NodeIndex) -> NodeFlags {
-        self.flags[n.index() as usize]
+        self.flags
+            .get(n.index() as usize)
+            .copied()
+            .unwrap_or(NodeFlags::empty())
     }
     pub fn set_flags(&mut self, n: NodeIndex, f: NodeFlags) {
         self.flags[n.index() as usize] = f;

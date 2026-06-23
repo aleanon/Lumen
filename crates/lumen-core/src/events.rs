@@ -117,6 +117,10 @@ pub enum NamedKey {
     Home,
     /// End.
     End,
+    /// Page Up.
+    PageUp,
+    /// Page Down.
+    PageDown,
 }
 
 /// A key identity: a named key or a produced character.

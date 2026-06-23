@@ -200,6 +200,7 @@ struct NodeMeta {
     on_drag: Option<crate::element::DragHandler>,
     on_drop: Option<crate::element::DropHandler>,
     on_text: Option<crate::element::TextHandler>,
+    on_key: Option<crate::element::KeyHandler>,
     background: Option<Color>,
     corner_radius: f64,
     shadow: Option<crate::element::Shadow>,
@@ -266,7 +267,10 @@ pub struct Headless<R = lumen_render::CpuRenderer, E = lumen_core::tasks::Inline
     build_panic: Option<lumen_core::Diagnostic>,
     focused_id: Option<StableId>,
     hovered_id: Option<StableId>,
-    pressed: Option<NodeIndex>,
+    /// The node being dragged: its index *and* stable id (if any). The id lets a
+    /// drag survive rebuilds that renumber nodes (e.g. a scrollbar whose index
+    /// shifts as list rows load) by re-resolving the current node each move.
+    pressed: Option<(NodeIndex, Option<StableId>)>,
     app_sheet: Option<lumen_style::Stylesheet>,
     theme: lumen_style::ThemeKind,
     node_style: HashMap<NodeIndex, lumen_style::Style>,
@@ -527,7 +531,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                             }
                         }
                         if !did_drag && m.on_drag.is_some() {
-                            self.pressed = Some(node);
+                            self.pressed = Some((node, m.id.clone()));
                             self.apply_drag(node, pe.pos);
                             did_drag = true;
                         }
@@ -567,7 +571,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     n = p.is_some().then_some(p);
                 }
                 self.hovered_id = id;
-                if let Some(node) = self.pressed {
+                if let Some((idx, drag_id)) = self.pressed.clone() {
+                    // Re-resolve by stable id so a rebuild that renumbered nodes
+                    // doesn't drag the wrong (or a stale) node; fall back to the
+                    // original index.
+                    let node = drag_id
+                        .as_ref()
+                        .and_then(|i| self.node_by_id(i))
+                        .unwrap_or(idx);
                     self.apply_drag(node, pe.pos);
                 }
             }
@@ -595,22 +606,37 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     n = parent.is_some().then_some(parent);
                 }
             }
-            Event::KeyDown(ke) => match ke.key {
-                Key::Named(NamedKey::Tab) => {
-                    let forward = !ke.modifiers.contains(lumen_core::events::Modifiers::SHIFT);
-                    self.move_focus(forward);
+            Event::KeyDown(ke) => {
+                // The focused node's key handler sees every key first (a list
+                // handles PageUp/Down/Home/End/arrows); built-in focus/activation
+                // keys still apply.
+                if let Some(node) = self.focused_node() {
+                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_key.clone()) {
+                        h(&self.rt, &ke);
+                    }
                 }
-                Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
-                    self.activate_focused();
+                match ke.key {
+                    Key::Named(NamedKey::Tab) => {
+                        let forward = !ke.modifiers.contains(lumen_core::events::Modifiers::SHIFT);
+                        self.move_focus(forward);
+                    }
+                    Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                        self.activate_focused();
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
 
     fn focused_node(&self) -> Option<NodeIndex> {
         let id = self.focused_id.as_ref()?;
+        self.node_by_id(id)
+    }
+
+    /// The current node carrying stable id `id`, if any (survives rebuilds).
+    fn node_by_id(&self, id: &StableId) -> Option<NodeIndex> {
         self.tree
             .document_order()
             .into_iter()
@@ -632,15 +658,26 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
     }
 
-    /// Call a node's drag handler with the pointer's fraction along its width.
+    /// Call a node's drag handler with the pointer's fraction along its width and
+    /// height (`frac_x`, `frac_y`). Horizontal controls read `frac_x`, vertical
+    /// ones (a scrollbar) read `frac_y`.
     fn apply_drag(&self, node: NodeIndex, pos: Point) {
         let b = self.tree.bounds(node);
-        if b.width() <= 0.0 {
-            return;
+        if b.width() <= 0.0 && b.height() <= 0.0 {
+            return; // degenerate/stale bounds — skip rather than apply (0, 0)
         }
-        let frac = ((pos.x - b.x0) / b.width()).clamp(0.0, 1.0);
+        let frac_x = if b.width() > 0.0 {
+            ((pos.x - b.x0) / b.width()).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let frac_y = if b.height() > 0.0 {
+            ((pos.y - b.y0) / b.height()).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         if let Some(h) = self.meta.get(&node).and_then(|m| m.on_drag.clone()) {
-            h(&self.rt, frac);
+            h(&self.rt, frac_x, frac_y);
         }
     }
 
@@ -842,7 +879,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 NodeContent::Text(..) | NodeContent::Image(..) | NodeContent::Custom(..)
             )
             || el.on_wheel.is_some()
-            || el.on_drag.is_some();
+            || el.on_drag.is_some()
+            || el.on_key.is_some()
+            || el.focusable;
         if interactive {
             flags |= NodeFlags::HIT_TESTABLE;
         }
@@ -937,6 +976,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 on_drag: el.on_drag,
                 on_drop: el.on_drop,
                 on_text: el.on_text,
+                on_key: el.on_key,
                 background: el.background,
                 corner_radius: el.corner_radius,
                 shadow: el.shadow,
