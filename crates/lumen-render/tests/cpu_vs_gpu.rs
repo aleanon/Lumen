@@ -52,3 +52,39 @@ fn gpu_matches_cpu_for_supported_capabilities() {
         "expected to parity-check at least the rect+image scenes, checked {checked}"
     );
 }
+
+/// R1.6: at 2× HiDPI the GPU (`render_at_scale`) must match the CPU
+/// (`render_scaled`) within the AA budget — geometry scales, AA stays a thin
+/// seam. Skips when no adapter.
+#[test]
+fn gpu_matches_cpu_at_2x() {
+    let Some(gpu) = GpuRenderer::new() else {
+        eprintln!("gpu_matches_cpu_at_2x: no wgpu adapter; skipping");
+        return;
+    };
+    let scale = 2.0;
+    let (pw, ph) = (W * 2, H * 2);
+    let mut checked = 0usize;
+    for s in corpus() {
+        if !gpu_supported(s.cap) {
+            continue;
+        }
+        let cpu_img = cpu::render_scaled(&s.dl, pw, ph, scale, bg());
+        let gpu_img = gpu.render_at_scale(&s.dl, pw, ph, scale, bg());
+        assert_eq!(
+            (gpu_img.width(), gpu_img.height()),
+            (pw, ph),
+            "{} size",
+            s.name
+        );
+        let d = frame_diff(&cpu_img, &gpu_img);
+        eprintln!(
+            "gpu@2x: {} ({:?}) max ΔE {:.4}, {} px differ",
+            s.name, s.cap, d.max_delta_e, d.differing
+        );
+        // HiDPI AA seam is ~2× wider in logical terms; use the AA budget for all.
+        assert_frames_close(&cpu_img, &gpu_img, Tolerance::AA, s.name);
+        checked += 1;
+    }
+    assert!(checked >= 2, "expected ≥2 scenes at 2×, checked {checked}");
+}

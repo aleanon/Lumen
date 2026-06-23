@@ -313,12 +313,17 @@ impl<'a> Renderer<'a> {
         let Some(mask) = path_mask(w, h, path, self.base) else {
             return;
         };
+        // Sample points are in canvas (device) space; map back to logical space
+        // by the base scale so the conic centers on the logical `center` at any
+        // HiDPI scale (identity at scale 1, so goldens/damage are unchanged).
+        let sx = (self.base.sx as f64).abs().max(1e-6);
+        let sy = (self.base.sy as f64).abs().max(1e-6);
         let mut tmp = Pixmap::new(w.max(1), h.max(1)).expect("valid size");
         let data = tmp.pixels_mut();
         for py in 0..h {
             for px in 0..w {
-                let wx = px as f64 + ox + 0.5;
-                let wy = py as f64 + oy + 0.5;
+                let wx = (px as f64 + ox + 0.5) / sx;
+                let wy = (py as f64 + oy + 0.5) / sy;
                 let mut t = ((wy - center.y).atan2(wx - center.x) - start) / std::f64::consts::TAU;
                 t = t.rem_euclid(1.0);
                 let c = sample_stops_oklab(stops, t as f32).to_srgb8();

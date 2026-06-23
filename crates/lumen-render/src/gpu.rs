@@ -8,8 +8,9 @@
 //! gradient-filled rects (linear/radial/conic) via an Oklab ramp texture (R1.4);
 //! [`DrawCmd::PushLayer`]/[`DrawCmd::PopLayer`] via recursive render-to-texture
 //! compositing with rounded-rect clip + group opacity (R1.5); and
-//! [`DrawCmd::Image`] blits. Glyph runs (R3) and shaders are still pending.
-//! Parity with the CPU reference is gated by `tests/cpu_vs_gpu` (05 §4).
+//! [`DrawCmd::Image`] blits, all honoring a HiDPI `scale` (R1.6). Glyph runs
+//! (R3) and shaders are still pending. Parity with the CPU reference is gated by
+//! `tests/cpu_vs_gpu` (05 §4), at 1× and 2×.
 //!
 //! Blending matches the CPU by happening in **gamma space**: the target is a
 //! non-sRGB `Rgba8Unorm` holding sRGB-encoded bytes, fragments sRGB-encode their
@@ -134,10 +135,10 @@ impl crate::Renderer for GpuRenderer {
         list: &DisplayList,
         width: u32,
         height: u32,
-        _scale: f64,
+        scale: f64,
         background: Color,
     ) -> RgbaImage {
-        self.render(list, width, height, background)
+        self.render_at_scale(list, width, height, scale, background)
     }
 
     fn name(&self) -> &'static str {
@@ -424,7 +425,8 @@ impl GpuRenderer {
         })
     }
 
-    /// Render `list` to a `width`×`height` image over `background`.
+    /// Render `list` (logical-px) to a `width`×`height` *physical* image over
+    /// `background`, at 1:1 scale.
     pub fn render(
         &self,
         list: &DisplayList,
@@ -432,15 +434,28 @@ impl GpuRenderer {
         height: u32,
         background: Color,
     ) -> RgbaImage {
+        self.render_at_scale(list, width, height, 1.0, background)
+    }
+
+    /// Render `list` (logical-px) to a `width`×`height` *physical* image,
+    /// scaling logical coordinates by `scale` (HiDPI, R1.6).
+    pub fn render_at_scale(
+        &self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+    ) -> RgbaImage {
         use wgpu::util::DeviceExt;
         let device = &self.device;
         let mut keep = KeepAlive::default();
         let mut encoder = device.create_command_encoder(&Default::default());
 
-        // Shared viewport uniform (logical = physical here; HiDPI is R1.6).
+        // Shared viewport uniform: physical size + the logical→physical scale.
         let viewport = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport"),
-            contents: bytemuck_lite::bytes_of(&[width as f32, height as f32, 0.0, 0.0]),
+            contents: bytemuck_lite::bytes_of(&[width as f32, height as f32, scale as f32, 0.0]),
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let viewport_bgl = self.rect_pipeline.get_bind_group_layout(0);
@@ -1405,7 +1420,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 }
 
 const SHADER: &str = r#"
-struct Viewport { size: vec2<f32>, _pad: vec2<f32> };
+struct Viewport { size: vec2<f32>, scale: f32, _pad: f32 };
 @group(0) @binding(0) var<uniform> viewport: Viewport;
 
 struct VsOut {
@@ -1424,8 +1439,10 @@ fn corner(i: u32) -> vec2<f32> {
 }
 
 fn to_ndc(px: vec2<f32>) -> vec4<f32> {
-    let ndc = vec2<f32>(px.x / viewport.size.x * 2.0 - 1.0,
-                        1.0 - px.y / viewport.size.y * 2.0);
+    // Logical → physical (× scale) → NDC.
+    let dev = px * viewport.scale;
+    let ndc = vec2<f32>(dev.x / viewport.size.x * 2.0 - 1.0,
+                        1.0 - dev.y / viewport.size.y * 2.0);
     return vec4<f32>(ndc, 0.0, 1.0);
 }
 
@@ -1641,8 +1658,8 @@ fn composite_vs(@builtin(vertex_index) vi: u32,
 
 @fragment
 fn composite_fs(in: CompVsOut) -> @location(0) vec4<f32> {
-    // Child stored premultiplied; sample 1:1 at this pixel.
-    let child = textureSample(img_tex, img_samp, in.wpx / viewport.size);
+    // Child stored premultiplied at physical resolution; sample at this pixel.
+    let child = textureSample(img_tex, img_samp, in.wpx * viewport.scale / viewport.size);
     var cov = 1.0;
     if (in.params.y > 0.5) {
         let center = in.rect.xy + in.rect.zw * 0.5;
