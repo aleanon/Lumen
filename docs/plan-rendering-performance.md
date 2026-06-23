@@ -11,7 +11,10 @@ scale" polish line). This plan is the work that runs **behind** that seam.*
 > ramp), layers/clip/opacity (R1.5, render-to-texture + gamma-space blending),
 > and HiDPI (R1.6), gated at 1× and 2×. Remaining in R1: **R1.1 live `wgpu`
 > surface in the shell** (display-dependent), non-source-over blends, rounded
-> gradient rects, and `BackdropFilter` on GPU. R2–R4 pending.
+> gradient rects, and `BackdropFilter` on GPU. **R3.1 ✅ done** — per-glyph CPU
+> raster cache in `lumen-text` (byte-identical; a changed string only
+> rasterizes new glyphs). R2, R3.2–R3.5, and R4 pending (R4 constrained by
+> taffy — see its section).
 >
 > **Scope.** Turns the five priority recommendations into committable phases:
 > (1) a real GPU surface backend, (2) activating the dormant dirty-flag /
