@@ -142,6 +142,9 @@ pub struct Element {
     /// element's bounds, or on Escape. Used for click-away on transient overlays
     /// (dropdowns, popovers, menus, tooltips).
     pub on_dismiss: Option<Handler>,
+    /// Clip descendants to this element's (rounded) bounds — `overflow: hidden`.
+    /// Used by scroll viewports so off-screen content doesn't paint outside.
+    pub clip: bool,
     /// Optional drop shadow behind the box.
     pub shadow: Option<Shadow>,
     /// Children.
@@ -172,6 +175,7 @@ impl Default for Element {
             on_text: None,
             on_key: None,
             on_dismiss: None,
+            clip: false,
             shadow: None,
             children: Vec::new(),
         }
@@ -308,6 +312,11 @@ impl Element {
     /// Set the light-dismiss handler (fires on an outside press or Escape).
     pub fn on_dismiss(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
         self.on_dismiss = Some(Rc::new(f));
+        self
+    }
+    /// Clip descendants to this element's bounds (`overflow: hidden`).
+    pub fn clip(mut self, on: bool) -> Self {
+        self.clip = on;
         self
     }
     /// Replace the children.

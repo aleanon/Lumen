@@ -1,20 +1,24 @@
 //! [`TextInput`] — a self-stateful single-line text field. Its `Element` is built
 //! inside [`TextInput::new`]; the value lives in a signal keyed by `name`, so it
-//! survives rebuilds.
+//! survives rebuilds. Supports backspace, and an [`on_submit`](TextInput::on_submit)
+//! handler that fires on Enter.
 
 use crate::element::NodeContent;
 use crate::widget::impl_common;
 use crate::{BuildCx, Element};
+use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role};
+use lumen_core::state::{Runtime, Signal};
 use lumen_core::Color;
 use lumen_layout::{Dim, Edges, LayoutStyle};
 use lumen_text::TextStyle;
 use std::rc::Rc;
 
-/// A single-line text input. Committed text is appended to the value signal
-/// (`name`); full IME/editing is the text stack's concern.
+/// A single-line text input. Typing appends committed text; Backspace deletes;
+/// Enter calls the optional submit handler.
 pub struct TextInput {
     el: Element,
+    value: Signal<String>,
 }
 
 impl TextInput {
@@ -46,9 +50,37 @@ impl TextInput {
                 let t = t.to_string();
                 value.update(rt, |s| s.push_str(&t))
             })),
+            // Backspace edits while focused (Enter is wired by `on_submit`).
+            on_key: Some(Rc::new(move |rt, ke| {
+                if matches!(ke.key, Key::Named(NamedKey::Backspace)) {
+                    value.update(rt, |s| {
+                        s.pop();
+                    });
+                }
+            })),
             ..Element::default()
         };
-        TextInput { el }
+        TextInput { el, value }
+    }
+
+    /// Run `f` with the current value when Enter is pressed, then clear the field
+    /// (the "submit a line" pattern). Backspace editing is preserved.
+    pub fn on_submit(mut self, f: impl Fn(&Runtime, &str) + 'static) -> TextInput {
+        let value = self.value;
+        self.el.on_key = Some(Rc::new(move |rt, ke| match ke.key {
+            Key::Named(NamedKey::Backspace) => value.update(rt, |s| {
+                s.pop();
+            }),
+            Key::Named(NamedKey::Enter) => {
+                let v = value.get(rt);
+                if !v.is_empty() {
+                    f(rt, &v);
+                    value.set(rt, String::new());
+                }
+            }
+            _ => {}
+        }));
+        self
     }
 }
 

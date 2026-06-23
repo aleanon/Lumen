@@ -16,7 +16,9 @@ use lumen_core::state::Runtime;
 use lumen_core::tree::{NodeFlags, Tree};
 use lumen_core::{Color, NodeIndex, StableId};
 use lumen_layout::{Dim, LayoutNode, LayoutStyle, LayoutTree};
-use lumen_render::{cpu, Brush, CornerRadii, DisplayList, DrawCmd, RgbaImage};
+use lumen_render::{
+    cpu, BlendMode, Brush, CornerRadii, DisplayList, DrawCmd, RgbaImage, RoundedRect,
+};
 use lumen_text::TextEngine;
 use std::collections::HashMap;
 
@@ -204,6 +206,7 @@ struct NodeMeta {
     on_dismiss: Option<Handler>,
     background: Option<Color>,
     corner_radius: f64,
+    clip: bool,
     shadow: Option<crate::element::Shadow>,
     content: NodeContent,
     /// Left/top padding in px — own-text is painted at the padded (content-box)
@@ -1019,6 +1022,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 on_dismiss: el.on_dismiss,
                 background: el.background,
                 corner_radius: el.corner_radius,
+                clip: el.clip,
                 shadow: el.shadow,
                 content: el.content,
                 pad,
@@ -1035,8 +1039,24 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let mut dl = DisplayList::new();
         let mut text_targets: Vec<lumen_render::TextTarget> = Vec::new();
         let order = self.tree.document_order();
+        // Clip stack (overflow:hidden): a `clip` node opens a `PushLayer` masked
+        // to its bounds; it stays open across the node's descendants (contiguous
+        // in preorder) and closes when traversal returns to its depth or above.
+        let root = order.first().copied();
+        let mut depth: HashMap<NodeIndex, u32> = HashMap::new();
+        let mut clip_stack: Vec<u32> = Vec::new();
         for node in order {
             let bounds = self.tree.bounds(node);
+            let d = if Some(node) == root {
+                0
+            } else {
+                depth.get(&self.tree.parent(node)).map_or(0, |p| p + 1)
+            };
+            depth.insert(node, d);
+            while clip_stack.last().is_some_and(|&cd| d <= cd) {
+                dl.push(DrawCmd::PopLayer);
+                clip_stack.pop();
+            }
             let Some(m) = self.meta.get(&node) else {
                 continue;
             };
@@ -1054,6 +1074,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 .and_then(|s| s.border_radius)
                 .map(|r| r as f64)
                 .unwrap_or(m.corner_radius);
+            // overflow:hidden — open a clip layer for this node's subtree (its own
+            // fill + descendants paint into it, masked to its rounded bounds).
+            if m.clip {
+                dl.push(DrawCmd::PushLayer {
+                    clip: Some(RoundedRect {
+                        rect: bounds,
+                        radii: CornerRadii::all(radius),
+                    }),
+                    opacity: 1.0,
+                    transform: kurbo::Affine::IDENTITY,
+                    blend: BlendMode::SourceOver,
+                });
+                clip_stack.push(d);
+            }
             // Drop shadow: a soft penumbra — the shadow shape rasterized once and
             // Gaussian-blurred (the shared blur primitive). The sprite is static
             // for a given box, so cache it and blit each frame rather than
@@ -1257,6 +1291,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     region: bounds,
                 });
             }
+        }
+        // Close any clip layers still open at the end of traversal.
+        for _ in 0..clip_stack.len() {
+            dl.push(DrawCmd::PopLayer);
         }
         (dl, text_targets)
     }

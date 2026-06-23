@@ -5,6 +5,7 @@
 use crate::element::NodeContent;
 use crate::widget::impl_common;
 use crate::{BuildCx, Element};
+use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role};
 use lumen_core::Color;
 use lumen_layout::{Dim, Edges, LayoutStyle};
@@ -51,6 +52,14 @@ impl TextField {
             on_text: Some(Rc::new(move |rt, t| {
                 let t = t.to_string();
                 value.update(rt, |s| s.push_str(&t))
+            })),
+            // Backspace deletes; Enter inserts a newline (multi-line).
+            on_key: Some(Rc::new(move |rt, ke| match ke.key {
+                Key::Named(NamedKey::Backspace) => value.update(rt, |s| {
+                    s.pop();
+                }),
+                Key::Named(NamedKey::Enter) => value.update(rt, |s| s.push('\n')),
+                _ => {}
             })),
             ..Element::default()
         };

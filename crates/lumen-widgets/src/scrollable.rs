@@ -32,6 +32,7 @@ impl Scrollable {
 
         let el = Element {
             role: Role::ScrollArea,
+            clip: true, // overflow:hidden — content outside the viewport is masked
             scroll: Some(ScrollInfo {
                 x: 0.0,
                 y,

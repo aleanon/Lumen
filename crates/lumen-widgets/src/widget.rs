@@ -39,6 +39,11 @@ macro_rules! impl_common {
             pub fn element(&self) -> &$crate::Element {
                 &self.el
             }
+            /// Mutably borrow the built element (escape hatch for one-off layout
+            /// tweaks not covered by a dedicated modifier).
+            pub fn element_mut(&mut self) -> &mut $crate::Element {
+                &mut self.el
+            }
         }
         impl From<$t> for $crate::Element {
             fn from(w: $t) -> $crate::Element {
