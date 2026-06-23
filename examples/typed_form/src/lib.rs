@@ -1,10 +1,10 @@
-//! typed_form — a preferences card built with the typed widget builders
-//! (`Text`/`TextField`/`Checkbox`/`Slider`/`Button`) and the `row!` macro. Each
-//! builder exposes only its relevant modifiers; here they're grouped under muted
-//! field labels and themed from `app.lss`.
+//! typed_form — a preferences card built with the typed widgets
+//! (`Label`/`TextInput`/`CheckBox`/`Slider`/`Button`) and the `row!` macro. Each
+//! builds its `Element` in `::new()` and exposes only its relevant modifiers;
+//! here they're grouped under muted field labels and themed from `app.lss`.
 use lumen_widgets::element::Shadow;
 use lumen_widgets::{
-    row, widgets, App, BuildCx, Button, Checkbox, Element, Slider, Text, TextField,
+    row, widgets, App, BuildCx, Button, CheckBox, Element, Label, Slider, TextInput,
 };
 
 use lumen_layout::{Align, Dim, Edges};
@@ -33,8 +33,8 @@ fn field(name: &str, widget: Element) -> Element {
 }
 
 fn build(cx: &mut BuildCx) -> Element {
-    let name: Element = TextField::new(cx, "name", "Ada Lovelace").id("name").into();
-    let notify: Element = Checkbox::new(cx, "notify", "Email me product updates")
+    let name: Element = TextInput::new(cx, "name", "Ada Lovelace").id("name").into();
+    let notify: Element = CheckBox::new(cx, "notify", "Email me product updates")
         .id("notify")
         .into();
     let volume: Element = Slider::new(cx, "volume", 0.0, 100.0).id("volume").into();
@@ -56,7 +56,7 @@ fn build(cx: &mut BuildCx) -> Element {
     };
 
     let mut card = widgets::column(vec![
-        Text::new("Preferences")
+        Label::new("Preferences")
             .bold()
             .size(24.0)
             .id("title")

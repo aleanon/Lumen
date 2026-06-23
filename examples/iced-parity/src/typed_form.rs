@@ -3,7 +3,7 @@
 //! and `col!`/`row!` mix typed widgets freely. Compare to the field-set style of
 //! the other examples — same result, more type-safe authoring.
 use lumen_widgets::{
-    col, row, theme, App, BuildCx, Button, Checkbox, Element, Slider, Text, TextField,
+    col, row, theme, App, BuildCx, Button, CheckBox, Element, Label, Slider, TextInput,
 };
 
 /// Build the typed-form app.
@@ -13,9 +13,9 @@ pub fn main_app() -> App {
 
 fn build(cx: &mut BuildCx) -> Element {
     theme::center_screen(theme::panel_centered(col![
-        Text::new("Preferences").bold().size(24.0).id("title"),
-        TextField::new(cx, "name", "Ada Lovelace").id("name"),
-        Checkbox::new(cx, "notify", "Email me updates").id("notify"),
+        Label::new("Preferences").bold().size(24.0).id("title"),
+        TextInput::new(cx, "name", "Ada Lovelace").id("name"),
+        CheckBox::new(cx, "notify", "Email me updates").id("notify"),
         Slider::new(cx, "volume", 0.0, 100.0).id("volume"),
         {
             let mut buttons = row![

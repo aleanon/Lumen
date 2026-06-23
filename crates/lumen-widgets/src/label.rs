@@ -63,6 +63,14 @@ impl Label {
         self
     }
 
+    /// Extra letter tracking, px.
+    pub fn letter_spacing(mut self, px: f32) -> Label {
+        if let Some(ts) = self.el.text_style_mut() {
+            ts.letter_spacing = px;
+        }
+        self
+    }
+
     /// Wrap to `px` wide (a fixed width turns the label into a paragraph).
     pub fn width(mut self, px: f32) -> Label {
         self.el.style.width = lumen_layout::Dim::px(px);
