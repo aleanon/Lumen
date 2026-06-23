@@ -115,6 +115,8 @@ impl PickList {
             menu.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
             menu.corner_radius = 8.0;
             menu.shadow = Some(crate::element::Shadow::soft());
+            // Click-away / Escape closes the dropdown (light dismiss).
+            menu.on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
             menu.style.position = Position::Absolute;
             menu.style.inset = Edges {
                 top: Dim::px((TRIGGER_H + 4.0) as f32),

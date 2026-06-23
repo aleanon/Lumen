@@ -188,3 +188,39 @@ fn checkbox_radio_picklist_progress() {
     assert!(t.contains("fruit=Banana"), "selection stored");
     assert!(!t.contains("Apple"), "menu closed after choosing");
 }
+
+#[test]
+fn picklist_dismisses_on_click_away_and_escape() {
+    use lumen_core::events::{Key, KeyEvent, Modifiers, NamedKey};
+
+    // Click-away: open the menu, then press outside it → it closes.
+    let mut a = App::new(form).run_headless(Size::new(360.0, 760.0));
+    a.pump();
+    click(&mut a, "picker");
+    assert!(
+        a.semantics_json().to_string().contains("Cherry"),
+        "menu open"
+    );
+    click_at(&mut a, Point::new(4.0, 4.0)); // far from the dropdown
+    assert!(
+        !a.semantics_json().to_string().contains("Cherry"),
+        "outside press dismissed the menu"
+    );
+
+    // Escape: open again, press Escape → it closes.
+    click(&mut a, "picker");
+    assert!(
+        a.semantics_json().to_string().contains("Cherry"),
+        "menu re-open"
+    );
+    a.inject(Event::KeyDown(KeyEvent {
+        key: Key::Named(NamedKey::Escape),
+        modifiers: Modifiers::empty(),
+        repeat: false,
+    }));
+    a.pump();
+    assert!(
+        !a.semantics_json().to_string().contains("Cherry"),
+        "Escape dismissed the menu"
+    );
+}

@@ -201,6 +201,7 @@ struct NodeMeta {
     on_drop: Option<crate::element::DropHandler>,
     on_text: Option<crate::element::TextHandler>,
     on_key: Option<crate::element::KeyHandler>,
+    on_dismiss: Option<Handler>,
     background: Option<Color>,
     corner_radius: f64,
     shadow: Option<crate::element::Shadow>,
@@ -542,6 +543,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     let p = self.tree.parent(node);
                     n = p.is_some().then_some(p);
                 }
+                // Light dismiss: any element with an `on_dismiss` whose bounds do
+                // not contain the press is dismissed (click-away for dropdowns/
+                // popovers/menus). The opening press never self-dismisses: the
+                // overlay is built on the *next* rebuild, so it isn't in this
+                // frame's tree yet.
+                self.dismiss_outside(pe.pos);
             }
             Event::PointerUp(_) => {
                 self.pressed = None;
@@ -623,10 +630,42 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
                         self.activate_focused();
                     }
+                    // Escape light-dismisses every open overlay.
+                    Key::Named(NamedKey::Escape) => self.dismiss_all(),
                     _ => {}
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Fire `on_dismiss` for every element whose bounds do not contain `pos`
+    /// (click-away). Collected first, since a handler mutates state.
+    fn dismiss_outside(&self, pos: Point) {
+        let hits: Vec<Handler> = self
+            .tree
+            .document_order()
+            .into_iter()
+            .filter_map(|n| {
+                let h = self.meta.get(&n).and_then(|m| m.on_dismiss.clone())?;
+                (!self.tree.bounds(n).contains(pos)).then_some(h)
+            })
+            .collect();
+        for h in hits {
+            h(&self.rt);
+        }
+    }
+
+    /// Fire every `on_dismiss` (Escape closes all overlays).
+    fn dismiss_all(&self) {
+        let hits: Vec<Handler> = self
+            .tree
+            .document_order()
+            .into_iter()
+            .filter_map(|n| self.meta.get(&n).and_then(|m| m.on_dismiss.clone()))
+            .collect();
+        for h in hits {
+            h(&self.rt);
         }
     }
 
@@ -977,6 +1016,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 on_drop: el.on_drop,
                 on_text: el.on_text,
                 on_key: el.on_key,
+                on_dismiss: el.on_dismiss,
                 background: el.background,
                 corner_radius: el.corner_radius,
                 shadow: el.shadow,

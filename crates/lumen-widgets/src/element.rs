@@ -138,6 +138,10 @@ pub struct Element {
     pub on_text: Option<TextHandler>,
     /// Key handler invoked on the focused node for each `KeyDown`.
     pub on_key: Option<KeyHandler>,
+    /// Light-dismiss handler: fired when a pointer press lands *outside* this
+    /// element's bounds, or on Escape. Used for click-away on transient overlays
+    /// (dropdowns, popovers, menus, tooltips).
+    pub on_dismiss: Option<Handler>,
     /// Optional drop shadow behind the box.
     pub shadow: Option<Shadow>,
     /// Children.
@@ -167,6 +171,7 @@ impl Default for Element {
             on_drop: None,
             on_text: None,
             on_key: None,
+            on_dismiss: None,
             shadow: None,
             children: Vec::new(),
         }
@@ -298,6 +303,11 @@ impl Element {
     /// Mark the node keyboard-focusable (so it can receive `on_key`).
     pub fn focusable(mut self) -> Self {
         self.focusable = true;
+        self
+    }
+    /// Set the light-dismiss handler (fires on an outside press or Escape).
+    pub fn on_dismiss(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
+        self.on_dismiss = Some(Rc::new(f));
         self
     }
     /// Replace the children.
