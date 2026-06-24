@@ -5,7 +5,18 @@
 CpuRenderer>`) and to `cross-platform-readiness.md` (Blocker #2 + the "Perf at
 scale" polish line). This plan is the work that runs **behind** that seam.*
 
-> **Status (2026-06-24).** R0 ✅ done (corpus diff harness + capability ratchet).
+> **Status (2026-06-24).** R0 ✅ done. **R1 ✅ COMPLETE** — the GPU backend
+> matches the CPU reference for every command the framework produces (rects incl.
+> rounded/border, paths, gradients incl. rounded, layers/clip/opacity, images
+> nearest+bilinear, glass `backdrop-filter`, text-as-image), draws in display-list
+> order, honors HiDPI, and drives the live window (R1.1). Scoped out (no
+> producer): non-source-over blends and GPU `DrawCmd::Shader` (`ShaderWidget`
+> pre-rasterizes to an image). Deferred (perf): zero-copy render-to-surface (the
+> live-window agent needs a per-frame readback). **R2 ✅ done. R3.1 ✅ done.**
+> R3.2–R3.5 and R4 remain (R4 constrained by taffy — see its section).
+>
+> <details><summary>(historical detail)</summary>
+>
 > R1 offscreen backend ✅ done — `GpuRenderer` matches the CPU reference within
 > tolerance for rects (R1.2), paths (R1.3, `lyon`+MSAA), gradients (R1.4, Oklab
 > ramp), layers/clip/opacity (R1.5, render-to-texture + gamma-space blending),
@@ -30,6 +41,8 @@ scale" polish line). This plan is the work that runs **behind** that seam.*
 > full upload) needs a Presenter texture-retention refactor — deferred (minor;
 > the dominant CPU raster is already saved). R3.2–R3.5 and R4 pending (R4
 > constrained by taffy — see its section).
+>
+> </details>
 >
 > **Scope.** Turns the five priority recommendations into committable phases:
 > (1) a real GPU surface backend, (2) activating the dormant dirty-flag /

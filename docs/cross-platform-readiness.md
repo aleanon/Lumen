@@ -54,16 +54,21 @@ results will arrive through.
   is the bundled transport + the wasm executor. The `websocket` example still uses
   a blocking `tungstenite` round-trip pending this.
 
-### 2. No true GPU rendering — full-frame CPU raster every frame
-- **Evidence:** `Presenter::present` does `create_texture` + `queue.write_texture`
-  of `h.screenshot()` **each frame** (desktop); Android software-blits; iOS/web
-  blit CPU bytes. `gpu.rs` is offscreen-only and its `match` has `_ => {}` for
-  "gradients/paths/layers/glyphs/shader: GPU later" — it handles only Rect+Image.
-- **What remains:** a real GPU surface backend behind the existing `Renderer`
-  trait — quad pipeline (have), path/stroke tessellation (`lyon`, ADR), gradients,
-  glyph atlas, layer clip/opacity/blend, `BackdropFilter`. Until then the perf
-  ceiling is "rasterize the entire window on the CPU at 60fps," which won't hold
-  for large/HiDPI windows, animation, or low-end mobile.
+### 2. GPU rendering — **DONE (R1, 2026-06-24).**
+- The GPU backend (`gpu.rs`) now matches the CPU reference for every command the
+  framework produces: rects (rounded/border, SDF AA), paths (`lyon` + MSAA),
+  gradients (linear/radial/conic, incl. rounded), layers (clip/opacity,
+  render-to-texture, gamma-space blending), images (nearest + bilinear), glass
+  `BackdropFilter` (3-box blur + saturate), and text-as-image — drawn in
+  display-list order, HiDPI-aware, gated by `cpu_vs_gpu` at 1× and 2×.
+- **Desktop renders the live window through the GPU** (R1.1): the shell selects
+  `GpuRenderer` if an adapter is present (dynamic `Box<dyn Renderer>` seam), else
+  CPU. Verified live (counter + glass screenshots via the agent).
+- *Scoped out (no producer):* non-source-over blend modes and GPU
+  `DrawCmd::Shader` (`ShaderWidget` pre-rasterizes to an image). *Deferred
+  (perf):* zero-copy render-to-surface (the live-window agent needs a per-frame
+  readback); Android/iOS/web shells still CPU-blit. See
+  `docs/plan-rendering-performance.md` (R1).
 
 ### 3. Desktop OS integration unwired (A4)
 - **Evidence:** `lumen-shell` deps are only `winit`/`wgpu`/`notify`; no
