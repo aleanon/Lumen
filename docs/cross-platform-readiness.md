@@ -58,7 +58,7 @@ results will arrive through.
 - The GPU backend (`gpu.rs`) now matches the CPU reference for every command the
   framework produces: rects (rounded/border, SDF AA), paths (`lyon` + MSAA),
   gradients (linear/radial/conic, incl. rounded), layers (clip/opacity,
-  render-to-texture, gamma-space blending), images (nearest + bilinear), glass
+  render-to-texture, linear-light blending), images (nearest + bilinear), glass
   `BackdropFilter` (3-box blur + saturate), and text-as-image — drawn in
   display-list order, HiDPI-aware, gated by `cpu_vs_gpu` at 1× and 2×.
 - **Desktop renders the live window through the GPU** (R1.1): the shell selects
