@@ -17,7 +17,7 @@
 //! (linear) colors, and image/ramp textures store raw sRGB sampled without
 //! decode — so fixed-function blends compose premultiplied sRGB like tiny-skia.
 
-use crate::display_list::{Brush, DisplayList, DrawCmd, FillOrStroke};
+use crate::display_list::{Brush, DisplayList, DrawCmd, FillOrStroke, Filter};
 use crate::image::RgbaImage;
 use lumen_core::Color;
 use std::borrow::Cow;
@@ -122,6 +122,75 @@ impl RectInstance {
 // happens in gamma space — matching the tiny-skia CPU reference (which blends
 // premultiplied sRGB directly). Fragments output sRGB-encoded color; image and
 // ramp textures store raw sRGB bytes and are sampled without decode (R1.5).
+/// One ordered draw within a layer (R1: draws are emitted in display-list order,
+/// batching only *consecutive* solid rects and *consecutive* paths, so a rect
+/// authored after an image paints on top of it).
+enum LayerDraw {
+    Rects {
+        buf: wgpu::Buffer,
+        count: u32,
+    },
+    Paths {
+        vbuf: wgpu::Buffer,
+        ibuf: wgpu::Buffer,
+        indices: u32,
+    },
+    Gradient {
+        buf: wgpu::Buffer,
+        bind: wgpu::BindGroup,
+    },
+    Image {
+        buf: wgpu::Buffer,
+        bind: wgpu::BindGroup,
+    },
+    Composite {
+        buf: wgpu::Buffer,
+        bind: wgpu::BindGroup,
+    },
+}
+
+/// Flush the pending run of consecutive solid rects into an ordered op.
+fn flush_rects(device: &wgpu::Device, ops: &mut Vec<LayerDraw>, pend: &mut Vec<RectInstance>) {
+    use wgpu::util::DeviceExt;
+    if pend.is_empty() {
+        return;
+    }
+    let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("rects"),
+        contents: bytemuck_lite::cast_slice(pend),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    ops.push(LayerDraw::Rects {
+        buf,
+        count: pend.len() as u32,
+    });
+    pend.clear();
+}
+
+/// Flush the pending run of consecutive tessellated paths into an ordered op.
+fn flush_paths(device: &wgpu::Device, ops: &mut Vec<LayerDraw>, pend: &mut PathGeometry) {
+    use wgpu::util::DeviceExt;
+    if pend.vertices.is_empty() {
+        return;
+    }
+    let vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("path-verts"),
+        contents: bytemuck_lite::cast_slice(&pend.vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let ibuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("path-idx"),
+        contents: bytemuck_lite::cast_slice(&pend.indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    ops.push(LayerDraw::Paths {
+        vbuf,
+        ibuf,
+        indices: pend.indices.len() as u32,
+    });
+    *pend = PathGeometry::default();
+}
+
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// The GPU backend as a runtime-selectable [`Renderer`](crate::Renderer) (A1).
@@ -549,29 +618,17 @@ impl GpuRenderer {
     ) -> wgpu::Texture {
         use wgpu::util::DeviceExt;
 
-        // --- collect this level's geometry + composite the children ---------
-        let mut rects: Vec<RectInstance> = Vec::new();
-        let mut path_geo = PathGeometry::default();
-        struct ImageDraw {
-            instance: RectInstance,
-            bind: wgpu::BindGroup,
-        }
-        let mut images: Vec<ImageDraw> = Vec::new();
-        struct GradDraw {
-            instance: GradInstance,
-            bind: wgpu::BindGroup,
-        }
-        let mut gradients: Vec<GradDraw> = Vec::new();
-        struct Composite {
-            instance: CompositeInstance,
-            bind: wgpu::BindGroup,
-        }
-        let mut composites: Vec<Composite> = Vec::new();
+        // --- collect ordered draw ops (display-list order within the layer) -
+        let mut ops: Vec<LayerDraw> = Vec::new();
+        let mut pend_rects: Vec<RectInstance> = Vec::new();
+        let mut pend_paths = PathGeometry::default();
 
         let mut i = 0;
         while i < cmds.len() {
             match &cmds[i] {
                 DrawCmd::PushLayer { clip, opacity, .. } => {
+                    flush_rects(device, &mut ops, &mut pend_rects);
+                    flush_paths(device, &mut ops, &mut pend_paths);
                     // Find the matching PopLayer (accounting for nesting).
                     let start = i + 1;
                     let mut depth = 1;
@@ -634,14 +691,16 @@ impl GpuRenderer {
                         ),
                         None => ([0.0, 0.0, width as f32, height as f32], [0.0; 4], 0.0),
                     };
-                    composites.push(Composite {
-                        instance: CompositeInstance {
+                    let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("composite-instance"),
+                        contents: bytemuck_lite::bytes_of(&CompositeInstance {
                             rect,
                             radii,
                             params: [*opacity, has_clip, 0.0, 0.0],
-                        },
-                        bind,
+                        }),
+                        usage: wgpu::BufferUsages::VERTEX,
                     });
+                    ops.push(LayerDraw::Composite { buf, bind });
                     keep.textures.push(child);
                     keep.views.push(child_view);
                     i = j + 1;
@@ -652,7 +711,8 @@ impl GpuRenderer {
                     brush: Brush::Solid(c),
                     style,
                 } => {
-                    path_geo.add(path, [c.r, c.g, c.b, c.a], *style);
+                    flush_rects(device, &mut ops, &mut pend_rects);
+                    pend_paths.add(path, [c.r, c.g, c.b, c.a], *style);
                     i += 1;
                 }
                 DrawCmd::Rect {
@@ -663,9 +723,16 @@ impl GpuRenderer {
                         | Brush::ConicGradient { .. }),
                     ..
                 } => {
+                    flush_rects(device, &mut ops, &mut pend_rects);
+                    flush_paths(device, &mut ops, &mut pend_paths);
                     if let Some((instance, stops)) = grad_instance(rect, brush) {
                         let bind = self.upload_ramp(stops);
-                        gradients.push(GradDraw { instance, bind });
+                        let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("grad-instance"),
+                            contents: bytemuck_lite::bytes_of(&instance),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                        ops.push(LayerDraw::Gradient { buf, bind });
                     }
                     i += 1;
                 }
@@ -675,11 +742,12 @@ impl GpuRenderer {
                     radii,
                     border,
                 } => {
+                    flush_paths(device, &mut ops, &mut pend_paths);
                     let (bcolor, bw) = match border {
                         Some(b) => ([b.color.r, b.color.g, b.color.b, b.color.a], b.width as f32),
                         None => ([0.0; 4], 0.0),
                     };
-                    rects.push(RectInstance {
+                    pend_rects.push(RectInstance {
                         rect: [
                             rect.x0 as f32,
                             rect.y0 as f32,
@@ -698,11 +766,19 @@ impl GpuRenderer {
                     });
                     i += 1;
                 }
-                DrawCmd::Image { id, dst_rect, .. } => {
+                DrawCmd::Image {
+                    id,
+                    dst_rect,
+                    quality,
+                    ..
+                } => {
                     if let Some(img) = list.images.get(id.0 as usize) {
-                        let bind = self.upload_image(img);
-                        images.push(ImageDraw {
-                            instance: RectInstance::plain(
+                        flush_rects(device, &mut ops, &mut pend_rects);
+                        flush_paths(device, &mut ops, &mut pend_paths);
+                        let bind = self.upload_image(img, *quality);
+                        let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("img-instance"),
+                            contents: bytemuck_lite::bytes_of(&RectInstance::plain(
                                 [
                                     dst_rect.x0 as f32,
                                     dst_rect.y0 as f32,
@@ -710,16 +786,18 @@ impl GpuRenderer {
                                     dst_rect.height() as f32,
                                 ],
                                 [1.0, 1.0, 1.0, 1.0],
-                            ),
-                            bind,
+                            )),
+                            usage: wgpu::BufferUsages::VERTEX,
                         });
+                        ops.push(LayerDraw::Image { buf, bind });
                     }
                     i += 1;
                 }
                 // CPU draws a Shader as its deterministic fallback solid rect.
                 DrawCmd::Shader { rect, uniforms, .. } => {
+                    flush_paths(device, &mut ops, &mut pend_paths);
                     let c = uniforms.fallback;
-                    rects.push(RectInstance::plain(
+                    pend_rects.push(RectInstance::plain(
                         [
                             rect.x0 as f32,
                             rect.y0 as f32,
@@ -734,62 +812,8 @@ impl GpuRenderer {
                 _ => i += 1,
             }
         }
-
-        // --- buffers (local; moved into `keep` after the pass) --------------
-        let empty = [RectInstance::plain([0.0; 4], [0.0; 4])];
-        let rect_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("rects"),
-            contents: if rects.is_empty() {
-                bytemuck_lite::cast_slice(&empty)
-            } else {
-                bytemuck_lite::cast_slice(&rects)
-            },
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let image_buffers: Vec<wgpu::Buffer> = images
-            .iter()
-            .map(|img| {
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("img-instance"),
-                    contents: bytemuck_lite::bytes_of(&img.instance),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-            })
-            .collect();
-        let gradient_buffers: Vec<wgpu::Buffer> = gradients
-            .iter()
-            .map(|g| {
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("grad-instance"),
-                    contents: bytemuck_lite::bytes_of(&g.instance),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-            })
-            .collect();
-        let composite_buffers: Vec<wgpu::Buffer> = composites
-            .iter()
-            .map(|c| {
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("composite-instance"),
-                    contents: bytemuck_lite::bytes_of(&c.instance),
-                    usage: wgpu::BufferUsages::VERTEX,
-                })
-            })
-            .collect();
-        let path_vbuf = (!path_geo.vertices.is_empty()).then(|| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("path-verts"),
-                contents: bytemuck_lite::cast_slice(&path_geo.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            })
-        });
-        let path_ibuf = (!path_geo.indices.is_empty()).then(|| {
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("path-idx"),
-                contents: bytemuck_lite::cast_slice(&path_geo.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            })
-        });
+        flush_rects(device, &mut ops, &mut pend_rects);
+        flush_paths(device, &mut ops, &mut pend_paths);
 
         // --- this layer's targets (MSAA → resolved single-sample) -----------
         let resolved = device.create_texture(&wgpu::TextureDescriptor {
@@ -854,59 +878,67 @@ impl GpuRenderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            if !rects.is_empty() {
-                pass.set_pipeline(&self.rect_pipeline);
-                pass.set_bind_group(0, viewport_bg, &[]);
-                pass.set_vertex_buffer(0, rect_buf.slice(..));
-                pass.draw(0..6, 0..rects.len() as u32);
-            }
-            if !gradients.is_empty() {
-                pass.set_pipeline(&self.gradient_pipeline);
-                pass.set_bind_group(0, viewport_bg, &[]);
-                for (g, buf) in gradients.iter().zip(&gradient_buffers) {
-                    pass.set_bind_group(1, &g.bind, &[]);
-                    pass.set_vertex_buffer(0, buf.slice(..));
-                    pass.draw(0..6, 0..1);
-                }
-            }
-            if let (Some(vbuf), Some(ibuf)) = (&path_vbuf, &path_ibuf) {
-                pass.set_pipeline(&self.path_pipeline);
-                pass.set_bind_group(0, viewport_bg, &[]);
-                pass.set_vertex_buffer(0, vbuf.slice(..));
-                pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..path_geo.indices.len() as u32, 0, 0..1);
-            }
-            if !images.is_empty() {
-                pass.set_pipeline(&self.image_pipeline);
-                pass.set_bind_group(0, viewport_bg, &[]);
-                for (img, buf) in images.iter().zip(&image_buffers) {
-                    pass.set_bind_group(1, &img.bind, &[]);
-                    pass.set_vertex_buffer(0, buf.slice(..));
-                    pass.draw(0..6, 0..1);
-                }
-            }
-            // Composite child layers last (on top), in command order.
-            if !composites.is_empty() {
-                pass.set_pipeline(&self.composite_pipeline);
-                pass.set_bind_group(0, viewport_bg, &[]);
-                for (c, buf) in composites.iter().zip(&composite_buffers) {
-                    pass.set_bind_group(1, &c.bind, &[]);
-                    pass.set_vertex_buffer(0, buf.slice(..));
-                    pass.draw(0..6, 0..1);
+            // Issue draws in authored order.
+            for op in &ops {
+                match op {
+                    LayerDraw::Rects { buf, count } => {
+                        pass.set_pipeline(&self.rect_pipeline);
+                        pass.set_bind_group(0, viewport_bg, &[]);
+                        pass.set_vertex_buffer(0, buf.slice(..));
+                        pass.draw(0..6, 0..*count);
+                    }
+                    LayerDraw::Paths {
+                        vbuf,
+                        ibuf,
+                        indices,
+                    } => {
+                        pass.set_pipeline(&self.path_pipeline);
+                        pass.set_bind_group(0, viewport_bg, &[]);
+                        pass.set_vertex_buffer(0, vbuf.slice(..));
+                        pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..*indices, 0, 0..1);
+                    }
+                    LayerDraw::Gradient { buf, bind } => {
+                        pass.set_pipeline(&self.gradient_pipeline);
+                        pass.set_bind_group(0, viewport_bg, &[]);
+                        pass.set_bind_group(1, bind, &[]);
+                        pass.set_vertex_buffer(0, buf.slice(..));
+                        pass.draw(0..6, 0..1);
+                    }
+                    LayerDraw::Image { buf, bind } => {
+                        pass.set_pipeline(&self.image_pipeline);
+                        pass.set_bind_group(0, viewport_bg, &[]);
+                        pass.set_bind_group(1, bind, &[]);
+                        pass.set_vertex_buffer(0, buf.slice(..));
+                        pass.draw(0..6, 0..1);
+                    }
+                    LayerDraw::Composite { buf, bind } => {
+                        pass.set_pipeline(&self.composite_pipeline);
+                        pass.set_bind_group(0, viewport_bg, &[]);
+                        pass.set_bind_group(1, bind, &[]);
+                        pass.set_vertex_buffer(0, buf.slice(..));
+                        pass.draw(0..6, 0..1);
+                    }
                 }
             }
         }
 
         // Park everything the recorded pass referenced until after submit.
-        keep.buffers.push(rect_buf);
-        keep.buffers.extend(image_buffers);
-        keep.buffers.extend(gradient_buffers);
-        keep.buffers.extend(composite_buffers);
-        keep.buffers.extend(path_vbuf);
-        keep.buffers.extend(path_ibuf);
-        keep.binds.extend(images.into_iter().map(|d| d.bind));
-        keep.binds.extend(gradients.into_iter().map(|d| d.bind));
-        keep.binds.extend(composites.into_iter().map(|d| d.bind));
+        for op in ops {
+            match op {
+                LayerDraw::Rects { buf, .. } => keep.buffers.push(buf),
+                LayerDraw::Paths { vbuf, ibuf, .. } => {
+                    keep.buffers.push(vbuf);
+                    keep.buffers.push(ibuf);
+                }
+                LayerDraw::Gradient { buf, bind }
+                | LayerDraw::Image { buf, bind }
+                | LayerDraw::Composite { buf, bind } => {
+                    keep.buffers.push(buf);
+                    keep.binds.push(bind);
+                }
+            }
+        }
         if let Some(t) = msaa_tex {
             keep.textures.push(t);
         }
@@ -966,7 +998,14 @@ impl GpuRenderer {
         })
     }
 
-    fn upload_image(&self, img: &RgbaImage) -> wgpu::BindGroup {
+    fn upload_image(&self, img: &RgbaImage, quality: Filter) -> wgpu::BindGroup {
+        // Nearest for crisp/pixel-art (and cached text/shadow sprites, which are
+        // drawn 1:1); bilinear for smoothly-scaled images. Both filter in gamma
+        // space (the texture holds sRGB bytes), matching the CPU reference.
+        let sampler = match quality {
+            Filter::Nearest => &self.sampler,
+            Filter::Bilinear => &self.ramp_sampler,
+        };
         let size = wgpu::Extent3d {
             width: img.width(),
             height: img.height(),
@@ -1008,7 +1047,7 @@ impl GpuRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    resource: wgpu::BindingResource::Sampler(sampler),
                 },
             ],
         })

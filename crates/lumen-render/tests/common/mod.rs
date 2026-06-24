@@ -226,6 +226,11 @@ pub fn corpus() -> Vec<Scene> {
             dl: scene_image(),
         },
         Scene {
+            name: "image_bilinear",
+            cap: Cap::Image,
+            dl: scene_image_bilinear(),
+        },
+        Scene {
             name: "rect_rounded",
             cap: Cap::RectRounded,
             dl: scene_rect_rounded(),
@@ -274,7 +279,48 @@ pub fn corpus() -> Vec<Scene> {
             cap: Cap::Shader,
             dl: scene_shader(),
         },
+        // Mixed-Z within one layer: rect, then an image on top, then a rect on
+        // top — only correct if draws follow display-list order (R1). Opaque +
+        // integer-aligned, so it's tight PARITY.
+        Scene {
+            name: "mixed_order",
+            cap: Cap::RectSolid,
+            dl: scene_mixed_order(),
+        },
     ]
+}
+
+fn scene_mixed_order() -> DisplayList {
+    let mut dl = DisplayList::new();
+    dl.push(DrawCmd::Rect {
+        rect: Rect::new(30.0, 30.0, 130.0, 110.0),
+        brush: Brush::Solid(Color::srgb8(0xd0, 0x30, 0x30, 0xff)),
+        radii: CornerRadii::ZERO,
+        border: None,
+    });
+    // 2×2 checkerboard on top of the red rect.
+    let a = Color::srgb8(40, 60, 200, 255).to_srgb8();
+    let b = Color::srgb8(240, 220, 70, 255).to_srgb8();
+    let mut px = Vec::new();
+    for (p, q) in [(a, b), (b, a)] {
+        px.extend_from_slice(&p);
+        px.extend_from_slice(&q);
+    }
+    dl.images.push(RgbaImage::from_raw(2, 2, px));
+    dl.push(DrawCmd::Image {
+        id: ImageId(0),
+        src_rect: Rect::new(0.0, 0.0, 2.0, 2.0),
+        dst_rect: Rect::new(70.0, 60.0, 150.0, 120.0),
+        quality: Filter::Nearest,
+    });
+    // A green rect on top of the image — must win.
+    dl.push(DrawCmd::Rect {
+        rect: Rect::new(110.0, 90.0, 180.0, 140.0),
+        brush: Brush::Solid(Color::srgb8(0x20, 0xa0, 0x40, 0xff)),
+        radii: CornerRadii::ZERO,
+        border: None,
+    });
+    dl
 }
 
 /// Three opaque, integer-aligned, square-cornered solid rects — the GPU-parity
@@ -321,6 +367,27 @@ fn scene_image() -> DisplayList {
         src_rect: Rect::new(0.0, 0.0, 2.0, 2.0),
         dst_rect: Rect::new(20.0, 100.0, 52.0, 132.0),
         quality: Filter::Nearest,
+    });
+    dl
+}
+
+fn scene_image_bilinear() -> DisplayList {
+    // A 4×4 gradient-ish image scaled up ~40× with bilinear sampling.
+    let mut px = Vec::new();
+    for y in 0..4u32 {
+        for x in 0..4u32 {
+            px.extend_from_slice(
+                &Color::srgb8((x * 80) as u8, (y * 80) as u8, 120, 255).to_srgb8(),
+            );
+        }
+    }
+    let mut dl = DisplayList::new();
+    dl.images.push(RgbaImage::from_raw(4, 4, px));
+    dl.push(DrawCmd::Image {
+        id: ImageId(0),
+        src_rect: Rect::new(0.0, 0.0, 4.0, 4.0),
+        dst_rect: Rect::new(20.0, 15.0, 180.0, 135.0),
+        quality: Filter::Bilinear,
     });
     dl
 }
