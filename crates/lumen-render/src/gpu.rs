@@ -61,6 +61,8 @@ struct GradInstance {
     g0: [f32; 4],
     /// `[kind (0=linear,1=radial,2=conic), spread (0=pad,1=repeat,2=reflect), _, _]`.
     meta: [f32; 4],
+    /// Corner radii `[tl, tr, br, bl]` — the fill is clipped to the rounded rect.
+    radii: [f32; 4],
 }
 
 /// Texels per gradient ramp texture (1-D). Dense enough that linear filtering
@@ -411,7 +413,9 @@ impl GpuRenderer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<GradInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4
+                    ],
                 }],
                 compilation_options: Default::default(),
             },
@@ -721,11 +725,12 @@ impl GpuRenderer {
                         brush @ (Brush::LinearGradient { .. }
                         | Brush::RadialGradient { .. }
                         | Brush::ConicGradient { .. }),
+                    radii,
                     ..
                 } => {
                     flush_rects(device, &mut ops, &mut pend_rects);
                     flush_paths(device, &mut ops, &mut pend_paths);
-                    if let Some((instance, stops)) = grad_instance(rect, brush) {
+                    if let Some((instance, stops)) = grad_instance(rect, radii, brush) {
                         let bind = self.upload_ramp(stops);
                         let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("grad-instance"),
@@ -1347,6 +1352,7 @@ impl PathGeometry {
 /// filling `rect`. Returns `None` for a solid brush.
 fn grad_instance<'a>(
     rect: &kurbo::Rect,
+    radii: &crate::display_list::CornerRadii,
     brush: &'a Brush,
 ) -> Option<(GradInstance, &'a [crate::display_list::GradientStop])> {
     let r = [
@@ -1354,6 +1360,12 @@ fn grad_instance<'a>(
         rect.y0 as f32,
         rect.width() as f32,
         rect.height() as f32,
+    ];
+    let rad = [
+        radii.tl as f32,
+        radii.tr as f32,
+        radii.br as f32,
+        radii.bl as f32,
     ];
     let spread = |s: crate::display_list::SpreadMode| match s {
         crate::display_list::SpreadMode::Pad => 0.0,
@@ -1372,6 +1384,7 @@ fn grad_instance<'a>(
                 rect: r,
                 g0: [start.x as f32, start.y as f32, end.x as f32, end.y as f32],
                 meta: [0.0, spread(*sp), 0.0, 0.0],
+                radii: rad,
             },
             stops,
         )),
@@ -1385,6 +1398,7 @@ fn grad_instance<'a>(
                 rect: r,
                 g0: [center.x as f32, center.y as f32, *radius as f32, 0.0],
                 meta: [1.0, spread(*sp), 0.0, 0.0],
+                radii: rad,
             },
             stops,
         )),
@@ -1397,6 +1411,7 @@ fn grad_instance<'a>(
                 rect: r,
                 g0: [center.x as f32, center.y as f32, *start_angle as f32, 0.0],
                 meta: [2.0, 0.0, 0.0, 0.0],
+                radii: rad,
             },
             stops,
         )),
@@ -1621,13 +1636,17 @@ struct GradVsOut {
     @location(0) wpx: vec2<f32>,
     @location(1) g0: vec4<f32>,
     @location(2) gmeta: vec4<f32>,
+    @location(3) center: vec2<f32>,
+    @location(4) half: vec2<f32>,
+    @location(5) radii: vec4<f32>,
 };
 
 @vertex
 fn gradient_vs(@builtin(vertex_index) vi: u32,
                @location(0) rect: vec4<f32>,
                @location(1) g0: vec4<f32>,
-               @location(2) gmeta: vec4<f32>) -> GradVsOut {
+               @location(2) gmeta: vec4<f32>,
+               @location(3) radii: vec4<f32>) -> GradVsOut {
     let c = corner(vi);
     let px = rect.xy + c * rect.zw;
     var o: GradVsOut;
@@ -1635,6 +1654,9 @@ fn gradient_vs(@builtin(vertex_index) vi: u32,
     o.wpx = px;
     o.g0 = g0;
     o.gmeta = gmeta;
+    o.center = rect.xy + rect.zw * 0.5;
+    o.half = rect.zw * 0.5;
+    o.radii = radii;
     return o;
 }
 
@@ -1664,7 +1686,16 @@ fn gradient_fs(in: GradVsOut) -> @location(0) vec4<f32> {
         let a = atan2(in.wpx.y - in.g0.y, in.wpx.x - in.g0.x) - in.g0.z;
         t = fract(a / 6.283185307179586);
     }
-    return textureSample(img_tex, img_samp, vec2<f32>(clamp(t, 0.0, 1.0), 0.5));
+    let color = textureSample(img_tex, img_samp, vec2<f32>(clamp(t, 0.0, 1.0), 0.5));
+    // Clip the fill to the rounded rect. Skip entirely when square so the edges
+    // stay crisp (the quad already bounds them); only rounded corners need the
+    // SDF coverage (1px AA), which keeps square gradients byte-identical.
+    var cov = 1.0;
+    if (max(max(in.radii.x, in.radii.y), max(in.radii.z, in.radii.w)) > 0.0) {
+        let sd = sd_round_box(in.wpx - in.center, in.half, in.radii);
+        cov = clamp(0.5 - sd, 0.0, 1.0);
+    }
+    return vec4<f32>(color.rgb, color.a * cov);
 }
 
 // --- layer compositing (R1.5) -----------------------------------------------

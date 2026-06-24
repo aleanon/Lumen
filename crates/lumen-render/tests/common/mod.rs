@@ -269,6 +269,27 @@ pub fn corpus() -> Vec<Scene> {
                 stops: ramp(),
             }),
         },
+        // A rounded rect filled with a gradient — the fill is clipped to the
+        // corner radii (R1).
+        Scene {
+            name: "gradient_rounded",
+            cap: Cap::Gradient,
+            dl: {
+                let mut dl = DisplayList::new();
+                dl.push(DrawCmd::Rect {
+                    rect: Rect::new(20.0, 18.0, 180.0, 132.0),
+                    brush: Brush::LinearGradient {
+                        start: Point::new(20.0, 18.0),
+                        end: Point::new(180.0, 132.0),
+                        stops: ramp(),
+                        spread: SpreadMode::Pad,
+                    },
+                    radii: CornerRadii::all(28.0),
+                    border: None,
+                });
+                dl
+            },
+        },
         Scene {
             name: "layer_clip_opacity",
             cap: Cap::Layer,
