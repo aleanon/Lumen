@@ -54,8 +54,13 @@ enum ShellEvent {
 
 /// The shell's concrete runtime: CPU reference renderer + a real thread-pool
 /// executor for the data layer.
-type ShellApp = App<lumen_widgets::CpuRenderer, lumen_core::tasks::ThreadPoolSpawner>;
-type ShellHeadless = Headless<lumen_widgets::CpuRenderer, lumen_core::tasks::ThreadPoolSpawner>;
+// The live window renders through the dynamic-renderer seam (R = Box<dyn
+// Renderer>), so the backend is chosen at startup: the GPU backend if an adapter
+// is present, else the CPU reference. Both rasterize into the same Rgba8Unorm /
+// sRGB-byte frame, which the presenter blits to the surface.
+type ShellRenderer = Box<dyn lumen_widgets::Renderer>;
+type ShellApp = App<ShellRenderer, lumen_core::tasks::ThreadPoolSpawner>;
+type ShellHeadless = Headless<ShellRenderer, lumen_core::tasks::ThreadPoolSpawner>;
 
 /// Open a window and run `app` at `size`.
 ///
@@ -80,6 +85,20 @@ pub fn run(app: App, size: Size) {
     // Upgrade the default inline executor to a real thread pool for the live app,
     // so `cx.resource`/`cx.task` run off the UI thread.
     let app = app.with_executor(lumen_core::tasks::ThreadPoolSpawner::default());
+    // Choose the rasterization backend: GPU when an adapter is available (paths,
+    // gradients, layers, text sprites all rasterized on the GPU), else the CPU
+    // reference. R1.1.
+    let renderer: ShellRenderer = match lumen_render::gpu::GpuRenderer::new() {
+        Some(gpu) => {
+            eprintln!("lumen: GPU renderer active");
+            Box::new(gpu)
+        }
+        None => {
+            eprintln!("lumen: no GPU adapter; using the CPU renderer");
+            Box::new(lumen_widgets::CpuRenderer)
+        }
+    };
+    let app = app.with_renderer(renderer);
     let mut shell = Shell {
         app: Some(app),
         proxy: event_loop.create_proxy(),

@@ -9,9 +9,15 @@ scale" polish line). This plan is the work that runs **behind** that seam.*
 > R1 offscreen backend ✅ done — `GpuRenderer` matches the CPU reference within
 > tolerance for rects (R1.2), paths (R1.3, `lyon`+MSAA), gradients (R1.4, Oklab
 > ramp), layers/clip/opacity (R1.5, render-to-texture + gamma-space blending),
-> and HiDPI (R1.6), gated at 1× and 2×. Remaining in R1: **R1.1 live `wgpu`
-> surface in the shell** (display-dependent), non-source-over blends, rounded
-> gradient rects, and `BackdropFilter` on GPU. **R3.1 ✅ done** — per-glyph CPU
+> and HiDPI (R1.6), gated at 1× and 2×. **R1.1 ✅ done** — the desktop shell now
+> rasterizes the live window through the GPU backend (dynamic-renderer seam,
+> `Box<dyn Renderer>`, GPU-if-available else CPU), keeping the `Rgba8Unorm`
+> gamma-space target; verified by a headless boxed-GPU≈CPU test and a live launch
+> ("GPU renderer active" + a valid agent screenshot). Remaining in R1:
+> non-source-over blends, rounded gradient rects, `BackdropFilter` on GPU, GPU
+> `DrawCmd::Shader`, strict intra-layer draw order, and (perf) zero-copy
+> render-to-surface — today the GPU frame is read back for the always-on agent
+> and blitted by the presenter. **R3.1 ✅ done** — per-glyph CPU
 > raster cache in `lumen-text` (byte-identical; a changed string only
 > rasterizes new glyphs). **R2 ✅ done (paint side)** — retained display list +
 > `damage_between` diff + `Renderer::render_damage` + incremental composite into
