@@ -55,6 +55,8 @@ pub enum Cap {
     Layer,
     /// Custom shader fills (R1, later).
     Shader,
+    /// Glass `backdrop-filter` (blur + saturate within a rounded region).
+    Backdrop,
 }
 
 /// The capabilities the **live GPU backend** matches the CPU reference for
@@ -63,7 +65,13 @@ pub enum Cap {
 pub fn gpu_supported(cap: Cap) -> bool {
     matches!(
         cap,
-        Cap::RectSolid | Cap::Image | Cap::RectRounded | Cap::Path | Cap::Gradient | Cap::Layer
+        Cap::RectSolid
+            | Cap::Image
+            | Cap::RectRounded
+            | Cap::Path
+            | Cap::Gradient
+            | Cap::Layer
+            | Cap::Backdrop
     )
 }
 
@@ -114,6 +122,12 @@ impl Tolerance {
 pub fn tolerance(cap: Cap) -> Tolerance {
     match cap {
         Cap::RectSolid | Cap::Image => Tolerance::PARITY,
+        // The blur is a 3-box approximation; CPU uses u8 intermediates and the
+        // GPU keeps more precision, so allow a broader perceptual margin.
+        Cap::Backdrop => Tolerance {
+            max_delta_e: 0.04,
+            max_frac_over: 0.10,
+        },
         _ => Tolerance::AA,
     }
 }
@@ -308,7 +322,44 @@ pub fn corpus() -> Vec<Scene> {
             cap: Cap::RectSolid,
             dl: scene_mixed_order(),
         },
+        // Glass: a textured backdrop blurred + saturated within a rounded region.
+        Scene {
+            name: "backdrop_glass",
+            cap: Cap::Backdrop,
+            dl: scene_backdrop(),
+        },
     ]
+}
+
+fn scene_backdrop() -> DisplayList {
+    let mut dl = DisplayList::new();
+    // A high-contrast backdrop so the blur is visible/discriminating.
+    dl.push(DrawCmd::Rect {
+        rect: Rect::new(0.0, 0.0, W as f64, H as f64),
+        brush: Brush::Solid(Color::srgb8(0xf0, 0xf2, 0xf6, 0xff)),
+        radii: CornerRadii::ZERO,
+        border: None,
+    });
+    dl.push(DrawCmd::Rect {
+        rect: Rect::new(0.0, 0.0, 100.0, H as f64),
+        brush: Brush::Solid(Color::srgb8(0xe0, 0x30, 0x40, 0xff)),
+        radii: CornerRadii::ZERO,
+        border: None,
+    });
+    dl.push(DrawCmd::Rect {
+        rect: Rect::new(120.0, 30.0, 190.0, 120.0),
+        brush: Brush::Solid(Color::srgb8(0x20, 0x60, 0xd0, 0xff)),
+        radii: CornerRadii::ZERO,
+        border: None,
+    });
+    // Glass: blur (+slight saturate) the backdrop within a rounded region.
+    dl.push(DrawCmd::BackdropFilter {
+        rect: Rect::new(50.0, 40.0, 160.0, 115.0),
+        radii: CornerRadii::all(18.0),
+        blur: 6.0,
+        saturate: 1.2,
+    });
+    dl
 }
 
 fn scene_mixed_order() -> DisplayList {

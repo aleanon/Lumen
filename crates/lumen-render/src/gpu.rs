@@ -7,17 +7,19 @@
 //! [`DrawCmd::Path`] tessellated by `lyon` with MSAA edge AA (R1.3);
 //! gradient-filled rects (linear/radial/conic) via an Oklab ramp texture (R1.4);
 //! [`DrawCmd::PushLayer`]/[`DrawCmd::PopLayer`] via recursive render-to-texture
-//! compositing with rounded-rect clip + group opacity (R1.5); and
-//! [`DrawCmd::Image`] blits, all honoring a HiDPI `scale` (R1.6). Glyph runs
-//! (R3) and shaders are still pending. Parity with the CPU reference is gated by
-//! `tests/cpu_vs_gpu` (05 §4), at 1× and 2×.
+//! compositing with rounded-rect clip + group opacity (R1.5);
+//! [`DrawCmd::BackdropFilter`] (glass) via a 3-box blur + saturated rounded
+//! composite (the layer pass is split to read prior content); and
+//! [`DrawCmd::Image`] blits (nearest or bilinear), all honoring a HiDPI `scale`
+//! (R1.6). Draws within a layer follow display-list order. Glyph runs are R3.
+//! Parity with the CPU reference is gated by `tests/cpu_vs_gpu` at 1× and 2×.
 //!
 //! Blending matches the CPU by happening in **gamma space**: the target is a
 //! non-sRGB `Rgba8Unorm` holding sRGB-encoded bytes, fragments sRGB-encode their
 //! (linear) colors, and image/ramp textures store raw sRGB sampled without
 //! decode — so fixed-function blends compose premultiplied sRGB like tiny-skia.
 
-use crate::display_list::{Brush, DisplayList, DrawCmd, FillOrStroke, Filter};
+use crate::display_list::{Brush, CornerRadii, DisplayList, DrawCmd, FillOrStroke, Filter};
 use crate::image::RgbaImage;
 use lumen_core::Color;
 use std::borrow::Cow;
@@ -31,6 +33,11 @@ pub struct GpuRenderer {
     path_pipeline: wgpu::RenderPipeline,
     gradient_pipeline: wgpu::RenderPipeline,
     composite_pipeline: wgpu::RenderPipeline,
+    /// 1-D box-blur pass (group0 = params, group1 = source texture). R1 backdrop.
+    blur_pipeline: wgpu::RenderPipeline,
+    blur_params_bgl: wgpu::BindGroupLayout,
+    /// Composites a blurred backdrop within a rounded clip, with saturation.
+    backdrop_pipeline: wgpu::RenderPipeline,
     image_bgl: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// Linear, clamp-to-edge sampler for 1-D gradient ramp textures (R1.4).
@@ -148,6 +155,14 @@ enum LayerDraw {
     Composite {
         buf: wgpu::Buffer,
         bind: wgpu::BindGroup,
+    },
+    /// Glass `backdrop-filter`: blur everything drawn so far within the rounded
+    /// region and composite it back (R1). Handled by splitting the layer pass.
+    Backdrop {
+        rect: kurbo::Rect,
+        radii: CornerRadii,
+        blur: f32,
+        saturate: f32,
     },
 }
 
@@ -470,6 +485,90 @@ impl GpuRenderer {
             cache: None,
         });
 
+        // Box-blur pipeline (R1 backdrop): fullscreen pass averaging 2r+1 texels
+        // along one axis. group0 = params (dir+radius), group1 = source texture.
+        let blur_params_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("blur-params"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let blur_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("blur-layout"),
+            bind_group_layouts: &[&blur_params_bgl, &image_bgl],
+            push_constant_ranges: &[],
+        });
+        let blur_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("blur"),
+            layout: Some(&blur_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "fullscreen_vs",
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "blur_fs",
+                // Renders into a single-sample ping-pong target, overwriting.
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: TARGET_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        // Backdrop-composite pipeline: draws the blurred backdrop within a rounded
+        // clip (+saturation) into the (possibly MSAA) layer attachment.
+        let backdrop_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("backdrop-layout"),
+            bind_group_layouts: &[&viewport_bgl, &image_bgl],
+            push_constant_ranges: &[],
+        });
+        let backdrop_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("backdrop"),
+            layout: Some(&backdrop_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "backdrop_vs",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<CompositeInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "backdrop_fs",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: TARGET_FORMAT,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample,
+            multiview: None,
+            cache: None,
+        });
+
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("nearest"),
             ..Default::default()
@@ -491,6 +590,9 @@ impl GpuRenderer {
             path_pipeline,
             gradient_pipeline,
             composite_pipeline,
+            blur_pipeline,
+            blur_params_bgl,
+            backdrop_pipeline,
             image_bgl,
             sampler,
             ramp_sampler,
@@ -552,6 +654,7 @@ impl GpuRenderer {
             &list.cmds,
             list,
             Some(background),
+            scale,
         );
 
         // Readback from the resolved root texture.
@@ -619,6 +722,7 @@ impl GpuRenderer {
         cmds: &[DrawCmd],
         list: &DisplayList,
         clear: Option<Color>,
+        scale: f64,
     ) -> wgpu::Texture {
         use wgpu::util::DeviceExt;
 
@@ -661,6 +765,7 @@ impl GpuRenderer {
                         inner,
                         list,
                         None,
+                        scale,
                     );
                     let child_view = child.create_view(&Default::default());
                     let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -813,14 +918,35 @@ impl GpuRenderer {
                     ));
                     i += 1;
                 }
-                // GlyphRun (R3) and BackdropFilter: not on the GPU yet.
+                DrawCmd::BackdropFilter {
+                    rect,
+                    radii,
+                    blur,
+                    saturate,
+                } => {
+                    flush_rects(device, &mut ops, &mut pend_rects);
+                    flush_paths(device, &mut ops, &mut pend_paths);
+                    ops.push(LayerDraw::Backdrop {
+                        rect: *rect,
+                        radii: *radii,
+                        blur: *blur,
+                        saturate: *saturate,
+                    });
+                    i += 1;
+                }
+                // GlyphRun (R3): not on the GPU yet.
                 _ => i += 1,
             }
         }
         flush_rects(device, &mut ops, &mut pend_rects);
         flush_paths(device, &mut ops, &mut pend_paths);
+        let has_backdrop = ops
+            .iter()
+            .any(|op| matches!(op, LayerDraw::Backdrop { .. }));
 
-        // --- this layer's targets (MSAA → resolved single-sample) -----------
+        // --- this layer's target. MSAA (when available) gives tessellated
+        // paths their edge AA; the single-sample `resolved` is the resolve target
+        // (and what a parent composite / backdrop blur samples).
         let resolved = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("layer"),
             size: wgpu::Extent3d {
@@ -857,25 +983,31 @@ impl GpuRenderer {
         let msaa_view = msaa_tex
             .as_ref()
             .map(|t| t.create_view(&Default::default()));
-        let (attach_view, resolve_target) = match &msaa_view {
-            Some(v) => (v, Some(&resolved_view)),
-            None => (&resolved_view, None),
+        // Each pass renders into the MSAA attachment (when present) and resolves
+        // into `resolved`; without MSAA it renders straight into `resolved`.
+        let (attach_view, resolve_target): (&wgpu::TextureView, Option<&wgpu::TextureView>) =
+            match &msaa_view {
+                Some(v) => (v, Some(&resolved_view)),
+                None => (&resolved_view, None),
+            };
+
+        let c = clear.unwrap_or(Color::TRANSPARENT);
+        let clear_color = wgpu::Color {
+            r: c.r as f64,
+            g: c.g as f64,
+            b: c.b as f64,
+            a: c.a as f64,
         };
 
-        let clear_color = clear.unwrap_or(Color::TRANSPARENT);
-        {
+        if !has_backdrop {
+            // Fast path: a single pass for the whole layer.
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("layer-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: attach_view,
                     resolve_target,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: clear_color.r as f64,
-                            g: clear_color.g as f64,
-                            b: clear_color.b as f64,
-                            a: clear_color.a as f64,
-                        }),
+                        load: wgpu::LoadOp::Clear(clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -883,52 +1015,84 @@ impl GpuRenderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            // Issue draws in authored order.
             for op in &ops {
-                match op {
-                    LayerDraw::Rects { buf, count } => {
-                        pass.set_pipeline(&self.rect_pipeline);
-                        pass.set_bind_group(0, viewport_bg, &[]);
-                        pass.set_vertex_buffer(0, buf.slice(..));
-                        pass.draw(0..6, 0..*count);
+                self.draw_op(&mut pass, viewport_bg, op);
+            }
+        } else {
+            // Backdrop path: split into segments at each Backdrop op. Render a
+            // segment (resolving into `resolved`), blur the resolved content, then
+            // start the next segment by compositing that blurred backdrop in.
+            let n = ops.len();
+            let mut seg_start = 0usize;
+            let mut first = true;
+            // Composite resources for a backdrop, drawn at the start of the next
+            // segment (its blurred backdrop was prepared from the prior resolve).
+            let mut pending: Option<(wgpu::BindGroup, wgpu::Buffer)> = None;
+            let mut k = 0usize;
+            loop {
+                let at_backdrop = k < n && matches!(ops[k], LayerDraw::Backdrop { .. });
+                if at_backdrop || k == n {
+                    {
+                        let load = if first {
+                            wgpu::LoadOp::Clear(clear_color)
+                        } else {
+                            wgpu::LoadOp::Load
+                        };
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("layer-seg"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: attach_view,
+                                resolve_target,
+                                ops: wgpu::Operations {
+                                    load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            timestamp_writes: None,
+                            occlusion_query_set: None,
+                        });
+                        // Composite the previous backdrop's blurred content first.
+                        if let Some((bind, buf)) = &pending {
+                            pass.set_pipeline(&self.backdrop_pipeline);
+                            pass.set_bind_group(0, viewport_bg, &[]);
+                            pass.set_bind_group(1, bind, &[]);
+                            pass.set_vertex_buffer(0, buf.slice(..));
+                            pass.draw(0..6, 0..1);
+                        }
+                        for op in &ops[seg_start..k] {
+                            self.draw_op(&mut pass, viewport_bg, op);
+                        }
                     }
-                    LayerDraw::Paths {
-                        vbuf,
-                        ibuf,
-                        indices,
-                    } => {
-                        pass.set_pipeline(&self.path_pipeline);
-                        pass.set_bind_group(0, viewport_bg, &[]);
-                        pass.set_vertex_buffer(0, vbuf.slice(..));
-                        pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
-                        pass.draw_indexed(0..*indices, 0, 0..1);
+                    if let Some((bind, buf)) = pending.take() {
+                        keep.binds.push(bind);
+                        keep.buffers.push(buf);
                     }
-                    LayerDraw::Gradient { buf, bind } => {
-                        pass.set_pipeline(&self.gradient_pipeline);
-                        pass.set_bind_group(0, viewport_bg, &[]);
-                        pass.set_bind_group(1, bind, &[]);
-                        pass.set_vertex_buffer(0, buf.slice(..));
-                        pass.draw(0..6, 0..1);
+                    first = false;
+                    if k == n {
+                        break;
                     }
-                    LayerDraw::Image { buf, bind } => {
-                        pass.set_pipeline(&self.image_pipeline);
-                        pass.set_bind_group(0, viewport_bg, &[]);
-                        pass.set_bind_group(1, bind, &[]);
-                        pass.set_vertex_buffer(0, buf.slice(..));
-                        pass.draw(0..6, 0..1);
+                    if let LayerDraw::Backdrop {
+                        rect,
+                        radii,
+                        blur,
+                        saturate,
+                    } = &ops[k]
+                    {
+                        // Prepare the blurred-backdrop composite from the content
+                        // resolved so far; it is drawn at the next segment's start.
+                        pending = Some(self.prepare_backdrop(
+                            device, encoder, keep, &resolved, width, height, scale, *rect, *radii,
+                            *blur, *saturate,
+                        ));
                     }
-                    LayerDraw::Composite { buf, bind } => {
-                        pass.set_pipeline(&self.composite_pipeline);
-                        pass.set_bind_group(0, viewport_bg, &[]);
-                        pass.set_bind_group(1, bind, &[]);
-                        pass.set_vertex_buffer(0, buf.slice(..));
-                        pass.draw(0..6, 0..1);
-                    }
+                    seg_start = k + 1;
                 }
+                k += 1;
             }
         }
 
-        // Park everything the recorded pass referenced until after submit.
+        // Park everything the recorded passes referenced until after submit.
         for op in ops {
             match op {
                 LayerDraw::Rects { buf, .. } => keep.buffers.push(buf),
@@ -942,6 +1106,7 @@ impl GpuRenderer {
                     keep.buffers.push(buf);
                     keep.binds.push(bind);
                 }
+                LayerDraw::Backdrop { .. } => {}
             }
         }
         if let Some(t) = msaa_tex {
@@ -950,6 +1115,57 @@ impl GpuRenderer {
         keep.views.extend(msaa_view);
         keep.views.push(resolved_view);
         resolved
+    }
+
+    /// Issue one ordered draw into `pass` (R1 — display-list order). `Backdrop`
+    /// is handled by pass-splitting, not here.
+    fn draw_op<'a>(
+        &'a self,
+        pass: &mut wgpu::RenderPass<'a>,
+        viewport_bg: &'a wgpu::BindGroup,
+        op: &'a LayerDraw,
+    ) {
+        match op {
+            LayerDraw::Rects { buf, count } => {
+                pass.set_pipeline(&self.rect_pipeline);
+                pass.set_bind_group(0, viewport_bg, &[]);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..6, 0..*count);
+            }
+            LayerDraw::Paths {
+                vbuf,
+                ibuf,
+                indices,
+            } => {
+                pass.set_pipeline(&self.path_pipeline);
+                pass.set_bind_group(0, viewport_bg, &[]);
+                pass.set_vertex_buffer(0, vbuf.slice(..));
+                pass.set_index_buffer(ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..*indices, 0, 0..1);
+            }
+            LayerDraw::Gradient { buf, bind } => {
+                pass.set_pipeline(&self.gradient_pipeline);
+                pass.set_bind_group(0, viewport_bg, &[]);
+                pass.set_bind_group(1, bind, &[]);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..6, 0..1);
+            }
+            LayerDraw::Image { buf, bind } => {
+                pass.set_pipeline(&self.image_pipeline);
+                pass.set_bind_group(0, viewport_bg, &[]);
+                pass.set_bind_group(1, bind, &[]);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..6, 0..1);
+            }
+            LayerDraw::Composite { buf, bind } => {
+                pass.set_pipeline(&self.composite_pipeline);
+                pass.set_bind_group(0, viewport_bg, &[]);
+                pass.set_bind_group(1, bind, &[]);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..6, 0..1);
+            }
+            LayerDraw::Backdrop { .. } => {}
+        }
     }
 
     /// Bake a gradient's stops into a 1-D ramp texture (Oklab, shared with the
@@ -1001,6 +1217,173 @@ impl GpuRenderer {
                 },
             ],
         })
+    }
+
+    /// Blur the `resolved` content within the backdrop region (3 box passes per
+    /// axis, matching `RgbaImage::blurred`) and prepare the composite that draws
+    /// it back within the rounded clip with saturation. Returns the composite
+    /// bind group + instance buffer (drawn by the caller at the next segment's
+    /// start); all blur intermediates are parked in `keep`. (R1 glass.)
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_backdrop(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        keep: &mut KeepAlive,
+        resolved: &wgpu::Texture,
+        width: u32,
+        height: u32,
+        scale: f64,
+        rect: kurbo::Rect,
+        radii: CornerRadii,
+        blur: f32,
+        saturate: f32,
+    ) -> (wgpu::BindGroup, wgpu::Buffer) {
+        use wgpu::util::DeviceExt;
+        let r_px = (blur as f64 * scale).round().max(0.0) as f32;
+
+        let mk_tex = |label| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TARGET_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        let tex_a = mk_tex("blur-a");
+        let tex_b = mk_tex("blur-b");
+        let view_a = tex_a.create_view(&Default::default());
+        let view_b = tex_b.create_view(&Default::default());
+        let src_view = resolved.create_view(&Default::default());
+
+        let param = |dir: [f32; 2]| {
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("blur-params"),
+                contents: f32s_as_bytes(&[dir[0], dir[1], r_px, 0.0]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            })
+        };
+        let h_buf = param([1.0, 0.0]);
+        let v_buf = param([0.0, 1.0]);
+        let params_bind = |buf: &wgpu::Buffer| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("blur-params-bg"),
+                layout: &self.blur_params_bgl,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buf.as_entire_binding(),
+                }],
+            })
+        };
+        let h_params = params_bind(&h_buf);
+        let v_params = params_bind(&v_buf);
+        let src_bind = |view: &wgpu::TextureView| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("blur-src"),
+                layout: &self.image_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            })
+        };
+        let bind_resolved = src_bind(&src_view);
+        let bind_a = src_bind(&view_a);
+        let bind_b = src_bind(&view_b);
+
+        // 3× (horizontal then vertical) box passes, ping-ponging a↔b, ending in b.
+        let mut blur_pass =
+            |dst: &wgpu::TextureView, params: &wgpu::BindGroup, src: &wgpu::BindGroup| {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("blur-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: dst,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(&self.blur_pipeline);
+                pass.set_bind_group(0, params, &[]);
+                pass.set_bind_group(1, src, &[]);
+                pass.draw(0..3, 0..1);
+            };
+        blur_pass(&view_a, &h_params, &bind_resolved);
+        blur_pass(&view_b, &v_params, &bind_a);
+        blur_pass(&view_a, &h_params, &bind_b);
+        blur_pass(&view_b, &v_params, &bind_a);
+        blur_pass(&view_a, &h_params, &bind_b);
+        blur_pass(&view_b, &v_params, &bind_a);
+        // blurred = tex_b.
+
+        let composite_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("backdrop-bg"),
+            layout: &self.image_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view_b),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+        let instance = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("backdrop-instance"),
+            contents: bytemuck_lite::bytes_of(&CompositeInstance {
+                rect: [
+                    rect.x0 as f32,
+                    rect.y0 as f32,
+                    rect.width() as f32,
+                    rect.height() as f32,
+                ],
+                radii: [
+                    radii.tl as f32,
+                    radii.tr as f32,
+                    radii.br as f32,
+                    radii.bl as f32,
+                ],
+                params: [saturate, 0.0, 0.0, 0.0],
+            }),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
+        // Park blur intermediates (the recorded passes reference them).
+        keep.textures.push(tex_a);
+        keep.textures.push(tex_b);
+        keep.views.push(view_a);
+        keep.views.push(view_b);
+        keep.views.push(src_view);
+        keep.buffers.push(h_buf);
+        keep.buffers.push(v_buf);
+        keep.binds.push(h_params);
+        keep.binds.push(v_params);
+        keep.binds.push(bind_resolved);
+        keep.binds.push(bind_a);
+        keep.binds.push(bind_b);
+        (composite_bind, instance)
     }
 
     fn upload_image(&self, img: &RgbaImage, quality: Filter) -> wgpu::BindGroup {
@@ -1739,6 +2122,68 @@ fn composite_fs(in: CompVsOut) -> @location(0) vec4<f32> {
     }
     let k = cov * in.params.x;          // clip coverage × group opacity
     return child * k;                   // scale premultiplied color + alpha
+}
+
+// --- backdrop-filter: box blur + saturated composite (R1 glass) -------------
+
+// Fullscreen triangle; the fragment derives its uv from @builtin(position).
+@vertex
+fn fullscreen_vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    var p = array<vec2<f32>, 3>(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+    return vec4<f32>(p[i], 0.0, 1.0);
+}
+
+struct BlurP { dir: vec2<f32>, radius: f32, _pad: f32 };
+@group(0) @binding(0) var<uniform> bp: BlurP;
+@group(1) @binding(0) var blur_tex: texture_2d<f32>;
+@group(1) @binding(1) var blur_samp: sampler;
+
+// One axis of a box blur: average the 2*radius+1 texels along `dir` (edges
+// clamp via the sampler), matching one CPU box pass.
+@fragment
+fn blur_fs(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
+    let dim = vec2<f32>(textureDimensions(blur_tex));
+    let uv = fc.xy / dim;
+    let r = i32(bp.radius + 0.5);
+    var acc = vec4<f32>(0.0);
+    var cnt = 0.0;
+    for (var k = -r; k <= r; k = k + 1) {
+        let o = bp.dir * f32(k) / dim;
+        acc = acc + textureSample(blur_tex, blur_samp, uv + o);
+        cnt = cnt + 1.0;
+    }
+    return acc / cnt;
+}
+
+@vertex
+fn backdrop_vs(@builtin(vertex_index) vi: u32,
+               @location(0) rect: vec4<f32>,
+               @location(1) radii: vec4<f32>,
+               @location(2) params: vec4<f32>) -> CompVsOut {
+    let c = corner(vi);
+    let px = rect.xy + c * rect.zw;
+    var o: CompVsOut;
+    o.pos = to_ndc(px);
+    o.wpx = px;
+    o.rect = rect;
+    o.radii = radii;
+    o.params = params;
+    return o;
+}
+
+@fragment
+fn backdrop_fs(in: CompVsOut) -> @location(0) vec4<f32> {
+    var rgb = textureSample(img_tex, img_samp, in.wpx * viewport.scale / viewport.size).rgb;
+    // Saturation, gamma-space luma (matches RgbaImage::saturate).
+    let s = in.params.x;
+    let luma = dot(rgb, vec3<f32>(0.299, 0.587, 0.114));
+    rgb = clamp(vec3<f32>(luma) + (rgb - vec3<f32>(luma)) * s, vec3<f32>(0.0), vec3<f32>(1.0));
+    // Rounded-rect clip coverage (1px AA), straight-alpha source-over.
+    let center = in.rect.xy + in.rect.zw * 0.5;
+    let half = in.rect.zw * 0.5;
+    let sd = sd_round_box(in.wpx - center, half, in.radii);
+    let cov = clamp(0.5 - sd, 0.0, 1.0);
+    return vec4<f32>(rgb, cov);
 }
 "#;
 
