@@ -13,8 +13,17 @@ scale" polish line). This plan is the work that runs **behind** that seam.*
 > surface in the shell** (display-dependent), non-source-over blends, rounded
 > gradient rects, and `BackdropFilter` on GPU. **R3.1 ✅ done** — per-glyph CPU
 > raster cache in `lumen-text` (byte-identical; a changed string only
-> rasterizes new glyphs). R2, R3.2–R3.5, and R4 pending (R4 constrained by
-> taffy — see its section).
+> rasterizes new glyphs). **R2 ✅ done (paint side)** — retained display list +
+> `damage_between` diff + `Renderer::render_damage` + incremental composite into
+> the retained frame; idle pumps repaint nothing; `FrameStats.damage` drives the
+> shell idle-skip. *Scope note:* R2.1/R2.2 (dirty-flag marking + incremental
+> `relayout_subtree`) are **not applicable** to the current full-rebuild reactive
+> model — the tree+layout recompute each pump, so damage is derived by diffing
+> display lists, not by propagating node dirty flags (the flags remain for a
+> future incremental-tree model). Shell partial-*tile* upload (vs idle-skip +
+> full upload) needs a Presenter texture-retention refactor — deferred (minor;
+> the dominant CPU raster is already saved). R3.2–R3.5 and R4 pending (R4
+> constrained by taffy — see its section).
 >
 > **Scope.** Turns the five priority recommendations into committable phases:
 > (1) a real GPU surface backend, (2) activating the dormant dirty-flag /

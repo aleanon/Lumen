@@ -104,6 +104,21 @@ impl RgbaImage {
         }
     }
 
+    /// Overwrite a `src`-sized rectangle at `(x, y)` with `src`'s pixels
+    /// (opaque copy, no blending), clipped to this image's bounds. Used to
+    /// composite a damage tile into the retained frame (R2).
+    pub fn overwrite_rect(&mut self, x: u32, y: u32, src: &RgbaImage) {
+        let w = src.width.min(self.width.saturating_sub(x));
+        let h = src.height.min(self.height.saturating_sub(y));
+        for row in 0..h {
+            let dst_start = (((y + row) * self.width + x) * 4) as usize;
+            let src_start = (row * src.width * 4) as usize;
+            let n = (w * 4) as usize;
+            self.pixels[dst_start..dst_start + n]
+                .copy_from_slice(&src.pixels[src_start..src_start + n]);
+        }
+    }
+
     /// A Gaussian-ish blur (three box-blur passes) with the given radius in
     /// pixels. The reusable blur primitive behind soft shadows and the glass
     /// `backdrop-filter`. Edges clamp (the border pixel is extended), and each

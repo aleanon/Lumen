@@ -17,7 +17,7 @@ use lumen_core::tree::{NodeFlags, Tree};
 use lumen_core::{Color, NodeIndex, StableId};
 use lumen_layout::{Dim, LayoutNode, LayoutStyle, LayoutTree};
 use lumen_render::{
-    cpu, BlendMode, Brush, CornerRadii, DisplayList, DrawCmd, RgbaImage, RoundedRect,
+    cpu, BlendMode, Brush, CornerRadii, Damage, DisplayList, DrawCmd, RgbaImage, RoundedRect,
 };
 use lumen_text::TextEngine;
 use std::collections::HashMap;
@@ -27,8 +27,12 @@ use std::collections::HashMap;
 pub struct FrameStats {
     /// Number of live nodes after the rebuild.
     pub node_count: usize,
-    /// Whether a frame was painted.
+    /// Whether any pixels were repainted this frame (`false` = idle frame, the
+    /// previous frame was reused verbatim).
     pub painted: bool,
+    /// What changed this frame (R2): `None` (idle), `Region` (only a rectangle
+    /// repainted), or `Full`. The shell can upload just the changed region.
+    pub damage: Damage,
 }
 
 /// An application: a root build closure, an optional stylesheet, and the frame
@@ -147,6 +151,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             system_requests: Vec::new(),
             windows: Vec::new(),
             rtl: false,
+            last_dl: None,
+            last_damage: lumen_render::Damage::Full,
         };
         let diags = if let Some(s) = restore {
             // Stage the snapshot *before* the first build so each signal adopts
@@ -291,6 +297,12 @@ pub struct Headless<R = lumen_render::CpuRenderer, E = lumen_core::tasks::Inline
     system_requests: Vec<crate::system::SystemRequest>,
     windows: Vec<crate::system::WindowDesc>,
     rtl: bool,
+    /// Previous frame's display list, retained so the next paint can compute a
+    /// damage region and repaint only what changed (R2). `None` forces a full
+    /// repaint (first frame, or after a resize/scale change).
+    last_dl: Option<DisplayList>,
+    /// Damage applied by the most recent paint (reported via [`FrameStats`]).
+    last_damage: lumen_render::Damage,
 }
 
 impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
@@ -310,7 +322,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.rebuild();
         FrameStats {
             node_count: self.tree.len(),
-            painted: true,
+            painted: self.last_damage != Damage::None,
+            damage: self.last_damage,
         }
     }
 
@@ -356,6 +369,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// The most recent rendered frame.
     pub fn screenshot(&mut self) -> RgbaImage {
         self.frame.clone()
+    }
+
+    /// Force the next paint to repaint the whole frame instead of only the
+    /// damaged region (R2). The shell calls this when the retained frame can't be
+    /// trusted — e.g. after the surface is recreated; tests use it to compare the
+    /// incremental result against a from-scratch render.
+    pub fn force_full_repaint(&mut self) {
+        self.last_dl = None;
+        self.pump();
+    }
+
+    /// The damage applied by the most recent paint (R2).
+    pub fn last_damage(&self) -> Damage {
+        self.last_damage
     }
 
     /// Capture a tier-3 [`AppSnapshot`] (reactive store + focus) for a later
@@ -731,6 +758,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// is kept and a structured `E0701` diagnostic is recorded; a clean build
     /// clears it.
     fn rebuild(&mut self) {
+        // Default to "nothing painted"; a successful paint sets the real damage.
+        self.last_damage = Damage::None;
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.rebuild_inner()));
         match result {
@@ -788,7 +817,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.tree = tree;
         self.meta = meta;
         self.compute_styles();
-        self.frame = self.paint();
+        self.last_damage = self.paint();
         self.sem_root = Some(self.build_semantics(self.tree.root()));
     }
 
@@ -1398,15 +1427,58 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         });
     }
 
-    fn paint(&mut self) -> RgbaImage {
+    /// Rasterize the current build into `self.frame`, repainting only what
+    /// changed since the last frame (R2). Returns the [`Damage`] applied.
+    ///
+    /// The retained `self.frame` always equals a full render: when nothing
+    /// changed it is reused; when a sub-region changed, only that region is
+    /// re-rendered (byte-identical to a full render there — R0
+    /// `damage_equivalence`) and composited in, leaving the unchanged pixels
+    /// (which still match) intact.
+    fn paint(&mut self) -> Damage {
         let (dl, _) = self.build_display_list();
         // Layout/display list are in logical px; rasterize at physical px so the
         // frame matches a HiDPI surface 1:1 (no upscaling blur). scale 1.0 is
         // byte-identical to the unscaled path (goldens unaffected).
         let pw = (self.size.width * self.scale).round().max(1.0) as u32;
         let ph = (self.size.height * self.scale).round().max(1.0) as u32;
-        self.renderer
-            .render_frame(&dl, pw, ph, self.scale, Color::srgb8(255, 255, 255, 255))
+        let bg = Color::srgb8(255, 255, 255, 255);
+
+        // Incremental only when the retained frame matches the target size and we
+        // have a previous display list to diff against (else: first frame or a
+        // resize/scale change → full repaint).
+        let can_incremental =
+            self.frame.width() == pw && self.frame.height() == ph && self.last_dl.is_some();
+        let damage = if can_incremental {
+            lumen_render::damage_between(self.last_dl.as_ref().unwrap(), &dl)
+        } else {
+            Damage::Full
+        };
+
+        match damage {
+            Damage::None => { /* nothing changed — reuse self.frame */ }
+            Damage::Region(r) => {
+                // Logical → physical, integer-aligned, clamped to the frame.
+                let dirty = kurbo::Rect::new(
+                    (r.x0 * self.scale).floor().max(0.0),
+                    (r.y0 * self.scale).floor().max(0.0),
+                    (r.x1 * self.scale).ceil().min(pw as f64),
+                    (r.y1 * self.scale).ceil().min(ph as f64),
+                );
+                if dirty.width() >= 1.0 && dirty.height() >= 1.0 {
+                    let tile = self
+                        .renderer
+                        .render_damage(&dl, pw, ph, self.scale, bg, dirty);
+                    self.frame
+                        .overwrite_rect(dirty.x0 as u32, dirty.y0 as u32, &tile);
+                }
+            }
+            Damage::Full => {
+                self.frame = self.renderer.render_frame(&dl, pw, ph, self.scale, bg);
+            }
+        }
+        self.last_dl = Some(dl);
+        damage
     }
 
     /// Replace the frame renderer with another of the *same* type `R`, then

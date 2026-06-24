@@ -33,8 +33,9 @@ pub mod scene;
 pub mod svg;
 
 pub use display_list::{
-    BlendMode, Border, Brush, CornerRadii, DisplayList, DrawCmd, FillOrStroke, Filter, GlyphRunId,
-    GradientStop, ImageId, RoundedRect, ShaderId, SpreadMode, UniformBlock,
+    damage_between, BlendMode, Border, Brush, CornerRadii, Damage, DisplayList, DrawCmd,
+    FillOrStroke, Filter, GlyphRunId, GradientStop, ImageId, RoundedRect, ShaderId, SpreadMode,
+    UniformBlock,
 };
 pub use image::RgbaImage;
 
@@ -63,6 +64,28 @@ pub trait Renderer {
         background: Color,
     ) -> RgbaImage;
 
+    /// Re-render only `dirty` (a *physical*-px rectangle), returning a
+    /// `dirty`-sized image byte-identical to [`render_frame`](Self::render_frame)
+    /// cropped to `dirty`. The runtime composites this into the retained frame to
+    /// repaint only what changed (R2). The default renders the whole frame and
+    /// crops — always correct; a backend overrides it to actually skip work.
+    fn render_damage(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+        dirty: kurbo::Rect,
+    ) -> RgbaImage {
+        let full = self.render_frame(list, width, height, scale, background);
+        let x = dirty.x0.floor().max(0.0) as u32;
+        let y = dirty.y0.floor().max(0.0) as u32;
+        let w = (dirty.x1.ceil().min(width as f64) - x as f64).max(0.0) as u32;
+        let h = (dirty.y1.ceil().min(height as f64) - y as f64).max(0.0) as u32;
+        full.crop(x, y, w, h)
+    }
+
     /// A short, stable backend name (for diagnostics / the agent).
     fn name(&self) -> &'static str;
 }
@@ -84,6 +107,30 @@ impl Renderer for CpuRenderer {
         cpu::render_scaled(list, width, height, scale, background)
     }
 
+    fn render_damage(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+        dirty: kurbo::Rect,
+    ) -> RgbaImage {
+        // At 1:1 the deterministic CPU damage path actually re-renders only the
+        // crop (byte-identical to a full render cropped — R0 damage_equivalence).
+        // At HiDPI fall back to the default (full render + crop), still correct.
+        if scale == 1.0 {
+            cpu::render_damage(list, width, height, background, dirty)
+        } else {
+            let full = self.render_frame(list, width, height, scale, background);
+            let x = dirty.x0.floor().max(0.0) as u32;
+            let y = dirty.y0.floor().max(0.0) as u32;
+            let w = (dirty.x1.ceil().min(width as f64) - x as f64).max(0.0) as u32;
+            let h = (dirty.y1.ceil().min(height as f64) - y as f64).max(0.0) as u32;
+            full.crop(x, y, w, h)
+        }
+    }
+
     fn name(&self) -> &'static str {
         "cpu"
     }
@@ -103,6 +150,18 @@ impl<R: Renderer + ?Sized> Renderer for Box<R> {
         background: Color,
     ) -> RgbaImage {
         (**self).render_frame(list, width, height, scale, background)
+    }
+
+    fn render_damage(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+        dirty: kurbo::Rect,
+    ) -> RgbaImage {
+        (**self).render_damage(list, width, height, scale, background, dirty)
     }
 
     fn name(&self) -> &'static str {

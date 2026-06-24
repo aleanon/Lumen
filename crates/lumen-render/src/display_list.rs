@@ -5,7 +5,7 @@
 //! are expressed by enclosing [`DrawCmd::PushLayer`]/[`DrawCmd::PopLayer`] pairs.
 
 use crate::image::RgbaImage;
-use kurbo::{Affine, BezPath, Point, Rect};
+use kurbo::{Affine, BezPath, Point, Rect, Shape};
 use lumen_core::Color;
 
 /// Per-corner radii for a [`DrawCmd::Rect`], in logical px.
@@ -47,7 +47,7 @@ impl CornerRadii {
 }
 
 /// A border drawn inside a rect's edge.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Border {
     /// Stroke width in logical px.
     pub width: f64,
@@ -68,7 +68,7 @@ pub enum FillOrStroke {
 }
 
 /// A rectangle with corner radii (used as a layer clip).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RoundedRect {
     /// The rectangle.
     pub rect: Rect,
@@ -97,7 +97,7 @@ pub enum SpreadMode {
 }
 
 /// A gradient color stop.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GradientStop {
     /// Position in `[0, 1]`.
     pub offset: f32,
@@ -106,7 +106,7 @@ pub struct GradientStop {
 }
 
 /// A paint source. Gradients interpolate in Oklab (ADR-017).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Brush {
     /// A single solid color.
     Solid(Color),
@@ -174,7 +174,7 @@ pub struct ShaderId(pub u32);
 
 /// Shader uniforms. On the CPU backend a shader renders a deterministic
 /// `fallback` fill (02 §7); the real pipeline runs on the GPU backend.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UniformBlock {
     /// The deterministic fill used by the CPU fallback.
     pub fallback: Color,
@@ -189,7 +189,7 @@ impl Default for UniformBlock {
 }
 
 /// A single draw command (02 §7).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DrawCmd {
     /// A (possibly rounded) rectangle, filled with `brush`, optionally bordered.
     Rect {
@@ -285,5 +285,101 @@ impl DisplayList {
     /// Append a command.
     pub fn push(&mut self, cmd: DrawCmd) {
         self.cmds.push(cmd);
+    }
+}
+
+impl DrawCmd {
+    /// The screen-space rectangle (logical px) this command paints into, or
+    /// `None` for structural/unbounded commands (`PushLayer`/`PopLayer`,
+    /// `GlyphRun`) — a `None` in a changed range forces a full repaint. AA seams
+    /// and centered borders/strokes are accounted for by a small inflation.
+    pub fn paint_bounds(&self) -> Option<Rect> {
+        match self {
+            DrawCmd::Rect { rect, border, .. } => {
+                let g = border.map(|b| b.width / 2.0).unwrap_or(0.0) + 1.0;
+                Some(rect.inflate(g, g))
+            }
+            DrawCmd::Path { path, style, .. } => {
+                let g = match style {
+                    FillOrStroke::Fill => 1.0,
+                    FillOrStroke::Stroke { width } => width / 2.0 + 1.0,
+                };
+                Some(path.bounding_box().inflate(g, g))
+            }
+            DrawCmd::Image { dst_rect, .. } => Some(*dst_rect),
+            DrawCmd::Shader { rect, .. } => Some(*rect),
+            DrawCmd::BackdropFilter { rect, blur, .. } => {
+                let g = *blur as f64 + 1.0;
+                Some(rect.inflate(g, g))
+            }
+            DrawCmd::GlyphRun { .. } | DrawCmd::PushLayer { .. } | DrawCmd::PopLayer => None,
+        }
+    }
+}
+
+/// The region of a frame that changed between two display lists (R2.3).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Damage {
+    /// Nothing changed — the previous frame can be reused verbatim.
+    None,
+    /// Only this (logical-px) rectangle changed; repaint just it.
+    Region(Rect),
+    /// The change can't be bounded to a sub-region; repaint the whole frame.
+    Full,
+}
+
+/// Two `DrawCmd`s are equal *and* (for images) reference byte-identical pixels.
+/// The derived `==` only compares the image *index*, so cached text/shadow
+/// sprites that change content at a stable list position need the byte check.
+fn cmd_eq(a: &DrawCmd, b: &DrawCmd, ai: &[RgbaImage], bi: &[RgbaImage]) -> bool {
+    if a != b {
+        return false;
+    }
+    if let (DrawCmd::Image { id: ia, .. }, DrawCmd::Image { id: ib, .. }) = (a, b) {
+        return ai.get(ia.0 as usize).map(|i| i.pixels())
+            == bi.get(ib.0 as usize).map(|i| i.pixels());
+    }
+    true
+}
+
+/// Compute the [`Damage`] between a previous display list and the next one.
+///
+/// Trims the common (content-equal) prefix and suffix; the difference in the
+/// middle is the change. The damage rect is the union of the changed commands'
+/// [`paint_bounds`](DrawCmd::paint_bounds) from *both* lists (so a region a
+/// command vacated is repainted too). Any unbounded changed command ⇒ `Full`.
+pub fn damage_between(prev: &DisplayList, next: &DisplayList) -> Damage {
+    let (po, pn) = (&prev.cmds, &next.cmds);
+    let max_p = po.len().min(pn.len());
+    let mut p = 0;
+    while p < max_p && cmd_eq(&po[p], &pn[p], &prev.images, &next.images) {
+        p += 1;
+    }
+    let mut s = 0;
+    while s < (po.len() - p).min(pn.len() - p)
+        && cmd_eq(
+            &po[po.len() - 1 - s],
+            &pn[pn.len() - 1 - s],
+            &prev.images,
+            &next.images,
+        )
+    {
+        s += 1;
+    }
+    let changed_old = &po[p..po.len() - s];
+    let changed_new = &pn[p..pn.len() - s];
+    if changed_old.is_empty() && changed_new.is_empty() {
+        return Damage::None;
+    }
+    let mut rect: Option<Rect> = None;
+    for c in changed_old.iter().chain(changed_new.iter()) {
+        match c.paint_bounds() {
+            Some(b) => rect = Some(rect.map_or(b, |r: Rect| r.union(b))),
+            None => return Damage::Full,
+        }
+    }
+    match rect {
+        Some(r) => Damage::Region(r),
+        None => Damage::None,
     }
 }

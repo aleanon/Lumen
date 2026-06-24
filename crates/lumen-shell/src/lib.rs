@@ -413,9 +413,13 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     // as a function of now_ms(), there is no tick backlog to
                     // replay — just a single catch-up frame).
                     h.advance_clock(elapsed_ms.min(1000.0));
-                    h.pump();
-                    let frame = h.screenshot();
-                    p.present(&frame);
+                    // Present only when the frame actually changed (R2): an idle
+                    // tick repaints nothing, so the surface keeps its last frame.
+                    let stats = h.pump();
+                    if stats.painted {
+                        let frame = h.screenshot();
+                        p.present(&frame);
+                    }
                 }
             }
             _ => {}
