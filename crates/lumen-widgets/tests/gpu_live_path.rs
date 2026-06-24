@@ -1,8 +1,10 @@
 //! R1.1 — the live shell rasterizes through the dynamic-renderer seam
 //! (`App::with_renderer(Box<dyn Renderer>)`), selecting the GPU backend at
-//! startup. This test drives that exact construction headlessly and asserts the
-//! GPU-rendered frame matches the CPU reference within the AA tolerance on a real
-//! screen (rounded button + text). Self-skips when no wgpu adapter is present.
+//! startup. This test drives that exact construction headlessly and sanity-checks
+//! the GPU frame on a real screen (rounded button + text): non-blank and broadly
+//! close to the CPU reference (a loose bound — the GPU blends in linear vs the
+//! CPU's gamma, so AA/text edges differ by design; the screen is mostly opaque,
+//! so the divergent fraction stays small). Self-skips when no wgpu adapter.
 
 use lumen_core::geometry::Size;
 use lumen_core::Color;

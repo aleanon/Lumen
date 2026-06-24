@@ -1,16 +1,17 @@
-//! Phase **R0.2** — corpus-driven CPU↔GPU differential, with the capability
-//! ratchet (`common::gpu_supported`).
+//! Phase **R0.2** — corpus-driven CPU↔GPU differential.
 //!
-//! For every corpus scene whose capability is GPU-live today, the GPU output
-//! must match the CPU reference within [`Tolerance::PARITY`]. As each R1
-//! sub-phase lands a command class on the GPU, it flips that `Cap` to supported
-//! and this test instantly enforces parity for it.
+//! The GPU renders in **linear light** (sRGB target — the physically-correct
+//! blend the live-window agent sees), while the deterministic `CpuRenderer`
+//! reference blends in **gamma**. So the two agree *exactly* only on opaque,
+//! non-AA, nearest-sampled content ([`exact_vs_cpu`]); anti-aliased / blended /
+//! bilinear scenes diverge by design. This test therefore:
+//!   - asserts tight CPU parity for the exact scenes (catches GPU regressions on
+//!     opaque content), and
+//!   - for the rest, logs the (expected) divergence and checks the GPU actually
+//!     renders and is **deterministic** (same bytes across two renders).
 //!
-//! **Skip policy:** unlike the legacy `gpu_parity` test this is *not* `#[ignore]`d
-//! — it self-skips (returns early, logging) when no wgpu adapter is present, so
-//! it runs automatically on a GPU box (this dev env: RTX 4070 / lavapipe) and in
-//! GPU-CI, and no-ops cleanly on headless CI. Never silently passes a real
-//! divergence.
+//! **Skip policy:** not `#[ignore]`d — self-skips (logging) when no wgpu adapter
+//! is present, so it runs on a GPU box / GPU-CI and no-ops on headless CI.
 
 mod common;
 
@@ -19,57 +20,74 @@ use lumen_render::cpu;
 use lumen_render::gpu::GpuRenderer;
 
 #[test]
-fn gpu_matches_cpu_for_supported_capabilities() {
+fn gpu_matches_cpu_for_opaque_and_renders_the_rest() {
     let Some(gpu) = GpuRenderer::new() else {
         eprintln!("cpu_vs_gpu: no wgpu adapter; skipping (GPU-absent policy)");
         return;
     };
 
-    let mut checked = 0usize;
+    let blank = blank_frame();
+    let mut exact_checked = 0usize;
     for s in corpus() {
-        if !gpu_supported(s.cap) {
-            eprintln!(
-                "cpu_vs_gpu: {} ({:?}) not GPU-live yet — skipped",
-                s.name, s.cap
-            );
-            continue;
-        }
         let cpu_img = cpu::render(&s.dl, W, H, bg());
         let gpu_img = gpu.render(&s.dl, W, H, bg());
-        assert_eq!(gpu_img.width(), W, "{} width", s.name);
-        assert_eq!(gpu_img.height(), H, "{} height", s.name);
+        assert_eq!(
+            (gpu_img.width(), gpu_img.height()),
+            (W, H),
+            "{} size",
+            s.name
+        );
+
         let d = frame_diff(&cpu_img, &gpu_img);
         eprintln!(
-            "cpu_vs_gpu: {} ({:?}) max ΔE {:.4}, {} px differ",
-            s.name, s.cap, d.max_delta_e, d.differing
+            "cpu_vs_gpu: {} ({:?}) max ΔE {:.4}, {} px differ{}",
+            s.name,
+            s.cap,
+            d.max_delta_e,
+            d.differing,
+            if exact_vs_cpu(s.name) {
+                " [exact]"
+            } else {
+                " [linear≠gamma, informational]"
+            }
         );
-        assert_frames_close(&cpu_img, &gpu_img, tolerance(s.cap), s.name);
-        checked += 1;
-    }
 
+        if exact_vs_cpu(s.name) {
+            assert_frames_close(&cpu_img, &gpu_img, Tolerance::PARITY, s.name);
+            exact_checked += 1;
+        } else {
+            // Not parity-checked (linear vs gamma); but the GPU must render real
+            // content and do so deterministically.
+            assert!(
+                frame_diff(&gpu_img, &blank).differing > 0,
+                "GPU rendered nothing for {}",
+                s.name
+            );
+            let again = gpu.render(&s.dl, W, H, bg());
+            assert_frames_exact(&gpu_img, &again, &format!("{} GPU determinism", s.name));
+        }
+    }
     assert!(
-        checked >= 2,
-        "expected to parity-check at least the rect+image scenes, checked {checked}"
+        exact_checked >= 2,
+        "expected ≥2 exact-parity scenes, checked {exact_checked}"
     );
 }
 
-/// R1.6: at 2× HiDPI the GPU (`render_at_scale`) must match the CPU
-/// (`render_scaled`) within the AA budget — geometry scales, AA stays a thin
-/// seam. Skips when no adapter.
+/// R1.6: HiDPI. At 2× the GPU must render every scene at the scaled resolution;
+/// the nearest-image path stays pixel-exact to the CPU (the SDF rects pick up a
+/// sub-pixel AA band at non-unit scale that blends linear≠gamma, so only nearest
+/// images are exact). Skips when no adapter.
 #[test]
-fn gpu_matches_cpu_at_2x() {
+fn gpu_renders_at_2x_and_matches_cpu_for_nearest_images() {
     let Some(gpu) = GpuRenderer::new() else {
         eprintln!("gpu_matches_cpu_at_2x: no wgpu adapter; skipping");
         return;
     };
     let scale = 2.0;
     let (pw, ph) = (W * 2, H * 2);
-    let mut checked = 0usize;
+    let blank = blank_2x();
+    let mut exact_checked = 0usize;
     for s in corpus() {
-        if !gpu_supported(s.cap) {
-            continue;
-        }
-        let cpu_img = cpu::render_scaled(&s.dl, pw, ph, scale, bg());
         let gpu_img = gpu.render_at_scale(&s.dl, pw, ph, scale, bg());
         assert_eq!(
             (gpu_img.width(), gpu_img.height()),
@@ -77,14 +95,28 @@ fn gpu_matches_cpu_at_2x() {
             "{} size",
             s.name
         );
-        let d = frame_diff(&cpu_img, &gpu_img);
-        eprintln!(
-            "gpu@2x: {} ({:?}) max ΔE {:.4}, {} px differ",
-            s.name, s.cap, d.max_delta_e, d.differing
+        assert!(
+            frame_diff(&gpu_img, &blank).differing > 0,
+            "GPU rendered nothing at 2× for {}",
+            s.name
         );
-        // HiDPI AA seam is ~2× wider in logical terms; use the AA budget for all.
-        assert_frames_close(&cpu_img, &gpu_img, Tolerance::AA, s.name);
-        checked += 1;
+        // A nearest-sampled opaque image has no AA and no blend, so it's exact at
+        // any scale — a clean geometry/scale parity check.
+        if s.name == "image_checker" {
+            let cpu_img = cpu::render_scaled(&s.dl, pw, ph, scale, bg());
+            assert_frames_close(&cpu_img, &gpu_img, Tolerance::PARITY, s.name);
+            exact_checked += 1;
+        }
     }
-    assert!(checked >= 2, "expected ≥2 scenes at 2×, checked {checked}");
+    assert!(exact_checked >= 1, "expected the nearest-image scene at 2×");
+}
+
+fn blank_2x() -> lumen_render::RgbaImage {
+    let px = bg().to_srgb8();
+    let (pw, ph) = (W * 2, H * 2);
+    let mut buf = Vec::with_capacity((pw * ph * 4) as usize);
+    for _ in 0..(pw * ph) {
+        buf.extend_from_slice(&px);
+    }
+    lumen_render::RgbaImage::from_raw(pw, ph, buf)
 }

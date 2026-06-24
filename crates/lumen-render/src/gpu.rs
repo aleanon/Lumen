@@ -12,12 +12,14 @@
 //! composite (the layer pass is split to read prior content); and
 //! [`DrawCmd::Image`] blits (nearest or bilinear), all honoring a HiDPI `scale`
 //! (R1.6). Draws within a layer follow display-list order. Glyph runs are R3.
-//! Parity with the CPU reference is gated by `tests/cpu_vs_gpu` at 1× and 2×.
 //!
-//! Blending matches the CPU by happening in **gamma space**: the target is a
-//! non-sRGB `Rgba8Unorm` holding sRGB-encoded bytes, fragments sRGB-encode their
-//! (linear) colors, and image/ramp textures store raw sRGB sampled without
-//! decode — so fixed-function blends compose premultiplied sRGB like tiny-skia.
+//! The target is `Rgba8UnormSrgb`, so the GPU composites in **linear light** (the
+//! hardware decodes on read, blends, and encodes on write) — the physically
+//! correct blend, and what the live-window agent reads back. The deterministic
+//! `CpuRenderer` reference blends in **gamma**, so GPU and CPU agree on opaque,
+//! non-AA, nearest-sampled content and *intentionally* differ on blended /
+//! anti-aliased pixels. `tests/cpu_vs_gpu` asserts exact parity for the former
+//! and treats the latter as informational; see the decision log.
 
 use crate::display_list::{Brush, CornerRadii, DisplayList, DrawCmd, FillOrStroke, Filter};
 use crate::image::RgbaImage;
@@ -127,10 +129,6 @@ impl RectInstance {
     }
 }
 
-// A *non*-sRGB target holding sRGB-encoded bytes, so fixed-function blending
-// happens in gamma space — matching the tiny-skia CPU reference (which blends
-// premultiplied sRGB directly). Fragments output sRGB-encoded color; image and
-// ramp textures store raw sRGB bytes and are sampled without decode (R1.5).
 /// One ordered draw within a layer (R1: draws are emitted in display-list order,
 /// batching only *consecutive* solid rects and *consecutive* paths, so a rect
 /// authored after an image paints on top of it).
@@ -208,7 +206,14 @@ fn flush_paths(device: &wgpu::Device, ops: &mut Vec<LayerDraw>, pend: &mut PathG
     *pend = PathGeometry::default();
 }
 
-const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+// An sRGB target: the hardware decodes on read, blends in **linear light**, and
+// encodes on write — the physically-correct compositing the GPU is built for.
+// Solid fragments output linear color (the hardware encodes); image/ramp/child
+// textures are sRGB so sampling decodes to linear. Readback returns the stored
+// sRGB bytes (RGBA, no swizzle) — exactly what the live-window agent sees. The
+// CPU reference stays gamma-space, so GPU and CPU agree on opaque, non-AA content
+// and *intentionally* differ on blended/anti-aliased pixels (linear vs gamma).
+const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 /// The GPU backend as a runtime-selectable [`Renderer`](crate::Renderer) (A1).
 /// Covers the command set the offscreen backend supports (solid rects — square
@@ -1883,13 +1888,6 @@ fn to_ndc(px: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(ndc, 0.0, 1.0);
 }
 
-// Encode linear-light → sRGB (the target is non-sRGB so we encode in-shader,
-// keeping blending in gamma space). Matches `Color::to_srgb8`'s transfer.
-fn lin_to_srgb(c: vec3<f32>) -> vec3<f32> {
-    let lo = c * 12.92;
-    let hi = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
-    return select(hi, lo, c <= vec3<f32>(0.0031308));
-}
 
 // --- rounded-rect SDF fill + centered border (R1.2) -------------------------
 
@@ -1956,14 +1954,14 @@ fn over(src: vec4<f32>, dst: vec4<f32>) -> vec4<f32> {
 fn rect_fs(in: RectVsOut) -> @location(0) vec4<f32> {
     let sd = sd_round_box(in.wpx - in.center, in.half, in.radii);
     // Fill covers the path interior (sd < 0), AA over a 1px ramp. Colors are
-    // sRGB-encoded so compositing happens in gamma space (CPU parity).
+    // linear; the sRGB target encodes on write and blends in linear light.
     let fill_cov = clamp(0.5 - sd, 0.0, 1.0);
-    var col = vec4<f32>(lin_to_srgb(in.color.rgb), in.color.a * fill_cov);
+    var col = vec4<f32>(in.color.rgb, in.color.a * fill_cov);
     if (in.bwidth > 0.0) {
         // Centered stroke: a band of width bwidth straddling sd == 0.
         let half_bw = in.bwidth * 0.5;
         let stroke_cov = clamp(0.5 - (abs(sd) - half_bw), 0.0, 1.0);
-        let stroke = vec4<f32>(lin_to_srgb(in.bcolor.rgb), in.bcolor.a * stroke_cov);
+        let stroke = vec4<f32>(in.bcolor.rgb, in.bcolor.a * stroke_cov);
         col = over(stroke, col);
     }
     if (col.a <= 0.0) { discard; }
@@ -2007,7 +2005,7 @@ fn path_vs(@location(0) p: vec2<f32>, @location(1) color: vec4<f32>) -> PathVsOu
 
 @fragment
 fn path_fs(in: PathVsOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(lin_to_srgb(in.color.rgb), in.color.a);
+    return in.color;
 }
 
 // --- gradients (R1.4) -------------------------------------------------------
