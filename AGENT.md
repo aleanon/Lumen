@@ -1,2 +1,3 @@
 ## Committing
-commit with a clear explanation of what has been done for every Task completed, T0,1, T0,2 etc...
+
+commit with a clear explanation of what has been done for every task or subtask completed
