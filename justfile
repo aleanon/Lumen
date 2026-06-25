@@ -51,7 +51,7 @@ run-agent name addr="127.0.0.1:9230":
         cargo run -q --release -p iced-parity --example win -- "$name"
     fi
 
-# Run an example headlessly (no window): binaries run their smoke main, gallery names render a frame to PNG, library examples run their tests. `just render list` shows the gallery.
+# Run an example headlessly (no window): binaries run their smoke main, gallery names render a frame to PNG, library examples run their tests. `just render list` shows the gallery. Pass `--wgpu` for a gallery name to rasterize the linear/GPU picture.
 render name *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -63,7 +63,7 @@ render name *args:
         echo "→ '$name' is a library example (no binary); running its tests:"
         cargo test -p "$name" {{args}}           # gauntlets / shells / gallery crate
     else
-        cargo run -q -p iced-parity --example show -- "$name"   # iced-parity gallery example
+        cargo run -q -p iced-parity --example show -- "$name" {{args}}   # iced-parity gallery example (`--wgpu` = GPU/linear picture)
     fi
 
 # List the example packages.
