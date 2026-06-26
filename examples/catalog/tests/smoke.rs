@@ -8,9 +8,9 @@ use lumen_core::events::{Key, Modifiers};
 use lumen_core::geometry::{Point, Rect, Size, Vec2};
 use lumen_core::semantics::SemanticsNode;
 use lumen_core::tasks::ManualSpawner;
-use lumen_widgets::{CpuRenderer, Headless};
+use lumen_widgets::{Headless, TinySkia};
 
-type App = Headless<CpuRenderer, ManualSpawner>;
+type App = Headless<TinySkia, ManualSpawner>;
 
 fn app() -> App {
     catalog::main_app()

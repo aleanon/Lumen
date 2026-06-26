@@ -16,7 +16,7 @@
 //! The target is `Rgba8UnormSrgb`, so the GPU composites in **linear light** (the
 //! hardware decodes on read, blends, and encodes on write) — the physically
 //! correct blend, and what the live-window agent reads back. The deterministic
-//! `CpuRenderer` reference blends in **gamma**, so GPU and CPU agree on opaque,
+//! `TinySkia` reference blends in **gamma**, so GPU and CPU agree on opaque,
 //! non-AA, nearest-sampled content and *intentionally* differ on blended /
 //! anti-aliased pixels. `tests/cpu_vs_gpu` asserts exact parity for the former
 //! and treats the latter as informational; see the decision log.
@@ -27,7 +27,7 @@ use lumen_core::Color;
 use std::borrow::Cow;
 
 /// A headless wgpu renderer.
-pub struct GpuRenderer {
+pub struct Wgpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     rect_pipeline: wgpu::RenderPipeline,
@@ -220,7 +220,7 @@ const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// or rounded with a centered border — and image blits, which include
 /// rasterized text/shadow sprites); paths/gradients/layers and HiDPI scaling on
 /// the GPU are follow-on, so it renders at 1:1.
-impl crate::Renderer for GpuRenderer {
+impl crate::Renderer for Wgpu {
     fn render_frame(
         &mut self,
         list: &DisplayList,
@@ -237,9 +237,9 @@ impl crate::Renderer for GpuRenderer {
     }
 }
 
-impl GpuRenderer {
+impl Wgpu {
     /// Create a headless renderer, or `None` if no adapter is available.
-    pub fn new() -> Option<GpuRenderer> {
+    pub fn new() -> Option<Wgpu> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
@@ -587,7 +587,7 @@ impl GpuRenderer {
             ..Default::default()
         });
 
-        Some(GpuRenderer {
+        Some(Wgpu {
             device,
             queue,
             rect_pipeline,

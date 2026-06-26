@@ -1,7 +1,7 @@
 //! Phase **R0.2** — corpus-driven CPU↔GPU differential.
 //!
 //! The GPU renders in **linear light** (sRGB target — the physically-correct
-//! blend the live-window agent sees), while the deterministic `CpuRenderer`
+//! blend the live-window agent sees), while the deterministic `TinySkia`
 //! reference blends in **gamma**. So the two agree *exactly* only on opaque,
 //! non-AA, nearest-sampled content ([`exact_vs_cpu`]); anti-aliased / blended /
 //! bilinear scenes diverge by design. This test therefore:
@@ -17,11 +17,11 @@ mod common;
 
 use common::*;
 use lumen_render::cpu;
-use lumen_render::gpu::GpuRenderer;
+use lumen_render::gpu::Wgpu;
 
 #[test]
 fn gpu_matches_cpu_for_opaque_and_renders_the_rest() {
-    let Some(gpu) = GpuRenderer::new() else {
+    let Some(gpu) = Wgpu::new() else {
         eprintln!("cpu_vs_gpu: no wgpu adapter; skipping (GPU-absent policy)");
         return;
     };
@@ -79,7 +79,7 @@ fn gpu_matches_cpu_for_opaque_and_renders_the_rest() {
 /// images are exact). Skips when no adapter.
 #[test]
 fn gpu_renders_at_2x_and_matches_cpu_for_nearest_images() {
-    let Some(gpu) = GpuRenderer::new() else {
+    let Some(gpu) = Wgpu::new() else {
         eprintln!("gpu_matches_cpu_at_2x: no wgpu adapter; skipping");
         return;
     };

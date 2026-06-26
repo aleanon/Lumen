@@ -4,16 +4,16 @@
 //! escape hatch, exercised here without a GPU.
 
 use lumen_core::geometry::Size;
-use lumen_widgets::{theme, App, BuildCx, CpuRenderer, Renderer};
+use lumen_widgets::{theme, App, BuildCx, Renderer, TinySkia};
 
 #[test]
 #[ignore = "needs a GPU adapter (run with --ignored on a GPU runner)"]
 fn runtime_renders_on_gpu_backend() {
-    let Some(gpu) = lumen_render::gpu::GpuRenderer::new() else {
+    let Some(gpu) = lumen_render::gpu::Wgpu::new() else {
         eprintln!("no GPU adapter; skipping");
         return;
     };
-    // Backend chosen at construction (no runtime swap): App<GpuRenderer>.
+    // Backend chosen at construction (no runtime swap): App<Wgpu>.
     let mut a = App::new(|_cx: &mut BuildCx| {
         theme::center_screen(theme::panel_centered(theme::display("GPU")))
     })
@@ -36,7 +36,7 @@ fn boxed_renderer_opt_in_compiles_and_runs() {
     // The dynamic-dispatch opt-in: instantiate the runtime with
     // `R = Box<dyn Renderer>` (one vtable hop, the consumer's choice). Proves the
     // blanket `impl Renderer for Box<R>` + generic `App`/`Headless` line up.
-    let boxed: Box<dyn Renderer> = Box::new(CpuRenderer);
+    let boxed: Box<dyn Renderer> = Box::new(TinySkia);
     let mut a = App::new(|_cx: &mut BuildCx| {
         theme::center_screen(theme::panel_centered(theme::display("Boxed")))
     })

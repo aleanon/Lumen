@@ -8,7 +8,7 @@
 
 use lumen_core::geometry::Size;
 use lumen_core::Color;
-use lumen_render::gpu::GpuRenderer;
+use lumen_render::gpu::Wgpu;
 use lumen_render::Renderer;
 use lumen_widgets::{App, BuildCx, Button, Container, Element, Label};
 
@@ -32,7 +32,7 @@ const SIZE: Size = Size {
 
 #[test]
 fn boxed_gpu_renderer_matches_cpu_on_a_real_screen() {
-    let Some(gpu) = GpuRenderer::new() else {
+    let Some(gpu) = Wgpu::new() else {
         eprintln!("gpu_live_path: no wgpu adapter; skipping");
         return;
     };

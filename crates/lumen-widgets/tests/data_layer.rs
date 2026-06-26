@@ -6,9 +6,9 @@
 use lumen_core::events::{Event, PointerButton, PointerEvent, PointerKind};
 use lumen_core::geometry::{Point, Size};
 use lumen_core::tasks::ManualSpawner;
-use lumen_widgets::{App, BuildCx, CpuRenderer, Element, Headless};
+use lumen_widgets::{App, BuildCx, Element, Headless, TinySkia};
 
-type ManualApp = Headless<CpuRenderer, ManualSpawner>;
+type ManualApp = Headless<TinySkia, ManualSpawner>;
 
 /// Run spawned jobs, then pump so their deferred results apply and the tree
 /// rebuilds.

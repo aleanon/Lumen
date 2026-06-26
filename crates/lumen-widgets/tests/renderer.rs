@@ -61,6 +61,6 @@ fn boxed_backend_is_swappable_at_runtime() {
     a.pump();
     assert_eq!(a.renderer_name(), "solid-red");
 
-    a.set_renderer(Box::new(lumen_render::CpuRenderer)); // same type: Box<dyn Renderer>
+    a.set_renderer(Box::new(lumen_render::TinySkia)); // same type: Box<dyn Renderer>
     assert_eq!(a.renderer_name(), "cpu", "swapped to CPU at runtime");
 }

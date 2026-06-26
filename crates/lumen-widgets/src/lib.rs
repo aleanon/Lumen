@@ -56,7 +56,7 @@ pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
 pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
 /// Re-exported so downstream crates can bound on the renderer backend (e.g.
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
-pub use lumen_render::{CpuRenderer, Renderer};
+pub use lumen_render::{DefaultRenderer, Renderer, TinySkia};
 pub use tasks::{Resource, TaskError};
 // The widget library — each builds its `Element` inside `::new()`, in its own
 // file. Lower to `Element` via `From`; compose with `col!`/`row!` or `Container`.

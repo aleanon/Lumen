@@ -13,7 +13,7 @@
 //!
 //! ## CPU parity vs. the GPU's linear blend
 //!
-//! The GPU composites in **linear light** (sRGB target) while the `CpuRenderer`
+//! The GPU composites in **linear light** (sRGB target) while the `TinySkia`
 //! reference blends in **gamma**, so they agree *exactly* only on opaque, non-AA,
 //! nearest-sampled content ([`exact_vs_cpu`]) and intentionally diverge on
 //! blended / anti-aliased / bilinear scenes (the GPU is the "nicer" linear result

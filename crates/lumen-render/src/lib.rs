@@ -48,7 +48,7 @@ use lumen_core::Color;
 
 /// A frame renderer: rasterizes a (logical-px) display list to a physical-px
 /// frame. The runtime is generic over this so backends are *pluggable* — the
-/// tiny-skia CPU reference renderer ([`CpuRenderer`]) is the default and the
+/// tiny-skia CPU reference renderer ([`TinySkia`]) is the default and the
 /// golden contract; a GPU backend (and future ones, e.g. a Vello-class compute
 /// rasterizer) implement the same trait and are selected at runtime rather than
 /// swapped in by hand (A1).
@@ -93,9 +93,9 @@ pub trait Renderer {
 /// The deterministic CPU reference renderer (tiny-skia, ADR-002) — the default
 /// backend and the golden contract.
 #[derive(Default)]
-pub struct CpuRenderer;
+pub struct TinySkia;
 
-impl Renderer for CpuRenderer {
+impl Renderer for TinySkia {
     fn render_frame(
         &mut self,
         list: &DisplayList,
@@ -135,6 +135,11 @@ impl Renderer for CpuRenderer {
         "cpu"
     }
 }
+
+/// The default renderer for `App`/`Headless`: the deterministic [`TinySkia`] CPU
+/// reference (golden/test path). The GPU is opt-in — the shell and `--wgpu`
+/// construct [`gpu::Wgpu`]/[`gpu::WgpuFallbackTinySkia`] explicitly.
+pub type DefaultRenderer = TinySkia;
 
 /// A boxed renderer is itself a renderer — the dynamic-dispatch escape hatch. The
 /// runtime is generic over `R: Renderer` (zero-cost by default); a consumer who

@@ -7,7 +7,7 @@
 //! "real" picture the live window shows) instead of the default CPU reference
 //! (gamma, deterministic). Each future backend gets its own flag.
 use lumen_core::geometry::Size;
-use lumen_widgets::{CpuRenderer, Renderer};
+use lumen_widgets::{Renderer, TinySkia};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -34,15 +34,15 @@ fn main() {
     // (the App's renderer is generic; `with_renderer` erases it). The golden/test
     // path stays CPU; `--wgpu` is for eyeballing/exporting the real GPU look.
     let (renderer, tag): (Box<dyn Renderer>, &str) = if wgpu {
-        match lumen_render::gpu::GpuRenderer::new() {
+        match lumen_render::gpu::Wgpu::new() {
             Some(gpu) => (Box::new(gpu), "wgpu"),
             None => {
                 eprintln!("--wgpu requested but no GPU adapter found; using the CPU renderer");
-                (Box::new(CpuRenderer), "cpu")
+                (Box::new(TinySkia), "cpu")
             }
         }
     } else {
-        (Box::new(CpuRenderer), "cpu")
+        (Box::new(TinySkia), "cpu")
     };
 
     let mut h = app

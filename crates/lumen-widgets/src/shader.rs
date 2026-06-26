@@ -5,13 +5,13 @@
 use crate::widgets;
 use crate::Element;
 use lumen_core::{Color, Diagnostic};
-use lumen_render::gpu::{GpuRenderer, ShaderUniforms};
+use lumen_render::gpu::{ShaderUniforms, Wgpu};
 use lumen_render::RgbaImage;
 
 /// A stateful shader surface. Build it once, then `set_source`/`set_time`/
 /// `set_params` to drive it; `element()` embeds the latest frame.
 pub struct ShaderWidget {
-    gpu: Option<GpuRenderer>,
+    gpu: Option<Wgpu>,
     width: u32,
     height: u32,
     fallback: Color,
@@ -26,7 +26,7 @@ impl ShaderWidget {
     /// surface is a solid `fallback` fill.
     pub fn new(width: u32, height: u32, fallback: Color) -> ShaderWidget {
         ShaderWidget {
-            gpu: GpuRenderer::new(),
+            gpu: Wgpu::new(),
             width,
             height,
             fallback,

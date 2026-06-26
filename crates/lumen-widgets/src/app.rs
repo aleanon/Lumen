@@ -36,11 +36,11 @@ pub struct FrameStats {
 }
 
 /// An application: a root build closure, an optional stylesheet, and the frame
-/// renderer backend `R` (defaults to the deterministic [`lumen_render::CpuRenderer`]). The
-/// runtime is generic over `R` — zero-cost by default; a consumer who wants
-/// dynamic backend selection uses `R = Box<dyn Renderer>` (see the blanket
-/// `Renderer` impl in `lumen-render`).
-pub struct App<R = lumen_render::CpuRenderer, E = lumen_core::tasks::InlineSpawner> {
+/// renderer backend `R` (defaults to [`lumen_render::DefaultRenderer`] = the
+/// deterministic CPU `TinySkia`). The runtime is generic over `R` — zero-cost by
+/// default; a consumer who wants dynamic backend selection uses
+/// `R = Box<dyn Renderer>` (see the blanket `Renderer` impl in `lumen-render`).
+pub struct App<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::InlineSpawner> {
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     #[allow(dead_code)]
     stylesheet: Option<String>,
@@ -48,14 +48,14 @@ pub struct App<R = lumen_render::CpuRenderer, E = lumen_core::tasks::InlineSpawn
     executor: E,
 }
 
-impl App<lumen_render::CpuRenderer, lumen_core::tasks::InlineSpawner> {
+impl App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner> {
     /// Create an app from its root build closure (02 §8), on the default CPU
     /// reference renderer and the deterministic inline executor.
     pub fn new(root: impl Fn(&mut BuildCx) -> Element + 'static) -> App {
         App {
             root: Box::new(root),
             stylesheet: None,
-            renderer: lumen_render::CpuRenderer,
+            renderer: lumen_render::TinySkia,
             executor: lumen_core::tasks::InlineSpawner,
         }
     }
@@ -236,7 +236,7 @@ fn dim_px(d: Dim) -> f64 {
 
 /// A headless, CPU-rendered application instance (02 §8). Drives the same input
 /// queue as a real shell, so tests and the agent exercise the real paths.
-pub struct Headless<R = lumen_render::CpuRenderer, E = lumen_core::tasks::InlineSpawner> {
+pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::InlineSpawner> {
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     rt: Runtime,
     /// Logical size (the coordinate space for layout, events, and the display

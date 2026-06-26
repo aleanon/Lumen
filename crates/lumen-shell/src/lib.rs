@@ -88,14 +88,14 @@ pub fn run(app: App, size: Size) {
     // Choose the rasterization backend: GPU when an adapter is available (paths,
     // gradients, layers, text sprites all rasterized on the GPU), else the CPU
     // reference. R1.1.
-    let renderer: ShellRenderer = match lumen_render::gpu::GpuRenderer::new() {
+    let renderer: ShellRenderer = match lumen_render::gpu::Wgpu::new() {
         Some(gpu) => {
             eprintln!("lumen: GPU renderer active");
             Box::new(gpu)
         }
         None => {
             eprintln!("lumen: no GPU adapter; using the CPU renderer");
-            Box::new(lumen_widgets::CpuRenderer)
+            Box::new(lumen_widgets::TinySkia)
         }
     };
     let app = app.with_renderer(renderer);
