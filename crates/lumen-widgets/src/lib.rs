@@ -39,9 +39,9 @@ pub mod theme;
 pub mod undo;
 pub mod wcag;
 mod widget;
-// ShaderWidget needs the wgpu GPU backend (CPU fallback included), which is not
-// built on wasm; on the web, shaders are a WebGPU presenter concern.
-#[cfg(not(target_arch = "wasm32"))]
+// ShaderWidget needs the wgpu GPU backend (`wgpu` feature), which is not built on
+// wasm; on the web, shaders are a WebGPU presenter concern.
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 pub mod shader;
 pub mod tasks;
 pub mod widgets;

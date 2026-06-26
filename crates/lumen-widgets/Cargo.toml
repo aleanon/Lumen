@@ -7,6 +7,12 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# GPU backend, forwarded to lumen-render (default-on). Gates the ShaderWidget;
+# `--no-default-features` drops it (build the crate directly for the effect).
+default = ["wgpu"]
+wgpu = ["lumen-render/wgpu"]
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }

@@ -12,6 +12,7 @@
 //!
 //! **Skip policy:** not `#[ignore]`d — self-skips (logging) when no wgpu adapter
 //! is present, so it runs on a GPU box / GPU-CI and no-ops on headless CI.
+#![cfg(feature = "wgpu")]
 
 mod common;
 

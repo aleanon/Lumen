@@ -32,8 +32,8 @@ pub use lumen_widgets::{
     widgets_m4,
 };
 
-/// The ShaderWidget (GPU; not available on wasm).
-#[cfg(not(target_arch = "wasm32"))]
+/// The ShaderWidget (GPU; `wgpu` feature, not available on wasm).
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 pub use lumen_widgets::shader;
 
 /// Layout styling (the typed mirror of the `.lss` layout properties, 04 §3).

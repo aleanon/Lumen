@@ -24,8 +24,9 @@ pub mod canvas;
 pub mod cpu;
 pub mod display_list;
 pub mod gradient;
-// The GPU backend (wgpu) is unavailable on wasm; the web shell renders on the CPU.
-#[cfg(not(target_arch = "wasm32"))]
+// The GPU backend (wgpu, `wgpu` feature). Unavailable on wasm; the web shell
+// renders on the CPU. Disable the feature for a CPU-only build.
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 pub mod gpu;
 pub mod image;
 pub mod media;
@@ -39,8 +40,8 @@ pub use display_list::{
 };
 pub use image::RgbaImage;
 
-/// The GPU renderer and its CPU-fallback wrapper (non-wasm).
-#[cfg(not(target_arch = "wasm32"))]
+/// The GPU renderer and its CPU-fallback wrapper (`wgpu` feature, non-wasm).
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 pub use gpu::{Wgpu, WgpuFallbackTinySkia};
 
 pub use analysis::{
@@ -142,7 +143,7 @@ impl Renderer for TinySkia {
 
 /// The default renderer for `App`/`Headless`: the deterministic [`TinySkia`] CPU
 /// reference (golden/test path). The GPU is opt-in — the shell and `--wgpu`
-/// construct [`gpu::Wgpu`]/[`gpu::WgpuFallbackTinySkia`] explicitly.
+/// construct `Wgpu`/`WgpuFallbackTinySkia` explicitly (the `wgpu` feature).
 pub type DefaultRenderer = TinySkia;
 
 /// A boxed renderer is itself a renderer — the dynamic-dispatch escape hatch. The

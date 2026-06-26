@@ -1,5 +1,6 @@
 //! T4.1 acceptance: 3 sample shaders match GPU goldens (perceptual); a broken
 //! shader edit keeps the previous frame and reports E0201; CPU fallback fills.
+#![cfg(feature = "wgpu")]
 
 use lumen_core::Color;
 use lumen_render::RgbaImage;

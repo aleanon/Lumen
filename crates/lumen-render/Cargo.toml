@@ -21,10 +21,19 @@ tiny-skia = { workspace = true, features = ["png-format"] }
 # uses the CPU renderer (WebGPU would pull wasm-bindgen); the GPU/WebGPU path is
 # a browser-only production presenter, not part of the deterministic core.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wgpu = { workspace = true }
+# Optional behind the `wgpu` feature (default-on). A CPU-only build can drop the
+# whole GPU/tessellation stack with `--no-default-features`; tiny-skia (the CPU
+# reference) is unconditional. Always target-gated off for wasm.
+wgpu = { workspace = true, optional = true }
 # Path/stroke tessellation → GPU triangles (ADR-006, R1.3). GPU-only; the CPU
 # reference renderer uses tiny-skia for paths.
-lyon = { workspace = true }
+lyon = { workspace = true, optional = true }
+
+[features]
+# The GPU (`Wgpu`) backend. On by default; turn off for a CPU-only build. No
+# effect on wasm (the deps are target-gated off there; the web shell uses CPU).
+default = ["wgpu"]
+wgpu = ["dep:wgpu", "dep:lyon"]
 
 [dev-dependencies]
 # Golden JSON for the design-analysis tests.

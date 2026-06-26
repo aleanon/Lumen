@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 lumen-core = { workspace = true }
+# CPU-side types only (RgbaImage, display list) — never the GPU stack.
 lumen-render = { workspace = true }
 kurbo = { workspace = true }
 # Shaping/layout (parley) + scaling/rasterization (swash), ADR-005.

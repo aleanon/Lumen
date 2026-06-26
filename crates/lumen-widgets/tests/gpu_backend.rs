@@ -2,6 +2,7 @@
 //! construction via `App::with_renderer`. The GPU backend is one such `R`
 //! (GPU-gated, `--ignored`); a `Box<dyn Renderer>` is another — the dynamic
 //! escape hatch, exercised here without a GPU.
+#![cfg(feature = "wgpu")]
 
 use lumen_core::geometry::Size;
 use lumen_widgets::{theme, App, BuildCx, Renderer, TinySkia};

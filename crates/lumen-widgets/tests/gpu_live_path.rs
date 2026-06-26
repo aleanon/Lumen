@@ -5,6 +5,7 @@
 //! close to the CPU reference (a loose bound — the GPU blends in linear vs the
 //! CPU's gamma, so AA/text edges differ by design; the screen is mostly opaque,
 //! so the divergent fraction stays small). Self-skips when no wgpu adapter.
+#![cfg(feature = "wgpu")]
 
 use lumen_core::geometry::Size;
 use lumen_core::Color;

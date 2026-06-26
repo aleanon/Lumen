@@ -7,6 +7,14 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# GPU backend (`wgpu`), forwarded down the stack. Default-on; gates the
+# facade's ShaderWidget re-export. (Web/mobile drop wgpu via target-gating in
+# lumen-render regardless; the CPU-only renderer build is `lumen-render
+# --no-default-features`.)
+default = ["wgpu"]
+wgpu = ["lumen-widgets/wgpu", "lumen-render/wgpu"]
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }
