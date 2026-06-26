@@ -85,19 +85,13 @@ pub fn run(app: App, size: Size) {
     // Upgrade the default inline executor to a real thread pool for the live app,
     // so `cx.resource`/`cx.task` run off the UI thread.
     let app = app.with_executor(lumen_core::tasks::ThreadPoolSpawner::default());
-    // Choose the rasterization backend: GPU when an adapter is available (paths,
-    // gradients, layers, text sprites all rasterized on the GPU), else the CPU
-    // reference. R1.1.
-    let renderer: ShellRenderer = match lumen_render::gpu::Wgpu::new() {
-        Some(gpu) => {
-            eprintln!("lumen: GPU renderer active");
-            Box::new(gpu)
-        }
-        None => {
-            eprintln!("lumen: no GPU adapter; using the CPU renderer");
-            Box::new(lumen_widgets::TinySkia)
-        }
-    };
+    // Choose the rasterization backend. An explicit `--wgpu` / `--tiny-skia` flag
+    // or `LUMEN_RENDERER` env wins; otherwise the live window defaults to
+    // GPU-with-CPU-fallback (paths, gradients, layers, text sprites rasterized on
+    // the GPU when an adapter is present, else the CPU reference). R1.1.
+    let renderer: ShellRenderer = lumen_widgets::renderer_override()
+        .unwrap_or_else(|| Box::new(lumen_render::WgpuFallbackTinySkia::new()));
+    eprintln!("lumen: renderer = {}", renderer.name());
     let app = app.with_renderer(renderer);
     let mut shell = Shell {
         app: Some(app),

@@ -5,13 +5,13 @@
 //!
 //! Pass `--wgpu` to rasterize on the GPU backend (linear-light blending — the
 //! "real" picture the live window shows) instead of the default CPU reference
-//! (gamma, deterministic). Each future backend gets its own flag.
+//! (gamma, deterministic); `--tiny-skia` / `LUMEN_RENDERER` work too. Backend
+//! selection is the framework's `renderer_override` helper.
 use lumen_core::geometry::Size;
-use lumen_widgets::{Renderer, TinySkia};
+use lumen_widgets::{renderer_override, Renderer, TinySkia};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let wgpu = args.iter().any(|a| a == "--wgpu");
     let name = args
         .iter()
         .find(|a| !a.starts_with("--"))
@@ -30,20 +30,11 @@ fn main() {
         std::process::exit(1);
     };
 
-    // Select the rasterization backend. Both are boxed so there's one code path
-    // (the App's renderer is generic; `with_renderer` erases it). The golden/test
-    // path stays CPU; `--wgpu` is for eyeballing/exporting the real GPU look.
-    let (renderer, tag): (Box<dyn Renderer>, &str) = if wgpu {
-        match lumen_render::gpu::Wgpu::new() {
-            Some(gpu) => (Box::new(gpu), "wgpu"),
-            None => {
-                eprintln!("--wgpu requested but no GPU adapter found; using the CPU renderer");
-                (Box::new(TinySkia), "cpu")
-            }
-        }
-    } else {
-        (Box::new(TinySkia), "cpu")
-    };
+    // Select the rasterization backend. The golden/test path stays CPU; an
+    // explicit `--wgpu`/`--tiny-skia`/`LUMEN_RENDERER` overrides it (the helper
+    // returns `None` here → the default CPU reference, for deterministic output).
+    let renderer: Box<dyn Renderer> = renderer_override().unwrap_or_else(|| Box::new(TinySkia));
+    let tag = renderer.name();
 
     let mut h = app
         .with_renderer(renderer)

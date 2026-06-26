@@ -58,6 +58,50 @@ pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
 pub use lumen_render::{DefaultRenderer, Renderer, TinySkia};
 pub use tasks::{Resource, TaskError};
+
+/// An explicit renderer choice from the command line (`--wgpu` / `--tiny-skia`)
+/// or the `LUMEN_RENDERER=wgpu|tiny-skia` environment variable, ready to install
+/// with [`App::with_renderer`]. Returns `None` when nothing is specified, so the
+/// caller keeps its own default (the shell defaults to GPU-with-fallback,
+/// headless previews to the deterministic CPU).
+///
+/// `wgpu` yields a [`WgpuFallbackTinySkia`](lumen_render::WgpuFallbackTinySkia) —
+/// the GPU when an adapter exists, else the CPU fallback. Built without the
+/// `wgpu` feature, a `wgpu` request logs a notice and falls back to `TinySkia`.
+/// CLI flags take precedence over the env var.
+pub fn renderer_override() -> Option<Box<dyn Renderer>> {
+    enum Choice {
+        Wgpu,
+        TinySkia,
+    }
+    let from_args = std::env::args().skip(1).find_map(|a| match a.as_str() {
+        "--wgpu" => Some(Choice::Wgpu),
+        "--tiny-skia" => Some(Choice::TinySkia),
+        _ => None,
+    });
+    let choice = from_args.or_else(|| match std::env::var("LUMEN_RENDERER").ok().as_deref() {
+        Some("wgpu") => Some(Choice::Wgpu),
+        Some("tiny-skia") | Some("cpu") => Some(Choice::TinySkia),
+        _ => None,
+    })?;
+    Some(match choice {
+        Choice::TinySkia => Box::new(TinySkia),
+        Choice::Wgpu => {
+            #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+            {
+                Box::new(lumen_render::WgpuFallbackTinySkia::new())
+            }
+            #[cfg(not(all(feature = "wgpu", not(target_arch = "wasm32"))))]
+            {
+                eprintln!(
+                    "lumen: renderer `wgpu` requested but this build has no wgpu \
+                     backend; using tiny-skia"
+                );
+                Box::new(TinySkia)
+            }
+        }
+    })
+}
 // The widget library — each builds its `Element` inside `::new()`, in its own
 // file. Lower to `Element` via `From`; compose with `col!`/`row!` or `Container`.
 pub use button::Button;

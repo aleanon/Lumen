@@ -24,6 +24,10 @@ pub use lumen_core::semantics;
 #[doc(inline)]
 pub use lumen_widgets::{app::FrameStats, App, AppSnapshot, BuildCx, Element, Handler, Headless};
 
+/// Pick the renderer from `--wgpu`/`--tiny-skia`/`LUMEN_RENDERER` (else `None`).
+#[doc(inline)]
+pub use lumen_widgets::renderer_override;
+
 /// The built-in widget library (02 §10): M0 primitives plus the M1/M3/M4 and
 /// remaining widget sets, the accessibility bridge, and the M5 app-building
 /// modules (forms, navigation, undo, i18n, desktop system integration).
