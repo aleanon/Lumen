@@ -111,6 +111,27 @@ fn gpu_renders_at_2x_and_matches_cpu_for_nearest_images() {
     assert!(exact_checked >= 1, "expected the nearest-image scene at 2×");
 }
 
+/// `WgpuFallbackTinySkia` renders on any machine — the GPU when an adapter is
+/// present, else the CPU fallback — and reports the active backend. Never blank.
+#[test]
+fn wgpu_fallback_renders_anywhere() {
+    use lumen_render::{Renderer, WgpuFallbackTinySkia};
+    let mut r = WgpuFallbackTinySkia::new();
+    let scene = corpus()
+        .into_iter()
+        .find(|s| s.name == "rect_solid")
+        .unwrap();
+    let img = r.render_frame(&scene.dl, W, H, 1.0, bg());
+    assert_eq!((img.width(), img.height()), (W, H));
+    assert!(
+        frame_diff(&img, &blank_frame()).differing > 0,
+        "fallback renderer produced a blank frame"
+    );
+    let expected = if r.is_gpu() { "wgpu" } else { "tiny-skia" };
+    assert_eq!(r.name(), expected);
+    eprintln!("WgpuFallbackTinySkia active backend: {}", r.name());
+}
+
 fn blank_2x() -> lumen_render::RgbaImage {
     let px = bg().to_srgb8();
     let (pw, ph) = (W * 2, H * 2);

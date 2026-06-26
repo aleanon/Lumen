@@ -39,6 +39,10 @@ pub use display_list::{
 };
 pub use image::RgbaImage;
 
+/// The GPU renderer and its CPU-fallback wrapper (non-wasm).
+#[cfg(not(target_arch = "wasm32"))]
+pub use gpu::{Wgpu, WgpuFallbackTinySkia};
+
 pub use analysis::{
     analyze_contrast, apca_lc, resolve_backdrop, ContrastLevel, ContrastReport, TargetContrast,
     TextTarget,

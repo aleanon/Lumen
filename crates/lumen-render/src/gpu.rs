@@ -237,6 +237,79 @@ impl crate::Renderer for Wgpu {
     }
 }
 
+/// The "best available" renderer: the GPU ([`Wgpu`]) when an adapter is present,
+/// else the CPU reference ([`TinySkia`](crate::TinySkia)). Construction never
+/// fails — `main` is `None` when there's no adapter, and every call transparently
+/// uses the fallback. The desktop shell uses this so the live window gets the GPU
+/// whenever it can while still running on GPU-less machines.
+pub struct WgpuFallbackTinySkia {
+    main: Option<Wgpu>,
+    fallback: crate::TinySkia,
+}
+
+impl Default for WgpuFallbackTinySkia {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WgpuFallbackTinySkia {
+    /// Try the GPU; fall back to the CPU reference if no adapter is available.
+    pub fn new() -> WgpuFallbackTinySkia {
+        WgpuFallbackTinySkia {
+            main: Wgpu::new(),
+            fallback: crate::TinySkia,
+        }
+    }
+
+    /// Whether the GPU backend is active (an adapter was found).
+    pub fn is_gpu(&self) -> bool {
+        self.main.is_some()
+    }
+}
+
+impl crate::Renderer for WgpuFallbackTinySkia {
+    fn render_frame(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+    ) -> RgbaImage {
+        match &mut self.main {
+            Some(gpu) => gpu.render_frame(list, width, height, scale, background),
+            None => self
+                .fallback
+                .render_frame(list, width, height, scale, background),
+        }
+    }
+
+    fn render_damage(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+        dirty: kurbo::Rect,
+    ) -> RgbaImage {
+        match &mut self.main {
+            Some(gpu) => gpu.render_damage(list, width, height, scale, background, dirty),
+            None => self
+                .fallback
+                .render_damage(list, width, height, scale, background, dirty),
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self.main {
+            Some(_) => "wgpu",
+            None => "tiny-skia",
+        }
+    }
+}
+
 impl Wgpu {
     /// Create a headless renderer, or `None` if no adapter is available.
     pub fn new() -> Option<Wgpu> {
