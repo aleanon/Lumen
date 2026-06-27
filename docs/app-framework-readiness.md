@@ -79,7 +79,7 @@ project's discipline: a portable API surfaced on the agent + synthesizable in
 ### Phase A — A shippable desktop runtime (highest priority)
 
 - **A1. Pluggable renderer + GPU backend. ✅ trait + CPU + GPU backends done; path/gradient/glyph GPU tessellation follow-on.** The
-  `Renderer` trait + `CpuRenderer` ship; `Headless` holds a `Box<dyn Renderer>`
+  `Renderer` trait + `TinySkia` ship; `Headless` holds a `Box<dyn Renderer>`
   (`set_renderer`/`renderer_name`), so the runtime is now generic over the
   backend (tested by swapping one in). *Remaining:* the GPU surface backend
   itself (paths via `lyon` — ADR; gradients; glyph atlas; layers). Make the runtime **generic

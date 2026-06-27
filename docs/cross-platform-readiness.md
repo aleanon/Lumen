@@ -61,9 +61,12 @@ results will arrive through.
   render-to-texture, linear-light blending), images (nearest + bilinear), glass
   `BackdropFilter` (3-box blur + saturate), and text-as-image — drawn in
   display-list order, HiDPI-aware, gated by `cpu_vs_gpu` at 1× and 2×.
-- **Desktop renders the live window through the GPU** (R1.1): the shell selects
-  `GpuRenderer` if an adapter is present (dynamic `Box<dyn Renderer>` seam), else
-  CPU. Verified live (counter + glass screenshots via the agent).
+- **Desktop renders the live window through the GPU** (R1.1): the shell installs
+  `WgpuFallbackTinySkia` — the `Wgpu` backend if an adapter is present, else the
+  `TinySkia` CPU reference — over the dynamic `Box<dyn Renderer>` seam, with
+  `--wgpu`/`--tiny-skia`/`LUMEN_RENDERER` as an explicit override
+  (`renderer_override`). Verified live (counter + glass screenshots via the
+  agent).
 - *Scoped out (no producer):* non-source-over blend modes and GPU
   `DrawCmd::Shader` (`ShaderWidget` pre-rasterizes to an image). *Deferred
   (perf):* zero-copy render-to-surface (the live-window agent needs a per-frame

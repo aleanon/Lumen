@@ -2,8 +2,15 @@
 
 *Design + build plan, 2026-06-23. Companion to
 `plan-executor-and-renderer-generics.md` (the renderer **seam** — `App<R =
-CpuRenderer>`) and to `cross-platform-readiness.md` (Blocker #2 + the "Perf at
-scale" polish line). This plan is the work that runs **behind** that seam.*
+DefaultRenderer>`) and to `cross-platform-readiness.md` (Blocker #2 + the "Perf
+at scale" polish line). This plan is the work that runs **behind** that seam.*
+
+> **Renderer naming (2026-06-26).** The backends are `TinySkia` (CPU reference,
+> the golden contract and `DefaultRenderer`) and `Wgpu` (GPU), with
+> `WgpuFallbackTinySkia` for "GPU when available, else CPU". `Wgpu`/`lyon` sit
+> behind a default-on `wgpu` cargo feature. Backend choice at runtime goes
+> through `renderer_override` (`--wgpu`/`--tiny-skia`/`LUMEN_RENDERER`). (Earlier
+> revisions of this plan called these `CpuRenderer`/`GpuRenderer`.)
 
 > **Status (2026-06-24).** R0 ✅ done. **R1 ✅ COMPLETE** — the GPU backend
 > matches the CPU reference for every command the framework produces (rects incl.
@@ -17,7 +24,7 @@ scale" polish line). This plan is the work that runs **behind** that seam.*
 >
 > <details><summary>(historical detail)</summary>
 >
-> R1 offscreen backend ✅ done — `GpuRenderer` matches the CPU reference within
+> R1 offscreen backend ✅ done — `Wgpu` matches the CPU reference within
 > tolerance for rects (R1.2), paths (R1.3, `lyon`+MSAA), gradients (R1.4, Oklab
 > ramp), layers/clip/opacity (R1.5, render-to-texture; **linear-light blending**
 > since 2026-06-25 — `Rgba8UnormSrgb`, CPU reference stays gamma so they match on
@@ -85,7 +92,7 @@ single golden test. R0 turns "keep the CPU renderer as the reference" into a
 reusable, enforced harness.
 
 ## Current state
-- `CpuRenderer` is the default and the golden contract (`cpu_goldens.rs`).
+- `TinySkia` is the default and the golden contract (`cpu_goldens.rs`).
 - `render_damage` exists (`cpu.rs:61`) and is byte-identical to the cropped full
   frame *by construction*, but only one test calls it.
 - GPU/CPU parity is checked by calling each `render` directly (per the seam plan's
@@ -95,8 +102,8 @@ reusable, enforced harness.
 - **R0.1.** Add `tests/diff_harness.rs` in `lumen-render`: `assert_frames_eq(a, b,
   tol)` (max per-channel delta + count of differing pixels), plus a corpus of
   display lists (one per `DrawCmd` class + the example screens' lists).
-- **R0.2.** `cpu_vs_gpu` differential test: for each corpus DL, `CpuRenderer` vs
-  `GpuRenderer` within a documented AA tolerance; **skip with a clear log when no
+- **R0.2.** `cpu_vs_gpu` differential test: for each corpus DL, `TinySkia` vs
+  `Wgpu` within a documented AA tolerance; **skip with a clear log when no
   GPU adapter** (CI runners without a device) — never silently pass.
 - **R0.3.** `damage_equivalence` test: for a corpus of (DL, dirty-rect) pairs,
   assert `render_damage(dl, dirty)` is byte-identical to `render(dl)` cropped to
@@ -117,7 +124,7 @@ renderer as the oracle (R0).
 
 ## Current state
 - `Renderer` trait: `render_frame(&mut self, &DisplayList, w, h, scale, bg) ->
-  RgbaImage`-ish + `name()`; impls for `CpuRenderer`, `GpuRenderer`, `Box<R>`.
+  RgbaImage`-ish + `name()`; impls for `TinySkia`, `Wgpu`, `Box<R>`.
 - `DrawCmd` vocabulary already complete: `Rect, Path, Image, GlyphRun, PushLayer,
   PopLayer, Shader` with `Fill`/`Stroke` styles, gradients, `BlendMode`,
   `CornerRadii`, `BackdropFilter`.
@@ -127,14 +134,14 @@ renderer as the oracle (R0).
   `h.screenshot()` as one texture per frame (`lumen-shell` `present`).
 
 ## Target
-A `GpuRenderer` that (a) renders the full `DrawCmd` set offscreen matching CPU
+A `Wgpu` that (a) renders the full `DrawCmd` set offscreen matching CPU
 within tolerance, and (b) drives a **live `wgpu` surface** in the shell via
-`App::new(build).with_renderer(GpuRenderer::new()?)` (the seam from Part A is
+`App::new(build).with_renderer(Wgpu::new()?)` (the seam from Part A is
 already in place). CPU stays the default and the fallback.
 
 ## Sub-phases (each independently green, each gated by R0)
 - **R1.1 — Surface plumbing.** Add a `present_to_surface` path so the shell can
-  hand `GpuRenderer` a `wgpu::Surface` (configured for the window) instead of
+  hand `Wgpu` a `wgpu::Surface` (configured for the window) instead of
   rasterizing to bytes. Keep the offscreen `render_frame` for goldens/agent. Shell
   selects GPU-if-available else CPU at the entry branch (Part A4 left the hook).
 - **R1.2 — Rect pipeline on-surface.** Promote the existing quad/rect+image
@@ -234,7 +241,7 @@ quads — essential for text-heavy and animated UIs.
 - **R3.2 — Atlas allocator.** Pack glyph bitmaps into a GPU texture atlas (shelf or
   skyline packer) with eviction; grow/rotate atlas pages on overflow.
 - **R3.3 — Instanced glyph quads.** Implement the real `DrawCmd::GlyphRun` arm in
-  `GpuRenderer`: one instanced draw per run sampling atlas UVs; alpha/coverage
+  `Wgpu`: one instanced draw per run sampling atlas UVs; alpha/coverage
   blend with the text color. CPU renderer implements `GlyphRun` too (currently
   stubbed) so goldens cover it.
 - **R3.4 — Retire string sprites.** Switch the paint layer to emit `GlyphRun`
@@ -358,7 +365,7 @@ R0  Golden guardrail (diff harness: GPU≈CPU, damage==full)  ── gates every
 
 1. **CPU stays golden:** R0 harness in CI; GPU within tolerance, damage byte-exact;
    GPU-absent skips cleanly.
-2. **GPU surface (Rec #1):** all example screens render live through `GpuRenderer`
+2. **GPU surface (Rec #1):** all example screens render live through `Wgpu`
    on a real surface; full `DrawCmd` set (rect/path/gradient/layer/blend/backdrop)
    covered.
 3. **Incremental (Rec #2):** single-signal edits relayout only the dirty subtree
