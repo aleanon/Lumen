@@ -61,7 +61,9 @@ fn dark() -> Pal {
 
 fn build(cx: &mut BuildCx) -> Element {
     let rt = cx.runtime();
-    let theme = cx.signal("theme", String::new);
+    // Seed the held value so the matching radio is selected on first paint (an
+    // empty default matches neither "Light" nor "Dark").
+    let theme = cx.signal("theme", || "Light".to_string());
     let pal = if theme.get(rt) == "Dark" {
         dark()
     } else {
