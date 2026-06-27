@@ -181,6 +181,20 @@ impl TextEditor {
         self.cursor = cursor.min(self.text.len());
     }
 
+    /// Place the cursor at byte offset `byte` (clamped to a char boundary). With
+    /// `extend` false the selection collapses there (a plain click / caret move);
+    /// with `extend` true the anchor is kept (drag-select / Shift-click).
+    pub fn place(&mut self, byte: usize, extend: bool) {
+        let mut b = byte.min(self.text.len());
+        while b > 0 && !self.text.is_char_boundary(b) {
+            b -= 1;
+        }
+        self.cursor = b;
+        if !extend {
+            self.anchor = b;
+        }
+    }
+
     // --- clipboard ----------------------------------------------------------
 
     /// Copy the selection.
@@ -317,7 +331,7 @@ mod tests {
         e.move_right(true);
         e.move_right(true); // select "he"
         e.insert("HE"); // pushes an undo snapshot
-        // Round-trip through JSON (the Signal<T> storage format).
+                        // Round-trip through JSON (the Signal<T> storage format).
         let json = serde_json::to_string(&e).unwrap();
         let mut back: TextEditor = serde_json::from_str(&json).unwrap();
         assert_eq!(back.text(), "HEllo");

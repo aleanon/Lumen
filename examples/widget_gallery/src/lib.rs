@@ -317,8 +317,8 @@ fn build(cx: &mut BuildCx) -> Element {
         .into()
 }
 
-/// Read the `draft` text signal from within a handler (the Add button needs the
+/// Read the `draft` field's text from within a handler (the Add button needs the
 /// current value without holding the `TextInput`'s signal handle).
 fn draft_text(rt: &lumen_core::state::Runtime) -> String {
-    rt.signal::<String>("draft", String::new).get(rt)
+    lumen_widgets::TextInput::text_of(rt, "draft")
 }
