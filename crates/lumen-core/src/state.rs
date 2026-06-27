@@ -177,6 +177,10 @@ pub struct Runtime {
     inner: Rc<RefCell<Inner>>,
     /// Channel for off-thread results (the data layer); see [`crate::tasks`].
     deferred: Rc<crate::tasks::DeferredChannel>,
+    /// Shared clipboard text, reachable from event handlers (which only get a
+    /// `&Runtime`) — text widgets cut/copy/paste through it. The desktop shell
+    /// syncs it with the OS clipboard.
+    clipboard: Rc<RefCell<String>>,
 }
 
 impl Default for Runtime {
@@ -205,12 +209,24 @@ impl Runtime {
         Runtime {
             inner: Rc::new(RefCell::new(Inner::default())),
             deferred: Rc::new(crate::tasks::DeferredChannel::new()),
+            clipboard: Rc::new(RefCell::new(String::new())),
         }
     }
 
     /// The deferred-op channel (data layer). Internal accessor for `tasks`.
     pub(crate) fn deferred(&self) -> &crate::tasks::DeferredChannel {
         &self.deferred
+    }
+
+    /// The current clipboard text. Shared across handler closures (which only
+    /// receive `&Runtime`); the shell keeps it in sync with the OS clipboard.
+    pub fn clipboard(&self) -> String {
+        self.clipboard.borrow().clone()
+    }
+
+    /// Replace the clipboard text (e.g. a text widget's copy/cut).
+    pub fn set_clipboard(&self, text: impl Into<String>) {
+        *self.clipboard.borrow_mut() = text.into();
     }
 
     /// Total number of scope runs since creation — used by tests to assert that
@@ -648,6 +664,18 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use std::cell::Cell;
+
+    #[test]
+    fn clipboard_is_shared_across_runtime_clones() {
+        // Handlers capture clones of the Runtime; they must see the same buffer.
+        let rt = Runtime::new();
+        assert_eq!(rt.clipboard(), "");
+        let handle = rt.clone();
+        handle.set_clipboard("copied");
+        assert_eq!(rt.clipboard(), "copied");
+        rt.set_clipboard(String::from("replaced"));
+        assert_eq!(handle.clipboard(), "replaced");
+    }
 
     #[test]
     fn write_one_of_many_reruns_exactly_one_scope() {

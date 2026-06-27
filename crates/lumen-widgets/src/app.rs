@@ -145,7 +145,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             theme: lumen_style::ThemeKind::Light,
             node_style: HashMap::new(),
             node_computed: HashMap::new(),
-            clipboard: String::new(),
             menu: crate::system::MenuModel::default(),
             invoked_menu: Vec::new(),
             system_requests: Vec::new(),
@@ -290,8 +289,8 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     pointer: PointerState,
     // Animation/timer requests from the latest build (02 §8, time-driven UI).
     requests: crate::element::FrameRequests,
-    // Desktop system integration (T5.2).
-    clipboard: String,
+    // Desktop system integration (T5.2). The clipboard lives on the Runtime so
+    // event handlers can reach it; see `Runtime::clipboard`.
     menu: crate::system::MenuModel,
     invoked_menu: Vec<String>,
     system_requests: Vec<crate::system::SystemRequest>,
@@ -453,14 +452,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
     // --- desktop system integration (T5.2) ---------------------------------
 
-    /// Read the (in-memory) clipboard text.
+    /// Read the (in-memory) clipboard text. Backed by the shared `Runtime`
+    /// clipboard, so text widgets and this accessor see the same buffer.
     pub fn clipboard_read(&self) -> String {
-        self.clipboard.clone()
+        self.rt.clipboard()
     }
 
     /// Write text to the clipboard.
     pub fn clipboard_write(&mut self, text: impl Into<String>) {
-        self.clipboard = text.into();
+        self.rt.set_clipboard(text);
     }
 
     /// Install the app's native menu model.
