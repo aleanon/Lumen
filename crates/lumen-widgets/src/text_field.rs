@@ -1,19 +1,21 @@
-//! [`TextField`] — a self-stateful **multi-line** text input. Its `Element` is
-//! built inside [`TextField::new`]; the value lives in a signal keyed by `name`.
-//! (Single-line input is [`TextInput`](crate::TextInput).)
+//! [`TextField`] — a self-stateful **multi-line** editable area. Its `Element` is
+//! built inside [`TextField::new`]; the editor state lives in a `Signal<TextEditor>`
+//! keyed by `name` (with a `"{name}.text"` string mirror), exactly like
+//! [`TextInput`](crate::TextInput). Enter inserts a newline; Up/Down move the
+//! caret between visual lines. Read the text with [`TextInput::text_of`].
 
 use crate::element::NodeContent;
+use crate::text_input::edit_key;
 use crate::widget::impl_common;
 use crate::{BuildCx, Element};
-use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role};
 use lumen_core::Color;
 use lumen_layout::{Dim, Edges, LayoutStyle};
-use lumen_text::TextStyle;
+use lumen_text::{TextEditor, TextStyle};
 use std::rc::Rc;
 
-/// A multi-line text area. Committed text is appended to the value signal
-/// (`name`); the box is sized for several lines and wraps to its width.
+/// A multi-line text area with a caret, selection, clipboard, and undo. Wraps to
+/// its width; the box is sized for several lines.
 pub struct TextField {
     el: Element,
 }
@@ -23,19 +25,21 @@ impl TextField {
     /// Defaults to ~5 visible lines; override with [`lines`](TextField::lines)
     /// or [`width`](TextField::width).
     pub fn new(cx: &BuildCx, name: &str, initial: &str) -> TextField {
-        let value = cx.signal(name, || initial.to_string());
-        let v = value.get(cx.runtime());
-        let shown = if v.is_empty() {
+        let editor = cx.signal(name, || TextEditor::new(initial));
+        let mirror = cx.signal(&format!("{name}.text"), || initial.to_string());
+        let ed = editor.get(cx.runtime());
+        let text = ed.text().to_string();
+        let shown = if text.is_empty() {
             " ".to_string()
         } else {
-            v.clone()
+            text.clone()
         };
         let line_h = 20.0_f32;
         let el = Element {
             role: Role::TextInput,
             focusable: true,
-            label: v.clone(),
-            value: Some(v),
+            label: text.clone(),
+            value: Some(text.clone()),
             actions: vec![Action::Focus, Action::SetValue],
             background: Some(Color::srgb8(0xf2, 0xf2, 0xf2, 0xff)),
             corner_radius: 6.0,
@@ -49,17 +53,19 @@ impl TextField {
                 ..LayoutStyle::default()
             },
             content: NodeContent::Text(shown, TextStyle::default()),
+            caret_byte: Some(ed.cursor()),
+            selection: ed.has_selection().then(|| ed.selection()),
             on_text: Some(Rc::new(move |rt, t| {
-                let t = t.to_string();
-                value.update(rt, |s| s.push_str(&t))
+                editor.update(rt, |e| e.insert(t));
+                let text = editor.get(rt).text().to_string();
+                mirror.set(rt, text);
             })),
-            // Backspace deletes; Enter inserts a newline (multi-line).
-            on_key: Some(Rc::new(move |rt, ke| match ke.key {
-                Key::Named(NamedKey::Backspace) => value.update(rt, |s| {
-                    s.pop();
-                }),
-                Key::Named(NamedKey::Enter) => value.update(rt, |s| s.push('\n')),
-                _ => {}
+            on_caret_set: Some(Rc::new(move |rt, byte, extend| {
+                editor.update(rt, |e| e.place(byte, extend));
+            })),
+            // Multi-line: Enter inserts a newline (Up/Down are handled app-side).
+            on_key: Some(Rc::new(move |rt, ke| {
+                edit_key(rt, ke, editor, mirror, true);
             })),
             ..Element::default()
         };
