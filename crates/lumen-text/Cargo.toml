@@ -12,6 +12,12 @@ lumen-core = { workspace = true }
 # CPU-side types only (RgbaImage, display list) — never the GPU stack.
 lumen-render = { workspace = true }
 kurbo = { workspace = true }
+# TextEditor is persisted in a Signal<T> (State = Serialize + DeserializeOwned).
+serde = { workspace = true }
 # Shaping/layout (parley) + scaling/rasterization (swash), ADR-005.
 parley = { workspace = true }
 swash = { workspace = true }
+
+[dev-dependencies]
+# Editor serde round-trip test (matches the Signal<T> JSON storage format).
+serde_json = { workspace = true }

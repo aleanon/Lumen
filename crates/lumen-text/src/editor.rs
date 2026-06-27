@@ -3,7 +3,7 @@
 //! moves by `char` boundaries (good enough pre-grapheme-segmentation).
 
 /// IME pre-edit (composition) state overlaid on the buffer at the cursor.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Preedit {
     /// The composing text.
     pub text: String,
@@ -11,7 +11,7 @@ pub struct Preedit {
     pub cursor: Option<(usize, usize)>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Snapshot {
     text: String,
     cursor: usize,
@@ -19,7 +19,7 @@ struct Snapshot {
 }
 
 /// A single-document text editor.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TextEditor {
     text: String,
     cursor: usize,
@@ -308,6 +308,24 @@ mod tests {
         assert_eq!(e.text(), "aef");
         e.paste("X");
         assert_eq!(e.text(), "aXef");
+    }
+
+    #[test]
+    fn serde_round_trip_preserves_state_and_history() {
+        let mut e = TextEditor::new("hello");
+        e.move_home(false);
+        e.move_right(true);
+        e.move_right(true); // select "he"
+        e.insert("HE"); // pushes an undo snapshot
+        // Round-trip through JSON (the Signal<T> storage format).
+        let json = serde_json::to_string(&e).unwrap();
+        let mut back: TextEditor = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.text(), "HEllo");
+        assert_eq!(back.cursor(), e.cursor());
+        assert_eq!(back.selection(), e.selection());
+        // Undo history survived the round-trip.
+        back.undo();
+        assert_eq!(back.text(), "hello");
     }
 
     #[test]
