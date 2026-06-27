@@ -2,7 +2,7 @@
 //! built inside [`TextField::new`]; the editor state lives in a `Signal<TextEditor>`
 //! keyed by `name` (with a `"{name}.text"` string mirror), exactly like
 //! [`TextInput`](crate::TextInput). Enter inserts a newline; Up/Down move the
-//! caret between visual lines. Read the text with [`TextInput::text_of`].
+//! caret between visual lines. Read the text with [`TextInput::text_of`](crate::TextInput::text_of).
 
 use crate::element::NodeContent;
 use crate::text_input::edit_key;
