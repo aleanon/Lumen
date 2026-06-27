@@ -30,6 +30,11 @@ pub type TextHandler = Rc<dyn Fn(&Runtime, &str)>;
 pub type KeyHandler = Rc<dyn Fn(&Runtime, &lumen_core::events::KeyEvent)>;
 /// A drop handler receiving the dropped payload (T5.2 drag-and-drop).
 pub type DropHandler = Rc<dyn Fn(&Runtime, &lumen_core::events::DropData)>;
+/// A caret-placement handler for text editors. The app resolves a pointer press
+/// or vertical-nav key to a byte offset (via the text engine's geometry) and
+/// calls this with `(byte, extend)` — `extend` keeps the selection anchor
+/// (drag-select / Shift). Marks an element as an editable text field.
+pub type CaretHandler = Rc<dyn Fn(&Runtime, usize, bool)>;
 /// An immediate-mode draw callback (E8.1 Canvas): paints into a `Frame` sized to
 /// the node's bounds.
 pub type CanvasFn = Rc<dyn Fn(&mut lumen_render::canvas::Frame, kurbo::Size)>;
@@ -138,6 +143,14 @@ pub struct Element {
     pub on_text: Option<TextHandler>,
     /// Key handler invoked on the focused node for each `KeyDown`.
     pub on_key: Option<KeyHandler>,
+    /// Caret-placement handler (editable text fields). Its presence marks the
+    /// element as a text editor: the app resolves pointer presses / drags and
+    /// vertical-nav keys to a byte offset and calls this.
+    pub on_caret_set: Option<CaretHandler>,
+    /// The caret byte offset to draw when this field is focused (text editors).
+    pub caret_byte: Option<usize>,
+    /// The selected byte range `(start, end)` to highlight when focused.
+    pub selection: Option<(usize, usize)>,
     /// Light-dismiss handler: fired when a pointer press lands *outside* this
     /// element's bounds, or on Escape. Used for click-away on transient overlays
     /// (dropdowns, popovers, menus, tooltips).
@@ -178,6 +191,9 @@ impl Default for Element {
             on_drop: None,
             on_text: None,
             on_key: None,
+            on_caret_set: None,
+            caret_byte: None,
+            selection: None,
             on_dismiss: None,
             clip: false,
             overlay: false,

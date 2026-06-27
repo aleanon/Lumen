@@ -17,7 +17,8 @@ use lumen_core::tree::{NodeFlags, Tree};
 use lumen_core::{Color, NodeIndex, StableId};
 use lumen_layout::{Dim, LayoutNode, LayoutStyle, LayoutTree};
 use lumen_render::{
-    cpu, BlendMode, Brush, CornerRadii, Damage, DisplayList, DrawCmd, RgbaImage, RoundedRect,
+    cpu, BlendMode, Border, Brush, CornerRadii, Damage, DisplayList, DrawCmd, RgbaImage,
+    RoundedRect,
 };
 use lumen_text::TextEngine;
 use std::collections::HashMap;
@@ -208,6 +209,9 @@ struct NodeMeta {
     on_drop: Option<crate::element::DropHandler>,
     on_text: Option<crate::element::TextHandler>,
     on_key: Option<crate::element::KeyHandler>,
+    on_caret_set: Option<crate::element::CaretHandler>,
+    caret_byte: Option<usize>,
+    selection: Option<(usize, usize)>,
     on_dismiss: Option<Handler>,
     background: Option<Color>,
     corner_radius: f64,
@@ -550,6 +554,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // their interactive ancestor handle the press).
                 let mut n = self.tree.hit_test(pe.pos);
                 let (mut did_focus, mut did_click, mut did_drag) = (false, false, false);
+                let mut caret_hit = None;
                 while let Some(node) = n {
                     if let Some(m) = self.meta.get(&node) {
                         if !did_focus && m.focusable {
@@ -567,12 +572,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                             self.apply_drag(node, pe.pos);
                             did_drag = true;
                         }
+                        // A text editor places its caret at the press and keeps
+                        // `pressed` so a drag extends the selection.
+                        if caret_hit.is_none() && m.on_caret_set.is_some() {
+                            self.pressed = Some((node, m.id.clone()));
+                            caret_hit = Some(node);
+                        }
                     }
                     if did_focus && did_click && did_drag {
                         break;
                     }
                     let p = self.tree.parent(node);
                     n = p.is_some().then_some(p);
+                }
+                if let Some(node) = caret_hit {
+                    self.place_caret(node, pe.pos, false);
                 }
                 // Light dismiss: any element with an `on_dismiss` whose bounds do
                 // not contain the press is dismissed (click-away for dropdowns/
@@ -617,7 +631,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                         .as_ref()
                         .and_then(|i| self.node_by_id(i))
                         .unwrap_or(idx);
-                    self.apply_drag(node, pe.pos);
+                    // A pressed text editor extends its selection on drag; other
+                    // pressed nodes are sliders/scrollbars (fractional drag).
+                    if self
+                        .meta
+                        .get(&node)
+                        .is_some_and(|m| m.on_caret_set.is_some())
+                    {
+                        self.place_caret(node, pe.pos, true);
+                    } else {
+                        self.apply_drag(node, pe.pos);
+                    }
                 }
             }
             Event::Wheel(we) => {
@@ -649,7 +673,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // handles PageUp/Down/Home/End/arrows); built-in focus/activation
                 // keys still apply.
                 if let Some(node) = self.focused_node() {
-                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_key.clone()) {
+                    // Vertical caret nav needs layout geometry (which visual line),
+                    // so the app handles Up/Down for text editors; the widget's
+                    // on_key handles the rest (Left/Right/Home/End/edit/clipboard).
+                    let vnav = match ke.key {
+                        Key::Named(NamedKey::ArrowUp) => Some(true),
+                        Key::Named(NamedKey::ArrowDown) => Some(false),
+                        _ => None,
+                    }
+                    .filter(|_| {
+                        self.meta
+                            .get(&node)
+                            .is_some_and(|m| m.on_caret_set.is_some())
+                    });
+                    if let Some(up) = vnav {
+                        let extend = ke.modifiers.contains(lumen_core::events::Modifiers::SHIFT);
+                        self.move_caret_vertical(node, up, extend);
+                    } else if let Some(h) = self.meta.get(&node).and_then(|m| m.on_key.clone()) {
                         h(&self.rt, &ke);
                     }
                 }
@@ -749,6 +789,56 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         if let Some(h) = self.meta.get(&node).and_then(|m| m.on_drag.clone()) {
             h(&self.rt, frac_x, frac_y);
         }
+    }
+
+    /// Resolve a pointer position over a text-editor node to a byte offset (via
+    /// the text engine's geometry) and call its caret handler. `extend` keeps the
+    /// selection anchor (drag-select). No-op for non-editor nodes.
+    fn place_caret(&mut self, node: NodeIndex, pos: Point, extend: bool) {
+        let b = self.tree.bounds(node);
+        let Some((text, ts, wrap, padx, pady, handler)) = self.meta.get(&node).and_then(|m| {
+            let h = m.on_caret_set.clone()?;
+            let NodeContent::Text(t, ts) = &m.content else {
+                return None;
+            };
+            Some((t.clone(), *ts, m.wrap_width, m.pad.0, m.pad.1, h))
+        }) else {
+            return;
+        };
+        // Content-box-local px: x=0 is before the first glyph (matches the text
+        // origin, which is painted at the padded corner).
+        let lx = (pos.x - b.x0 - padx) as f32;
+        let ly = (pos.y - b.y0 - pady) as f32;
+        let block = self
+            .text
+            .layout(&text, ts, &[], wrap, lumen_text::TextAlign::Start);
+        let byte = block.hit_to_byte(lx, ly);
+        handler(&self.rt, byte, extend);
+    }
+
+    /// Move a text-editor caret up/down a visual line (geometry lives here, on the
+    /// engine side). Resolves the current caret's x to the line above/below and
+    /// calls the caret handler. `extend` keeps the selection anchor (Shift).
+    fn move_caret_vertical(&mut self, node: NodeIndex, up: bool, extend: bool) {
+        let Some((text, ts, wrap, caret, handler)) = self.meta.get(&node).and_then(|m| {
+            let h = m.on_caret_set.clone()?;
+            let c = m.caret_byte?;
+            let NodeContent::Text(t, ts) = &m.content else {
+                return None;
+            };
+            Some((t.clone(), *ts, m.wrap_width, c, h))
+        }) else {
+            return;
+        };
+        let block = self
+            .text
+            .layout(&text, ts, &[], wrap, lumen_text::TextAlign::Start);
+        let (x, y, h) = block.caret_pos(caret);
+        // Probe into the neighbouring line (above the caret top, or below its
+        // baseline); hit_to_byte clamps to the nearest cluster on that line.
+        let ty = if up { y - h * 0.5 } else { y + h * 1.5 };
+        let byte = block.hit_to_byte(x, ty);
+        handler(&self.rt, byte, extend);
     }
 
     // --- rebuild ------------------------------------------------------------
@@ -1049,6 +1139,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 on_drop: el.on_drop,
                 on_text: el.on_text,
                 on_key: el.on_key,
+                on_caret_set: el.on_caret_set,
+                caret_byte: el.caret_byte,
+                selection: el.selection,
                 on_dismiss: el.on_dismiss,
                 background: el.background,
                 corner_radius: el.corner_radius,
@@ -1243,12 +1336,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     saturate: css.and_then(|s| s.backdrop_saturate).unwrap_or(1.0),
                 });
             }
+            // A focused text editor gets an accent focus ring (drawn inside the
+            // box edge, so no layout shift). Gated to editors to keep other
+            // widgets' goldens unchanged.
+            let focused = self.tree.flags(node).contains(NodeFlags::FOCUSED);
+            let focus_border = (focused && m.on_caret_set.is_some()).then(|| Border {
+                width: 2.0,
+                color: crate::theme::accent(),
+            });
             if let Some(bg) = bg {
                 dl.push(DrawCmd::Rect {
                     rect: bounds,
                     brush: Brush::Solid(bg),
                     radii: CornerRadii::all(radius),
-                    border: None,
+                    border: focus_border,
                 });
             }
             // Immediate-mode canvas: draw in node-local coords offset to bounds.
@@ -1341,12 +1442,57 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // padding, so this is a no-op for it.
                 let tx = bounds.x0 + m.pad.0;
                 let ty = bounds.y0 + m.pad.1;
+                // Editor overlay (only for the focused field): selection band(s)
+                // behind the glyphs, caret in front. Computed from the same layout
+                // as the text image, so it stays out of the (focus-independent)
+                // glyph cache. `caret_byte`/`selection` index `txt`.
+                let overlay = if focused && m.caret_byte.is_some() {
+                    Some(
+                        self.text
+                            .layout(txt, ts, &[], m.wrap_width, lumen_text::TextAlign::Start),
+                    )
+                } else {
+                    None
+                };
+                if let Some(block) = &overlay {
+                    if let Some((a, b)) = m.selection.filter(|(a, b)| a != b) {
+                        let sel = Color::srgb8(0x1a, 0x73, 0xe8, 0x55);
+                        for (x0, y0, x1, y1) in block.selection_rects(a, b) {
+                            dl.push(DrawCmd::Rect {
+                                rect: Rect::new(
+                                    tx + x0 as f64,
+                                    ty + y0 as f64,
+                                    tx + x1 as f64,
+                                    ty + y1 as f64,
+                                ),
+                                brush: Brush::Solid(sel),
+                                radii: CornerRadii::all(0.0),
+                                border: None,
+                            });
+                        }
+                    }
+                }
                 dl.push(DrawCmd::Image {
                     id,
                     src_rect: Rect::new(0.0, 0.0, iw, ih),
                     dst_rect: Rect::new(tx, ty, tx + iw, ty + ih),
                     quality: lumen_render::Filter::Nearest,
                 });
+                if let (Some(block), Some(caret)) = (&overlay, m.caret_byte) {
+                    let (cx, cy, ch) = block.caret_pos(caret);
+                    let w = 1.5;
+                    dl.push(DrawCmd::Rect {
+                        rect: Rect::new(
+                            tx + cx as f64,
+                            ty + cy as f64,
+                            tx + cx as f64 + w,
+                            ty + cy as f64 + ch as f64,
+                        ),
+                        brush: Brush::Solid(ts.color),
+                        radii: CornerRadii::all(0.0),
+                        border: None,
+                    });
+                }
                 // Mirror the painted text as a design-analysis target: the
                 // foreground is the text's resolved color, the region its bounds.
                 text_targets.push(lumen_render::TextTarget {
