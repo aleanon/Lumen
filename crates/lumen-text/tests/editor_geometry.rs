@@ -21,7 +21,10 @@ fn caret_advances_left_to_right_single_line() {
     let (x0, y0, h) = block.caret_pos(0);
     let (x_mid, _, _) = block.caret_pos(3);
     let (x_end, _, _) = block.caret_pos(5);
-    assert!(x0 <= 0.5, "caret at offset 0 sits at the left edge (got {x0})");
+    assert!(
+        x0 <= 0.5,
+        "caret at offset 0 sits at the left edge (got {x0})"
+    );
     assert!(x_mid > x0, "caret moves right as the offset grows");
     assert!(x_end > x_mid, "caret at the end is rightmost");
     assert!(h > 0.0, "caret has the line height");
@@ -59,7 +62,11 @@ fn selection_spans_multiple_lines_when_wrapped() {
     );
     let full = "the quick brown fox jumps over the lazy dog".len();
     let rects = block.selection_rects(0, full);
-    assert!(rects.len() >= 2, "wrapped full-selection spans ≥2 lines, got {}", rects.len());
+    assert!(
+        rects.len() >= 2,
+        "wrapped full-selection spans ≥2 lines, got {}",
+        rects.len()
+    );
     // Each rect is non-empty.
     for (x0, y0, x1, y1) in &rects {
         assert!(x1 > x0 && y1 > y0, "non-empty selection rect");

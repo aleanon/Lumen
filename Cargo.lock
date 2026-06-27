@@ -2154,6 +2154,8 @@ dependencies = [
  "lumen-core",
  "lumen-render",
  "parley",
+ "serde",
+ "serde_json",
  "swash",
 ]
 
