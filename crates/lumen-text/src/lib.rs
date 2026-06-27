@@ -297,6 +297,37 @@ impl TextBlock {
         Size::new(self.width() as f64, self.height() as f64)
     }
 
+    /// The caret geometry for byte offset `byte`: `(x, y, height)` in logical px
+    /// (the top-left of a zero-width caret and its line height). Line- and
+    /// bidi-aware, so it works for wrapped multi-line text. `byte` is clamped to
+    /// the buffer; non-char-boundary offsets snap to the enclosing cluster.
+    pub fn caret_pos(&self, byte: usize) -> (f32, f32, f32) {
+        use parley::layout::{Affinity, Cursor};
+        let cur = Cursor::from_byte_index(&self.layout, byte, Affinity::Downstream);
+        let r = cur.geometry(&self.layout, 0.0);
+        (r.x0 as f32, r.y0 as f32, (r.y1 - r.y0) as f32)
+    }
+
+    /// The byte offset nearest the layout-space point `(x, y)` — the inverse of
+    /// [`caret_pos`](Self::caret_pos), for click-to-place / drag-select.
+    pub fn hit_to_byte(&self, x: f32, y: f32) -> usize {
+        use parley::layout::Cursor;
+        Cursor::from_point(&self.layout, x, y).index()
+    }
+
+    /// Selection highlight rectangles `(x0, y0, x1, y1)` (logical px) for the
+    /// byte range `[a, b)` — one rect per visual line the range spans.
+    pub fn selection_rects(&self, a: usize, b: usize) -> Vec<(f32, f32, f32, f32)> {
+        use parley::layout::{Affinity, Cursor, Selection};
+        let anchor = Cursor::from_byte_index(&self.layout, a, Affinity::Downstream);
+        let focus = Cursor::from_byte_index(&self.layout, b, Affinity::Downstream);
+        Selection::new(anchor, focus)
+            .geometry(&self.layout)
+            .into_iter()
+            .map(|r| (r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32))
+            .collect()
+    }
+
     /// Rasterize onto a `width`×`height` image over `background` (CPU path).
     /// `width`/`height` default to the measured size if zero.
     pub fn render(&self, width: u32, height: u32, background: Color) -> RgbaImage {
