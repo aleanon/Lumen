@@ -370,8 +370,12 @@ impl TextBlock {
                 };
                 // Faux bold: when the requested weight exceeds the (single)
                 // bundled face, parley flags synthesis; embolden the outline.
+                // Kept deliberately light (2% of font size): emboldening expands
+                // the outline and re-antialiases its edges, so a larger amount
+                // visibly softens/blurs bold text. A real bold face would be
+                // crisper, but we ship a single weight (ADR-005).
                 let strength = if run.synthesis().embolden() {
-                    run.font_size() * 0.04
+                    run.font_size() * 0.02
                 } else {
                     0.0
                 };
