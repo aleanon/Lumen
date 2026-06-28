@@ -191,6 +191,8 @@ enum LayerDraw {
         radii: CornerRadii,
         blur: f32,
         saturate: f32,
+        refraction: f32,
+        specular: f32,
     },
 }
 
@@ -1106,7 +1108,8 @@ impl Wgpu {
                     radii,
                     blur,
                     saturate,
-                    .. // refraction/specular: GPU support lands in R3-style 2b
+                    refraction,
+                    specular,
                 } => {
                     flush_rects(device, &mut ops, &mut pend_rects);
                     flush_paths(device, &mut ops, &mut pend_paths);
@@ -1115,6 +1118,8 @@ impl Wgpu {
                         radii: *radii,
                         blur: *blur,
                         saturate: *saturate,
+                        refraction: *refraction,
+                        specular: *specular,
                     });
                     i += 1;
                 }
@@ -1334,13 +1339,26 @@ impl Wgpu {
                         radii,
                         blur,
                         saturate,
+                        refraction,
+                        specular,
                     } = &ops[k]
                     {
                         // Prepare the blurred-backdrop composite from the content
                         // resolved so far; it is drawn at the next segment's start.
                         pending = Some(self.prepare_backdrop(
-                            device, encoder, keep, &resolved, width, height, scale, *rect, *radii,
-                            *blur, *saturate,
+                            device,
+                            encoder,
+                            keep,
+                            &resolved,
+                            width,
+                            height,
+                            scale,
+                            *rect,
+                            *radii,
+                            *blur,
+                            *saturate,
+                            *refraction,
+                            *specular,
                         ));
                     }
                     seg_start = k + 1;
@@ -1504,6 +1522,8 @@ impl Wgpu {
         radii: CornerRadii,
         blur: f32,
         saturate: f32,
+        refraction: f32,
+        specular: f32,
     ) -> (wgpu::BindGroup, wgpu::Buffer) {
         use wgpu::util::DeviceExt;
         let r_px = (blur as f64 * scale).round().max(0.0) as f32;
@@ -1631,7 +1651,7 @@ impl Wgpu {
                     radii.br as f32,
                     radii.bl as f32,
                 ],
-                params: [saturate, 0.0, 0.0, 0.0],
+                params: [saturate, refraction, specular, 0.0],
             }),
             usage: wgpu::BufferUsages::VERTEX,
         });
@@ -2455,15 +2475,41 @@ fn backdrop_vs(@builtin(vertex_index) vi: u32,
 
 @fragment
 fn backdrop_fs(in: CompVsOut) -> @location(0) vec4<f32> {
-    var rgb = textureSample(img_tex, img_samp, in.wpx * viewport.scale / viewport.size).rgb;
+    let center = in.rect.xy + in.rect.zw * 0.5;
+    let half = in.rect.zw * 0.5;
+    let p = in.wpx - center;
+    let sd = sd_round_box(p, half, in.radii); // logical px, <0 inside
+    let refraction = in.params.y;
+    let specular = in.params.z;
+    // Liquid-glass edge lensing (R3-style 2b): bend the sample along the edge
+    // normal, strongest at the edge, plus a top-left specular rim. Mirrors the CPU.
+    var samp = in.wpx;
+    var edge_t = 0.0;
+    var n = vec2<f32>(0.0, 0.0);
+    if (sd < 0.0 && (refraction > 0.0 || specular > 0.0)) {
+        let band = max(refraction * 3.0, 1.0);
+        edge_t = clamp(1.0 + sd / band, 0.0, 1.0);
+        let e = 1.0;
+        let nx = sd_round_box(p + vec2<f32>(e, 0.0), half, in.radii)
+               - sd_round_box(p - vec2<f32>(e, 0.0), half, in.radii);
+        let ny = sd_round_box(p + vec2<f32>(0.0, e), half, in.radii)
+               - sd_round_box(p - vec2<f32>(0.0, e), half, in.radii);
+        n = normalize(vec2<f32>(nx, ny) + vec2<f32>(1e-6, 0.0));
+        samp = in.wpx - n * (refraction * edge_t * edge_t);
+    }
+    // textureSample is unconditional (uniform control flow); `samp` carries the
+    // displacement.
+    var rgb = textureSample(img_tex, img_samp, samp * viewport.scale / viewport.size).rgb;
     // Saturation, gamma-space luma (matches RgbaImage::saturate).
     let s = in.params.x;
     let luma = dot(rgb, vec3<f32>(0.299, 0.587, 0.114));
     rgb = clamp(vec3<f32>(luma) + (rgb - vec3<f32>(luma)) * s, vec3<f32>(0.0), vec3<f32>(1.0));
+    if (specular > 0.0 && edge_t > 0.0) {
+        let light = normalize(vec2<f32>(-1.0, -1.0));
+        let rim = pow(edge_t, 3.0) * max(dot(n, light), 0.0) * specular;
+        rgb = min(rgb + vec3<f32>(rim), vec3<f32>(1.0));
+    }
     // Rounded-rect clip coverage (1px AA), straight-alpha source-over.
-    let center = in.rect.xy + in.rect.zw * 0.5;
-    let half = in.rect.zw * 0.5;
-    let sd = sd_round_box(in.wpx - center, half, in.radii);
     let cov = clamp(0.5 - sd, 0.0, 1.0);
     return vec4<f32>(rgb, cov);
 }
