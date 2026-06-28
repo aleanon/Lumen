@@ -142,3 +142,29 @@ fn border_shorthand_and_longhands_resolve() {
         Some(lumen_core::Color::from_hex("#112233ff").unwrap())
     );
 }
+
+#[test]
+fn backdrop_filter_parses_all_functions() {
+    let sheet = parse(
+        "g.lss",
+        ".glass { backdrop-filter: blur(18px) saturate(140%) refraction(14px) specular(0.6); }",
+    )
+    .0;
+    let sources = [StyleSource {
+        origin: Origin::App,
+        sheet,
+    }];
+    let tokens = tokens_for(&sources[0].sheet, ThemeKind::Light);
+    let node = NodeDesc {
+        classes: vec!["glass".into()],
+        ..Default::default()
+    };
+    let mut s = Style::new();
+    for (prop, c) in resolve_media(&sources, &node, &MediaContext::default()) {
+        apply(&mut s, &prop, &c.value, &tokens);
+    }
+    assert_eq!(s.backdrop_blur, Some(18.0));
+    assert_eq!(s.backdrop_saturate, Some(1.4)); // 140% → 1.4
+    assert_eq!(s.backdrop_refraction, Some(14.0));
+    assert_eq!(s.backdrop_specular, Some(0.6));
+}

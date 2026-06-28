@@ -5,11 +5,13 @@
 }
 
 /* The frosted panel: a translucent white tint over a blurred, slightly more
-   vivid backdrop. The blur is what makes it read as glass. */
+   vivid backdrop. The blur is what makes it read as glass; refraction + specular
+   add the "Liquid Glass" edge lensing and a top-left rim highlight. */
 .glass {
     background: #ffffff26;
     border-radius: 28px;
-    backdrop-filter: blur(18px) saturate(140%);
+    border: 1px #ffffff66;
+    backdrop-filter: blur(18px) saturate(140%) refraction(14px) specular(0.6);
 }
 .title { color: $ink; }
 .subtitle { color: $sub; }
@@ -18,5 +20,5 @@
     background: #ffffff33;
     border-radius: 999px;
     color: $chip-ink;
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px) refraction(6px) specular(0.5);
 }

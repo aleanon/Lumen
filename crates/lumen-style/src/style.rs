@@ -48,6 +48,10 @@ pub struct Style {
     pub backdrop_blur: Option<f32>,
     /// `backdrop-filter: saturate(...)` multiplier (`1.0` = none).
     pub backdrop_saturate: Option<f32>,
+    /// `backdrop-filter: refraction(...)` edge-lens strength in px (Liquid Glass).
+    pub backdrop_refraction: Option<f32>,
+    /// `backdrop-filter: specular(...)` rim-highlight intensity.
+    pub backdrop_specular: Option<f32>,
     /// `border-width` in px (uniform). Also set by the `border` shorthand.
     pub border_width: Option<f32>,
     /// `border-color`. Also set by the `border` shorthand.
@@ -171,6 +175,16 @@ fn apply_backdrop(style: &mut Style, v: &Value) {
                 "saturate" => {
                     if let Some(s) = a.first().and_then(|x| as_saturate(x)) {
                         style.backdrop_saturate = Some(s);
+                    }
+                }
+                "refraction" => {
+                    if let Some(px) = a.first().and_then(|x| as_px(x)) {
+                        style.backdrop_refraction = Some(px);
+                    }
+                }
+                "specular" => {
+                    if let Some(n) = a.first().and_then(|x| as_number(x)) {
+                        style.backdrop_specular = Some(n as f32);
                     }
                 }
                 _ => {}

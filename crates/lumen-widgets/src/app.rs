@@ -1351,14 +1351,18 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // Glass: blur the painted backdrop within this node's box before its
             // (translucent) fill goes on top. Emitted after the shadow so it
             // filters everything behind, but before bg/children.
-            if let Some(blur) = css.and_then(|s| s.backdrop_blur) {
+            let blur = css.and_then(|s| s.backdrop_blur).unwrap_or(0.0);
+            let refraction = css.and_then(|s| s.backdrop_refraction).unwrap_or(0.0);
+            let specular = css.and_then(|s| s.backdrop_specular).unwrap_or(0.0);
+            let saturate = css.and_then(|s| s.backdrop_saturate).unwrap_or(1.0);
+            if blur > 0.0 || refraction > 0.0 || specular > 0.0 || saturate != 1.0 {
                 dl.push(DrawCmd::BackdropFilter {
                     rect: bounds,
                     radii: CornerRadii::all(radius),
                     blur,
-                    saturate: css.and_then(|s| s.backdrop_saturate).unwrap_or(1.0),
-                    refraction: 0.0,
-                    specular: 0.0,
+                    saturate,
+                    refraction,
+                    specular,
                 });
             }
             // A focused text editor gets an accent focus ring (drawn on the box
