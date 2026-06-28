@@ -32,6 +32,7 @@ pub struct Wgpu {
     queue: wgpu::Queue,
     rect_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
+    glyph_pipeline: wgpu::RenderPipeline,
     path_pipeline: wgpu::RenderPipeline,
     gradient_pipeline: wgpu::RenderPipeline,
     composite_pipeline: wgpu::RenderPipeline,
@@ -41,6 +42,16 @@ pub struct Wgpu {
     /// Composites a blurred backdrop within a rounded clip, with saturation.
     backdrop_pipeline: wgpu::RenderPipeline,
     image_bgl: wgpu::BindGroupLayout,
+    /// Shared glyph coverage atlas (R3.3): the persistent texture, its bind
+    /// group, and the CPU-side packing allocator (interior-mutable since
+    /// rendering is `&self`).
+    atlas_tex: wgpu::Texture,
+    atlas_bind: wgpu::BindGroup,
+    atlas: std::cell::RefCell<crate::atlas::GlyphAtlas>,
+    /// Set when a frame couldn't pack a glyph (atlas full); the allocator is
+    /// cleared after the frame so the next one repacks (avoids mid-frame eviction
+    /// corrupting glyphs already placed this frame).
+    atlas_overflow: std::cell::Cell<bool>,
     sampler: wgpu::Sampler,
     /// Linear, clamp-to-edge sampler for 1-D gradient ramp textures (R1.4).
     ramp_sampler: wgpu::Sampler,
@@ -129,6 +140,20 @@ impl RectInstance {
     }
 }
 
+/// One instanced glyph quad (R3): a dest rect in logical px, the atlas UV rect
+/// (normalized), and the run's color. The fragment samples coverage from the
+/// atlas and tints it.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GlyphInstance {
+    /// `[x0, y0, width, height]` in logical px.
+    rect: [f32; 4],
+    /// `[u0, v0, u_width, v_height]` in atlas UV (0..1).
+    uv: [f32; 4],
+    /// Text color (straight alpha).
+    color: [f32; 4],
+}
+
 /// One ordered draw within a layer (R1: draws are emitted in display-list order,
 /// batching only *consecutive* solid rects and *consecutive* paths, so a rect
 /// authored after an image paints on top of it).
@@ -149,6 +174,11 @@ enum LayerDraw {
     Image {
         buf: wgpu::Buffer,
         bind: wgpu::BindGroup,
+    },
+    /// Instanced glyph quads sampling the shared glyph atlas (R3.3).
+    Glyphs {
+        buf: wgpu::Buffer,
+        count: u32,
     },
     Composite {
         buf: wgpu::Buffer,
@@ -214,6 +244,10 @@ fn flush_paths(device: &wgpu::Device, ops: &mut Vec<LayerDraw>, pend: &mut PathG
 // CPU reference stays gamma-space, so GPU and CPU agree on opaque, non-AA content
 // and *intentionally* differ on blended/anti-aliased pixels (linear vs gamma).
 const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+/// Edge length of the (single-page) glyph coverage atlas in px (R3.3). Holds
+/// thousands of small glyphs; on overflow the allocator is cleared and repacked.
+const ATLAS_SIZE: u32 = 1024;
 
 /// The GPU backend as a runtime-selectable [`Renderer`](crate::Renderer) (A1).
 /// Covers the command set the offscreen backend supports (solid rects — square
@@ -458,6 +492,34 @@ impl Wgpu {
             cache: None,
         });
 
+        // Glyph pipeline (R3.3): instanced quads sampling the shared coverage
+        // atlas (group 1 = atlas texture + sampler, same layout as images).
+        let glyph_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("glyph"),
+            layout: Some(&image_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "glyph_vs",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<GlyphInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "glyph_fs",
+                targets: &[Some(target.clone())],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample,
+            multiview: None,
+            cache: None,
+        });
+
         // Tessellated-path pipeline (R1.3): non-instanced (pos, color) triangles.
         let path_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("path-layout"),
@@ -660,11 +722,45 @@ impl Wgpu {
             ..Default::default()
         });
 
+        // Glyph coverage atlas (R3.3): a single R8 page glyphs are packed into;
+        // persists across frames, deduped by stable glyph id. Coverage is linear
+        // (not sRGB) — it's an alpha mask, not color.
+        let atlas_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("glyph-atlas"),
+            size: wgpu::Extent3d {
+                width: ATLAS_SIZE,
+                height: ATLAS_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let atlas_view = atlas_tex.create_view(&Default::default());
+        let atlas_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("glyph-atlas-bg"),
+            layout: &image_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
         Some(Wgpu {
             device,
             queue,
             rect_pipeline,
             image_pipeline,
+            glyph_pipeline,
             path_pipeline,
             gradient_pipeline,
             composite_pipeline,
@@ -672,6 +768,10 @@ impl Wgpu {
             blur_params_bgl,
             backdrop_pipeline,
             image_bgl,
+            atlas_tex,
+            atlas_bind,
+            atlas: std::cell::RefCell::new(crate::atlas::GlyphAtlas::new(ATLAS_SIZE, 1)),
+            atlas_overflow: std::cell::Cell::new(false),
             sampler,
             ramp_sampler,
             sample_count,
@@ -778,6 +878,11 @@ impl Wgpu {
         }
         drop(data);
         readback.unmap();
+        // The atlas filled this frame; repack from scratch next frame (deferred
+        // so this frame's already-placed glyphs stayed valid).
+        if self.atlas_overflow.take() {
+            self.atlas.borrow_mut().clear();
+        }
         RgbaImage::from_raw(width, height, pixels)
     }
 
@@ -1012,7 +1117,77 @@ impl Wgpu {
                     });
                     i += 1;
                 }
-                // GlyphRun (R3): not on the GPU yet.
+                // Instanced glyph run sampling the shared coverage atlas (R3.3).
+                DrawCmd::GlyphRun { run, brush, .. } => {
+                    if let (Brush::Solid(c), Some(grun)) = (brush, list.runs.get(run.0 as usize)) {
+                        flush_rects(device, &mut ops, &mut pend_rects);
+                        flush_paths(device, &mut ops, &mut pend_paths);
+                        let color = [c.r, c.g, c.b, c.a];
+                        let mut atlas = self.atlas.borrow_mut();
+                        let mut insts: Vec<GlyphInstance> = Vec::with_capacity(grun.glyphs.len());
+                        let s = ATLAS_SIZE as f32;
+                        for pg in &grun.glyphs {
+                            let Some(gi) = list.glyph_images.get(pg.image as usize) else {
+                                continue;
+                            };
+                            let Some((slot, fresh)) = atlas.alloc(gi.key, gi.width, gi.height)
+                            else {
+                                self.atlas_overflow.set(true);
+                                continue;
+                            };
+                            if fresh {
+                                self.queue.write_texture(
+                                    wgpu::ImageCopyTexture {
+                                        texture: &self.atlas_tex,
+                                        mip_level: 0,
+                                        origin: wgpu::Origin3d {
+                                            x: slot.x,
+                                            y: slot.y,
+                                            z: 0,
+                                        },
+                                        aspect: wgpu::TextureAspect::All,
+                                    },
+                                    &gi.coverage,
+                                    wgpu::ImageDataLayout {
+                                        offset: 0,
+                                        bytes_per_row: Some(gi.width),
+                                        rows_per_image: Some(gi.height),
+                                    },
+                                    wgpu::Extent3d {
+                                        width: gi.width,
+                                        height: gi.height,
+                                        depth_or_array_layers: 1,
+                                    },
+                                );
+                            }
+                            insts.push(GlyphInstance {
+                                rect: [pg.x, pg.y, gi.width as f32, gi.height as f32],
+                                uv: [
+                                    slot.x as f32 / s,
+                                    slot.y as f32 / s,
+                                    gi.width as f32 / s,
+                                    gi.height as f32 / s,
+                                ],
+                                color,
+                            });
+                        }
+                        drop(atlas);
+                        if !insts.is_empty() {
+                            let buf =
+                                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("glyph-instances"),
+                                    contents: bytemuck_lite::cast_slice(&insts),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
+                            ops.push(LayerDraw::Glyphs {
+                                buf,
+                                count: insts.len() as u32,
+                            });
+                        }
+                    }
+                    i += 1;
+                }
+                // Gradient-filled paths and any other unsupported command.
                 _ => i += 1,
             }
         }
@@ -1173,7 +1348,9 @@ impl Wgpu {
         // Park everything the recorded passes referenced until after submit.
         for op in ops {
             match op {
-                LayerDraw::Rects { buf, .. } => keep.buffers.push(buf),
+                LayerDraw::Rects { buf, .. } | LayerDraw::Glyphs { buf, .. } => {
+                    keep.buffers.push(buf)
+                }
                 LayerDraw::Paths { vbuf, ibuf, .. } => {
                     keep.buffers.push(vbuf);
                     keep.buffers.push(ibuf);
@@ -1234,6 +1411,13 @@ impl Wgpu {
                 pass.set_bind_group(1, bind, &[]);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..6, 0..1);
+            }
+            LayerDraw::Glyphs { buf, count } => {
+                pass.set_pipeline(&self.glyph_pipeline);
+                pass.set_bind_group(0, viewport_bg, &[]);
+                pass.set_bind_group(1, &self.atlas_bind, &[]);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..6, 0..*count);
             }
             LayerDraw::Composite { buf, bind } => {
                 pass.set_pipeline(&self.composite_pipeline);
@@ -2059,6 +2243,29 @@ fn image_vs(@builtin(vertex_index) vi: u32,
 @fragment
 fn image_fs(in: VsOut) -> @location(0) vec4<f32> {
     return textureSample(img_tex, img_samp, in.uv) * in.color;
+}
+
+// --- glyph runs (R3.3): instanced quads sampling the coverage atlas ----------
+// `uv` is `[u0, v0, u_w, v_h]` into the R8 atlas; the fragment tints the sampled
+// coverage with the run color (straight alpha, source-over).
+
+@vertex
+fn glyph_vs(@builtin(vertex_index) vi: u32,
+            @location(0) rect: vec4<f32>,
+            @location(1) uv: vec4<f32>,
+            @location(2) color: vec4<f32>) -> VsOut {
+    let c = corner(vi);
+    var o: VsOut;
+    o.pos = to_ndc(rect.xy + c * rect.zw);
+    o.color = color;
+    o.uv = uv.xy + c * uv.zw;
+    return o;
+}
+
+@fragment
+fn glyph_fs(in: VsOut) -> @location(0) vec4<f32> {
+    let cov = textureSample(img_tex, img_samp, in.uv).r;
+    return vec4<f32>(in.color.rgb, in.color.a * cov);
 }
 
 // --- tessellated paths (R1.3) -----------------------------------------------
