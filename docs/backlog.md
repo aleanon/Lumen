@@ -17,7 +17,13 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
 - **E3** — `build_node` consumes the `Element` (per-node clones → moves).
 - **A1** — `Renderer` trait + `TinySkia` **and** `Wgpu` backends (the latter
   behind the default-on `wgpu` feature), runtime-selectable via
-  `renderer_override`. (GPU path/gradient/glyph tessellation follow-on.)
+  `renderer_override`.
+- **Rendering/perf plan (R0–R3)** — golden diff harness; full GPU command
+  coverage on `Wgpu` (rounded/bordered rects, `lyon` paths, gradients,
+  layers/clip/opacity, `backdrop-filter`, images, HiDPI, display-list order);
+  retained display list + damage/incremental repaint; GPU glyph atlas
+  (`DrawCmd::GlyphRun` on both backends, physical-size HiDPI text). R4 (threaded
+  layout) parked — see below.
 - **B2/B3/C1/D1** — rich TextStyle; cached PNG assets; `.lss` hot reload; spring motion.
 - **E1/E2** — Element→NodeContent enum; LeafWidget trait (first-class custom leaves).
 - **Gallery redesign** — every iced-parity example now matches the stopwatch hero
@@ -89,24 +95,28 @@ The scope-deferred items are all implemented (see Done). These are the remaining
   fixed once the parent's available space is known) and prototype the split behind
   a threshold. (Options ruled out: parallelizing inside one tree would need a
   taffy fork/upstream; replacing taffy contradicts ADR-004.)
-- **A1 GPU** — path/stroke tessellation (`lyon` — ADR), gradients,
-  layer clip/opacity, and HiDPI scaling on the GPU backend (renders 1:1 today).
 - **B3 codecs** — jpeg/webp/avif decode (new deps → ADR); PNG ships now.
 - **D1 motion** — gesture-driven interruptible animations + shared-element
   transitions on top of the `motion::spring` primitive.
-- **B1 fonts** — custom/system font registration + `TextStyle` family (ADR-005
-  determinism considerations; see sandbox-blocked note).
-- **Glass refraction (Liquid Glass)** — the `backdrop-filter: blur()/saturate()`
-  primitive ships (CPU renderer + `.lss` cascade + `examples/glass`). The
-  remaining Apple "Liquid Glass" look is *refraction/lensing*: bending the
-  blurred backdrop with a per-pixel displacement (a rounded-rect normal/height
-  map) plus a moving specular highlight. *First step:* a `DrawCmd` displacement
-  variant (or extend `BackdropFilter` with an optional displacement map) sampled
-  deterministically on the CPU backend, with the GPU path as a shader. Needs the
-  edge-normal model worked out; larger than the blur slice, hence deferred.
-  Also pending: GPU-backend support for `BackdropFilter` (CPU is the contract;
-  the GPU backend only handles Rect/Image today) and a hairline rim border for
-  the glass edge (borders aren't plumbed from `.lss`/`Element` yet).
+
+### ▶ Next up — in-sandbox, no new deps / no ADR (prioritized 2026-06-28)
+
+1. **`.lss`/`Element` borders.** A general border (color + width, per-side later)
+   plumbed through `Element` and the `.lss` cascade into the existing
+   `DrawCmd::Rect { border }` primitive (the renderers already draw it; only the
+   focus ring uses it today). Unblocks the glass rim border and ordinary outlined
+   controls.
+2. **Glass refraction (Liquid Glass).** The `backdrop-filter: blur()/saturate()`
+   primitive ships on both backends (CPU + GPU, `.lss` cascade, `examples/glass`).
+   The remaining Apple "Liquid Glass" look is *refraction/lensing*: bending the
+   blurred backdrop with a per-pixel displacement (a rounded-rect normal/height
+   map) plus a moving specular highlight. *First step:* extend `BackdropFilter`
+   with an optional displacement model sampled deterministically on the CPU
+   backend (the golden contract), GPU path as a shader. Needs the edge-normal
+   model worked out; larger than the blur slice.
+3. **Additive font registration.** `register_font(bytes)` + a `TextStyle` family
+   selector, keeping the bundled font as the deterministic default (no system
+   enumeration — that half stays in B1/sandbox-blocked for ADR-005 reasons).
 
 ## Notes
 
