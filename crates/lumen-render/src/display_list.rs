@@ -186,15 +186,22 @@ pub struct GlyphImage {
 }
 
 /// One glyph placed in window space, referencing a [`GlyphImage`] by index into
-/// [`DisplayList::glyph_images`].
+/// [`DisplayList::glyph_images`]. The destination rect is in **logical** px while
+/// the coverage bitmap may be rasterized at a higher physical resolution (R3.5);
+/// the renderer scales the logical rect to physical and samples the bitmap 1:1,
+/// keeping HiDPI text crisp. At scale 1 the rect size equals the bitmap size.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlacedGlyph {
     /// Index into [`DisplayList::glyph_images`].
     pub image: u32,
-    /// Top-left of the coverage bitmap, in window (logical) px.
+    /// Left of the destination rect, in window (logical) px.
     pub x: f32,
-    /// Top of the coverage bitmap, in window (logical) px.
+    /// Top of the destination rect, in window (logical) px.
     pub y: f32,
+    /// Destination width in logical px (`bitmap_width / scale`).
+    pub w: f32,
+    /// Destination height in logical px (`bitmap_height / scale`).
+    pub h: f32,
 }
 
 /// A shaped run of glyphs sharing a paint color (set by the run's

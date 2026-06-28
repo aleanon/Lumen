@@ -28,7 +28,13 @@ fn glyph_list(color: Color, x: f32, y: f32) -> DisplayList {
         coverage: vec![255u8; 100],
     });
     let run = GlyphRun {
-        glyphs: vec![PlacedGlyph { image: 0, x, y }],
+        glyphs: vec![PlacedGlyph {
+            image: 0,
+            x,
+            y,
+            w: 10.0,
+            h: 10.0,
+        }],
     };
     let id = dl.add_run(run);
     dl.push(DrawCmd::GlyphRun {

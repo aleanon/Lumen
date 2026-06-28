@@ -60,7 +60,7 @@ fn glyph_run_matches_sprite_within_tolerance() {
         let img_a = cpu::render(&dl_a, w, h, Color::WHITE);
 
         // Path B — the new GlyphRun: positioned glyphs + coverage bitmaps.
-        let (run, images) = block.glyph_run(0.0, 0.0);
+        let (run, images) = block.glyph_run(0.0, 0.0, 1.0);
         let mut dl_b = DisplayList::new();
         dl_b.glyph_images = images;
         let id = dl_b.add_run(run);
@@ -82,11 +82,34 @@ fn glyph_run_matches_sprite_within_tolerance() {
 }
 
 #[test]
+fn hidpi_rasterizes_at_physical_size_with_logical_dest() {
+    let mut eng = TextEngine::new();
+    let block = eng.layout("R", style(40.0), &[], None, TextAlign::Start);
+    let (run1, img1) = block.glyph_run(0.0, 0.0, 1.0);
+    let (run2, img2) = block.glyph_run(0.0, 0.0, 2.0);
+    // The 2× coverage bitmap is ~twice the pixels (crisp HiDPI rasterization)...
+    let r = img2[0].width as f64 / img1[0].width as f64;
+    assert!(
+        (1.8..2.2).contains(&r),
+        "2x glyph bitmap should be ~2x wide, got {r}"
+    );
+    // ...while the logical destination size stays ~the same (so layout is
+    // stable); it can differ by ≤1px from rounding the physical bitmap bounds.
+    let dw = (run2.glyphs[0].w - run1.glyphs[0].w).abs();
+    assert!(
+        dw <= 1.5,
+        "logical dest width should be ~scale-independent (Δ={dw})"
+    );
+    // Distinct atlas keys per physical size, so 1× and 2× don't collide.
+    assert_ne!(img1[0].key, img2[0].key);
+}
+
+#[test]
 fn glyph_run_dedups_repeated_glyphs() {
     let mut eng = TextEngine::new();
     // "aaaa" — one unique glyph + a space-free run; the image table holds 1 entry.
     let block = eng.layout("aaaa", style(20.0), &[], None, TextAlign::Start);
-    let (run, images) = block.glyph_run(0.0, 0.0);
+    let (run, images) = block.glyph_run(0.0, 0.0, 1.0);
     assert_eq!(run.glyphs.len(), 4, "four placed glyphs");
     assert_eq!(images.len(), 1, "deduped to one coverage bitmap");
     assert!(run.glyphs.iter().all(|g| g.image == 0));

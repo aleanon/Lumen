@@ -1161,7 +1161,10 @@ impl Wgpu {
                                 );
                             }
                             insts.push(GlyphInstance {
-                                rect: [pg.x, pg.y, gi.width as f32, gi.height as f32],
+                                // Dest rect is logical; viewport.scale maps it to
+                                // physical, where it samples the physical-res
+                                // coverage 1:1 (crisp HiDPI). UV spans the bitmap.
+                                rect: [pg.x, pg.y, pg.w, pg.h],
                                 uv: [
                                     slot.x as f32 / s,
                                     slot.y as f32 / s,

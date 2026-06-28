@@ -1440,21 +1440,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // sprite, so the GPU batches text through the atlas and a 1-char
                 // edit re-rasterizes ≤1 glyph. `block` also drives the caret /
                 // selection geometry below (same layout).
+                let scale = self.scale as f32;
                 let block =
                     self.text
                         .layout(txt, ts, &[], m.wrap_width, lumen_text::TextAlign::Start);
-                let (mut run, images) = block.glyph_run(tx as f32, ty as f32);
+                let (mut run, images) = block.glyph_run(tx as f32, ty as f32, scale);
                 // The run's bounding rect over *actual glyph ink* (a glyph can
                 // overhang the logical box via side bearings) — drives damage, so
-                // it must cover every pixel the run paints.
+                // it must cover every pixel the run paints. Dest rects are logical.
                 let mut run_rect = Rect::new(tx, ty, tx, ty);
                 for g in &run.glyphs {
-                    let im = &images[g.image as usize];
                     run_rect = run_rect.union(Rect::new(
                         g.x as f64,
                         g.y as f64,
-                        g.x as f64 + im.width as f64,
-                        g.y as f64 + im.height as f64,
+                        (g.x + g.w) as f64,
+                        (g.y + g.h) as f64,
                     ));
                 }
                 // Intern this run's glyph bitmaps into the frame-wide tables

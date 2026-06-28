@@ -409,17 +409,22 @@ impl TextBlock {
             }
         }
 
-        self.for_each_glyph(|_key, g, pen_x, pen_y, color| {
+        self.for_each_glyph(1.0, |_key, g, pen_x, pen_y, color| {
             blit_alpha(&mut pixels, w, h, g, pen_x, pen_y, color);
         });
         RgbaImage::from_raw(w, h, pixels)
     }
 
-    /// Walk every laid-out glyph, rasterizing it (or hitting the per-glyph cache),
-    /// and call `f(key, bitmap, pen_x, pen_y, color)`. Shared by the sprite
-    /// renderer ([`render_inner`](Self::render_inner)) and the [`glyph_run`]
-    /// producer (Self::glyph_run) so both see identical rasterization.
-    fn for_each_glyph(&self, mut f: impl FnMut(GlyphKey, &CachedGlyph, f32, f32, Brush)) {
+    /// Walk every laid-out glyph, rasterizing it (or hitting the per-glyph cache)
+    /// at `scale`× the logical font size, and call `f(key, bitmap, pen_x, pen_y,
+    /// color)` — `pen_x`/`pen_y` are logical, the bitmap is physical-resolution.
+    /// Shared by the sprite renderer (`scale = 1.0`) and the [`glyph_run`]
+    /// producer (HiDPI scale) so both see identical rasterization.
+    fn for_each_glyph(
+        &self,
+        scale: f32,
+        mut f: impl FnMut(GlyphKey, &CachedGlyph, f32, f32, Brush),
+    ) {
         let mut ctx = ScaleContext::new();
         for line in self.layout.lines() {
             for item in line.items() {
@@ -439,15 +444,19 @@ impl TextBlock {
                 // the outline and re-antialiases its edges, so a larger amount
                 // visibly softens/blurs bold text. A real bold face would be
                 // crisper, but we ship a single weight (ADR-005).
+                // Rasterize at the physical size (logical × scale) so HiDPI text
+                // is crisp; the key buckets by physical size, so 1× and 2× of the
+                // same glyph are distinct atlas entries (R3.5).
+                let phys_size = run.font_size() * scale;
                 let strength = if run.synthesis().embolden() {
-                    run.font_size() * 0.02
+                    phys_size * 0.02
                 } else {
                     0.0
                 };
                 let coords = run.normalized_coords();
                 let mut scaler = ctx
                     .builder(font_ref)
-                    .size(run.font_size())
+                    .size(phys_size)
                     .hint(true)
                     .normalized_coords(coords)
                     .build();
@@ -455,7 +464,7 @@ impl TextBlock {
                     font_index: font.index,
                     data_len: font.data.as_ref().len() as u32,
                     glyph_id: 0,
-                    size_bits: run.font_size().to_bits(),
+                    size_bits: phys_size.to_bits(),
                     embolden_bits: strength.to_bits(),
                     coords_hash: coords_hash(coords),
                 };
@@ -497,17 +506,21 @@ impl TextBlock {
 
     /// Produce a renderer-ready glyph run for the GPU/CPU `DrawCmd::GlyphRun`
     /// path (R3): positioned glyphs plus their deduplicated coverage bitmaps,
-    /// translated to window origin `(ox, oy)`. Reuses the per-glyph raster cache.
-    /// The run's color is uniform and set by the caller on the `DrawCmd`, so it
-    /// isn't carried here (multi-color text still uses the sprite path for now).
+    /// translated to window origin `(ox, oy)`. Glyphs are rasterized at `scale`×
+    /// the logical font size (HiDPI crispness, R3.5); the placed glyph's dest
+    /// rect is in logical px (bitmap size ÷ scale). `scale == 1.0` reproduces the
+    /// sprite path exactly. Reuses the per-glyph raster cache. The run's color is
+    /// uniform and set by the caller on the `DrawCmd` (multi-color text still uses
+    /// the sprite path for now).
     pub fn glyph_run(
         &self,
         ox: f32,
         oy: f32,
+        scale: f32,
     ) -> (lumen_render::GlyphRun, Vec<lumen_render::GlyphImage>) {
         let mut images: Vec<lumen_render::GlyphImage> = Vec::new();
         let mut glyphs: Vec<lumen_render::PlacedGlyph> = Vec::new();
-        self.for_each_glyph(|key, g, pen_x, pen_y, _color| {
+        self.for_each_glyph(scale, |key, g, pen_x, pen_y, _color| {
             if g.width == 0 || g.height == 0 {
                 return; // whitespace — nothing to paint
             }
@@ -524,11 +537,14 @@ impl TextBlock {
                     (images.len() - 1) as u32
                 }
             };
-            // Match the sprite blit's pen placement (round the pen, add bearings).
+            // The pen rounds in logical px (stable across scales); the physical
+            // bearings/size convert back to logical for the dest rect.
             glyphs.push(lumen_render::PlacedGlyph {
                 image,
-                x: ox + pen_x.round() + g.left as f32,
-                y: oy + pen_y.round() - g.top as f32,
+                x: ox + pen_x.round() + g.left as f32 / scale,
+                y: oy + pen_y.round() - g.top as f32 / scale,
+                w: g.width as f32 / scale,
+                h: g.height as f32 / scale,
             });
         });
         (lumen_render::GlyphRun { glyphs }, images)

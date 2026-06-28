@@ -380,7 +380,16 @@ impl<'a> Renderer<'a> {
                 )
                 .unwrap_or(PremultipliedColorU8::TRANSPARENT);
             }
-            let local = Transform::from_translate(pg.x, pg.y);
+            // Map the physical-res bitmap onto its logical dest rect; `base` then
+            // scales that to physical, so at any HiDPI scale the bitmap lands 1:1.
+            let local = Transform::from_row(
+                pg.w / img.width as f32,
+                0.0,
+                0.0,
+                pg.h / img.height as f32,
+                pg.x,
+                pg.y,
+            );
             self.top().draw_pixmap(
                 0,
                 0,
