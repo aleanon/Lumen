@@ -28,6 +28,10 @@ pub mod gradient;
 // renders on the CPU. Disable the feature for a CPU-only build.
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 pub mod gpu;
+// The GPU glyph-atlas allocator (R3). Pure packing logic the `Wgpu` backend
+// drives; gated with the GPU backend that consumes it.
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+pub mod atlas;
 pub mod image;
 pub mod media;
 pub mod scene;
