@@ -17,7 +17,7 @@ use kurbo::{Affine, BezPath, PathEl, Point, Rect, Shape};
 use lumen_core::Color;
 use tiny_skia::{
     FillRule, GradientStop as TsStop, LinearGradient, Mask, Paint, PathBuilder, Pixmap,
-    PixmapPaint, RadialGradient, Shader, Stroke, Transform,
+    PixmapPaint, PremultipliedColorU8, RadialGradient, Shader, Stroke, Transform,
 };
 
 /// Number of baked sub-stops per gradient segment (Oklab interpolation).
@@ -27,7 +27,7 @@ const GRADIENT_BAKE_STEPS: usize = 24;
 ///
 /// This is the renderer of record: the result is bit-deterministic.
 pub fn render(list: &DisplayList, width: u32, height: u32, background: Color) -> RgbaImage {
-    let mut r = Renderer::new(width, height, 0.0, 0.0, &list.images);
+    let mut r = Renderer::new(width, height, 0.0, 0.0, list);
     r.run(list, background);
     r.finish()
 }
@@ -43,7 +43,7 @@ pub fn render_scaled(
     scale: f64,
     background: Color,
 ) -> RgbaImage {
-    let mut r = Renderer::new(width, height, 0.0, 0.0, &list.images);
+    let mut r = Renderer::new(width, height, 0.0, 0.0, list);
     r.base = Transform::from_scale(scale as f32, scale as f32);
     r.run(list, background);
     r.finish()
@@ -88,18 +88,22 @@ struct Renderer<'a> {
     /// Window-space origin of the canvas (the dirty rect's top-left).
     origin: (f64, f64),
     images: &'a [RgbaImage],
+    runs: &'a [GlyphRun],
+    glyph_images: &'a [GlyphImage],
     layers: Vec<Pixmap>,
     params: Vec<LayerParams>,
 }
 
 impl<'a> Renderer<'a> {
-    fn new(width: u32, height: u32, ox: f64, oy: f64, images: &'a [RgbaImage]) -> Renderer<'a> {
+    fn new(width: u32, height: u32, ox: f64, oy: f64, list: &'a DisplayList) -> Renderer<'a> {
         Renderer {
             width,
             height,
             base: Transform::from_translate(-ox as f32, -oy as f32),
             origin: (ox, oy),
-            images,
+            images: &list.images,
+            runs: &list.runs,
+            glyph_images: &list.glyph_images,
             layers: Vec::new(),
             params: Vec::new(),
         }
@@ -140,7 +144,7 @@ impl<'a> Renderer<'a> {
                 dst_rect,
                 quality,
             } => self.draw_image(*id, *src_rect, *dst_rect, *quality),
-            DrawCmd::GlyphRun { .. } => { /* text stack lands in T0.6 */ }
+            DrawCmd::GlyphRun { run, brush, .. } => self.draw_glyph_run(*run, brush),
             DrawCmd::PushLayer {
                 clip,
                 opacity,
@@ -339,6 +343,53 @@ impl<'a> Renderer<'a> {
             Transform::identity(),
             Some(&mask),
         );
+    }
+
+    /// Paint a shaped glyph run: composite each glyph's coverage bitmap, tinted
+    /// by the run's solid color, at its window position. The reference for the GPU
+    /// atlas path (R3.3); SourceOver in straight-alpha sRGB, like the old sprite
+    /// blit.
+    fn draw_glyph_run(&mut self, run: GlyphRunId, brush: &Brush) {
+        let Brush::Solid(color) = brush else {
+            return; // text is always a solid color; gradients aren't produced
+        };
+        let Some(run) = self.runs.get(run.0 as usize) else {
+            return;
+        };
+        let [cr, cg, cb, ca] = color.to_srgb8();
+        let base = self.base;
+        for pg in &run.glyphs {
+            let Some(img) = self.glyph_images.get(pg.image as usize) else {
+                continue;
+            };
+            if img.width == 0 || img.height == 0 {
+                continue;
+            }
+            let Some(mut pm) = Pixmap::new(img.width, img.height) else {
+                continue;
+            };
+            let px = pm.pixels_mut();
+            for (i, &cov) in img.coverage.iter().enumerate() {
+                // Premultiplied src = color × (coverage · color-alpha).
+                let a = (cov as f32 / 255.0) * (ca as f32 / 255.0);
+                px[i] = PremultipliedColorU8::from_rgba(
+                    (cr as f32 * a).round() as u8,
+                    (cg as f32 * a).round() as u8,
+                    (cb as f32 * a).round() as u8,
+                    (a * 255.0).round() as u8,
+                )
+                .unwrap_or(PremultipliedColorU8::TRANSPARENT);
+            }
+            let local = Transform::from_translate(pg.x, pg.y);
+            self.top().draw_pixmap(
+                0,
+                0,
+                pm.as_ref(),
+                &PixmapPaint::default(),
+                base.pre_concat(local),
+                None,
+            );
+        }
     }
 
     fn draw_image(&mut self, id: ImageId, src: Rect, dst: Rect, quality: Filter) {

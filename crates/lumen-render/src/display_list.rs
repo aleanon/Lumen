@@ -164,9 +164,46 @@ pub enum BlendMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ImageId(pub u32);
 
-/// Index into the shaped-glyph-run table (populated by the text stack, T0.6).
+/// Index into [`DisplayList::runs`], the shaped-glyph-run table (R3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GlyphRunId(pub u32);
+
+/// A rasterized glyph's 8-bit coverage bitmap. The text stack rasterizes glyphs
+/// (it owns the font/shaper; the renderer does not) and hands them across the
+/// boundary in [`DisplayList::glyph_images`]. `key` is a stable identity (font +
+/// glyph id + physical size + subpixel bucket + embolden) so a GPU atlas can
+/// cache and evict entries across frames (R3.2b).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GlyphImage {
+    /// Stable cross-frame identity for atlas caching.
+    pub key: u64,
+    /// Bitmap width in px.
+    pub width: u32,
+    /// Bitmap height in px.
+    pub height: u32,
+    /// Row-major 8-bit coverage, `width * height` bytes.
+    pub coverage: Vec<u8>,
+}
+
+/// One glyph placed in window space, referencing a [`GlyphImage`] by index into
+/// [`DisplayList::glyph_images`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlacedGlyph {
+    /// Index into [`DisplayList::glyph_images`].
+    pub image: u32,
+    /// Top-left of the coverage bitmap, in window (logical) px.
+    pub x: f32,
+    /// Top of the coverage bitmap, in window (logical) px.
+    pub y: f32,
+}
+
+/// A shaped run of glyphs sharing a paint color (set by the run's
+/// [`DrawCmd::GlyphRun`]). Indexed by [`GlyphRunId`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GlyphRun {
+    /// Placed glyphs, in paint order.
+    pub glyphs: Vec<PlacedGlyph>,
+}
 
 /// Index into the shader table (T4.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,10 +262,13 @@ pub enum DrawCmd {
     /// A shaped glyph run, painted with `brush`. Rendered by the text stack
     /// (T0.6); a no-op on the CPU backend until then.
     GlyphRun {
-        /// Glyph-run table index.
+        /// Glyph-run table index ([`DisplayList::runs`]).
         run: GlyphRunId,
-        /// Text paint.
+        /// Text paint (the whole run shares one color).
         brush: Brush,
+        /// Bounding rect (window px) covering the run's glyphs — for damage
+        /// tracking, since the glyph positions live in the run table.
+        rect: Rect,
     },
     /// Begin a layer; subsequent commands draw into it until [`DrawCmd::PopLayer`].
     PushLayer {
@@ -274,6 +314,10 @@ pub struct DisplayList {
     pub cmds: Vec<DrawCmd>,
     /// Images referenced by [`DrawCmd::Image`] via [`ImageId`].
     pub images: Vec<RgbaImage>,
+    /// Shaped glyph runs referenced by [`DrawCmd::GlyphRun`] via [`GlyphRunId`].
+    pub runs: Vec<GlyphRun>,
+    /// Deduplicated glyph coverage bitmaps referenced by [`PlacedGlyph::image`].
+    pub glyph_images: Vec<GlyphImage>,
 }
 
 impl DisplayList {
@@ -285,6 +329,25 @@ impl DisplayList {
     /// Append a command.
     pub fn push(&mut self, cmd: DrawCmd) {
         self.cmds.push(cmd);
+    }
+
+    /// Add a glyph run, returning its [`GlyphRunId`].
+    pub fn add_run(&mut self, run: GlyphRun) -> GlyphRunId {
+        let id = GlyphRunId(self.runs.len() as u32);
+        self.runs.push(run);
+        id
+    }
+
+    /// Intern a glyph image, deduplicating by its stable `key`, and return its
+    /// index for [`PlacedGlyph::image`]. The same glyph used many times across
+    /// runs is stored once.
+    pub fn intern_glyph(&mut self, img: GlyphImage) -> u32 {
+        if let Some(i) = self.glyph_images.iter().position(|g| g.key == img.key) {
+            return i as u32;
+        }
+        let i = self.glyph_images.len() as u32;
+        self.glyph_images.push(img);
+        i
     }
 }
 
@@ -312,7 +375,8 @@ impl DrawCmd {
                 let g = *blur as f64 + 1.0;
                 Some(rect.inflate(g, g))
             }
-            DrawCmd::GlyphRun { .. } | DrawCmd::PushLayer { .. } | DrawCmd::PopLayer => None,
+            DrawCmd::GlyphRun { rect, .. } => Some(rect.inflate(1.0, 1.0)),
+            DrawCmd::PushLayer { .. } | DrawCmd::PopLayer => None,
         }
     }
 }

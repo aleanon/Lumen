@@ -53,6 +53,25 @@ struct GlyphKey {
     coords_hash: u64,
 }
 
+impl GlyphKey {
+    /// A stable 64-bit identity for cross-frame atlas caching (FNV-1a over the
+    /// fields). Deterministic; only used as a cache key, never to render.
+    fn stable_id(&self) -> u64 {
+        let mut h = 0xcbf29ce484222325u64;
+        for word in [
+            self.font_index as u64,
+            self.data_len as u64,
+            self.glyph_id as u64,
+            self.size_bits as u64,
+            self.embolden_bits as u64,
+            self.coords_hash,
+        ] {
+            h = (h ^ word).wrapping_mul(0x100000001b3);
+        }
+        h
+    }
+}
+
 /// A cached swash alpha glyph (placement + coverage bitmap).
 #[derive(Clone)]
 struct CachedGlyph {
@@ -390,6 +409,17 @@ impl TextBlock {
             }
         }
 
+        self.for_each_glyph(|_key, g, pen_x, pen_y, color| {
+            blit_alpha(&mut pixels, w, h, g, pen_x, pen_y, color);
+        });
+        RgbaImage::from_raw(w, h, pixels)
+    }
+
+    /// Walk every laid-out glyph, rasterizing it (or hitting the per-glyph cache),
+    /// and call `f(key, bitmap, pen_x, pen_y, color)`. Shared by the sprite
+    /// renderer ([`render_inner`](Self::render_inner)) and the [`glyph_run`]
+    /// producer (Self::glyph_run) so both see identical rasterization.
+    fn for_each_glyph(&self, mut f: impl FnMut(GlyphKey, &CachedGlyph, f32, f32, Brush)) {
         let mut ctx = ScaleContext::new();
         for line in self.layout.lines() {
             for item in line.items() {
@@ -457,13 +487,51 @@ impl TextBlock {
                                 })
                         });
                         if let Some(g) = entry.as_ref() {
-                            blit_alpha(&mut pixels, w, h, g, glyph.x, glyph.y, color);
+                            f(key, g, glyph.x, glyph.y, color);
                         }
                     });
                 }
             }
         }
-        RgbaImage::from_raw(w, h, pixels)
+    }
+
+    /// Produce a renderer-ready glyph run for the GPU/CPU `DrawCmd::GlyphRun`
+    /// path (R3): positioned glyphs plus their deduplicated coverage bitmaps,
+    /// translated to window origin `(ox, oy)`. Reuses the per-glyph raster cache.
+    /// The run's color is uniform and set by the caller on the `DrawCmd`, so it
+    /// isn't carried here (multi-color text still uses the sprite path for now).
+    pub fn glyph_run(
+        &self,
+        ox: f32,
+        oy: f32,
+    ) -> (lumen_render::GlyphRun, Vec<lumen_render::GlyphImage>) {
+        let mut images: Vec<lumen_render::GlyphImage> = Vec::new();
+        let mut glyphs: Vec<lumen_render::PlacedGlyph> = Vec::new();
+        self.for_each_glyph(|key, g, pen_x, pen_y, _color| {
+            if g.width == 0 || g.height == 0 {
+                return; // whitespace — nothing to paint
+            }
+            let id = key.stable_id();
+            let image = match images.iter().position(|gi| gi.key == id) {
+                Some(i) => i as u32,
+                None => {
+                    images.push(lumen_render::GlyphImage {
+                        key: id,
+                        width: g.width,
+                        height: g.height,
+                        coverage: g.data.clone(),
+                    });
+                    (images.len() - 1) as u32
+                }
+            };
+            // Match the sprite blit's pen placement (round the pen, add bearings).
+            glyphs.push(lumen_render::PlacedGlyph {
+                image,
+                x: ox + pen_x.round() + g.left as f32,
+                y: oy + pen_y.round() - g.top as f32,
+            });
+        });
+        (lumen_render::GlyphRun { glyphs }, images)
     }
 }
 
@@ -498,13 +566,21 @@ fn blit_alpha(
             }
             let src_a = a * (color[3] as f32 / 255.0);
             let idx = ((py as u32 * w + pxc as u32) * 4) as usize;
-            for c in 0..3 {
-                let src = color[c] as f32;
-                let dst = pixels[idx + c] as f32;
-                pixels[idx + c] = (src * src_a + dst * (1.0 - src_a)).round() as u8;
-            }
+            // Straight-alpha source-over. The destination's RGB is weighted by
+            // *its own* alpha, so compositing onto a transparent pixel yields the
+            // source color (not a blend toward the buffer's fill color) — that's
+            // what keeps glyph AA edges the right darkness over any background.
             let dst_a = pixels[idx + 3] as f32 / 255.0;
-            pixels[idx + 3] = ((src_a + dst_a * (1.0 - src_a)) * 255.0).round() as u8;
+            let out_a = src_a + dst_a * (1.0 - src_a);
+            if out_a > 0.0 {
+                for c in 0..3 {
+                    let src = color[c] as f32;
+                    let dst = pixels[idx + c] as f32;
+                    let out = (src * src_a + dst * dst_a * (1.0 - src_a)) / out_a;
+                    pixels[idx + c] = out.round() as u8;
+                }
+            }
+            pixels[idx + 3] = (out_a * 255.0).round() as u8;
         }
     }
 }

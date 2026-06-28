@@ -35,8 +35,8 @@ pub mod svg;
 
 pub use display_list::{
     damage_between, BlendMode, Border, Brush, CornerRadii, Damage, DisplayList, DrawCmd,
-    FillOrStroke, Filter, GlyphRunId, GradientStop, ImageId, RoundedRect, ShaderId, SpreadMode,
-    UniformBlock,
+    FillOrStroke, Filter, GlyphImage, GlyphRun, GlyphRunId, GradientStop, ImageId, PlacedGlyph,
+    RoundedRect, ShaderId, SpreadMode, UniformBlock,
 };
 pub use image::RgbaImage;
 
