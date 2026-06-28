@@ -219,6 +219,7 @@ struct NodeMeta {
     selection: Option<(usize, usize)>,
     on_dismiss: Option<Handler>,
     background: Option<Color>,
+    border: Option<Border>,
     corner_radius: f64,
     clip: bool,
     overlay: bool,
@@ -1165,6 +1166,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 selection: el.selection,
                 on_dismiss: el.on_dismiss,
                 background: el.background,
+                border: el.border,
                 corner_radius: el.corner_radius,
                 clip: el.clip,
                 overlay: el.overlay,
@@ -1357,20 +1359,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     saturate: css.and_then(|s| s.backdrop_saturate).unwrap_or(1.0),
                 });
             }
-            // A focused text editor gets an accent focus ring (drawn inside the
-            // box edge, so no layout shift). Gated to editors to keep other
-            // widgets' goldens unchanged.
+            // A focused text editor gets an accent focus ring (drawn on the box
+            // edge). It's the *default* — an explicit border (element or `.lss`)
+            // wins; customize focus feedback via a `&:focused { border: … }` rule.
             let focused = self.tree.flags(node).contains(NodeFlags::FOCUSED);
             let focus_border = (focused && m.on_caret_set.is_some()).then(|| Border {
                 width: 2.0,
                 color: crate::theme::accent(),
             });
-            if let Some(bg) = bg {
+            let border = m.border.or(focus_border);
+            // Emit the box rect for a fill *or* a border (an outline-only box has
+            // a transparent fill); nodes with neither stay rect-free as before.
+            if bg.is_some() || border.is_some() {
                 dl.push(DrawCmd::Rect {
                     rect: bounds,
-                    brush: Brush::Solid(bg),
+                    brush: Brush::Solid(bg.unwrap_or(Color::srgb8(0, 0, 0, 0))),
                     radii: CornerRadii::all(radius),
-                    border: focus_border,
+                    border,
                 });
             }
             // Immediate-mode canvas: draw in node-local coords offset to bounds.

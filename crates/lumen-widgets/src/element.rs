@@ -119,6 +119,9 @@ pub struct Element {
     pub style: LayoutStyle,
     /// Background fill.
     pub background: Option<Color>,
+    /// Optional border (uniform color + width), drawn on the box edge. A `.lss`
+    /// `border` overrides this; for a focused editor the focus ring takes over.
+    pub border: Option<lumen_render::Border>,
     /// Corner radius (px).
     pub corner_radius: f64,
     /// Leaf content — text, image, or canvas, mutually exclusive (E1).
@@ -179,6 +182,7 @@ impl Default for Element {
             actions: Vec::new(),
             style: LayoutStyle::default(),
             background: None,
+            border: None,
             corner_radius: 0.0,
             content: NodeContent::None,
             focusable: false,
@@ -295,6 +299,11 @@ impl Element {
     /// Set the background fill.
     pub fn background(mut self, color: Color) -> Self {
         self.background = Some(color);
+        self
+    }
+    /// Set a uniform border (`width` logical px, `color`).
+    pub fn border(mut self, color: Color, width: f64) -> Self {
+        self.border = Some(lumen_render::Border { width, color });
         self
     }
     /// Set a drop shadow.
