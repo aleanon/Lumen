@@ -163,15 +163,26 @@ impl<'a> Renderer<'a> {
                 radii,
                 blur,
                 saturate,
-            } => self.backdrop_filter(*rect, *radii, *blur, *saturate),
+                refraction,
+                specular,
+            } => self.backdrop_filter(*rect, *radii, *blur, *saturate, *refraction, *specular),
         }
     }
 
     /// Glass `backdrop-filter`: snapshot the painted backdrop under `rect`, blur
     /// (+ optionally saturate) it, and composite it back clipped to the rounded
     /// rect — so the node's translucent fill (drawn next) reads as frosted glass.
-    fn backdrop_filter(&mut self, rect: Rect, radii: CornerRadii, blur: f32, saturate: f32) {
-        if blur <= 0.0 && (saturate - 1.0).abs() < 1e-3 {
+    #[allow(clippy::too_many_arguments)]
+    fn backdrop_filter(
+        &mut self,
+        rect: Rect,
+        radii: CornerRadii,
+        blur: f32,
+        saturate: f32,
+        refraction: f32,
+        specular: f32,
+    ) {
+        if blur <= 0.0 && (saturate - 1.0).abs() < 1e-3 && refraction <= 0.0 && specular <= 0.0 {
             return;
         }
         // Map the region to physical pixels (HiDPI scale / damage origin).
@@ -189,7 +200,8 @@ impl<'a> Renderer<'a> {
         };
         let (w, h) = (self.width as i64, self.height as i64);
         let blur_px = (blur as f64 * scale).round().max(0.0) as i64;
-        let pad = blur_px;
+        let refraction_px = (refraction as f64 * scale).max(0.0);
+        let pad = blur_px.max(refraction_px.ceil() as i64);
         let rx0 = ((pts[0].x as f64).floor() as i64 - pad).clamp(0, w);
         let ry0 = ((pts[0].y as f64).floor() as i64 - pad).clamp(0, h);
         let rx1 = ((pts[1].x as f64).ceil() as i64 + pad).clamp(0, w);
@@ -199,15 +211,7 @@ impl<'a> Renderer<'a> {
             return;
         }
 
-        // Snapshot the current target, crop the padded region, filter it.
-        let snap = RgbaImage::from_pixmap(self.layers.last().expect("base layer"));
-        let mut region = snap.crop(rx0 as u32, ry0 as u32, rw as u32, rh as u32);
-        if blur_px > 0 {
-            region = region.blurred(blur_px as u32);
-        }
-        region.saturate(saturate);
-
-        // Composite back, clipped to the (physical) rounded rect.
+        // Physical rect + radii — the rounded clip *and* the refraction edge SDF.
         let phys_rect = Rect::new(
             pts[0].x as f64,
             pts[0].y as f64,
@@ -220,6 +224,26 @@ impl<'a> Renderer<'a> {
             br: radii.br * scale,
             bl: radii.bl * scale,
         };
+
+        // Snapshot the current target, crop the padded region, filter it.
+        let snap = RgbaImage::from_pixmap(self.layers.last().expect("base layer"));
+        let mut region = snap.crop(rx0 as u32, ry0 as u32, rw as u32, rh as u32);
+        if blur_px > 0 {
+            region = region.blurred(blur_px as u32);
+        }
+        region.saturate(saturate);
+        // Liquid-glass edge lensing: bend the blurred backdrop along the rounded
+        // edge normal (strongest at the edge) + a specular rim. Deterministic.
+        if refraction_px > 0.0 || specular > 0.0 {
+            region = refract_region(
+                region,
+                (rx0 as f64, ry0 as f64),
+                phys_rect,
+                phys_radii,
+                refraction_px,
+                specular,
+            );
+        }
         let mask = path_mask(
             self.width,
             self.height,
@@ -573,6 +597,110 @@ fn path_mask(w: u32, h: u32, path: &tiny_skia::Path, transform: Transform) -> Op
     let mut mask = Mask::new(w.max(1), h.max(1))?;
     mask.fill_path(path, FillRule::Winding, true, transform);
     Some(mask)
+}
+
+/// Signed distance from `p` (relative to the box center) to a rounded box with
+/// half-size `half` and per-corner `radii`. The CPU mirror of the GPU
+/// `sd_round_box` (y is downward); negative inside, 0 on the edge.
+fn sd_round_box(p: (f64, f64), half: (f64, f64), radii: CornerRadii) -> f64 {
+    let rmax = half.0.min(half.1);
+    let r = if p.0 > 0.0 {
+        if p.1 > 0.0 {
+            radii.br
+        } else {
+            radii.tr
+        }
+    } else if p.1 > 0.0 {
+        radii.bl
+    } else {
+        radii.tl
+    }
+    .clamp(0.0, rmax);
+    let qx = p.0.abs() - half.0 + r;
+    let qy = p.1.abs() - half.1 + r;
+    qx.max(qy).min(0.0) + qx.max(0.0).hypot(qy.max(0.0)) - r
+}
+
+/// Liquid-glass edge lensing: bend the (already blurred + saturated) `region`
+/// along the rounded-rect edge normal — strongest at the edge, fading inward —
+/// and add a top-left-lit specular rim. `origin` is the region's top-left in the
+/// same physical space as `rect`/`radii`. Pure f64 math + bilinear sampling, so
+/// it's deterministic (the golden contract). Returns the bent region.
+fn refract_region(
+    region: RgbaImage,
+    origin: (f64, f64),
+    rect: Rect,
+    radii: CornerRadii,
+    refraction: f64,
+    specular: f32,
+) -> RgbaImage {
+    let (rw, rh) = (region.width() as i64, region.height() as i64);
+    let src = region.pixels();
+    let stride = region.width() as usize * 4;
+    let center = (rect.x0 + rect.width() / 2.0, rect.y0 + rect.height() / 2.0);
+    let half = (rect.width() / 2.0, rect.height() / 2.0);
+    // Edge band the lens acts over (a few × the displacement).
+    let band = (refraction * 3.0).max(1.0);
+    // Light comes from the top-left.
+    let light = (
+        -std::f64::consts::FRAC_1_SQRT_2,
+        -std::f64::consts::FRAC_1_SQRT_2,
+    );
+
+    // Bilinear sample of the source region (clamp-to-edge).
+    let sample = |x: f64, y: f64| -> [f32; 4] {
+        let x = x.clamp(0.0, (rw - 1) as f64);
+        let y = y.clamp(0.0, (rh - 1) as f64);
+        let (x0, y0) = (x.floor() as i64, y.floor() as i64);
+        let (x1, y1) = ((x0 + 1).min(rw - 1), (y0 + 1).min(rh - 1));
+        let (fx, fy) = ((x - x0 as f64) as f32, (y - y0 as f64) as f32);
+        let at =
+            |xi: i64, yi: i64, c: usize| src[yi as usize * stride + xi as usize * 4 + c] as f32;
+        let mut out = [0.0f32; 4];
+        for (c, o) in out.iter_mut().enumerate() {
+            let top = at(x0, y0, c) * (1.0 - fx) + at(x1, y0, c) * fx;
+            let bot = at(x0, y1, c) * (1.0 - fx) + at(x1, y1, c) * fx;
+            *o = top * (1.0 - fy) + bot * fy;
+        }
+        out
+    };
+
+    let mut dst = src.to_vec();
+    let sd_at = |px: f64, py: f64| sd_round_box((px, py), half, radii);
+    for ly in 0..rh {
+        for lx in 0..rw {
+            let px = origin.0 + lx as f64 - center.0;
+            let py = origin.1 + ly as f64 - center.1;
+            let sd = sd_at(px, py);
+            if sd >= 0.0 {
+                continue; // outside the glass — leave as-is (rounded clip handles it)
+            }
+            let edge_t = (1.0 + sd / band).clamp(0.0, 1.0); // 1 at edge → 0 at depth `band`
+            if edge_t <= 0.0 {
+                continue;
+            }
+            // Outward edge normal via finite differences of the SDF.
+            let nx = sd_at(px + 1.0, py) - sd_at(px - 1.0, py);
+            let ny = sd_at(px, py + 1.0) - sd_at(px, py - 1.0);
+            let nl = (nx * nx + ny * ny).sqrt().max(1e-6);
+            let (nx, ny) = (nx / nl, ny / nl);
+            // Pull the sample inward (−normal), displacement growing toward the edge.
+            let disp = refraction * edge_t * edge_t;
+            let mut rgba = sample(lx as f64 - nx * disp, ly as f64 - ny * disp);
+            if specular > 0.0 {
+                let facing = (nx * light.0 + ny * light.1).max(0.0) as f32;
+                let rim = (edge_t as f32).powi(3) * facing * specular;
+                for c in rgba.iter_mut().take(3) {
+                    *c = (*c + 255.0 * rim).min(255.0);
+                }
+            }
+            let o = ly as usize * stride + lx as usize * 4;
+            for (c, v) in rgba.iter().enumerate() {
+                dst[o + c] = v.round() as u8;
+            }
+        }
+    }
+    RgbaImage::from_raw(region.width(), region.height(), dst)
 }
 
 // --- gradients --------------------------------------------------------------

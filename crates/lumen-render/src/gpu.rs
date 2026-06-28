@@ -1106,6 +1106,7 @@ impl Wgpu {
                     radii,
                     blur,
                     saturate,
+                    .. // refraction/specular: GPU support lands in R3-style 2b
                 } => {
                     flush_rects(device, &mut ops, &mut pend_rects);
                     flush_paths(device, &mut ops, &mut pend_paths);

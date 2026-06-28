@@ -64,6 +64,8 @@ fn backdrop_filter_blurs_the_painted_backdrop() {
         radii: CornerRadii::ZERO,
         blur: 5.0,
         saturate: 1.0,
+        refraction: 0.0,
+        specular: 0.0,
     });
     let glass = cpu::render(&dl, 60, 40, Color::WHITE);
     // Inside the filtered region the seam is now a soft ramp (mid grey appears).
@@ -75,4 +77,54 @@ fn backdrop_filter_blurs_the_painted_backdrop() {
     // Outside the filtered region the seam is untouched.
     let outside = px(&glass, 29, 2)[0];
     assert!(outside < 10, "seam outside filter still hard: {outside}");
+}
+
+/// Refraction bends the backdrop near the rounded edge but leaves the deep
+/// interior untouched (the lens fades to zero inward). No blur, so the effect is
+/// isolated and deterministic.
+#[test]
+fn refraction_bends_edges_not_center() {
+    // Vertical black/white stripes (every 4px) as the backdrop.
+    let stripes = |dl: &mut DisplayList| {
+        for i in 0..30 {
+            let x = i as f64 * 4.0;
+            dl.push(DrawCmd::Rect {
+                rect: Rect::new(x, 0.0, x + 2.0, 90.0),
+                brush: Brush::Solid(Color::BLACK),
+                radii: CornerRadii::ZERO,
+                border: None,
+            });
+        }
+    };
+    let scene = |refraction: f32| {
+        let mut dl = DisplayList::new();
+        stripes(&mut dl);
+        dl.push(DrawCmd::BackdropFilter {
+            rect: Rect::new(15.0, 15.0, 105.0, 75.0),
+            radii: CornerRadii::all(16.0),
+            blur: 0.0,
+            saturate: 1.0,
+            refraction,
+            specular: 0.0,
+        });
+        cpu::render(&dl, 120, 90, Color::WHITE)
+    };
+    let off = scene(0.0);
+    let on = scene(8.0);
+
+    // Deep center is beyond the lens band — identical with and without refraction.
+    assert_eq!(
+        px(&on, 60, 45),
+        px(&off, 60, 45),
+        "interior must be untouched by refraction"
+    );
+    // Near the left edge the stripes are bent — at least some pixels differ.
+    let differ = (15..105)
+        .flat_map(|x| (15..75).map(move |y| (x, y)))
+        .filter(|&(x, y)| px(&on, x, y) != px(&off, x, y))
+        .count();
+    assert!(
+        differ > 200,
+        "refraction should bend edge pixels (differ={differ})"
+    );
 }

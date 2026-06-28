@@ -1357,6 +1357,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     radii: CornerRadii::all(radius),
                     blur,
                     saturate: css.and_then(|s| s.backdrop_saturate).unwrap_or(1.0),
+                    refraction: 0.0,
+                    specular: 0.0,
                 });
             }
             // A focused text editor gets an accent focus ring (drawn on the box

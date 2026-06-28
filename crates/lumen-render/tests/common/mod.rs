@@ -382,6 +382,8 @@ fn scene_backdrop() -> DisplayList {
         radii: CornerRadii::all(18.0),
         blur: 6.0,
         saturate: 1.2,
+        refraction: 0.0,
+        specular: 0.0,
     });
     dl
 }

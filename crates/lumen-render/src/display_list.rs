@@ -311,6 +311,13 @@ pub enum DrawCmd {
         blur: f32,
         /// Saturation multiplier applied to the blurred backdrop (`1.0` = none).
         saturate: f32,
+        /// Edge refraction/lensing strength in logical px (`0` = none): bends the
+        /// blurred backdrop along the rounded-rect edge normal, strongest at the
+        /// edge (Liquid Glass).
+        refraction: f32,
+        /// Specular edge-highlight intensity (`0` = none): a bright rim along the
+        /// top-left-lit edge.
+        specular: f32,
     },
 }
 
@@ -378,8 +385,13 @@ impl DrawCmd {
             }
             DrawCmd::Image { dst_rect, .. } => Some(*dst_rect),
             DrawCmd::Shader { rect, .. } => Some(*rect),
-            DrawCmd::BackdropFilter { rect, blur, .. } => {
-                let g = *blur as f64 + 1.0;
+            DrawCmd::BackdropFilter {
+                rect,
+                blur,
+                refraction,
+                ..
+            } => {
+                let g = (*blur + *refraction) as f64 + 1.0;
                 Some(rect.inflate(g, g))
             }
             DrawCmd::GlyphRun { rect, .. } => Some(rect.inflate(1.0, 1.0)),
