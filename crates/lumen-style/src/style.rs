@@ -48,6 +48,10 @@ pub struct Style {
     pub backdrop_blur: Option<f32>,
     /// `backdrop-filter: saturate(...)` multiplier (`1.0` = none).
     pub backdrop_saturate: Option<f32>,
+    /// `border-width` in px (uniform). Also set by the `border` shorthand.
+    pub border_width: Option<f32>,
+    /// `border-color`. Also set by the `border` shorthand.
+    pub border_color: Option<Color>,
 }
 
 impl Style {
@@ -129,7 +133,26 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "font-size" => style.font_size = as_px(&v),
         "font-weight" => style.font_weight = as_number(&v).map(|n| n as u16),
         "backdrop-filter" => apply_backdrop(style, &v),
+        "border" => apply_border(style, &v),
+        "border-width" => style.border_width = as_px(&v),
+        "border-color" => style.border_color = as_color(&v),
         _ => {}
+    }
+}
+
+/// Parse the `border: <width> <color>` shorthand (either order) into the typed
+/// `border_width` / `border_color` fields. Per-side borders are not parsed yet.
+fn apply_border(style: &mut Style, v: &Value) {
+    let items: Vec<&Value> = match v {
+        Value::List(items) => items.iter().collect(),
+        other => vec![other],
+    };
+    for it in items {
+        if let Some(px) = as_px(it) {
+            style.border_width = Some(px);
+        } else if let Some(c) = as_color(it) {
+            style.border_color = Some(c);
+        }
     }
 }
 

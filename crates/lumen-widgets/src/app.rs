@@ -1367,7 +1367,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 width: 2.0,
                 color: crate::theme::accent(),
             });
-            let border = m.border.or(focus_border);
+            // `.lss` border (shorthand or longhands) wins over an element border,
+            // which wins over the focus ring.
+            let css_border = css.and_then(|s| match (s.border_width, s.border_color) {
+                (None, None) => None,
+                (w, c) => Some(Border {
+                    width: w.unwrap_or(1.0) as f64,
+                    color: c.unwrap_or(Color::srgb8(0, 0, 0, 0xff)),
+                }),
+            });
+            let border = css_border.or(m.border).or(focus_border);
             // Emit the box rect for a fill *or* a border (an outline-only box has
             // a transparent fill); nodes with neither stay rect-free as before.
             if bg.is_some() || border.is_some() {

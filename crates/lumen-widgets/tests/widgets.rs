@@ -72,6 +72,28 @@ fn w_text() {
 }
 
 #[test]
+fn w_border() {
+    // A bordered, rounded box (Element::border) on a small canvas, inset so the
+    // centered stroke isn't clipped at the edge.
+    let mut h = run(80.0, 60.0, |_| Element {
+        background: Some(lumen_core::Color::srgb8(0xf0, 0xf2, 0xf6, 0xff)),
+        border: Some(lumen_render::Border {
+            width: 3.0,
+            color: lumen_core::Color::srgb8(0x1a, 0x73, 0xe8, 0xff),
+        }),
+        corner_radius: 10.0,
+        style: lumen_layout::LayoutStyle {
+            margin: lumen_layout::Edges::all(lumen_layout::Dim::px(8.0)),
+            width: lumen_layout::Dim::px(60.0),
+            height: lumen_layout::Dim::px(40.0),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    check_golden("w_border", &h.screenshot());
+}
+
+#[test]
 fn w_image() {
     let img = RgbaImage::from_raw(
         2,

@@ -98,3 +98,47 @@ fn theme_switch_changes_colors() {
     );
     assert_ne!(light.background, dark.background);
 }
+
+#[test]
+fn border_shorthand_and_longhands_resolve() {
+    let sheet = parse(
+        "b.lss",
+        r#"
+        .a { border: 2px #d8dde3ff; }
+        .b { border-width: 3px; border-color: #112233ff; }
+    "#,
+    )
+    .0;
+    let sources = [StyleSource {
+        origin: Origin::App,
+        sheet,
+    }];
+    let tokens = tokens_for(&sources[0].sheet, ThemeKind::Light);
+    let resolve_class = |class: &str| {
+        let node = NodeDesc {
+            classes: vec![class.into()],
+            ..Default::default()
+        };
+        let r = resolve_media(&sources, &node, &MediaContext::default());
+        let mut s = Style::new();
+        for (prop, c) in &r {
+            apply(&mut s, prop, &c.value, &tokens);
+        }
+        s
+    };
+
+    // Shorthand sets both width and color (order-independent parse).
+    let a = resolve_class("a");
+    assert_eq!(a.border_width, Some(2.0));
+    assert_eq!(
+        a.border_color,
+        Some(lumen_core::Color::from_hex("#d8dde3ff").unwrap())
+    );
+    // Longhands set them independently.
+    let b = resolve_class("b");
+    assert_eq!(b.border_width, Some(3.0));
+    assert_eq!(
+        b.border_color,
+        Some(lumen_core::Color::from_hex("#112233ff").unwrap())
+    );
+}
