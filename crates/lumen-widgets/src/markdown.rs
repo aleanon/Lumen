@@ -54,6 +54,7 @@ fn heading(text: &str, size: f32) -> Element {
                 color: Color::BLACK,
                 line_height: None,
                 letter_spacing: 0.0,
+                family: None,
             },
         ),
         ..Element::default()
@@ -73,6 +74,7 @@ fn code_block(code: &str) -> Element {
                 color: Color::srgb8(0x33, 0x33, 0x33, 0xff),
                 line_height: None,
                 letter_spacing: 0.0,
+                family: None,
             },
         ),
         ..Element::default()
@@ -107,6 +109,7 @@ fn inline(text: &str) -> Element {
                     color,
                     line_height: None,
                     letter_spacing: 0.0,
+                    family: None,
                 },
             ),
             ..Element::default()

@@ -271,6 +271,7 @@ impl Element {
                     color: Color::WHITE,
                     line_height: None,
                     letter_spacing: 0.0,
+                    family: None,
                 },
             ),
             ..Element::default()

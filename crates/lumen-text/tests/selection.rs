@@ -35,6 +35,7 @@ fn style() -> TextStyle {
         color: Color::BLACK,
         line_height: None,
         letter_spacing: 0.0,
+        family: None,
     }
 }
 

@@ -39,6 +39,7 @@ fn black() -> TextStyle {
         color: Color::BLACK,
         line_height: None,
         letter_spacing: 0.0,
+        family: None,
     }
 }
 fn white() -> Color {
@@ -106,6 +107,7 @@ fn golden_multistyle() {
         color: Color::srgb8(0x1a, 0x73, 0xe8, 0xff),
         line_height: None,
         letter_spacing: 0.0,
+        family: None,
     };
     let b = e.layout(
         "size and color",

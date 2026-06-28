@@ -66,6 +66,7 @@ fn nav(cx: &BuildCx, name: &str, items: &[&str], dir: FlexDirection) -> Element 
                         color: if on { Color::WHITE } else { Color::BLACK },
                         line_height: None,
                         letter_spacing: 0.0,
+                        family: None,
                     },
                 ),
                 on_click: Some(Rc::new(move |rt| selected.set(rt, i))),
@@ -110,6 +111,7 @@ pub fn app_bar(title: impl Into<String>, actions: Vec<Element>) -> Element {
                 color: Color::BLACK,
                 line_height: None,
                 letter_spacing: 0.0,
+                family: None,
             },
         ),
         ..Element::default()
@@ -176,6 +178,7 @@ pub fn pull_to_refresh(
                 color: Color::srgb8(0x66, 0x66, 0x66, 0xff),
                 line_height: None,
                 letter_spacing: 0.0,
+                family: None,
             },
         ),
         ..Element::default()
@@ -304,6 +307,7 @@ fn tap_button(label: &str, id: &str, on_click: impl Fn(&lumen_core::Runtime) + '
                 color: Color::BLACK,
                 line_height: None,
                 letter_spacing: 0.0,
+                family: None,
             },
         ),
         on_click: Some(Rc::new(on_click)),

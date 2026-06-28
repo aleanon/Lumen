@@ -285,6 +285,7 @@ pub fn rich_text(runs: &[Run]) -> Element {
                     color: r.color,
                     line_height: None,
                     letter_spacing: 0.0,
+                    family: None,
                 },
             ),
             ..Element::default()

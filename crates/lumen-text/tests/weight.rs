@@ -11,6 +11,7 @@ fn ink(weight: f32) -> u64 {
         weight,
         line_height: None,
         letter_spacing: 0.0,
+        family: None,
     };
     let block = eng.layout("Bold", style, &[], None, TextAlign::Start);
     let img = block.render(0, 0, Color::WHITE);

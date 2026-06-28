@@ -166,6 +166,7 @@ pub fn tabs(cx: &BuildCx, name: &str, labels: &[&str]) -> Element {
                         color: if on { Color::WHITE } else { Color::BLACK },
                         line_height: None,
                         letter_spacing: 0.0,
+                        family: None,
                     },
                 ),
                 on_click: Some(Rc::new(move |rt| selected.set(rt, i))),

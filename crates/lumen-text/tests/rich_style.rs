@@ -8,7 +8,13 @@ fn letter_spacing_widens_a_line() {
     let mut e = TextEngine::new();
     let base = TextStyle::default();
     let w0 = e
-        .layout("AAAA", base, &[], None, lumen_text::TextAlign::Start)
+        .layout(
+            "AAAA",
+            base.clone(),
+            &[],
+            None,
+            lumen_text::TextAlign::Start,
+        )
         .width();
     let w1 = e
         .layout(
@@ -30,7 +36,7 @@ fn line_height_grows_wrapped_block() {
     let h0 = e
         .layout(
             "aaa bbb ccc ddd eee",
-            base,
+            base.clone(),
             &[],
             max,
             lumen_text::TextAlign::Start,

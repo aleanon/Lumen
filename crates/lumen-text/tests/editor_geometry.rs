@@ -11,6 +11,7 @@ fn style() -> TextStyle {
         weight: 400.0,
         line_height: None,
         letter_spacing: 0.0,
+        family: None,
     }
 }
 

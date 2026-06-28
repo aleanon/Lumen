@@ -807,7 +807,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             let NodeContent::Text(t, ts) = &m.content else {
                 return None;
             };
-            Some((t.clone(), *ts, m.wrap_width, m.pad.0, m.pad.1, h))
+            Some((t.clone(), ts.clone(), m.wrap_width, m.pad.0, m.pad.1, h))
         }) else {
             return;
         };
@@ -832,7 +832,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             let NodeContent::Text(t, ts) = &m.content else {
                 return None;
             };
-            Some((t.clone(), *ts, m.wrap_width, c, h))
+            Some((t.clone(), ts.clone(), m.wrap_width, c, h))
         }) else {
             return;
         };
@@ -1098,7 +1098,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             };
             let block = self
                 .text
-                .layout(txt, *ts, &[], wrap, lumen_text::TextAlign::Start);
+                .layout(txt, ts.clone(), &[], wrap, lumen_text::TextAlign::Start);
             if wrap.is_none() {
                 style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
             }
@@ -1445,10 +1445,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // doesn't desync the layout box measured at build time; `.lss`
                 // font-size/weight on text remain follow-on (they'd need the
                 // measure pass to consult the cascade too).
-                let mut ts = *ts;
+                let mut ts = ts.clone();
                 if let Some(c) = css.and_then(|s| s.color) {
                     ts.color = c;
                 }
+                // Text color is reused after `ts` is moved into layout (caret /
+                // run brush / analysis target); capture it (Color is Copy).
+                let text_color = ts.color;
                 // Paint at the padded (content-box) origin so a button label
                 // sits inside its padding (centred for symmetric padding) rather
                 // than jammed into the border-box corner. Plain text has no
@@ -1505,7 +1508,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 let run_id = dl.add_run(run);
                 dl.push(DrawCmd::GlyphRun {
                     run: run_id,
-                    brush: Brush::Solid(ts.color),
+                    brush: Brush::Solid(text_color),
                     rect: run_rect,
                 });
                 // Caret (in front) for a focused editor.
@@ -1519,7 +1522,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                             tx + cx as f64 + w,
                             ty + cy as f64 + ch as f64,
                         ),
-                        brush: Brush::Solid(ts.color),
+                        brush: Brush::Solid(text_color),
                         radii: CornerRadii::all(0.0),
                         border: None,
                     });
@@ -1529,7 +1532,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 text_targets.push(lumen_render::TextTarget {
                     node: Some(format!("node-{}", node.index())),
                     label: Some(txt.clone()),
-                    foreground: ts.color,
+                    foreground: text_color,
                     region: bounds,
                 });
             }
@@ -1557,6 +1560,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             color: t.opts.color,
             line_height: None,
             letter_spacing: 0.0,
+            family: None,
         };
         let [cr, cg, cb, ca] = ts.color.to_srgb8();
         let key = (

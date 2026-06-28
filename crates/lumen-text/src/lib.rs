@@ -126,7 +126,7 @@ pub enum TextAlign {
 }
 
 /// A run of text styling.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct TextStyle {
     /// Font size in logical px.
     pub font_size: f32,
@@ -141,6 +141,10 @@ pub struct TextStyle {
     /// Extra tracking between characters, in logical px (`0.0` = none). Positive
     /// loosens (good for upper-case captions); negative tightens (B2).
     pub letter_spacing: f32,
+    /// Font family to shape with (`None` = the engine default, the bundled font).
+    /// Register custom fonts via [`TextEngine::register_font`]; select by the
+    /// returned family name (B1, no system enumeration).
+    pub family: Option<String>,
 }
 
 impl Default for TextStyle {
@@ -151,6 +155,7 @@ impl Default for TextStyle {
             weight: 400.0,
             line_height: None,
             letter_spacing: 0.0,
+            family: None,
         }
     }
 }
@@ -171,6 +176,13 @@ impl TextStyle {
     /// This style with `px` of extra letter tracking (B2).
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = px;
+        self
+    }
+
+    /// This style shaped with the named font `family` (as returned by
+    /// [`TextEngine::register_font`]); `None`/unset uses the engine default.
+    pub fn family(mut self, name: impl Into<String>) -> Self {
+        self.family = Some(name.into());
         self
     }
 }
@@ -212,6 +224,20 @@ impl TextEngine {
         }
     }
 
+    /// Register an additional font from its `bytes` and return its family name —
+    /// pass that name to [`TextStyle::family`] to shape with it. Additive and
+    /// explicit (the app provides the bytes): no system-font enumeration, so
+    /// shaping stays deterministic (ADR-005). Returns `None` if the bytes don't
+    /// parse as a font. The bundled font remains the default.
+    pub fn register_font(&mut self, bytes: Vec<u8>) -> Option<String> {
+        let registered = self.font_cx.collection.register_fonts(bytes);
+        let (id, _) = registered.first()?;
+        self.font_cx
+            .collection
+            .family_name(*id)
+            .map(|s| s.to_string())
+    }
+
     /// Shape and lay out `text`. `ranges` apply per-byte-range style overrides
     /// (multi-style runs). `max_width` enables wrapping (UAX #14); `None` = no
     /// wrap. Returns a measured, renderable block.
@@ -224,8 +250,11 @@ impl TextEngine {
         align: TextAlign,
     ) -> TextBlock {
         let mut builder = self.layout_cx.ranged_builder(&mut self.font_cx, text, 1.0);
+        // Default family: the style's selected family, else the engine default
+        // (the bundled font). Unknown names fall back to the default in fontique.
+        let default_family = base.family.clone().unwrap_or_else(|| self.family.clone());
         builder.push_default(StyleProperty::FontStack(FontStack::Single(
-            FontFamily::Named(Cow::Owned(self.family.clone())),
+            FontFamily::Named(Cow::Owned(default_family)),
         )));
         builder.push_default(StyleProperty::FontSize(base.font_size));
         builder.push_default(StyleProperty::FontWeight(parley::FontWeight::new(
@@ -249,6 +278,14 @@ impl TextEngine {
                 range.clone(),
             );
             builder.push(StyleProperty::Brush(style.color.to_srgb8()), range.clone());
+            if let Some(fam) = &style.family {
+                builder.push(
+                    StyleProperty::FontStack(FontStack::Single(FontFamily::Named(Cow::Owned(
+                        fam.clone(),
+                    )))),
+                    range.clone(),
+                );
+            }
         }
         let mut layout: Layout<Brush> = builder.build(text);
         layout.break_all_lines(max_width);
@@ -275,7 +312,7 @@ impl TextEngine {
     /// Lay out `text` on a single line, truncating with an ellipsis (`…`) if it
     /// exceeds `max_width` (text-overflow: ellipsis).
     pub fn layout_ellipsized(&mut self, text: &str, base: TextStyle, max_width: f32) -> TextBlock {
-        let full = self.layout(text, base, &[], None, TextAlign::Start);
+        let full = self.layout(text, base.clone(), &[], None, TextAlign::Start);
         if full.width() <= max_width {
             return full;
         }
@@ -286,7 +323,7 @@ impl TextEngine {
             acc.push(ch);
             let candidate = format!("{acc}{ellipsis}");
             if self
-                .layout(&candidate, base, &[], None, TextAlign::Start)
+                .layout(&candidate, base.clone(), &[], None, TextAlign::Start)
                 .width()
                 <= max_width
             {
@@ -614,6 +651,7 @@ mod glyph_cache_tests {
             weight: 400.0,
             line_height: None,
             letter_spacing: 0.0,
+            family: None,
         }
     }
 

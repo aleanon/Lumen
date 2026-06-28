@@ -89,6 +89,7 @@ pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
                         color: Color::srgb8(0x44, 0x44, 0x44, 0xff),
                         line_height: None,
                         letter_spacing: 0.0,
+                        family: None,
                     },
                 ),
                 ..Element::default()
