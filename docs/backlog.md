@@ -99,24 +99,24 @@ The scope-deferred items are all implemented (see Done). These are the remaining
 - **D1 motion** — gesture-driven interruptible animations + shared-element
   transitions on top of the `motion::spring` primitive.
 
-### ▶ Next up — in-sandbox, no new deps / no ADR (prioritized 2026-06-28)
+### ✅ Done — in-sandbox, no new deps / no ADR (2026-06-28)
 
-1. **`.lss`/`Element` borders.** A general border (color + width, per-side later)
-   plumbed through `Element` and the `.lss` cascade into the existing
-   `DrawCmd::Rect { border }` primitive (the renderers already draw it; only the
-   focus ring uses it today). Unblocks the glass rim border and ordinary outlined
-   controls.
-2. **Glass refraction (Liquid Glass).** The `backdrop-filter: blur()/saturate()`
-   primitive ships on both backends (CPU + GPU, `.lss` cascade, `examples/glass`).
-   The remaining Apple "Liquid Glass" look is *refraction/lensing*: bending the
-   blurred backdrop with a per-pixel displacement (a rounded-rect normal/height
-   map) plus a moving specular highlight. *First step:* extend `BackdropFilter`
-   with an optional displacement model sampled deterministically on the CPU
-   backend (the golden contract), GPU path as a shader. Needs the edge-normal
-   model worked out; larger than the blur slice.
-3. **Additive font registration.** `register_font(bytes)` + a `TextStyle` family
-   selector, keeping the bundled font as the deterministic default (no system
-   enumeration — that half stays in B1/sandbox-blocked for ADR-005 reasons).
+1. **`.lss`/`Element` borders.** `Element::border` + `.lss` `border`/
+   `border-width`/`border-color` → the existing `DrawCmd::Rect { border }`
+   primitive; precedence `.lss → element → focus ring`; outline-only boxes paint.
+   *Remaining (deferred):* per-side / per-corner borders + inset (border-box)
+   stroke — needs a `Border` primitive change.
+2. **Glass refraction (Liquid Glass).** `BackdropFilter` gains opt-in
+   `refraction` (rounded-edge SDF lensing) + `specular` (rim highlight) on both
+   backends (CPU golden contract + GPU shader), wired through `.lss`
+   `backdrop-filter: … refraction(px) specular(n)` and shown in `examples/glass`.
+   *Note:* the look is a principled first cut; the falloff/strength constants may
+   want a tuning pass.
+3. **Additive font registration.** `TextEngine::register_font(bytes)` +
+   `TextStyle::family` / `Label::family` + `App::with_font`; unknown families fall
+   back to the bundled default. No system enumeration (ADR-005 intact).
+   *Remaining:* `.lss font-family` cascade and a second-font visual golden (needs
+   a small bundled test font); system-font enumeration stays in B1/sandbox-blocked.
 
 ## Notes
 
