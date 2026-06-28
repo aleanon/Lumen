@@ -395,15 +395,38 @@ pub enum Damage {
 /// Two `DrawCmd`s are equal *and* (for images) reference byte-identical pixels.
 /// The derived `==` only compares the image *index*, so cached text/shadow
 /// sprites that change content at a stable list position need the byte check.
-fn cmd_eq(a: &DrawCmd, b: &DrawCmd, ai: &[RgbaImage], bi: &[RgbaImage]) -> bool {
+fn cmd_eq(a: &DrawCmd, b: &DrawCmd, prev: &DisplayList, next: &DisplayList) -> bool {
+    // The `DrawCmd` itself (incl. an Image/GlyphRun table index) must match...
     if a != b {
         return false;
     }
-    if let (DrawCmd::Image { id: ia, .. }, DrawCmd::Image { id: ib, .. }) = (a, b) {
-        return ai.get(ia.0 as usize).map(|i| i.pixels())
-            == bi.get(ib.0 as usize).map(|i| i.pixels());
+    // ...and so must the *content* it references by index, since the index is
+    // stable across frames but the table behind it isn't.
+    match (a, b) {
+        (DrawCmd::Image { id: ia, .. }, DrawCmd::Image { id: ib, .. }) => {
+            prev.images.get(ia.0 as usize).map(|i| i.pixels())
+                == next.images.get(ib.0 as usize).map(|i| i.pixels())
+        }
+        (DrawCmd::GlyphRun { run: ra, .. }, DrawCmd::GlyphRun { run: rb, .. }) => {
+            run_content_eq(prev, *ra, next, *rb)
+        }
+        _ => true,
     }
-    true
+}
+
+/// Whether two glyph runs paint the same thing: same glyphs at the same
+/// positions with the same bitmaps (compared by stable glyph key).
+fn run_content_eq(prev: &DisplayList, ra: GlyphRunId, next: &DisplayList, rb: GlyphRunId) -> bool {
+    let (Some(pr), Some(nr)) = (prev.runs.get(ra.0 as usize), next.runs.get(rb.0 as usize)) else {
+        return false;
+    };
+    pr.glyphs.len() == nr.glyphs.len()
+        && pr.glyphs.iter().zip(&nr.glyphs).all(|(p, n)| {
+            p.x == n.x
+                && p.y == n.y
+                && prev.glyph_images.get(p.image as usize).map(|g| g.key)
+                    == next.glyph_images.get(n.image as usize).map(|g| g.key)
+        })
 }
 
 /// Compute the [`Damage`] between a previous display list and the next one.
@@ -416,17 +439,12 @@ pub fn damage_between(prev: &DisplayList, next: &DisplayList) -> Damage {
     let (po, pn) = (&prev.cmds, &next.cmds);
     let max_p = po.len().min(pn.len());
     let mut p = 0;
-    while p < max_p && cmd_eq(&po[p], &pn[p], &prev.images, &next.images) {
+    while p < max_p && cmd_eq(&po[p], &pn[p], prev, next) {
         p += 1;
     }
     let mut s = 0;
     while s < (po.len() - p).min(pn.len() - p)
-        && cmd_eq(
-            &po[po.len() - 1 - s],
-            &pn[pn.len() - 1 - s],
-            &prev.images,
-            &next.images,
-        )
+        && cmd_eq(&po[po.len() - 1 - s], &pn[pn.len() - 1 - s], prev, next)
     {
         s += 1;
     }

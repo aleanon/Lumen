@@ -1429,53 +1429,42 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 if let Some(c) = css.and_then(|s| s.color) {
                     ts.color = c;
                 }
-                // Reuse a previously rasterized glyph image when the string and
-                // style are unchanged (the common case across animation frames).
-                let [cr, cg, cb, ca] = ts.color.to_srgb8();
-                let key = (
-                    txt.clone(),
-                    ts.font_size.to_bits(),
-                    ts.weight.to_bits(),
-                    u32::from_le_bytes([cr, cg, cb, ca]),
-                    m.wrap_width.map(|w| w.to_bits()).unwrap_or(0),
-                );
-                let img = if let Some(cached) = self.text_cache.get(&key) {
-                    cached.clone()
-                } else {
-                    let block =
-                        self.text
-                            .layout(txt, ts, &[], m.wrap_width, lumen_text::TextAlign::Start);
-                    let img = block.render(0, 0, Color::srgb8(255, 255, 255, 0)); // transparent bg
-                    const CAP: usize = 512;
-                    if self.text_cache.len() >= CAP {
-                        self.text_cache.clear();
-                    }
-                    self.text_cache.insert(key, img.clone());
-                    img
-                };
-                let iw = img.width() as f64;
-                let ih = img.height() as f64;
-                let id = lumen_render::ImageId(dl.images.len() as u32);
-                dl.images.push(img);
                 // Paint at the padded (content-box) origin so a button label
                 // sits inside its padding (centred for symmetric padding) rather
                 // than jammed into the border-box corner. Plain text has no
                 // padding, so this is a no-op for it.
                 let tx = bounds.x0 + m.pad.0;
                 let ty = bounds.y0 + m.pad.1;
-                // Editor overlay (only for the focused field): selection band(s)
-                // behind the glyphs, caret in front. Computed from the same layout
-                // as the text image, so it stays out of the (focus-independent)
-                // glyph cache. `caret_byte`/`selection` index `txt`.
-                let overlay = if focused && m.caret_byte.is_some() {
-                    Some(
-                        self.text
-                            .layout(txt, ts, &[], m.wrap_width, lumen_text::TextAlign::Start),
-                    )
-                } else {
-                    None
-                };
-                if let Some(block) = &overlay {
+                // R3.4: emit a glyph run (positioned glyphs + atlas-bound coverage
+                // bitmaps from the per-glyph cache) instead of a whole-string
+                // sprite, so the GPU batches text through the atlas and a 1-char
+                // edit re-rasterizes ≤1 glyph. `block` also drives the caret /
+                // selection geometry below (same layout).
+                let block =
+                    self.text
+                        .layout(txt, ts, &[], m.wrap_width, lumen_text::TextAlign::Start);
+                let (mut run, images) = block.glyph_run(tx as f32, ty as f32);
+                // The run's bounding rect over *actual glyph ink* (a glyph can
+                // overhang the logical box via side bearings) — drives damage, so
+                // it must cover every pixel the run paints.
+                let mut run_rect = Rect::new(tx, ty, tx, ty);
+                for g in &run.glyphs {
+                    let im = &images[g.image as usize];
+                    run_rect = run_rect.union(Rect::new(
+                        g.x as f64,
+                        g.y as f64,
+                        g.x as f64 + im.width as f64,
+                        g.y as f64 + im.height as f64,
+                    ));
+                }
+                // Intern this run's glyph bitmaps into the frame-wide tables
+                // (dedup by stable id) and remap the run's local indices.
+                let remap: Vec<u32> = images.into_iter().map(|gi| dl.intern_glyph(gi)).collect();
+                for g in &mut run.glyphs {
+                    g.image = remap[g.image as usize];
+                }
+                // Selection highlight (behind the glyphs) for a focused editor.
+                if focused && m.caret_byte.is_some() {
                     if let Some((a, b)) = m.selection.filter(|(a, b)| a != b) {
                         let sel = Color::srgb8(0x1a, 0x73, 0xe8, 0x55);
                         for (x0, y0, x1, y1) in block.selection_rects(a, b) {
@@ -1493,13 +1482,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                         }
                     }
                 }
-                dl.push(DrawCmd::Image {
-                    id,
-                    src_rect: Rect::new(0.0, 0.0, iw, ih),
-                    dst_rect: Rect::new(tx, ty, tx + iw, ty + ih),
-                    quality: lumen_render::Filter::Nearest,
+                let run_id = dl.add_run(run);
+                dl.push(DrawCmd::GlyphRun {
+                    run: run_id,
+                    brush: Brush::Solid(ts.color),
+                    rect: run_rect,
                 });
-                if let (Some(block), Some(caret)) = (&overlay, m.caret_byte) {
+                // Caret (in front) for a focused editor.
+                if let Some(caret) = m.caret_byte.filter(|_| focused) {
                     let (cx, cy, ch) = block.caret_pos(caret);
                     let w = 1.5;
                     dl.push(DrawCmd::Rect {
