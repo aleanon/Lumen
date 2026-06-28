@@ -19,8 +19,14 @@ at scale" polish line). This plan is the work that runs **behind** that seam.*
 > order, honors HiDPI, and drives the live window (R1.1). Scoped out (no
 > producer): non-source-over blends and GPU `DrawCmd::Shader` (`ShaderWidget`
 > pre-rasterizes to an image). Deferred (perf): zero-copy render-to-surface (the
-> live-window agent needs a per-frame readback). **R2 ✅ done. R3.1 ✅ done.**
-> R3.2–R3.5 and R4 remain (R4 constrained by taffy — see its section).
+> live-window agent needs a per-frame readback). **R2 ✅ done. R3 ✅ COMPLETE** —
+> a GPU glyph atlas now backs text: the text layer hands positioned glyphs +
+> coverage bitmaps across the boundary (`DrawCmd::GlyphRun`), a shelf allocator
+> packs them into an R8 atlas, the `Wgpu` backend draws instanced glyph quads,
+> the paint layer emits `GlyphRun` instead of whole-string sprites, and glyphs
+> rasterize at physical size for crisp HiDPI. The CPU backend implements
+> `GlyphRun` as the golden reference. **R4 remains** (constrained by taffy — see
+> its section).
 >
 > <details><summary>(historical detail)</summary>
 >
