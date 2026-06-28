@@ -213,9 +213,13 @@ impl TextEngine {
             base.weight,
         )));
         builder.push_default(StyleProperty::Brush(base.color.to_srgb8()));
-        if let Some(lh) = base.line_height {
-            builder.push_default(StyleProperty::LineHeight(lh));
-        }
+        // Line height as a multiple of font size. parley's low-level builder
+        // defaults to 1.0, which is too tight for this font — ascenders/descenders
+        // (g, y, p, q, accents) fall outside the line box and get clipped when the
+        // run is rasterized to its measured height. Default to 1.3 (a touch above
+        // the ~1.25 where the bundled font's full glyph extent fits at every size)
+        // so the box always reserves room for the whole glyph.
+        builder.push_default(StyleProperty::LineHeight(base.line_height.unwrap_or(1.3)));
         if base.letter_spacing != 0.0 {
             builder.push_default(StyleProperty::LetterSpacing(base.letter_spacing));
         }
