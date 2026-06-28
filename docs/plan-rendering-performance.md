@@ -25,8 +25,9 @@ at scale" polish line). This plan is the work that runs **behind** that seam.*
 > packs them into an R8 atlas, the `Wgpu` backend draws instanced glyph quads,
 > the paint layer emits `GlyphRun` instead of whole-string sprites, and glyphs
 > rasterize at physical size for crisp HiDPI. The CPU backend implements
-> `GlyphRun` as the golden reference. **R4 remains** (constrained by taffy — see
-> its section).
+> `GlyphRun` as the golden reference. **R4 parked (2026-06-28)** — feasible with
+> no taffy fork (multi-`TaffyTree` two-phase split), but low priority since lists
+> are virtualized; tracked in `backlog.md`.
 >
 > <details><summary>(historical detail)</summary>
 >

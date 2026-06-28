@@ -73,7 +73,23 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
 The scope-deferred items are all implemented (see Done). These are the remaining
 *extensions* inside them, each additive and behind the now-shipped abstractions:
 
-- **A1 GPU** — path/stroke tessellation (`lyon` — ADR), gradients, glyph atlas,
+- **R4 — Multi-threaded layout** (rendering/perf plan; **parked 2026-06-28**). Lay
+  out very large *non-virtualized* trees on scoped threads. *Why parked, not
+  blocked:* feasible with no new deps and **no taffy fork** — `TaffyTree` is an
+  instantiable struct, so independent subtrees can each `compute_layout` on their
+  own `std::thread::scope` thread (the `scene.rs` culling model) and be stitched
+  by offset. The catch is layout's parent↔child size dependency: you can't
+  parallelize *inside* one `TaffyTree` (one `&mut self`, shared measure cache), so
+  it needs a real two-phase driver — measure independent regions → solve the upper
+  tree → solve each region in parallel within its fixed box → offset — plus a
+  1-vs-N byte-identical determinism test, gated behind a node-count threshold.
+  *Why low priority:* the usual scalability answer is **virtualization** (already
+  done for lists/`vlist`); a 10k-node non-virtualized tree is the narrow target.
+  *First step:* R4.1 — identify the fork seam (flex/grid children whose size is
+  fixed once the parent's available space is known) and prototype the split behind
+  a threshold. (Options ruled out: parallelizing inside one tree would need a
+  taffy fork/upstream; replacing taffy contradicts ADR-004.)
+- **A1 GPU** — path/stroke tessellation (`lyon` — ADR), gradients,
   layer clip/opacity, and HiDPI scaling on the GPU backend (renders 1:1 today).
 - **B3 codecs** — jpeg/webp/avif decode (new deps → ADR); PNG ships now.
 - **D1 motion** — gesture-driven interruptible animations + shared-element
