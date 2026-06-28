@@ -23,6 +23,11 @@ use lumen_render::{
 use lumen_text::TextEngine;
 use std::collections::HashMap;
 
+/// Hit-test z for overlay subtrees (dropdown menus, popovers, tooltips). They
+/// paint on top in a final pass, so they must also win hit-testing over the
+/// normal-flow content they cover (which has the default z of 0).
+const OVERLAY_Z: u32 = 1000;
+
 /// Statistics for one rendered frame.
 #[derive(Clone, Copy, Debug)]
 pub struct FrameStats {
@@ -893,8 +898,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let mut layout = LayoutTree::new();
         let mut meta = HashMap::new();
         let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::new();
-        let (_root_node, root_lnode) =
-            self.build_node(root_el, &mut tree, &mut layout, &mut meta, &mut built, None);
+        let (_root_node, root_lnode) = self.build_node(
+            root_el,
+            &mut tree,
+            &mut layout,
+            &mut meta,
+            &mut built,
+            None,
+            false,
+        );
 
         layout.compute(root_lnode, self.size);
         if self.rtl {
@@ -1027,11 +1039,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         meta: &mut HashMap<NodeIndex, NodeMeta>,
         built: &mut Vec<(NodeIndex, LayoutNode)>,
         parent: Option<NodeIndex>,
+        in_overlay: bool,
     ) -> (NodeIndex, LayoutNode) {
         let node = match parent {
             None => tree.insert_root(),
             Some(p) => tree.insert_child(p),
         };
+        // Overlay subtrees (dropdown menus, popovers, tooltips) paint in a final
+        // top pass that escapes ancestor clips. Hit-testing keys on `z` first, so
+        // give them an elevated z to match — otherwise content that paints *under*
+        // the overlay but comes later in document order would steal its clicks.
+        let this_overlay = in_overlay || el.overlay;
 
         let mut flags = NodeFlags::VISIBLE;
         let interactive = el.background.is_some()
@@ -1057,6 +1075,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             flags |= NodeFlags::HOVERED;
         }
         tree.set_flags(node, flags);
+        if this_overlay {
+            tree.set_z(node, OVERLAY_Z);
+        }
 
         // Text nodes get a fixed size from measurement.
         let mut style = el.style;
@@ -1110,7 +1131,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let child_built: Vec<(NodeIndex, LayoutNode)> = el
             .children
             .into_iter()
-            .map(|c| self.build_node(c, tree, layout, meta, built, Some(node)))
+            .map(|c| self.build_node(c, tree, layout, meta, built, Some(node), this_overlay))
             .collect();
         let child_lnodes: Vec<LayoutNode> = child_built.iter().map(|(_, l)| *l).collect();
         let lnode = if child_lnodes.is_empty() {
