@@ -249,10 +249,29 @@ impl TextEngine {
         max_width: Option<f32>,
         align: TextAlign,
     ) -> TextBlock {
+        // Resolve families to known registered ones *before* borrowing the font
+        // context for the builder; an unknown name falls back to the engine
+        // default (the bundled font). With no system fonts an unmatched family
+        // would otherwise shape nothing.
+        let resolve_family = |cx: &mut FontContext, want: &Option<String>| -> String {
+            match want {
+                Some(n) if cx.collection.family_id(n).is_some() => n.clone(),
+                _ => self.family.clone(),
+            }
+        };
+        let default_family = resolve_family(&mut self.font_cx, &base.family);
+        let range_families: Vec<Option<String>> = ranges
+            .iter()
+            .map(|(_, style)| {
+                style
+                    .family
+                    .as_ref()
+                    .filter(|n| self.font_cx.collection.family_id(n).is_some())
+                    .cloned()
+            })
+            .collect();
+
         let mut builder = self.layout_cx.ranged_builder(&mut self.font_cx, text, 1.0);
-        // Default family: the style's selected family, else the engine default
-        // (the bundled font). Unknown names fall back to the default in fontique.
-        let default_family = base.family.clone().unwrap_or_else(|| self.family.clone());
         builder.push_default(StyleProperty::FontStack(FontStack::Single(
             FontFamily::Named(Cow::Owned(default_family)),
         )));
@@ -271,14 +290,14 @@ impl TextEngine {
         if base.letter_spacing != 0.0 {
             builder.push_default(StyleProperty::LetterSpacing(base.letter_spacing));
         }
-        for (range, style) in ranges {
+        for (i, (range, style)) in ranges.iter().enumerate() {
             builder.push(StyleProperty::FontSize(style.font_size), range.clone());
             builder.push(
                 StyleProperty::FontWeight(parley::FontWeight::new(style.weight)),
                 range.clone(),
             );
             builder.push(StyleProperty::Brush(style.color.to_srgb8()), range.clone());
-            if let Some(fam) = &style.family {
+            if let Some(fam) = &range_families[i] {
                 builder.push(
                     StyleProperty::FontStack(FontStack::Single(FontFamily::Named(Cow::Owned(
                         fam.clone(),

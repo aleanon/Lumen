@@ -55,6 +55,15 @@ impl Label {
         self
     }
 
+    /// Shape with a registered font family by name (see `App::with_font` /
+    /// `TextEngine::register_font`); unknown names fall back to the default font.
+    pub fn family(mut self, name: impl Into<String>) -> Label {
+        if let Some(ts) = self.el.text_style_mut() {
+            ts.family = Some(name.into());
+        }
+        self
+    }
+
     /// Line height as a multiple of font size.
     pub fn line_height(mut self, multiple: f32) -> Label {
         if let Some(ts) = self.el.text_style_mut() {

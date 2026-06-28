@@ -50,6 +50,9 @@ pub struct App<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::InlineS
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     #[allow(dead_code)]
     stylesheet: Option<String>,
+    /// Extra fonts to register at boot (B1): app-provided bytes, selected by
+    /// family name via `TextStyle::family`. The bundled font stays the default.
+    fonts: Vec<Vec<u8>>,
     renderer: R,
     executor: E,
 }
@@ -61,6 +64,7 @@ impl App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner> {
         App {
             root: Box::new(root),
             stylesheet: None,
+            fonts: Vec::new(),
             renderer: lumen_render::TinySkia,
             executor: lumen_core::tasks::InlineSpawner,
         }
@@ -74,6 +78,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
         self
     }
 
+    /// Register an extra font (its bytes) for the app, selectable by family name
+    /// via [`TextStyle::family`](lumen_text::TextStyle::family). Additive — the
+    /// bundled font stays the default; no system-font enumeration (ADR-005).
+    pub fn with_font(mut self, bytes: impl Into<Vec<u8>>) -> App<R, E> {
+        self.fonts.push(bytes.into());
+        self
+    }
+
     /// Swap the frame renderer backend, changing the app's `R` type (typestate
     /// builder). The CPU reference renderer is the default; the shell hands in a
     /// GPU backend (constructed post-surface), and a consumer wanting runtime
@@ -82,6 +94,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
         App {
             root: self.root,
             stylesheet: self.stylesheet,
+            fonts: self.fonts,
             renderer,
             executor: self.executor,
         }
@@ -95,6 +108,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
         App {
             root: self.root,
             stylesheet: self.stylesheet,
+            fonts: self.fonts,
             renderer: self.renderer,
             executor,
         }
@@ -124,6 +138,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
         // Focus is host state (not in the reactive store), so it is carried on
         // the snapshot and re-applied directly.
         let focused = restore.as_ref().and_then(|s| s.focused.clone());
+        // Register app fonts before the first build so styled text can select them.
+        let mut text = TextEngine::new();
+        for bytes in self.fonts {
+            text.register_font(bytes);
+        }
         let mut h = Headless {
             root: self.root,
             rt: Runtime::new(),
@@ -133,7 +152,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             renderer: self.renderer,
             executor: self.executor,
             task_waker: None,
-            text: TextEngine::new(),
+            text,
             text_cache: HashMap::new(),
             shadow_cache: HashMap::new(),
             tree: Tree::new(),
