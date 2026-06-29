@@ -177,6 +177,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             rtl: false,
             last_dl: None,
             last_damage: lumen_render::Damage::Full,
+            surface_attached: false,
         };
         let diags = if let Some(s) = restore {
             // Stage the snapshot *before* the first build so each signal adopts
@@ -331,6 +332,10 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     last_dl: Option<DisplayList>,
     /// Damage applied by the most recent paint (reported via [`FrameStats`]).
     last_damage: lumen_render::Damage,
+    /// True once a live window surface is wired to the renderer (1c). The build
+    /// then presents straight to the swapchain instead of rasterizing to
+    /// `self.frame`; `screenshot()` renders on demand. Always false headless.
+    surface_attached: bool,
 }
 
 impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
@@ -394,9 +399,66 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
     }
 
-    /// The most recent rendered frame.
+    /// The most recent rendered frame. With a live surface attached (1c) the
+    /// build presents straight to the swapchain and no longer fills `self.frame`,
+    /// so render the retained display list on demand here (the agent/test capture
+    /// path — a freshly rendered frame of current state). Otherwise return the
+    /// cached frame.
     pub fn screenshot(&mut self) -> RgbaImage {
+        if self.surface_attached {
+            if let Some(dl) = self.last_dl.take() {
+                let pw = (self.size.width * self.scale).round().max(1.0) as u32;
+                let ph = (self.size.height * self.scale).round().max(1.0) as u32;
+                let bg = Color::srgb8(255, 255, 255, 255);
+                let img = self.renderer.render_frame(&dl, pw, ph, self.scale, bg);
+                self.last_dl = Some(dl);
+                return img;
+            }
+        }
         self.frame.clone()
+    }
+
+    /// Wire a live window surface to the renderer for direct present (1c).
+    /// Returns whether the backend accepted it (GPU present); on `false` the
+    /// shell keeps the CPU readback + separate-presenter path. `width`/`height`
+    /// are physical px.
+    #[cfg(feature = "wgpu")]
+    pub fn attach_surface(
+        &mut self,
+        target: lumen_render::wgpu::SurfaceTarget<'static>,
+        width: u32,
+        height: u32,
+    ) -> bool {
+        let ok = self.renderer.attach_surface(target, width, height);
+        self.surface_attached = ok;
+        ok
+    }
+
+    /// Reconfigure the attached surface to a new physical size (1c).
+    #[cfg(feature = "wgpu")]
+    pub fn resize_surface(&mut self, width: u32, height: u32) {
+        self.renderer.resize_surface(width, height);
+    }
+
+    /// Present the most recent frame straight to the attached swapchain (1c) —
+    /// no CPU readback. Returns `false` if nothing is attached or there's no
+    /// frame yet. The shell calls this after `pump()` when the frame changed.
+    #[cfg(feature = "wgpu")]
+    pub fn present_to_surface(&mut self) -> bool {
+        if !self.surface_attached {
+            return false;
+        }
+        let Some(dl) = self.last_dl.take() else {
+            return false;
+        };
+        let pw = (self.size.width * self.scale).round().max(1.0) as u32;
+        let ph = (self.size.height * self.scale).round().max(1.0) as u32;
+        let bg = Color::srgb8(255, 255, 255, 255);
+        let ok = self
+            .renderer
+            .present_to_surface(&dl, pw, ph, self.scale, bg);
+        self.last_dl = Some(dl);
+        ok
     }
 
     /// Force the next paint to repaint the whole frame instead of only the
@@ -1644,37 +1706,43 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let ph = (self.size.height * self.scale).round().max(1.0) as u32;
         let bg = Color::srgb8(255, 255, 255, 255);
 
-        // Incremental only when the retained frame matches the target size and we
-        // have a previous display list to diff against (else: first frame or a
-        // resize/scale change → full repaint).
-        let can_incremental =
-            self.frame.width() == pw && self.frame.height() == ph && self.last_dl.is_some();
+        // Incremental only when we have a previous display list to diff against.
+        // The CPU path additionally needs the retained frame to match the target
+        // size; the surface path keeps no CPU frame, so the prev-dl is enough.
+        let can_incremental = self.last_dl.is_some()
+            && (self.surface_attached || (self.frame.width() == pw && self.frame.height() == ph));
         let damage = if can_incremental {
             lumen_render::damage_between(self.last_dl.as_ref().unwrap(), &dl)
         } else {
             Damage::Full
         };
 
-        match damage {
-            Damage::None => { /* nothing changed — reuse self.frame */ }
-            Damage::Region(r) => {
-                // Logical → physical, integer-aligned, clamped to the frame.
-                let dirty = kurbo::Rect::new(
-                    (r.x0 * self.scale).floor().max(0.0),
-                    (r.y0 * self.scale).floor().max(0.0),
-                    (r.x1 * self.scale).ceil().min(pw as f64),
-                    (r.y1 * self.scale).ceil().min(ph as f64),
-                );
-                if dirty.width() >= 1.0 && dirty.height() >= 1.0 {
-                    let tile = self
-                        .renderer
-                        .render_damage(&dl, pw, ph, self.scale, bg, dirty);
-                    self.frame
-                        .overwrite_rect(dirty.x0 as u32, dirty.y0 as u32, &tile);
+        if self.surface_attached {
+            // Direct-to-surface (1c): no CPU rasterization. The shell presents the
+            // retained `last_dl` via `present_to_surface` when `damage != None`
+            // (granularity is ignored — the GPU renders the whole frame anyway).
+        } else {
+            match damage {
+                Damage::None => { /* nothing changed — reuse self.frame */ }
+                Damage::Region(r) => {
+                    // Logical → physical, integer-aligned, clamped to the frame.
+                    let dirty = kurbo::Rect::new(
+                        (r.x0 * self.scale).floor().max(0.0),
+                        (r.y0 * self.scale).floor().max(0.0),
+                        (r.x1 * self.scale).ceil().min(pw as f64),
+                        (r.y1 * self.scale).ceil().min(ph as f64),
+                    );
+                    if dirty.width() >= 1.0 && dirty.height() >= 1.0 {
+                        let tile = self
+                            .renderer
+                            .render_damage(&dl, pw, ph, self.scale, bg, dirty);
+                        self.frame
+                            .overwrite_rect(dirty.x0 as u32, dirty.y0 as u32, &tile);
+                    }
                 }
-            }
-            Damage::Full => {
-                self.frame = self.renderer.render_frame(&dl, pw, ph, self.scale, bg);
+                Damage::Full => {
+                    self.frame = self.renderer.render_frame(&dl, pw, ph, self.scale, bg);
+                }
             }
         }
         self.last_dl = Some(dl);

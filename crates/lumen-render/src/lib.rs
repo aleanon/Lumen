@@ -47,6 +47,10 @@ pub use image::RgbaImage;
 /// The GPU renderer and its CPU-fallback wrapper (`wgpu` feature, non-wasm).
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 pub use gpu::{Wgpu, WgpuFallbackTinySkia};
+/// Re-exported so downstream crates can name surface types (e.g.
+/// [`wgpu::SurfaceTarget`]) for the direct-present API without a direct dep.
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+pub use wgpu;
 
 pub use analysis::{
     analyze_contrast, apca_lc, resolve_backdrop, ContrastLevel, ContrastReport, TargetContrast,
