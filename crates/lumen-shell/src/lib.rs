@@ -100,6 +100,7 @@ pub fn run(app: App, size: Size) {
         headless: None,
         window: None,
         presenter: None,
+        direct: false,
         cursor: Point::ZERO,
         scale: 1.0,
         modifiers: Modifiers::empty(),
@@ -197,7 +198,12 @@ struct Shell {
     size: Size,
     headless: Option<ShellHeadless>,
     window: Option<Arc<Window>>,
+    /// CPU-readback presenter — only used as the fallback when the renderer can't
+    /// present directly to the surface (`direct == false`). `None` in direct mode.
     presenter: Option<Presenter>,
+    /// True when the renderer presents straight to the swapchain on its own device
+    /// (1c): no second wgpu device, no GPU→CPU→GPU readback per frame.
+    direct: bool,
     /// Pointer position in *logical* px (physical ÷ scale), the runtime's space.
     cursor: Point,
     /// HiDPI scale factor of the window.
@@ -278,7 +284,6 @@ impl ApplicationHandler<ShellEvent> for Shell {
             ));
         let window = Arc::new(el.create_window(attrs).expect("window"));
         window.set_ime_allowed(true); // receive IME composition + commit
-        let presenter = Presenter::new(window.clone());
         let app = self.app.take().expect("app");
         // Runtime works in logical px; the surface is physical. Derive the
         // logical size from the surface's physical size and the scale factor so
@@ -291,6 +296,25 @@ impl ApplicationHandler<ShellEvent> for Shell {
         );
         let mut headless = app.run_headless(self.size);
         headless.set_scale(self.scale);
+        // Direct-to-surface present on the renderer's own device (1c): one wgpu
+        // device, no GPU→CPU→GPU readback per frame. Falls back to a CPU-readback
+        // Presenter when the backend can't present (CPU renderer / unsupported
+        // adapter).
+        self.direct =
+            headless.attach_surface(window.clone().into(), phys.width.max(1), phys.height.max(1));
+        self.presenter = if self.direct {
+            None
+        } else {
+            Some(Presenter::new(window.clone()))
+        };
+        eprintln!(
+            "lumen: present = {}",
+            if self.direct {
+                "direct-to-surface"
+            } else {
+                "cpu-readback"
+            }
+        );
         // Wake the loop when a background task pushes a result, so it gets applied
         // and presented (the data-layer waker).
         let proxy = self.proxy.clone();
@@ -298,7 +322,6 @@ impl ApplicationHandler<ShellEvent> for Shell {
             let _ = proxy.send_event(ShellEvent::Wake);
         }));
         self.headless = Some(headless);
-        self.presenter = Some(presenter);
         window.request_redraw(); // paint the first frame
         self.window = Some(window);
         self.last_frame = Instant::now();
@@ -310,11 +333,15 @@ impl ApplicationHandler<ShellEvent> for Shell {
             WindowEvent::Resized(s) => {
                 let (w, h) = (s.width.max(1), s.height.max(1));
                 self.size = Size::new(w as f64 / self.scale, h as f64 / self.scale);
-                // Resizing the surface is cheap; reconfigure it now so the next
-                // present matches. The expensive relayout+repaint is deferred to
+                // Reconfiguring the surface is cheap; do it now so the next present
+                // matches. The expensive relayout+repaint is deferred to
                 // RedrawRequested so a drag's event storm coalesces into one
                 // render per displayed frame (winit merges request_redraw calls).
-                if let Some(p) = &mut self.presenter {
+                if self.direct {
+                    if let Some(hl) = &mut self.headless {
+                        hl.resize_surface(w, h); // surface is physical
+                    }
+                } else if let Some(p) = &mut self.presenter {
                     p.resize(w, h); // surface is physical
                 }
                 self.pending_resize = true;
@@ -327,7 +354,11 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 // Physical surface size follows from the (unchanged) logical size.
                 let pw = (self.size.width * self.scale).round().max(1.0) as u32;
                 let ph = (self.size.height * self.scale).round().max(1.0) as u32;
-                if let Some(p) = &mut self.presenter {
+                if self.direct {
+                    if let Some(hl) = &mut self.headless {
+                        hl.resize_surface(pw, ph);
+                    }
+                } else if let Some(p) = &mut self.presenter {
                     p.resize(pw, ph);
                 }
                 // Defer the rescale render+present to RedrawRequested (coalesced).
@@ -420,11 +451,9 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 }
             }
             WindowEvent::RedrawRequested => {
-                if let (Some(h), Some(p)) = (&mut self.headless, &mut self.presenter) {
+                if let Some(h) = &mut self.headless {
                     // Apply a deferred resize/scale once per frame (coalesced from
-                    // the event storm). These render the new-size frame into the
-                    // retained buffer, so the subsequent pump usually no-ops —
-                    // hence we force the present below when a resize happened.
+                    // the event storm).
                     let resized = std::mem::take(&mut self.pending_resize);
                     if resized {
                         h.set_scale(self.scale);
@@ -441,12 +470,17 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     h.advance_clock(elapsed_ms.min(1000.0));
                     // Present only when the frame actually changed (R2): an idle
                     // tick repaints nothing, so the surface keeps its last frame.
-                    // A resize always presents (its render landed in resize/pump
-                    // above, which the idle pump won't re-flag as painted).
+                    // A resize always presents (the new-size render landed in
+                    // resize/pump above, which the idle pump won't re-flag).
                     let stats = h.pump();
                     if stats.painted || resized {
-                        let frame = h.screenshot();
-                        p.present(&frame);
+                        if self.direct {
+                            // GPU → swapchain directly, no readback (1c).
+                            h.present_to_surface();
+                        } else if let Some(p) = &mut self.presenter {
+                            let frame = h.screenshot();
+                            p.present(&frame);
+                        }
                     }
                 }
             }
@@ -574,8 +608,16 @@ impl Presenter {
             force_fallback_adapter: false,
         }))
         .expect("adapter");
-        let (device, queue) =
-            block_on(adapter.request_device(&Default::default(), None)).expect("device");
+        // MemoryUsage over the default Performance hint — the blit presenter holds
+        // one small texture; no need for large pre-reserved GPU pools.
+        let (device, queue) = block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
+                ..Default::default()
+            },
+            None,
+        ))
+        .expect("device");
         let caps = surface.get_capabilities(&adapter);
         let format = caps
             .formats

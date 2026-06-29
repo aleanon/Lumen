@@ -438,7 +438,11 @@ impl Wgpu {
                 label: Some("lumen-gpu"),
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::downlevel_defaults(),
-                memory_hints: wgpu::MemoryHints::default(),
+                // Favor low memory over large pre-reserved pools: the default
+                // `Performance` hint makes gpu-alloc keep big blocks, which on the
+                // NVIDIA driver mapped ~128 MB per device. A UI allocates little
+                // and (post-1c) reuses resources, so MemoryUsage is ~free here.
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
             },
             None,
         ))
