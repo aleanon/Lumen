@@ -557,6 +557,10 @@ struct Presenter {
     pipeline: wgpu::RenderPipeline,
     bgl: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// Cached blit texture + bind group, keyed by `(width, height)`. Recreated
+    /// only when the frame size changes (on resize), not every present — so a
+    /// steady stream of same-size frames just re-uploads pixels.
+    staging: Option<(wgpu::Texture, wgpu::BindGroup, u32, u32)>,
 }
 
 impl Presenter {
@@ -651,6 +655,7 @@ impl Presenter {
             pipeline,
             bgl,
             sampler,
+            staging: None,
         }
     }
 
@@ -661,23 +666,45 @@ impl Presenter {
     }
 
     fn present(&mut self, frame: &RgbaImage) {
-        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("frame"),
-            size: wgpu::Extent3d {
-                width: frame.width(),
-                height: frame.height(),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let (fw, fh) = (frame.width(), frame.height());
+        // Reuse the blit texture + bind group across same-size frames; only
+        // recreate them when the frame dimensions change (resize).
+        if self.staging.as_ref().map(|(_, _, w, h)| (*w, *h)) != Some((fw, fh)) {
+            let tex = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("frame"),
+                size: wgpu::Extent3d {
+                    width: fw,
+                    height: fh,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = tex.create_view(&Default::default());
+            let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("blit-bg"),
+                layout: &self.bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            });
+            self.staging = Some((tex, bind, fw, fh));
+        }
+        let (tex, bind, _, _) = self.staging.as_ref().unwrap();
         self.queue.write_texture(
             wgpu::ImageCopyTexture {
-                texture: &tex,
+                texture: tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -685,30 +712,15 @@ impl Presenter {
             frame.pixels(),
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(frame.width() * 4),
-                rows_per_image: Some(frame.height()),
+                bytes_per_row: Some(fw * 4),
+                rows_per_image: Some(fh),
             },
             wgpu::Extent3d {
-                width: frame.width(),
-                height: frame.height(),
+                width: fw,
+                height: fh,
                 depth_or_array_layers: 1,
             },
         );
-        let view = tex.create_view(&Default::default());
-        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("blit-bg"),
-            layout: &self.bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
-        });
 
         let Ok(surface_tex) = self.surface.get_current_texture() else {
             return;
@@ -731,7 +743,7 @@ impl Presenter {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bind, &[]);
+            pass.set_bind_group(0, bind, &[]);
             pass.draw(0..3, 0..1);
         }
         self.queue.submit(Some(enc.finish()));
