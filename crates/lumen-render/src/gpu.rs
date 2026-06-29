@@ -381,6 +381,38 @@ impl crate::Renderer for WgpuFallbackTinySkia {
         }
     }
 
+    fn attach_surface(
+        &mut self,
+        target: wgpu::SurfaceTarget<'static>,
+        width: u32,
+        height: u32,
+    ) -> bool {
+        match &mut self.main {
+            Some(g) => g.attach_surface(target, width, height),
+            None => false,
+        }
+    }
+
+    fn resize_surface(&mut self, width: u32, height: u32) {
+        if let Some(g) = &mut self.main {
+            g.resize_surface(width, height);
+        }
+    }
+
+    fn present_to_surface(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+    ) -> bool {
+        match &mut self.main {
+            Some(g) => g.present_to_surface(list, width, height, scale, background),
+            None => false,
+        }
+    }
+
     fn name(&self) -> &'static str {
         match self.main {
             Some(_) => "wgpu",
