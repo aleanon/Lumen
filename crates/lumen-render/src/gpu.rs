@@ -52,6 +52,10 @@ pub struct Wgpu {
     /// cleared after the frame so the next one repacks (avoids mid-frame eviction
     /// corrupting glyphs already placed this frame).
     atlas_overflow: std::cell::Cell<bool>,
+    /// Reused full-frame readback buffer (the headless/agent screenshot path).
+    /// Grown on demand; interior-mutable since rendering is `&self`. Avoids a
+    /// multi-MB buffer allocation on every steady-state redraw.
+    readback: std::cell::RefCell<Option<wgpu::Buffer>>,
     sampler: wgpu::Sampler,
     /// Linear, clamp-to-edge sampler for 1-D gradient ramp textures (R1.4).
     ramp_sampler: wgpu::Sampler,
@@ -774,6 +778,7 @@ impl Wgpu {
             atlas_bind,
             atlas: std::cell::RefCell::new(crate::atlas::GlyphAtlas::new(ATLAS_SIZE, 1)),
             atlas_overflow: std::cell::Cell::new(false),
+            readback: std::cell::RefCell::new(None),
             sampler,
             ramp_sampler,
             sample_count,
@@ -837,14 +842,27 @@ impl Wgpu {
             scale,
         );
 
-        // Readback from the resolved root texture.
+        // Readback from the resolved root texture. Reuse a cached buffer across
+        // frames (grown on demand) rather than allocating multi-MB every frame.
         let bpr = padded_bytes_per_row(width);
-        let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: (bpr * height) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let needed = (bpr * height) as u64;
+        if self
+            .readback
+            .borrow()
+            .as_ref()
+            .map(|b| b.size())
+            .unwrap_or(0)
+            < needed
+        {
+            *self.readback.borrow_mut() = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("readback"),
+                size: needed,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        let slot = self.readback.borrow();
+        let readback = slot.as_ref().unwrap();
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
                 texture: &root,
@@ -853,7 +871,7 @@ impl Wgpu {
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::ImageCopyBuffer {
-                buffer: &readback,
+                buffer: readback,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(bpr),
@@ -869,7 +887,8 @@ impl Wgpu {
         self.queue.submit(Some(encoder.finish()));
         drop(keep);
 
-        let slice = readback.slice(..);
+        // Map only the region we wrote (the cached buffer may be larger).
+        let slice = readback.slice(..needed);
         slice.map_async(wgpu::MapMode::Read, |_| {});
         self.device.poll(wgpu::Maintain::Wait);
         let data = slice.get_mapped_range();
@@ -880,6 +899,7 @@ impl Wgpu {
         }
         drop(data);
         readback.unmap();
+        drop(slot);
         // The atlas filled this frame; repack from scratch next frame (deferred
         // so this frame's already-placed glyphs stayed valid).
         if self.atlas_overflow.take() {
