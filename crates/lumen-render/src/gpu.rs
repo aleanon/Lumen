@@ -797,21 +797,24 @@ impl Wgpu {
         self.render_at_scale(list, width, height, 1.0, background)
     }
 
-    /// Render `list` (logical-px) to a `width`×`height` *physical* image,
-    /// scaling logical coordinates by `scale` (HiDPI, R1.6).
-    pub fn render_at_scale(
+    /// Encode the whole display list as the root layer into a freshly-resolved
+    /// `TARGET_FORMAT` texture, recording the passes into `encoder`. Shared by the
+    /// CPU-readback path ([`render_at_scale`](Self::render_at_scale)) and the
+    /// direct-to-surface present path. The viewport uniform + its bind group are
+    /// parked in `keep` so they outlive `submit`.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_root(
         &self,
-        list: &DisplayList,
+        encoder: &mut wgpu::CommandEncoder,
+        keep: &mut KeepAlive,
         width: u32,
         height: u32,
-        scale: f64,
+        list: &DisplayList,
         background: Color,
-    ) -> RgbaImage {
+        scale: f64,
+    ) -> wgpu::Texture {
         use wgpu::util::DeviceExt;
         let device = &self.device;
-        let mut keep = KeepAlive::default();
-        let mut encoder = device.create_command_encoder(&Default::default());
-
         // Shared viewport uniform: physical size + the logical→physical scale.
         let viewport = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("viewport"),
@@ -827,18 +830,45 @@ impl Wgpu {
                 resource: viewport.as_entire_binding(),
             }],
         });
-
         // The whole list is the root layer, cleared to the opaque background.
         let root = self.encode_layer(
             device,
-            &mut encoder,
-            &mut keep,
+            encoder,
+            keep,
             &viewport_bg,
             width,
             height,
             &list.cmds,
             list,
             Some(background),
+            scale,
+        );
+        keep.buffers.push(viewport);
+        keep.binds.push(viewport_bg);
+        root
+    }
+
+    /// Render `list` (logical-px) to a `width`×`height` *physical* image,
+    /// scaling logical coordinates by `scale` (HiDPI, R1.6), reading the result
+    /// back to a CPU [`RgbaImage`] (the golden/headless/agent path).
+    pub fn render_at_scale(
+        &self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+    ) -> RgbaImage {
+        let device = &self.device;
+        let mut keep = KeepAlive::default();
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let root = self.encode_root(
+            &mut encoder,
+            &mut keep,
+            width,
+            height,
+            list,
+            background,
             scale,
         );
 
