@@ -15,7 +15,9 @@ use lumen_core::events::{
 };
 use lumen_render::RgbaImage;
 use lumen_widgets::{App, Headless};
+#[cfg(feature = "agent")]
 use std::io::{BufRead, Write};
+#[cfg(feature = "agent")]
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -41,6 +43,7 @@ impl RunExt for App {
 /// currently just an agent JSON-RPC request awaiting a reply.
 enum ShellEvent {
     /// One JSON-RPC request line; the response string is sent back on `reply`.
+    #[cfg(feature = "agent")]
     Agent {
         req: String,
         reply: mpsc::Sender<String>,
@@ -72,6 +75,7 @@ pub fn run(app: App, size: Size) {
     let event_loop = EventLoop::<ShellEvent>::with_user_event()
         .build()
         .expect("event loop");
+    #[cfg(feature = "agent")]
     if let Some(addr) = std::env::var_os("LUMEN_AGENT_ADDR") {
         let addr = addr.to_string_lossy().into_owned();
         let proxy = event_loop.create_proxy();
@@ -147,6 +151,7 @@ fn watch_styles(path: &str, proxy: EventLoopProxy<ShellEvent>) {
 }
 
 /// Accept agent connections and bridge each request line onto the event loop.
+#[cfg(feature = "agent")]
 fn serve_agent(addr: &str, proxy: EventLoopProxy<ShellEvent>) {
     let listener = match TcpListener::bind(addr) {
         Ok(l) => l,
@@ -163,6 +168,7 @@ fn serve_agent(addr: &str, proxy: EventLoopProxy<ShellEvent>) {
 }
 
 /// Serve one connection: each line is a JSON-RPC request; reply with one line.
+#[cfg(feature = "agent")]
 fn agent_conn(stream: TcpStream, proxy: EventLoopProxy<ShellEvent>) {
     let Ok(read_half) = stream.try_clone() else {
         return;
@@ -229,19 +235,21 @@ impl ApplicationHandler<ShellEvent> for Shell {
     /// resulting frame so the window reflects the action, and reply.
     fn user_event(&mut self, _el: &ActiveEventLoop, event: ShellEvent) {
         match event {
+            #[cfg(feature = "agent")]
             ShellEvent::Agent { req, reply } => {
                 let resp = if let Some(h) = &mut self.headless {
                     let v = serde_json::from_str::<serde_json::Value>(&req)
                         .unwrap_or(serde_json::Value::Null);
-                    let out = lumen_agent::dispatch(h, &v);
-                    if let Some(p) = &mut self.presenter {
-                        p.present(&h.screenshot());
-                    }
-                    out.to_string()
+                    lumen_agent::dispatch(h, &v).to_string()
                 } else {
                     r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"app not ready"}}"#
                         .to_string()
                 };
+                // Reflect any state change the action caused in the window (works
+                // for both the direct-present and CPU-fallback paths).
+                if let Some(w) = &self.window {
+                    w.request_redraw();
+                }
                 let _ = reply.send(resp);
             }
             ShellEvent::ReloadStyles(src) => {

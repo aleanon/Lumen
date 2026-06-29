@@ -15,10 +15,16 @@ kurbo = { workspace = true }
 # Desktop windowing + GPU surface presentation (ADR-001).
 winit = { workspace = true }
 wgpu = { workspace = true }
-# Optional embedded agent endpoint (LUMEN_AGENT_ADDR): lets an AI observe and
-# drive the *live* window over the same JSON-RPC the headless agent speaks.
-lumen-agent = { workspace = true }
-serde_json = { workspace = true }
+# Embedded agent endpoint (LUMEN_AGENT_ADDR): lets an AI observe and drive the
+# *live* window over the same JSON-RPC the headless agent speaks. Behind the
+# default-OFF `agent` feature — production builds ship without the RPC server.
+lumen-agent = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 # Optional `.lss` live-reload watcher (LUMEN_WATCH_LSS): tier-1 desktop hot
 # reload into the running window (C1).
 notify = { workspace = true }
+
+[features]
+# Compile in the live-window agent RPC server. Off by default: a normal build has
+# no dormant TCP endpoint / LUMEN_AGENT_ADDR handling and doesn't link lumen-agent.
+agent = ["dep:lumen-agent", "dep:serde_json"]

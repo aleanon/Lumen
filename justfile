@@ -45,10 +45,11 @@ run-agent name addr="127.0.0.1:9230":
     set -euo pipefail
     name="{{name}}"
     export LUMEN_AGENT_ADDR="{{addr}}"
+    # The agent RPC server is behind lumen-shell's default-off `agent` feature.
     if [[ -f "examples/$name/examples/win.rs" ]]; then
-        cargo run -q --release -p "$name" --example "$name-win"
+        cargo run -q --release -p "$name" --example "$name-win" --features lumen-shell/agent
     else
-        cargo run -q --release -p iced-parity --example win -- "$name"
+        cargo run -q --release -p iced-parity --example win --features lumen-shell/agent -- "$name"
     fi
 
 # Run an example headlessly (no window): binaries run their smoke main, gallery names render a frame to PNG, library examples run their tests. `just render list` shows the gallery. Pass `--wgpu` for a gallery name to rasterize the linear/GPU picture.
