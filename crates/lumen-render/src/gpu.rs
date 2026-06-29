@@ -30,6 +30,15 @@ use std::borrow::Cow;
 pub struct Wgpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    /// Kept so a window surface can be created/queried after construction (the
+    /// renderer is built before the window exists). Enables direct-to-surface
+    /// present without a second wgpu device (1c).
+    instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
+    /// The live window surface + its blit pipeline, once `attach_surface` wires
+    /// one up. `None` for headless rendering. Lets the renderer present a frame
+    /// straight to the swapchain (GPU→GPU blit) with no CPU readback.
+    surface: Option<SurfaceState>,
     rect_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
     glyph_pipeline: wgpu::RenderPipeline,
@@ -64,6 +73,36 @@ pub struct Wgpu {
     /// (R1.3); the SDF rect fill is alpha-coverage based and unaffected.
     sample_count: u32,
 }
+
+/// A live window surface plus the fullscreen-blit pipeline that copies a rendered
+/// root texture into the swapchain (1c — direct present, no CPU readback).
+struct SurfaceState {
+    surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
+    pipeline: wgpu::RenderPipeline,
+    bgl: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+}
+
+/// Fullscreen-triangle blit: sample a texture, write it to the surface. Same as
+/// the shell's CPU-upload blit, but here the source is a GPU texture we just
+/// rendered, on the *same* device — so no readback/re-upload.
+const BLIT_SHADER: &str = r#"
+struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> VsOut {
+    var uv = array<vec2<f32>, 3>(vec2<f32>(0.0,0.0), vec2<f32>(2.0,0.0), vec2<f32>(0.0,2.0));
+    var o: VsOut;
+    o.uv = uv[i];
+    o.pos = vec4<f32>(uv[i] * 2.0 - 1.0, 0.0, 1.0);
+    o.pos.y = -o.pos.y;
+    return o;
+}
+@group(0) @binding(0) var t: texture_2d<f32>;
+@group(0) @binding(1) var s: sampler;
+@fragment
+fn fs(in: VsOut) -> @location(0) vec4<f32> { return textureSample(t, s, in.uv); }
+"#;
 
 /// One tessellated path vertex (logical px position + straight-alpha color).
 #[repr(C)]
@@ -764,6 +803,9 @@ impl Wgpu {
         Some(Wgpu {
             device,
             queue,
+            instance,
+            adapter,
+            surface: None,
             rect_pipeline,
             image_pipeline,
             glyph_pipeline,
@@ -783,6 +825,197 @@ impl Wgpu {
             ramp_sampler,
             sample_count,
         })
+    }
+
+    /// Wire up a live window surface for direct present (1c). Returns `false` if
+    /// this renderer's adapter can't present to the surface (rare multi-GPU /
+    /// headless-adapter case) — the caller then falls back to CPU readback + a
+    /// separate presenter. `width`/`height` are physical px.
+    pub fn attach_surface(
+        &mut self,
+        target: wgpu::SurfaceTarget<'static>,
+        width: u32,
+        height: u32,
+    ) -> bool {
+        let Ok(surface) = self.instance.create_surface(target) else {
+            return false;
+        };
+        if !self.adapter.is_surface_supported(&surface) {
+            return false;
+        }
+        let caps = surface.get_capabilities(&self.adapter);
+        let format = caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(caps.formats[0]);
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: width.max(1),
+            height: height.max(1),
+            present_mode: wgpu::PresentMode::Fifo, // vsync
+            desired_maximum_frame_latency: 2,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+        };
+        surface.configure(&self.device, &config);
+
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("blit"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(BLIT_SHADER)),
+            });
+        let bgl = self
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("blit-bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("blit-layout"),
+                bind_group_layouts: &[&bgl],
+                push_constant_ranges: &[],
+            });
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("blit"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs",
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs",
+                    targets: &[Some(format.into())],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
+        let sampler = self
+            .device
+            .create_sampler(&wgpu::SamplerDescriptor::default());
+        self.surface = Some(SurfaceState {
+            surface,
+            config,
+            pipeline,
+            bgl,
+            sampler,
+        });
+        true
+    }
+
+    /// Reconfigure the attached surface to a new physical size. No-op headless.
+    pub fn resize_surface(&mut self, width: u32, height: u32) {
+        if let Some(surf) = self.surface.as_mut() {
+            surf.config.width = width.max(1);
+            surf.config.height = height.max(1);
+            surf.surface.configure(&self.device, &surf.config);
+        }
+    }
+
+    /// Render `list` straight to the attached swapchain (encode root texture →
+    /// GPU→GPU blit → present) — no CPU readback, one device. Returns `false` if
+    /// no surface is attached (caller uses the readback path). `width`/`height`
+    /// are physical px and must match the surface config (the shell keeps them in
+    /// sync via `resize_surface`).
+    pub fn present_to_surface(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+    ) -> bool {
+        let Some(surf) = self.surface.as_ref() else {
+            return false;
+        };
+        let Ok(frame) = surf.surface.get_current_texture() else {
+            return false;
+        };
+        let mut keep = KeepAlive::default();
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        let root = self.encode_root(
+            &mut encoder,
+            &mut keep,
+            width,
+            height,
+            list,
+            background,
+            scale,
+        );
+        let root_view = root.create_view(&Default::default());
+        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("blit-bg"),
+            layout: &surf.bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&root_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&surf.sampler),
+                },
+            ],
+        });
+        let sview = frame.texture.create_view(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("blit-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &sview,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&surf.pipeline);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+        drop(keep);
+        frame.present();
+        // Mirror render_at_scale: repack the atlas next frame if it overflowed.
+        if self.atlas_overflow.take() {
+            self.atlas.borrow_mut().clear();
+        }
+        true
     }
 
     /// Render `list` (logical-px) to a `width`×`height` *physical* image over
