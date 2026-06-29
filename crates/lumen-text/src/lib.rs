@@ -10,7 +10,7 @@ use kurbo::Size;
 use lumen_core::Color;
 use lumen_render::RgbaImage;
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontFamily, FontStack, Layout, LayoutContext,
+    Alignment, AlignmentOptions, FontContext, FontFamily, FontFamilyName, Layout, LayoutContext,
     PositionedLayoutItem, StyleProperty,
 };
 use std::borrow::Cow;
@@ -208,7 +208,12 @@ impl TextEngine {
                 shared: false,
                 system_fonts: false,
             });
-        let registered = collection.register_fonts(FONT.to_vec());
+        // Wrap the embedded font in a Blob over the `&'static` slice — no heap
+        // copy. fontique 0.11 takes an `Arc`-backed `Blob`, so the 15 MB bundled
+        // font is referenced in place rather than duplicated on the heap (the old
+        // `FONT.to_vec()` doubled its resident footprint).
+        let blob = parley::fontique::Blob::new(std::sync::Arc::new(FONT));
+        let registered = collection.register_fonts(blob, None);
         let family = registered
             .first()
             .and_then(|(id, _)| collection.family_name(*id))
@@ -230,7 +235,10 @@ impl TextEngine {
     /// shaping stays deterministic (ADR-005). Returns `None` if the bytes don't
     /// parse as a font. The bundled font remains the default.
     pub fn register_font(&mut self, bytes: Vec<u8>) -> Option<String> {
-        let registered = self.font_cx.collection.register_fonts(bytes);
+        let registered = self
+            .font_cx
+            .collection
+            .register_fonts(parley::fontique::Blob::from(bytes), None);
         let (id, _) = registered.first()?;
         self.font_cx
             .collection
@@ -271,9 +279,14 @@ impl TextEngine {
             })
             .collect();
 
-        let mut builder = self.layout_cx.ranged_builder(&mut self.font_cx, text, 1.0);
-        builder.push_default(StyleProperty::FontStack(FontStack::Single(
-            FontFamily::Named(Cow::Owned(default_family)),
+        // `quantize: false` keeps fractional logical-px layout — we rasterize at
+        // physical scale separately (for_each_glyph), so snapping positions to the
+        // logical grid here would coarsen HiDPI text.
+        let mut builder = self
+            .layout_cx
+            .ranged_builder(&mut self.font_cx, text, 1.0, false);
+        builder.push_default(StyleProperty::FontFamily(FontFamily::Single(
+            FontFamilyName::Named(Cow::Owned(default_family)),
         )));
         builder.push_default(StyleProperty::FontSize(base.font_size));
         builder.push_default(StyleProperty::FontWeight(parley::FontWeight::new(
@@ -286,7 +299,12 @@ impl TextEngine {
         // run is rasterized to its measured height. Default to 1.3 (a touch above
         // the ~1.25 where the bundled font's full glyph extent fits at every size)
         // so the box always reserves room for the whole glyph.
-        builder.push_default(StyleProperty::LineHeight(base.line_height.unwrap_or(1.3)));
+        // parley 0.11's LineHeight is an enum; FontSizeRelative matches the old
+        // f32-multiple-of-font-size semantics (its own default is now
+        // MetricsRelative, which would change spacing).
+        builder.push_default(StyleProperty::LineHeight(
+            parley::LineHeight::FontSizeRelative(base.line_height.unwrap_or(1.3)),
+        ));
         if base.letter_spacing != 0.0 {
             builder.push_default(StyleProperty::LetterSpacing(base.letter_spacing));
         }
@@ -299,9 +317,9 @@ impl TextEngine {
             builder.push(StyleProperty::Brush(style.color.to_srgb8()), range.clone());
             if let Some(fam) = &range_families[i] {
                 builder.push(
-                    StyleProperty::FontStack(FontStack::Single(FontFamily::Named(Cow::Owned(
-                        fam.clone(),
-                    )))),
+                    StyleProperty::FontFamily(FontFamily::Single(FontFamilyName::Named(
+                        Cow::Owned(fam.clone()),
+                    ))),
                     range.clone(),
                 );
             }
@@ -310,10 +328,12 @@ impl TextEngine {
         layout.break_all_lines(max_width);
         let parley_align = match align {
             TextAlign::Start => Alignment::Start,
-            TextAlign::Center => Alignment::Middle,
+            TextAlign::Center => Alignment::Center,
             TextAlign::End => Alignment::End,
         };
-        layout.align(max_width, parley_align, AlignmentOptions::default());
+        // `max_width` was already applied via break_all_lines; align() now takes
+        // just (alignment, options).
+        layout.align(parley_align, AlignmentOptions::default());
         TextBlock { layout }
     }
 
@@ -403,7 +423,8 @@ impl TextBlock {
         Selection::new(anchor, focus)
             .geometry(&self.layout)
             .into_iter()
-            .map(|r| (r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32))
+            // geometry() now yields (BoundingBox, line_index) pairs.
+            .map(|(r, _)| (r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32))
             .collect()
     }
 
@@ -526,7 +547,7 @@ impl TextBlock {
                 };
                 for glyph in glyph_run.positioned_glyphs() {
                     let key = GlyphKey {
-                        glyph_id: glyph.id as u32,
+                        glyph_id: glyph.id,
                         ..key_base
                     };
                     GLYPH_CACHE.with(|c| {
@@ -542,7 +563,7 @@ impl TextBlock {
                                 render.embolden(strength);
                             }
                             render
-                                .render(&mut scaler, glyph.id)
+                                .render(&mut scaler, glyph.id as u16)
                                 .map(|image| CachedGlyph {
                                     left: image.placement.left,
                                     top: image.placement.top,

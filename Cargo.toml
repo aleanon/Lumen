@@ -95,11 +95,15 @@ lumen = { path = "crates/lumen" }
 # whitelisted runtime deps (ADR-003) — added to crates as tasks need them
 kurbo = "0.11"
 taffy = "0.7"
-# `default-features = false` drops fontique's `system` font-enumeration backend
-# (windows/objc2/fontconfig) — Lumen only ever uses the bundled font
-# (`system_fonts: false`, ADR-005), so this changes nothing on desktop and makes
-# the text stack compile to wasm32.
-parley = { version = "0.3", default-features = false, features = ["std"] }
+# `complex-scripts` bundles the ICU dictionary line-break models (CJK/Thai/…);
+# without it parley panics ("no segmentation model for language: ja") on CJK.
+# `default-features = false` still drops fontique's `system` font-enumeration
+# backend — Lumen only ever uses the bundled font (ADR-005, `system_fonts:
+# false`), which also keeps the text stack wasm32-buildable.
+parley = { version = "0.11", default-features = false, features = [
+    "std",
+    "complex-scripts",
+] }
 swash = "0.2"
 wgpu = "22"
 lyon = "1.0"

@@ -105,12 +105,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "allocator-api2"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
-
-[[package]]
 name = "android-activity"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -535,18 +529,6 @@ dependencies = [
  "termcolor",
  "unicode-width",
 ]
-
-[[package]]
-name = "color"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa7f99105610438d4b3ee7ae8e453c2990e325c806a14d71e8ea937d584c5289"
-
-[[package]]
-name = "color"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ec7c5eb7a16992b1904d76c517d170ab353b0e0b3d5a0c81a8a0cd1037893cf"
 
 [[package]]
 name = "color_palette"
@@ -1001,13 +983,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
-name = "font-types"
-version = "0.8.4"
+name = "foldhash"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fa6a5e5a77b5f3f7f9e32879f484aa5b3632ddfbe568a16266c904a6f32cdaf"
-dependencies = [
- "bytemuck",
-]
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "font-types"
@@ -1019,17 +998,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "fontique"
-version = "0.3.0"
+name = "font-types"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b5fcb214137f01bc842c4fd633236255c51f8a24c6d3923eb8361c6d0940737"
+checksum = "81bf886368962a7d8456f136073ed33ed1b0770c690d2063731bb6a776e99f33"
 dependencies = [
  "bytemuck",
- "hashbrown 0.15.5",
- "icu_locid",
+]
+
+[[package]]
+name = "fontique"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e04c4750a17111ebd77c3e0aea00476ce33f59235bc4d9e7f0aded5033ad3fc"
+dependencies = [
+ "hashbrown 0.17.1",
+ "linebender_resource_handle",
  "memmap2",
- "peniko 0.3.2",
- "read-fonts 0.25.3",
+ "parlance",
+ "read-fonts 0.40.2",
  "smallvec",
 ]
 
@@ -1330,14 +1317,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "harfrust"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0589ddd0d2935dd2845827ac606b4081c266225d613b268ed2910f832889cab"
+dependencies = [
+ "bitflags 2.13.0",
+ "bytemuck",
+ "read-fonts 0.40.2",
+ "smallvec",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "allocator-api2",
- "equivalent",
- "foldhash",
+ "foldhash 0.1.5",
 ]
 
 [[package]]
@@ -1345,6 +1342,9 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+dependencies = [
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "hassle-rs"
@@ -1537,29 +1537,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "icu_locale"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5a396343c7208121dc86e35623d3dfe19814a7613cfd14964994cdc9c9a2e26"
+dependencies = [
+ "icu_collections",
+ "icu_locale_core",
+ "icu_locale_data",
+ "icu_provider",
+ "potential_utf",
+ "tinystr",
+ "zerovec",
+]
+
+[[package]]
 name = "icu_locale_core"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92219b62b3e2b4d88ac5119f8904c10f8f61bf7e95b640d25ba3075e6cac2c29"
 dependencies = [
  "displaydoc",
- "litemap 0.8.2",
- "tinystr 0.8.3",
- "writeable 0.6.3",
+ "litemap",
+ "serde",
+ "tinystr",
+ "writeable",
  "zerovec",
 ]
 
 [[package]]
-name = "icu_locid"
-version = "1.5.0"
+name = "icu_locale_data"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13acbb8371917fc971be86fc8057c41a64b521c184808a698c02acc242dbf637"
-dependencies = [
- "displaydoc",
- "litemap 0.7.5",
- "tinystr 0.7.6",
- "writeable 0.5.5",
-]
+checksum = "d5fdcc9ac77c6d74ff5cf6e65ef3181d6af32003b16fce3a77fb451d2f695993"
 
 [[package]]
 name = "icu_normalizer"
@@ -1609,12 +1619,35 @@ checksum = "139c4cf31c8b5f33d7e199446eff9c1e02decfc2f0eec2c8d71f65befa45b421"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
- "writeable 0.6.3",
+ "serde",
+ "stable_deref_trait",
+ "writeable",
  "yoke",
  "zerofrom",
  "zerotrie",
  "zerovec",
 ]
+
+[[package]]
+name = "icu_segmenter"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c0794db0b1a86193ac9c48768d0e6c52c54448e0870ad87907d456ee0dac964"
+dependencies = [
+ "icu_collections",
+ "icu_locale",
+ "icu_provider",
+ "icu_segmenter_data",
+ "potential_utf",
+ "utf8_iter",
+ "zerovec",
+]
+
+[[package]]
+name = "icu_segmenter_data"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4a2c462a4d927d512f5f882a033ddd62f33a05bb9f230d98f736ac3dc85938f"
 
 [[package]]
 name = "id-arena"
@@ -1944,12 +1977,6 @@ name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
-
-[[package]]
-name = "litemap"
-version = "0.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23fb14cb19457329c82206317a5663005a4d404783dc74f4252769b0d5f42856"
 
 [[package]]
 name = "litemap"
@@ -2788,16 +2815,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "parley"
-version = "0.3.0"
+name = "parlance"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d1c2b33b240c246f06cfceac48dc6c96040cb177d2aa5348899982b298b5577"
+checksum = "4b6937eda350acc1a5d05872c3cbf99fe78619c269096e2be3d4a350058639d5"
+
+[[package]]
+name = "parley"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0478b47dd9885a5e0a4f1c0782ffc42bf6ee8c41dea0917d7a9bcee3e6585fc"
 dependencies = [
  "fontique",
- "hashbrown 0.15.5",
- "peniko 0.3.2",
- "skrifa 0.26.6",
- "swash",
+ "harfrust",
+ "hashbrown 0.17.1",
+ "icu_normalizer",
+ "icu_properties",
+ "icu_segmenter",
+ "linebender_resource_handle",
+ "parlance",
+ "parley_data",
+ "skrifa 0.43.2",
+]
+
+[[package]]
+name = "parley_data"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a649e01a1acc917247ee147b56b8a1fa91824acf7117bd003b4204306d601255"
+dependencies = [
+ "icu_properties",
 ]
 
 [[package]]
@@ -2805,30 +2852,6 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
-name = "peniko"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c1f594c54ccdc9bd177a726885f066bf28d20e17169e31a8a1456217b1316b4"
-dependencies = [
- "color 0.2.4",
- "kurbo",
- "peniko 0.4.1",
- "smallvec",
-]
-
-[[package]]
-name = "peniko"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b44f9ddd2f480176b34278eb653ec1c8062f3b143a4e16eeff5ffac3334e288"
-dependencies = [
- "color 0.3.3",
- "kurbo",
- "linebender_resource_handle",
- "smallvec",
-]
 
 [[package]]
 name = "percent-encoding"
@@ -2935,6 +2958,8 @@ version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0103b1cef7ec0cf76490e969665504990193874ea05c85ff9bab8b911d0a0564"
 dependencies = [
+ "serde_core",
+ "writeable",
  "zerovec",
 ]
 
@@ -3156,22 +3181,23 @@ dependencies = [
 
 [[package]]
 name = "read-fonts"
-version = "0.25.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6f9e8a4f503e5c8750e4cd3b32a4e090035c46374b305a15c70bad833dca05f"
-dependencies = [
- "bytemuck",
- "font-types 0.8.4",
-]
-
-[[package]]
-name = "read-fonts"
 version = "0.39.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4ed38b89c2c77ff968c524145ad65fb010f38af5c7a224b53b81d47ac2daa81"
 dependencies = [
  "bytemuck",
  "font-types 0.11.3",
+]
+
+[[package]]
+name = "read-fonts"
+version = "0.40.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "487889119a5f19ff7c0a20637196bdc76b9f54ebec17e3588b5d75e4999f8773"
+dependencies = [
+ "bytemuck",
+ "font-types 0.12.0",
+ "once_cell",
 ]
 
 [[package]]
@@ -3538,22 +3564,22 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "skrifa"
-version = "0.26.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cc1aa86c26dbb1b63875a7180aa0819709b33348eb5b1491e4321fae388179d"
-dependencies = [
- "bytemuck",
- "read-fonts 0.25.3",
-]
-
-[[package]]
-name = "skrifa"
 version = "0.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c34617370ae968efb7161bb2beb517d9084659aae19e24b89e3db25b46e4564"
 dependencies = [
  "bytemuck",
  "read-fonts 0.39.2",
+]
+
+[[package]]
+name = "skrifa"
+version = "0.43.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cbe997d0f2480442d727488fbe2150779114cbe480ecdbadef58b33e0318ffb"
+dependencies = [
+ "bytemuck",
+ "read-fonts 0.40.2",
 ]
 
 [[package]]
@@ -3848,20 +3874,12 @@ dependencies = [
 
 [[package]]
 name = "tinystr"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9117f5d4db391c1cf6927e7bea3db74b9a1c1add8f7eda9ffd5364f40f57b82f"
-dependencies = [
- "displaydoc",
-]
-
-[[package]]
-name = "tinystr"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d"
 dependencies = [
  "displaydoc",
+ "serde_core",
  "zerovec",
 ]
 
@@ -4939,12 +4957,6 @@ dependencies = [
 
 [[package]]
 name = "writeable"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e9df38ee2d2c3c5948ea468a8406ff0db0b29ae1ffde1bcf20ef305bcc95c51"
-
-[[package]]
-name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
@@ -5097,6 +5109,7 @@ dependencies = [
  "displaydoc",
  "yoke",
  "zerofrom",
+ "zerovec",
 ]
 
 [[package]]
@@ -5105,6 +5118,7 @@ version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90f911cbc359ab6af17377d242225f4d75119aec87ea711a880987b18cd7b239"
 dependencies = [
+ "serde",
  "yoke",
  "zerofrom",
  "zerovec-derive",

@@ -29,7 +29,14 @@ fn caret_advances_left_to_right_single_line() {
     assert!(x_mid > x0, "caret moves right as the offset grows");
     assert!(x_end > x_mid, "caret at the end is rightmost");
     assert!(h > 0.0, "caret has the line height");
-    assert!(y0 >= 0.0);
+    // parley 0.11 distributes line leading such that the first line's box top
+    // sits a sub-pixel above the origin (~-0.6px here); the caret top tracks it.
+    // Allow that small negative — the visual goldens confirm text/carets still
+    // render correctly (widget padding absorbs it).
+    assert!(
+        y0 >= -1.0,
+        "caret top is at/near the line-box top (got {y0})"
+    );
     // End caret roughly matches the measured text width.
     assert!(
         (x_end - block.width()).abs() < 2.0,
