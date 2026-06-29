@@ -98,6 +98,20 @@ The scope-deferred items are all implemented (see Done). These are the remaining
 - **B3 codecs** — jpeg/webp/avif decode (new deps → ADR); PNG ships now.
 - **D1 motion** — gesture-driven interruptible animations + shared-element
   transitions on top of the `motion::spring` primitive.
+- **GPU-only lean build** (`cpu` feature, default-on) — *deferred 2026-06-30,
+  needs a product decision.* Let a known-GPU target `--no-default-features
+  --features wgpu` and strip the CPU rasterizer for a smaller binary. *Why
+  deferred, not trivial:* `tiny-skia` is also the framework's PNG codec
+  (`RgbaImage::to_png/from_png`, image assets, GPU-screenshot encode), so a full
+  drop needs PNG re-routed to the `png` crate; and `App::new`/`DefaultRenderer`
+  hard-bake `TinySkia` as the *infallible* default renderer, so the ergonomic
+  constructor must become conditional and a GPU-only build loses the GPU-less
+  fallback + headless render + CPU golden path. Bounded blast radius (workspace
+  tests/examples keep `cpu` on via feature unification). *First step:* gate the
+  `cpu` module + `TinySkia` + the `WgpuFallbackTinySkia` fallback arm behind a
+  default-on `cpu` feature; make `App::new`'s default-renderer constructor
+  `#[cfg(feature="cpu")]`; measure the binary-size delta. (Full plan lives in the
+  Track-1c plan doc, step 1c.8.)
 
 ### ✅ Done — in-sandbox, no new deps / no ADR (2026-06-28)
 
