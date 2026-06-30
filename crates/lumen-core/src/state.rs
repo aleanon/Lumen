@@ -159,6 +159,11 @@ struct Inner {
     dirty_set: HashSet<ScopeId>,
     batch_depth: u32,
     run_counter: u64,
+    /// Bumped on every value write (signal `set`, or a memo whose value actually
+    /// changed). The runtime compares it across frames to skip a rebuild when no
+    /// state changed since the last one. Conservative: `set` bumps even when the
+    /// written value equals the old one.
+    write_gen: u64,
 
     // restore
     pending: HashMap<String, serde_json::Value>,
@@ -233,6 +238,13 @@ impl Runtime {
     /// a write re-runs *exactly* the subscribed scopes.
     pub fn run_count(&self) -> u64 {
         self.inner.borrow().run_counter
+    }
+
+    /// A monotonic counter bumped on every value write (signal `set`, or a memo
+    /// whose value changed). The runtime compares it across frames to skip a
+    /// rebuild when nothing changed since the last one.
+    pub fn write_gen(&self) -> u64 {
+        self.inner.borrow().write_gen
     }
 
     /// Number of stored values.
@@ -469,6 +481,7 @@ impl Runtime {
             if let Some(slot) = b.slots.get_mut(&id) {
                 slot.value = Box::new(value);
             }
+            b.write_gen = b.write_gen.wrapping_add(1);
             let subs: Vec<ScopeId> = b
                 .slots
                 .get(&id)
@@ -501,6 +514,7 @@ impl Runtime {
         if !changed {
             return;
         }
+        b.write_gen = b.write_gen.wrapping_add(1);
         let subs: Vec<ScopeId> = match b.slots.get_mut(&id) {
             Some(slot) => {
                 slot.value = Box::new(value);

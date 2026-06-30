@@ -370,6 +370,10 @@ impl Element {
 pub struct FrameRequests {
     /// Any node asked to keep animating (redraw continuously).
     pub continuous: bool,
+    /// Whether the build read the virtual clock (`now_ms`). If so the frame is a
+    /// function of time, so the runtime must rebuild whenever the clock advances —
+    /// even for time-driven UI that didn't schedule a `wake_at`/`animate`.
+    pub read_clock: bool,
     /// Absolute virtual-clock deadlines (ms) at which the UI wants a frame.
     pub wakes: Vec<f64>,
     /// Background-work spawn requests this build emitted (the data layer). The
@@ -395,6 +399,7 @@ pub struct BuildCx<'a> {
     now_ms: f64,
     requests: RefCell<Vec<f64>>,
     continuous: Cell<bool>,
+    read_clock: Cell<bool>,
     pub(crate) tasks: RefCell<Vec<TaskRequest>>,
 }
 
@@ -405,6 +410,7 @@ impl<'a> BuildCx<'a> {
             now_ms,
             requests: RefCell::new(Vec::new()),
             continuous: Cell::new(false),
+            read_clock: Cell::new(false),
             tasks: RefCell::new(Vec::new()),
         }
     }
@@ -420,7 +426,10 @@ impl<'a> BuildCx<'a> {
     }
 
     /// The current virtual-clock time in milliseconds (for time-driven UI).
+    /// Reading it marks the frame time-dependent, so the runtime rebuilds on every
+    /// clock advance (even without an explicit `animate`/`wake_at`).
     pub fn now_ms(&self) -> f64 {
+        self.read_clock.set(true);
         self.now_ms
     }
 
@@ -448,6 +457,7 @@ impl<'a> BuildCx<'a> {
     pub(crate) fn take_requests(self) -> FrameRequests {
         FrameRequests {
             continuous: self.continuous.get(),
+            read_clock: self.read_clock.get(),
             wakes: self.requests.into_inner(),
             tasks: self.tasks.into_inner(),
         }

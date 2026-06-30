@@ -178,6 +178,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             last_dl: None,
             last_damage: lumen_render::Damage::Full,
             surface_attached: false,
+            last_build_gen: 0,
+            force_rebuild: false,
+            last_build_clock: 0.0,
         };
         let diags = if let Some(s) = restore {
             // Stage the snapshot *before* the first build so each signal adopts
@@ -336,15 +339,38 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// then presents straight to the swapchain instead of rasterizing to
     /// `self.frame`; `screenshot()` renders on demand. Always false headless.
     surface_attached: bool,
+    /// `Runtime::write_gen()` captured after the last rebuild — `pump` compares it
+    /// to the current value to detect whether any signal changed, and skips the
+    /// rebuild entirely when nothing did (idle/non-effecting frames cost ~µs).
+    last_build_gen: u64,
+    /// Forces the next `pump` to rebuild regardless of reactive state — set by
+    /// resize/scale/stylesheet/theme changes and `force_full_repaint`, which alter
+    /// the frame without going through a signal.
+    force_rebuild: bool,
+    /// `clock_ms` at the last rebuild. If the last build read the clock
+    /// (`requests.read_clock`), `pump` rebuilds whenever the clock has advanced
+    /// past this — so time-driven UI updates even without an explicit `animate`/
+    /// `wake_at`.
+    last_build_clock: f64,
 }
 
 impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
-    /// Process the input queue, then rebuild/layout/paint/semantics one turn.
+    /// Process the input queue, then rebuild/layout/paint/semantics one turn —
+    /// unless nothing that affects the frame changed, in which case the rebuild is
+    /// skipped entirely (idle/non-effecting frames cost ~µs instead of ~ms).
     pub fn pump(&mut self) -> FrameStats {
         // Apply any background-task results first (on the UI thread), so the build
         // sees fresh state. Keeps `pump` a pure function of (state, queued
-        // events + deferred ops, clock).
+        // events + deferred ops, clock). Deferred results write signals → bump the
+        // reactive write-gen, which the skip check below observes.
         self.rt.drain_deferred();
+        // Input-driven visual state that doesn't go through a signal (hover/focus/
+        // pressed). Snapshot it to detect changes from routing.
+        let visual_before = (
+            self.hovered_id.clone(),
+            self.focused_id.clone(),
+            self.pressed.clone(),
+        );
         let mut events = Vec::new();
         while let Some(ev) = self.input.pop() {
             events.push(ev);
@@ -352,7 +378,33 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         for ev in events {
             self.route(ev);
         }
-        self.rebuild();
+        // Rebuild only when something that affects the frame changed:
+        //  - a signal/memo write since the last build (reactive write-gen),
+        //  - input-driven visual state (hover/focus/pressed) changed,
+        //  - the UI is time-driven this tick (continuous, or a one-shot wake came
+        //    due since the last build),
+        //  - or a forced invalidation (resize/scale/stylesheet/theme/repaint).
+        // Conservative: anything uncertain forces a rebuild (set bumps the write-
+        // gen even on equal values; any visual delta counts).
+        let visual_changed = (
+            self.hovered_id.clone(),
+            self.focused_id.clone(),
+            self.pressed.clone(),
+        ) != visual_before;
+        // Time-driven iff the last build read the clock (or asked to animate) AND
+        // the clock has advanced since that build — then the frame would differ.
+        let time_driven = (self.requests.read_clock || self.requests.continuous)
+            && self.clock_ms != self.last_build_clock;
+        let needs_rebuild = self.force_rebuild
+            || self.rt.write_gen() != self.last_build_gen
+            || visual_changed
+            || time_driven;
+        if needs_rebuild {
+            self.rebuild(); // baselines force_rebuild + last_build_gen
+        } else {
+            // Nothing changed — keep the retained frame, report no damage.
+            self.last_damage = Damage::None;
+        }
         FrameStats {
             node_count: self.tree.len(),
             painted: self.last_damage != Damage::None,
@@ -374,6 +426,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     pub fn resize(&mut self, size: Size) {
         if size != self.size {
             self.size = size;
+            self.force_rebuild = true; // layout changed; not a signal write
             self.pump();
         }
     }
@@ -384,6 +437,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// each pumping, then another `pump()`). No-op-safe; ignores non-positive
     /// scale.
     pub fn prepare_resize(&mut self, size: Size, scale: f64) {
+        if size != self.size || (scale > 0.0 && scale != self.scale) {
+            self.force_rebuild = true; // make the following pump rebuild
+        }
         self.size = size;
         if scale > 0.0 {
             self.scale = scale;
@@ -407,6 +463,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     pub fn set_scale(&mut self, scale: f64) {
         if scale > 0.0 && scale != self.scale {
             self.scale = scale;
+            self.force_rebuild = true; // physical raster size changed
             self.pump();
         }
     }
@@ -479,6 +536,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// incremental result against a from-scratch render.
     pub fn force_full_repaint(&mut self) {
         self.last_dl = None;
+        self.force_rebuild = true;
         self.pump();
     }
 
@@ -961,6 +1019,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 ));
             }
         }
+        // Baseline the skip-rebuild state after every build, so the next pump only
+        // rebuilds on a real change (the build itself may bump the write-gen via
+        // memo recomputes — capture the post-build value).
+        self.force_rebuild = false;
+        self.last_build_gen = self.rt.write_gen();
+        self.last_build_clock = self.clock_ms;
     }
 
     fn rebuild_inner(&mut self) {
