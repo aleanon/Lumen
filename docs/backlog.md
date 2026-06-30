@@ -95,6 +95,16 @@ The scope-deferred items are all implemented (see Done). These are the remaining
   fixed once the parent's available space is known) and prototype the split behind
   a threshold. (Options ruled out: parallelizing inside one tree would need a
   taffy fork/upstream; replacing taffy contradicts ADR-004.)
+- **Incremental paint / retained per-subtree display lists** (perf; identified
+  2026-07-01). On a frame that *does* rebuild, ~928 µs (gallery) goes to glyph-run
+  + display-list emission — measured as the dominant remaining per-frame cost
+  after the shaped-text cache and skip-when-unchanged landed. *Why deferred, not
+  urgent:* a changed frame is already well within the 16 ms budget (resize is
+  smooth), so this is headroom, not a fix. *Idea:* retain per-subtree display
+  lists keyed by subtree identity, invalidate only dirty subtrees (reuse the
+  reactive dirty set + the existing damage diff), and re-emit just those — so a
+  counter tick re-emits the number, not the whole tree. Larger change; the
+  shaped-text cache (done) + skip-rebuild (done) captured the easy wins.
 - **B3 codecs** — jpeg/webp/avif decode (new deps → ADR); PNG ships now.
 - **D1 motion** — gesture-driven interruptible animations + shared-element
   transitions on top of the `motion::spring` primitive.
