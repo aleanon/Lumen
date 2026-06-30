@@ -762,8 +762,18 @@ impl Presenter {
             },
         );
 
-        let Ok(surface_tex) = self.surface.get_current_texture() else {
-            return;
+        // Reconfigure + retry once on a resize-outdated swapchain rather than
+        // dropping the frame (smooth resize on the CPU-fallback path too).
+        let surface_tex = match self.surface.get_current_texture() {
+            Ok(t) => t,
+            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+                self.surface.configure(&self.device, &self.config);
+                match self.surface.get_current_texture() {
+                    Ok(t) => t,
+                    Err(_) => return,
+                }
+            }
+            Err(_) => return,
         };
         let sview = surface_tex.texture.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());

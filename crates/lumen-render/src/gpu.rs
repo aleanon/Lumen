@@ -995,8 +995,19 @@ impl Wgpu {
         let Some(surf) = self.surface.as_ref() else {
             return false;
         };
-        let Ok(frame) = surf.surface.get_current_texture() else {
-            return false;
+        // A resize makes the swapchain Outdated/Lost until reconfigured; rather
+        // than drop the frame (visible stutter during a drag), reconfigure and
+        // retry once. Skipping here is what made resizing feel janky.
+        let frame = match surf.surface.get_current_texture() {
+            Ok(f) => f,
+            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+                surf.surface.configure(&self.device, &surf.config);
+                match surf.surface.get_current_texture() {
+                    Ok(f) => f,
+                    Err(_) => return false,
+                }
+            }
+            Err(_) => return false, // Timeout / OutOfMemory: skip this frame
         };
         let mut keep = KeepAlive::default();
         let mut encoder = self.device.create_command_encoder(&Default::default());
