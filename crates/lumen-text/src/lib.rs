@@ -187,11 +187,50 @@ impl TextStyle {
     }
 }
 
+/// Cache key for a shaped [`TextBlock`] — the **geometry-affecting** style only.
+/// Color is excluded (it doesn't affect shaping/metrics; the glyph run applies it
+/// at emission), so measure and a `.lss`-recolored paint share one entry.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct ShapeKey {
+    text: String,
+    size: u32,
+    weight: u32,
+    line_height: Option<u32>,
+    letter_spacing: u32,
+    family: Option<String>,
+    wrap: Option<u32>,
+    align: u8,
+}
+
+impl ShapeKey {
+    fn new(text: &str, s: &TextStyle, wrap: Option<f32>, align: TextAlign) -> ShapeKey {
+        ShapeKey {
+            text: text.to_string(),
+            size: s.font_size.to_bits(),
+            weight: s.weight.to_bits(),
+            line_height: s.line_height.map(f32::to_bits),
+            letter_spacing: s.letter_spacing.to_bits(),
+            family: s.family.clone(),
+            wrap: wrap.map(f32::to_bits),
+            align: align as u8,
+        }
+    }
+}
+
+/// Clear the shaped-layout cache above this many entries (bounds a long session
+/// with many distinct strings, e.g. an animated numeric readout).
+const SHAPE_CACHE_CAP: usize = 2048;
+
 /// The text engine: owns the bundled-font context. Reuse across layouts.
 pub struct TextEngine {
     font_cx: FontContext,
     layout_cx: LayoutContext<Brush>,
     family: String,
+    /// Cache of shaped blocks keyed by geometry-affecting style. parley shaping
+    /// is the dominant per-frame cost; the runtime shapes each label both to
+    /// measure it and to paint it, every frame — this collapses that to one
+    /// shaping per `(text, geometry, wrap)` and reuses it across frames.
+    shape_cache: HashMap<ShapeKey, TextBlock>,
 }
 
 impl Default for TextEngine {
@@ -226,6 +265,7 @@ impl TextEngine {
             },
             layout_cx: LayoutContext::new(),
             family,
+            shape_cache: HashMap::new(),
         }
     }
 
@@ -239,11 +279,39 @@ impl TextEngine {
             .font_cx
             .collection
             .register_fonts(parley::fontique::Blob::from(bytes), None);
+        // A new family can change fallback shaping for any string, so drop cached
+        // shaped blocks.
+        self.shape_cache.clear();
         let (id, _) = registered.first()?;
         self.font_cx
             .collection
             .family_name(*id)
             .map(|s| s.to_string())
+    }
+
+    /// Shape `text` at `base` style with optional `max_width` wrap and `align`,
+    /// returning a cached [`TextBlock`] (single-style runs only). The runtime
+    /// shapes each label to measure *and* to paint it every frame; this collapses
+    /// that to one parley shaping per `(text, geometry, wrap, align)` and reuses
+    /// it across frames. Color is not part of the key (it's applied at glyph-run
+    /// emission), so a `.lss` recolor still hits the same entry. For per-range
+    /// styles or color-baked rasterization, call [`layout`](Self::layout).
+    pub fn shaped(
+        &mut self,
+        text: &str,
+        base: &TextStyle,
+        max_width: Option<f32>,
+        align: TextAlign,
+    ) -> &TextBlock {
+        let key = ShapeKey::new(text, base, max_width, align);
+        if !self.shape_cache.contains_key(&key) {
+            let block = self.layout(text, base.clone(), &[], max_width, align);
+            if self.shape_cache.len() >= SHAPE_CACHE_CAP {
+                self.shape_cache.clear();
+            }
+            self.shape_cache.insert(key.clone(), block);
+        }
+        &self.shape_cache[&key]
     }
 
     /// Shape and lay out `text`. `ranges` apply per-byte-range style overrides

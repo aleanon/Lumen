@@ -1191,7 +1191,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             };
             let block = self
                 .text
-                .layout(txt, ts.clone(), &[], wrap, lumen_text::TextAlign::Start);
+                .shaped(txt, ts, wrap, lumen_text::TextAlign::Start);
             if wrap.is_none() {
                 style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
             }
@@ -1557,9 +1557,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // edit re-rasterizes ≤1 glyph. `block` also drives the caret /
                 // selection geometry below (same layout).
                 let scale = self.scale as f32;
-                let block =
-                    self.text
-                        .layout(txt, ts, &[], m.wrap_width, lumen_text::TextAlign::Start);
+                let block = self
+                    .text
+                    .shaped(txt, &ts, m.wrap_width, lumen_text::TextAlign::Start);
                 let (mut run, images) = block.glyph_run(tx as f32, ty as f32, scale);
                 // The run's bounding rect over *actual glyph ink* (a glyph can
                 // overhang the logical box via side bearings) — drives damage, so
