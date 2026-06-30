@@ -378,6 +378,18 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
     }
 
+    /// Set logical size + HiDPI scale **without** repainting — the caller pumps
+    /// once afterward. Lets the shell apply a coalesced resize and render the new
+    /// size in a single pump per frame (instead of `resize()` + `set_scale()`
+    /// each pumping, then another `pump()`). No-op-safe; ignores non-positive
+    /// scale.
+    pub fn prepare_resize(&mut self, size: Size, scale: f64) {
+        self.size = size;
+        if scale > 0.0 {
+            self.scale = scale;
+        }
+    }
+
     /// The current surface size (logical px).
     pub fn size(&self) -> Size {
         self.size

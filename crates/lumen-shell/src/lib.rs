@@ -341,17 +341,10 @@ impl ApplicationHandler<ShellEvent> for Shell {
             WindowEvent::Resized(s) => {
                 let (w, h) = (s.width.max(1), s.height.max(1));
                 self.size = Size::new(w as f64 / self.scale, h as f64 / self.scale);
-                // Reconfiguring the surface is cheap; do it now so the next present
-                // matches. The expensive relayout+repaint is deferred to
-                // RedrawRequested so a drag's event storm coalesces into one
-                // render per displayed frame (winit merges request_redraw calls).
-                if self.direct {
-                    if let Some(hl) = &mut self.headless {
-                        hl.resize_surface(w, h); // surface is physical
-                    }
-                } else if let Some(p) = &mut self.presenter {
-                    p.resize(w, h); // surface is physical
-                }
+                // Defer everything to RedrawRequested: a drag fires a storm of
+                // Resized events, so coalescing the surface reconfigure + relayout
+                // + present into one-per-frame avoids recreating the swapchain (and
+                // re-laying-out) many times per displayed frame.
                 self.pending_resize = true;
                 if let Some(w) = &self.window {
                     w.request_redraw();
@@ -359,17 +352,8 @@ impl ApplicationHandler<ShellEvent> for Shell {
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.scale = scale_factor;
-                // Physical surface size follows from the (unchanged) logical size.
-                let pw = (self.size.width * self.scale).round().max(1.0) as u32;
-                let ph = (self.size.height * self.scale).round().max(1.0) as u32;
-                if self.direct {
-                    if let Some(hl) = &mut self.headless {
-                        hl.resize_surface(pw, ph);
-                    }
-                } else if let Some(p) = &mut self.presenter {
-                    p.resize(pw, ph);
-                }
-                // Defer the rescale render+present to RedrawRequested (coalesced).
+                // Defer the rescale (surface reconfigure + render) to
+                // RedrawRequested (coalesced, same as Resized).
                 self.pending_resize = true;
                 if let Some(w) = &self.window {
                     w.request_redraw();
@@ -460,13 +444,7 @@ impl ApplicationHandler<ShellEvent> for Shell {
             }
             WindowEvent::RedrawRequested => {
                 if let Some(h) = &mut self.headless {
-                    // Apply a deferred resize/scale once per frame (coalesced from
-                    // the event storm).
                     let resized = std::mem::take(&mut self.pending_resize);
-                    if resized {
-                        h.set_scale(self.scale);
-                        h.resize(self.size);
-                    }
                     let now = Instant::now();
                     let elapsed_ms = (now - self.last_frame).as_secs_f64() * 1000.0;
                     self.last_frame = now;
@@ -476,10 +454,22 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     // as a function of now_ms(), there is no tick backlog to
                     // replay — just a single catch-up frame).
                     h.advance_clock(elapsed_ms.min(1000.0));
+                    if resized {
+                        // Apply the coalesced size/scale and reconfigure the
+                        // surface exactly once for this frame, then let the single
+                        // pump below render the new size (prepare_resize doesn't
+                        // pump, so there's no redundant relayout).
+                        let pw = (self.size.width * self.scale).round().max(1.0) as u32;
+                        let ph = (self.size.height * self.scale).round().max(1.0) as u32;
+                        if self.direct {
+                            h.resize_surface(pw, ph);
+                        } else if let Some(p) = &mut self.presenter {
+                            p.resize(pw, ph);
+                        }
+                        h.prepare_resize(self.size, self.scale);
+                    }
                     // Present only when the frame actually changed (R2): an idle
                     // tick repaints nothing, so the surface keeps its last frame.
-                    // A resize always presents (the new-size render landed in
-                    // resize/pump above, which the idle pump won't re-flag).
                     let stats = h.pump();
                     if stats.painted || resized {
                         if self.direct {
