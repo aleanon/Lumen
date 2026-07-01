@@ -275,6 +275,16 @@ fn handle<R: Renderer, E: Spawner>(
                 out["ink"] = json!({ "x": i.x0, "y": i.y0, "w": i.width(), "h": i.height() });
                 out["clipped"] = json!(over > 0.5);
             }
+            if let Some(tm) = node.text_metrics {
+                out["text_metrics"] = json!({
+                    "line_count": tm.line_count,
+                    "box_height": tm.box_height,
+                    "ascent": tm.ascent,
+                    "descent": tm.descent,
+                    "line_height": tm.line_height,
+                    "content_height": tm.content_height,
+                });
+            }
             Ok(out)
         }
         "ui.screenshot" => {

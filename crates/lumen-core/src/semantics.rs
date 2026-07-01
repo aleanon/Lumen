@@ -242,6 +242,27 @@ pub struct TextSelection {
     pub end: usize,
 }
 
+/// Typographic metrics for a text node (diagnostic aid alongside the
+/// authoritative [`ink`](SemanticsNode::ink) clip check). `content_height` is the
+/// font's *declared* extent (sum of per-line ascent+descent); exceeding
+/// `box_height` hints the line-height is tighter than the font wants, which names
+/// the line-height class behind a W0104 warning.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextMetrics {
+    /// Number of (wrapped) lines.
+    pub line_count: u32,
+    /// Reserved block height (logical px).
+    pub box_height: f32,
+    /// Max typographic ascent across lines.
+    pub ascent: f32,
+    /// Max typographic descent across lines.
+    pub descent: f32,
+    /// Max per-line box height across lines.
+    pub line_height: f32,
+    /// Sum of each line's ascent+descent — the glyph extent.
+    pub content_height: f32,
+}
+
 /// A semantic node (03 §1). Built during rebuild; `elide` marks pure-layout
 /// nodes whose children splice into the parent.
 #[derive(Clone, Debug)]
@@ -266,6 +287,8 @@ pub struct SemanticsNode {
     /// extend past `bounds` (descenders/side bearings); when it does, content is
     /// being clipped. `None` ⇒ ink coincides with `bounds`.
     pub ink: Option<Rect>,
+    /// Typographic metrics for text nodes (diagnostic aid; `None` for non-text).
+    pub text_metrics: Option<TextMetrics>,
     /// Supported actions.
     pub actions: Vec<Action>,
     /// Scroll info (scroll containers only).
@@ -293,6 +316,7 @@ impl SemanticsNode {
             states: Vec::new(),
             bounds: Rect::ZERO,
             ink: None,
+            text_metrics: None,
             actions: Vec::new(),
             scroll: None,
             text_selection: None,

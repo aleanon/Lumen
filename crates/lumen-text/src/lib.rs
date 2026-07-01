@@ -443,6 +443,25 @@ impl TextEngine {
     }
 }
 
+/// Typographic metrics for a laid-out [`TextBlock`] — a diagnostic aid that
+/// names the line-height class of clipping (`content_height > box_height`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextMetrics {
+    /// Number of (wrapped) lines.
+    pub line_count: usize,
+    /// The reserved block height (logical px) — [`TextBlock::height`].
+    pub box_height: f32,
+    /// Max typographic ascent across lines (logical px).
+    pub ascent: f32,
+    /// Max typographic descent across lines (logical px).
+    pub descent: f32,
+    /// Max per-line box height across lines (logical px).
+    pub line_height: f32,
+    /// Sum of each line's ascent+descent — the actual glyph extent. Exceeding
+    /// `box_height` means the line boxes are too short and glyphs are clipped.
+    pub content_height: f32,
+}
+
 /// A laid-out, measured block of text, renderable to an [`RgbaImage`].
 pub struct TextBlock {
     layout: Layout<Brush>,
@@ -462,6 +481,33 @@ impl TextBlock {
     /// The measured size.
     pub fn size(&self) -> Size {
         Size::new(self.width() as f64, self.height() as f64)
+    }
+
+    /// Typographic metrics for the laid-out block (diagnostic aid). `box_height`
+    /// is the reserved height ([`height`](Self::height)); `content_height` is the
+    /// sum of each line's *declared* ascent+descent. `content_height > box_height`
+    /// means the line-height is tighter than the font's declared extent — a hint,
+    /// not proof of clipping (actual glyph ink is usually tighter than the
+    /// declared metrics). The authoritative clip check is the rendered ink bounds
+    /// (`SemanticsNode.ink` / the W0104 audit).
+    pub fn metrics(&self) -> TextMetrics {
+        let mut m = TextMetrics {
+            line_count: 0,
+            box_height: self.layout.height(),
+            ascent: 0.0,
+            descent: 0.0,
+            line_height: 0.0,
+            content_height: 0.0,
+        };
+        for line in self.layout.lines() {
+            let lm = line.metrics();
+            m.line_count += 1;
+            m.ascent = m.ascent.max(lm.ascent);
+            m.descent = m.descent.max(lm.descent);
+            m.line_height = m.line_height.max(lm.line_height);
+            m.content_height += lm.ascent + lm.descent;
+        }
+        m
     }
 
     /// The caret geometry for byte offset `byte`: `(x, y, height)` in logical px

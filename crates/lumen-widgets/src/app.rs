@@ -158,6 +158,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             tree: Tree::new(),
             meta: HashMap::new(),
             node_ink: HashMap::new(),
+            node_text_metrics: HashMap::new(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
             sem_root: None,
             build_panic: None,
@@ -309,6 +310,9 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// past the layout box via descenders/side bearings). Absent ⇒ ink == box.
     /// Drives the clipping audit (W0104) and `ui.getLayout`'s `ink`.
     node_ink: HashMap<NodeIndex, kurbo::Rect>,
+    /// Typographic metrics per text node from the last paint (diagnostic aid;
+    /// surfaced on `SemanticsNode.text_metrics` and via `ui.getLayout`).
+    node_text_metrics: HashMap<NodeIndex, lumen_text::TextMetrics>,
     frame: RgbaImage,
     sem_root: Option<SemanticsNode>,
     /// If the last build panicked, the contained diagnostic (the previous good
@@ -1351,6 +1355,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let mut dl = DisplayList::new();
         let mut text_targets: Vec<lumen_render::TextTarget> = Vec::new();
         self.node_ink.clear(); // repopulated per node as text runs are emitted
+        self.node_text_metrics.clear();
         let order = self.tree.document_order();
         // Preorder depth of every node, and a partition into the main pass and the
         // overlay pass (nodes inside an `overlay` subtree). Overlays paint last so
@@ -1674,6 +1679,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // Record the glyph-ink bounds for this node so the clipping audit
                 // (W0104) and ui.getLayout can compare ink vs the layout box.
                 self.node_ink.insert(node, run_rect);
+                self.node_text_metrics.insert(node, block.metrics());
                 let run_id = dl.add_run(run);
                 dl.push(DrawCmd::GlyphRun {
                     run: run_id,
@@ -1902,6 +1908,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         s.bounds = self.tree.bounds(node);
         s.ink = self.node_ink.get(&node).copied();
+        s.text_metrics =
+            self.node_text_metrics
+                .get(&node)
+                .map(|m| lumen_core::semantics::TextMetrics {
+                    line_count: m.line_count as u32,
+                    box_height: m.box_height,
+                    ascent: m.ascent,
+                    descent: m.descent,
+                    line_height: m.line_height,
+                    content_height: m.content_height,
+                });
         let mut child = self.tree.first_child(node);
         while child.is_some() {
             s.children.push(self.build_semantics(child));
