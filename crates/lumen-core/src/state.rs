@@ -5,19 +5,25 @@
 //! subscribed scopes — never whole-tree work. Derived [`Memo`]s and [`effect`]s
 //! sit on the same graph.
 //!
-//! The **store is the only retained mutable state** (02 §4). Stored values are
-//! `Serialize + DeserializeOwned`; the reactive graph itself (subscriptions,
-//! effect closures) is runtime-only and rebuilt each frame, so a snapshot is
-//! pure field-tagged JSON that survives hot reloads and struct evolution
-//! (missing fields default, dropped fields warn with [`codes::W0002`]).
+//! The **store is the only retained mutable state** (02 §4). In the default
+//! `snapshot` build, stored values are `Serialize + DeserializeOwned`; the
+//! reactive graph itself (subscriptions, effect closures) is runtime-only and
+//! rebuilt each frame, so a snapshot is pure field-tagged JSON that survives hot
+//! reloads and struct evolution (missing fields default, dropped fields warn
+//! with `codes::W0002`). A lean build (`--no-default-features`) relaxes the
+//! [`State`] bound to `'static`, drops the snapshot API, and unlinks
+//! `serde_json` — the same signal source, without the serialization machinery.
 //!
 //! [`effect`]: Runtime::effect
 //!
 //! Not yet wired to a consumer (the headless `App`/`BuildCx` arrive in T0.9);
 //! `allow(dead_code)` is removed then.
 
+#[cfg(feature = "snapshot")]
 use crate::diagnostics::{codes, Diagnostic};
+#[cfg(feature = "snapshot")]
 use serde::de::DeserializeOwned;
+#[cfg(feature = "snapshot")]
 use serde::Serialize;
 use std::any::Any;
 use std::cell::RefCell;
@@ -26,15 +32,32 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
 
-/// Anything that can live in the state store: serializable and `'static`.
+/// Anything that can live in the state store.
+///
+/// With the default `snapshot` feature, stored values are serializable so the
+/// whole store can be checkpointed to field-tagged JSON (ADR-011) and read by
+/// the agent. In a lean build (`--no-default-features`) the bound relaxes to
+/// just `'static`: no per-value serialization, no `serde_json`. The `snapshot`
+/// build is the canonical superset — a program that compiles lean also compiles
+/// with `snapshot` on, provided its stored types stay serializable, so CI builds
+/// the superset.
+#[cfg(feature = "snapshot")]
 pub trait State: Serialize + DeserializeOwned + 'static {}
+#[cfg(feature = "snapshot")]
 impl<T: Serialize + DeserializeOwned + 'static> State for T {}
 
-/// Type-erased stored value that can still be serialized and downcast.
+/// Anything that can live in the state store (lean build: `'static` only).
+#[cfg(not(feature = "snapshot"))]
+pub trait State: 'static {}
+#[cfg(not(feature = "snapshot"))]
+impl<T: 'static> State for T {}
+
+/// Type-erased stored value: downcast always; serialize only under `snapshot`.
 /// Runtime-only (never part of a snapshot), so trait objects are fine here.
 trait StoredValue: 'static {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    #[cfg(feature = "snapshot")]
     fn to_json(&self) -> serde_json::Value;
 }
 impl<T: State> StoredValue for T {
@@ -44,6 +67,7 @@ impl<T: State> StoredValue for T {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+    #[cfg(feature = "snapshot")]
     fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
@@ -83,7 +107,8 @@ impl<T> Clone for Memo<T> {
 impl<T> Copy for Memo<T> {}
 
 /// The loading state of an async [`Resource`].
-#[derive(Clone, Serialize, serde::Deserialize)]
+#[derive(Clone)]
+#[cfg_attr(feature = "snapshot", derive(serde::Serialize, serde::Deserialize))]
 pub enum ResourceState<T> {
     /// The backing future has not yet resolved.
     Loading,
@@ -170,13 +195,16 @@ struct Inner {
     write_gen: u64,
 
     // restore
+    #[cfg(feature = "snapshot")]
     pending: HashMap<String, serde_json::Value>,
+    #[cfg(feature = "snapshot")]
     restore_diags: Vec<Diagnostic>,
 }
 
 /// A self-describing snapshot of the entire store (ADR-011): field-tagged JSON,
 /// keyed by each value's stable string key.
-#[derive(Clone, Serialize, serde::Deserialize)]
+#[cfg(feature = "snapshot")]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct StateSnapshot(pub serde_json::Value);
 
 /// The reactive runtime and state store. Cheap to clone (shared, interior
@@ -265,10 +293,15 @@ impl Runtime {
 
     /// Create or re-attach a signal. The key is the identity path + name (02
     /// §4); on restore, a staged snapshot value is adopted instead of `init`.
+    // Not the `entry` pattern: the slot value is built from `init`/`pending`,
+    // and `b` is borrowed for the pending map in between.
+    #[allow(clippy::map_entry)]
     pub fn signal<T: State>(&self, key: &str, init: impl FnOnce() -> T) -> Signal<T> {
         let id = self.intern(key);
         let mut b = self.inner.borrow_mut();
         if !b.slots.contains_key(&id) {
+            // On restore, adopt a staged snapshot value instead of `init`.
+            #[cfg(feature = "snapshot")]
             let value: Box<dyn StoredValue> = match b.pending.remove(key) {
                 Some(json) => match deser_lenient::<T>(key, &json) {
                     Ok((t, diags)) => {
@@ -282,6 +315,8 @@ impl Runtime {
                 },
                 None => Box::new(init()),
             };
+            #[cfg(not(feature = "snapshot"))]
+            let value: Box<dyn StoredValue> = Box::new(init());
             b.slots.insert(
                 id,
                 Slot {
@@ -382,6 +417,7 @@ impl Runtime {
     // --- snapshot / restore (Checkpoint pieces) -----------------------------
 
     /// Serialize the whole store to field-tagged JSON keyed by stable string key.
+    #[cfg(feature = "snapshot")]
     pub fn snapshot(&self) -> StateSnapshot {
         let b = self.inner.borrow();
         let mut map = serde_json::Map::new();
@@ -395,6 +431,7 @@ impl Runtime {
     /// Stage a snapshot for restoration. Values are adopted as signals are
     /// (re-)created; call [`Runtime::finish_restore`] afterward to collect
     /// `W0002` diagnostics for fields/keys that no longer exist.
+    #[cfg(feature = "snapshot")]
     pub fn load_pending(&self, snap: StateSnapshot) {
         let mut b = self.inner.borrow_mut();
         b.pending.clear();
@@ -408,6 +445,7 @@ impl Runtime {
 
     /// Finish a restore: returns accumulated `W0002` diagnostics, including one
     /// per snapshot key that was never re-attached (whole dropped value).
+    #[cfg(feature = "snapshot")]
     pub fn finish_restore(&self) -> Vec<Diagnostic> {
         let mut b = self.inner.borrow_mut();
         let mut diags = std::mem::take(&mut b.restore_diags);
@@ -661,6 +699,7 @@ impl<T: State + Clone> Resource<T> {
 /// type's `serde(default)`) and reporting dropped (now-unknown) fields as
 /// `W0002`. On hard failure, returns a single `W0002` so the caller can fall
 /// back to the initializer.
+#[cfg(feature = "snapshot")]
 fn deser_lenient<T: State>(
     key: &str,
     json: &serde_json::Value,
@@ -692,6 +731,7 @@ fn deser_lenient<T: State>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "snapshot")]
     use serde::Deserialize;
     use std::cell::Cell;
 
@@ -761,6 +801,7 @@ mod tests {
         assert_eq!(m.get(&rt), 10);
     }
 
+    #[cfg(feature = "snapshot")]
     #[test]
     fn snapshot_restore_is_lossless_for_1k_signals() {
         let rt = Runtime::new();
@@ -785,6 +826,7 @@ mod tests {
         assert!(rt2.finish_restore().is_empty(), "no diagnostics expected");
     }
 
+    #[cfg(feature = "snapshot")]
     #[test]
     fn struct_evolution_defaults_missing_and_warns_dropped() {
         #[derive(Serialize, Deserialize)]

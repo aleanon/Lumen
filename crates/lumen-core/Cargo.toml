@@ -7,15 +7,28 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# `snapshot` (default): the serializable / introspectable build. Stored signal
+# values gain a `Serialize + DeserializeOwned` bound so the store can be
+# checkpointed to field-tagged JSON (ADR-011) and the semantics tree serialized
+# for the agent. Turn it off (`--no-default-features`) for a lean build: the
+# `State` bound relaxes to `'static`, per-value JSON goes away, and `serde_json`
+# leaves the dependency tree. `snapshot` is the canonical superset built in CI;
+# lean is the optimized subset that ships.
+default = ["snapshot"]
+snapshot = ["dep:serde_json"]
+
 [dependencies]
 kurbo = { workspace = true }
 smol_str = { workspace = true, features = ["serde"] }
 bitflags = { workspace = true }
 serde = { workspace = true }
-# Snapshot format is self-describing field-tagged JSON (ADR-011), so serde_json
-# is a runtime dependency, not dev-only.
-serde_json = { workspace = true }
+# Self-describing field-tagged JSON (ADR-011) for the state snapshot + the
+# semantics doc. Only linked in a `snapshot` build.
+serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
 jsonschema = { workspace = true }
+# Tests always exercise the JSON paths (default features are on for `cargo test`).
+serde_json = { workspace = true }

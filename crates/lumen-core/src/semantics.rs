@@ -11,6 +11,7 @@
 
 use crate::identity::StableId;
 use kurbo::Rect;
+#[cfg(feature = "snapshot")]
 use serde_json::{json, Value};
 
 /// Accessible role (closed set, 03 §1). Extend only via the decision log.
@@ -349,6 +350,7 @@ impl SemanticsNode {
         c
     }
 
+    #[cfg(feature = "snapshot")]
     fn to_json(&self) -> Value {
         let mut obj = serde_json::Map::new();
         obj.insert("node".into(), json!(format!("node-{}", self.node)));
@@ -419,7 +421,9 @@ pub struct SemanticsDoc {
 
 impl SemanticsDoc {
     /// Serialize to the `lumen-semantics/1` JSON shape. `raw` returns the
-    /// unelided tree (`ui.getTree {raw:true}`).
+    /// unelided tree (`ui.getTree {raw:true}`). Available only in a `snapshot`
+    /// build (the agent's introspection path); lean builds omit it.
+    #[cfg(feature = "snapshot")]
     pub fn to_json(&self, raw: bool) -> Value {
         let root = if raw {
             self.root.clone()
