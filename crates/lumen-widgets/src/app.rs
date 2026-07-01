@@ -116,34 +116,41 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
 
     /// Run headless at `size` (no OS dependencies).
     pub fn run_headless(self, size: Size) -> Headless<R, E> {
-        self.boot(size, None).0
+        let mut h = self.into_headless(size, None);
+        h.rebuild();
+        h
     }
 
     /// Run headless, restoring a prior [`AppSnapshot`] (tier-3 restart,
     /// ADR-011). Returns the instance plus any `W0002` drop diagnostics raised
-    /// when a snapshot value no longer has a matching signal.
+    /// when a snapshot value no longer has a matching signal. Snapshot builds
+    /// only.
+    #[cfg(feature = "snapshot")]
     pub fn run_headless_restored(
         self,
         size: Size,
         snap: AppSnapshot,
     ) -> (Headless<R, E>, Vec<lumen_core::Diagnostic>) {
-        self.boot(size, Some(snap))
-    }
-
-    fn boot(
-        self,
-        size: Size,
-        restore: Option<AppSnapshot>,
-    ) -> (Headless<R, E>, Vec<lumen_core::Diagnostic>) {
         // Focus is host state (not in the reactive store), so it is carried on
         // the snapshot and re-applied directly.
-        let focused = restore.as_ref().and_then(|s| s.focused.clone());
+        let mut h = self.into_headless(size, snap.focused.clone());
+        // Stage the snapshot *before* the first build so each signal adopts its
+        // restored value as it is (re-)created (Checkpoint protocol).
+        h.rt.load_pending(snap.state);
+        h.rebuild();
+        let diags = h.rt.finish_restore();
+        (h, diags)
+    }
+
+    /// Construct the headless instance (fonts registered, focus applied) without
+    /// the first build. Shared by the plain and restore boot paths.
+    fn into_headless(self, size: Size, focused: Option<StableId>) -> Headless<R, E> {
         // Register app fonts before the first build so styled text can select them.
         let mut text = TextEngine::new();
         for bytes in self.fonts {
             text.register_font(bytes);
         }
-        let mut h = Headless {
+        let h = Headless {
             root: self.root,
             rt: Runtime::new(),
             size,
@@ -184,23 +191,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             force_rebuild: false,
             last_build_clock: 0.0,
         };
-        let diags = if let Some(s) = restore {
-            // Stage the snapshot *before* the first build so each signal adopts
-            // its restored value as it is (re-)created (Checkpoint protocol).
-            h.rt.load_pending(s.state);
-            h.rebuild();
-            h.rt.finish_restore()
-        } else {
-            h.rebuild();
-            Vec::new()
-        };
-        (h, diags)
+        h
     }
 }
 
 /// A tier-3 snapshot of a running app: the reactive store (every signal —
 /// including scroll offsets) plus focus. Serializable, so it can be written
-/// before a process restart and restored afterwards (ADR-011).
+/// before a process restart and restored afterwards (ADR-011). Snapshot builds
+/// only.
+#[cfg(feature = "snapshot")]
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct AppSnapshot {
     state: lumen_core::state::StateSnapshot,
@@ -596,7 +595,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     }
 
     /// Capture a tier-3 [`AppSnapshot`] (reactive store + focus) for a later
-    /// restart via [`App::run_headless_restored`].
+    /// restart via [`App::run_headless_restored`]. Snapshot builds only.
+    #[cfg(feature = "snapshot")]
     pub fn snapshot(&self) -> AppSnapshot {
         AppSnapshot {
             state: self.rt.snapshot(),
@@ -646,7 +646,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .min_by(|a, b| a.total_cmp(b))
     }
 
-    /// The semantics document as JSON (`lumen-semantics/1`, 03 §1).
+    /// The semantics document as JSON (`lumen-semantics/1`, 03 §1). Snapshot
+    /// builds only (the agent introspection path).
+    #[cfg(feature = "snapshot")]
     pub fn semantics_json(&self) -> serde_json::Value {
         self.semantics_doc().to_json(false)
     }
@@ -1222,7 +1224,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
     /// Computed styles for the node a `selector` resolves to (03 §3 ui.getStyles,
     /// 04 §7 value serialization). Returns `null` if the selector doesn't resolve
-    /// to exactly one node.
+    /// to exactly one node. Snapshot builds only (the agent introspection path).
+    #[cfg(feature = "snapshot")]
     pub fn get_styles(&self, selector: &str) -> serde_json::Value {
         let root = self.semantics_doc().root.elided();
         let Ok(id) = lumen_core::semantics::resolve_one(&root, selector) else {

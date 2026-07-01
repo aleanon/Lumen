@@ -6,9 +6,11 @@
 //! and the gallery; the remaining v1 properties slot in the same way.
 
 use crate::ast::{Unit, Value};
+#[cfg(feature = "snapshot")]
 use crate::Origin;
 use lumen_core::Color;
 use lumen_layout::{Dim, Display, Edges, FlexDirection};
+#[cfg(feature = "snapshot")]
 use serde_json::{json, Value as Json};
 use std::collections::HashMap;
 
@@ -302,10 +304,13 @@ fn as_flex_direction(v: &Value) -> Option<FlexDirection> {
 /// Serialize a computed value to the `ui.getStyles` canonical form (04 §7):
 /// `{ "value": <canonical>, "source": "theme|stylesheet|inline|default" }`.
 /// Canonical forms: lengths `{px}`, colors `#rrggbbaa`, enums as strings.
+/// Introspection surface — present only in a `snapshot` build.
+#[cfg(feature = "snapshot")]
 pub fn computed_json(value: &Value, origin: Origin) -> Json {
     json!({ "value": canonical(value), "source": source_str(origin) })
 }
 
+#[cfg(feature = "snapshot")]
 fn source_str(origin: Origin) -> &'static str {
     match origin {
         Origin::Default => "default",
@@ -316,6 +321,7 @@ fn source_str(origin: Origin) -> &'static str {
 }
 
 /// The canonical JSON form of a value (04 §7).
+#[cfg(feature = "snapshot")]
 pub fn canonical(value: &Value) -> Json {
     match value {
         Value::Number(n, Unit::Px | Unit::None) => json!({ "px": n }),

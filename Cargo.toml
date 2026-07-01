@@ -76,12 +76,17 @@ publish = false
 # Every dependency version is pinned in exactly one place (ADR-003).
 # Only the ADR-003 whitelist + dev-tooling may appear here.
 [workspace.dependencies]
-# internal crates
-lumen-core = { path = "crates/lumen-core" }
+# internal crates.
+# lumen-core / lumen-style default to *no* features so intermediate crates
+# (render/text/layout) pull them lean; the `snapshot` capability is forwarded
+# back on by the crates that need it (widgets, and thus apps by default). This
+# feature-forwarding is what lets a `--no-default-features` app binary actually
+# drop `serde_json` app-wide despite Cargo's feature unification.
+lumen-core = { path = "crates/lumen-core", default-features = false }
 lumen-layout = { path = "crates/lumen-layout" }
 lumen-render = { path = "crates/lumen-render" }
 lumen-text = { path = "crates/lumen-text" }
-lumen-style = { path = "crates/lumen-style" }
+lumen-style = { path = "crates/lumen-style", default-features = false }
 lumen-widgets = { path = "crates/lumen-widgets" }
 lumen-shell = { path = "crates/lumen-shell" }
 lumen-test = { path = "crates/lumen-test" }

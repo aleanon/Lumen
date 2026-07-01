@@ -7,8 +7,17 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# `snapshot` (default): the `ui.getStyles` JSON serialization (`computed_json`
+# / `canonical`). Off in a lean build — drops `serde_json`. See lumen-core.
+default = ["snapshot"]
+snapshot = ["dep:serde_json"]
+
 [dependencies]
 lumen-core = { workspace = true }
 lumen-layout = { workspace = true }
 kurbo = { workspace = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
 serde_json = { workspace = true }

@@ -10,8 +10,13 @@ publish = false
 [features]
 # GPU backend, forwarded to lumen-render (default-on). Gates the ShaderWidget;
 # `--no-default-features` drops it (build the crate directly for the effect).
-default = ["wgpu"]
+# `snapshot` (default-on): the serializable / introspectable surfaces —
+# AppSnapshot restore, `semantics_json`, `get_styles`, and the `design` import.
+# Forwards to lumen-core / lumen-style; a lean GPU app builds with
+# `--no-default-features --features wgpu` and drops `serde_json` app-wide.
+default = ["wgpu", "snapshot"]
 wgpu = ["lumen-render/wgpu"]
+snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot"]
 
 [dependencies]
 lumen-core = { workspace = true }
@@ -21,5 +26,5 @@ lumen-text = { workspace = true }
 lumen-style = { workspace = true }
 kurbo = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, optional = true }
 accesskit = { workspace = true }

@@ -16,6 +16,9 @@ pub mod boundary;
 pub mod button;
 pub mod check_box;
 pub mod container;
+/// Design-spec (JSON) → `.lss` import — an agent/tooling surface, so it lives
+/// behind `snapshot` (drops `serde_json` in a lean build).
+#[cfg(feature = "snapshot")]
 pub mod design;
 pub mod element;
 pub mod forms;
@@ -50,7 +53,9 @@ pub mod widgets_m1;
 pub mod widgets_m3;
 pub mod widgets_m4;
 
-pub use app::{center, App, AppSnapshot, FrameStats, Headless, ReloadResult};
+#[cfg(feature = "snapshot")]
+pub use app::AppSnapshot;
+pub use app::{center, App, FrameStats, Headless, ReloadResult};
 pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
 /// The data layer: executors + the `Sink` background work pushes results through.
 pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
