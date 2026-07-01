@@ -497,6 +497,46 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.frame.clone()
     }
 
+    /// Render a magnified crop of `region` (logical px) at `scale_mul`× the normal
+    /// scale, with optional debug `outlines` (rect + color, drawn as 1px borders)
+    /// — e.g. a node's box and ink bounds. Lets a small defect (a clipped
+    /// descender) be inspected at zoom instead of hunting for it in a full-window
+    /// screenshot. Deterministic (same CPU/GPU render path); overlays are opt-in.
+    pub fn screenshot_zoom(
+        &mut self,
+        region: kurbo::Rect,
+        scale_mul: f64,
+        outlines: &[(kurbo::Rect, Color)],
+    ) -> RgbaImage {
+        let (mut dl, _) = self.build_display_list();
+        for (r, color) in outlines {
+            dl.push(DrawCmd::Rect {
+                rect: *r,
+                brush: Brush::Solid(Color::TRANSPARENT),
+                radii: CornerRadii::all(0.0),
+                border: Some(Border {
+                    width: 1.0,
+                    color: *color,
+                }),
+            });
+        }
+        let zoom = (self.scale * scale_mul).max(0.1);
+        let pw = (self.size.width * zoom).round().max(1.0) as u32;
+        let ph = (self.size.height * zoom).round().max(1.0) as u32;
+        let bg = Color::srgb8(255, 255, 255, 255);
+        let full = self.renderer.render_frame(&dl, pw, ph, zoom, bg);
+        let x0 = (region.x0 * zoom).floor().clamp(0.0, pw as f64) as u32;
+        let y0 = (region.y0 * zoom).floor().clamp(0.0, ph as f64) as u32;
+        let x1 = (region.x1 * zoom).ceil().clamp(0.0, pw as f64) as u32;
+        let y1 = (region.y1 * zoom).ceil().clamp(0.0, ph as f64) as u32;
+        full.crop(
+            x0,
+            y0,
+            x1.saturating_sub(x0).max(1),
+            y1.saturating_sub(y0).max(1),
+        )
+    }
+
     /// Wire a live window surface to the renderer for direct present (1c).
     /// Returns whether the backend accepted it (GPU present); on `false` the
     /// shell keeps the CPU readback + separate-presenter path. `width`/`height`

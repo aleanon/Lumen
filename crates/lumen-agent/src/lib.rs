@@ -7,9 +7,10 @@
 //! (non-`Send`) app on the serving thread.
 #![warn(missing_docs)]
 
-use kurbo::Point;
+use kurbo::{Point, Rect};
 use lumen_core::events::{Event, Key, KeyEvent, Modifiers, NamedKey, PointerEvent, TextInputEvent};
 use lumen_core::semantics::{resolve_one, SemanticsNode};
+use lumen_core::Color;
 use lumen_widgets::{center, Headless, Renderer, Spawner};
 use serde_json::{json, Value};
 use std::net::TcpListener;
@@ -288,6 +289,33 @@ fn handle<R: Renderer, E: Spawner>(
             Ok(out)
         }
         "ui.screenshot" => {
+            // Zoomed, overlaid crop of one element (magnify a small defect).
+            if let Some(s) = params.get("selector").and_then(|v| v.as_str()) {
+                let node = resolve(app, s)?;
+                let scale = params.get("scale").and_then(|v| v.as_f64()).unwrap_or(4.0);
+                let overlay = params
+                    .get("overlay")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                let b = node.bounds;
+                let m = 8.0; // margin around the box
+                let region = Rect::new(b.x0 - m, b.y0 - m, b.x1 + m, b.y1 + m);
+                let mut outlines = Vec::new();
+                if overlay {
+                    outlines.push((b, Color::srgb8(0x1a, 0x73, 0xe8, 0xff))); // box = blue
+                    if let Some(i) = node.ink {
+                        outlines.push((i, Color::srgb8(0xe8, 0x1a, 0x1a, 0xff)));
+                        // ink = red
+                    }
+                }
+                let img = app.screenshot_zoom(region, scale, &outlines);
+                return Ok(json!({
+                    "image_base64": base64::encode(&img.to_png()),
+                    "width": img.width(),
+                    "height": img.height(),
+                    "box": { "x": b.x0, "y": b.y0, "w": b.width(), "h": b.height() },
+                }));
+            }
             let annotate = params
                 .get("annotate")
                 .and_then(|v| v.as_bool())
