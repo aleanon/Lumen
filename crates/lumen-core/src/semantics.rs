@@ -260,8 +260,12 @@ pub struct SemanticsNode {
     pub classes: Vec<String>,
     /// Active states.
     pub states: Vec<State>,
-    /// Window-space bounds.
+    /// Window-space bounds (the layout box).
     pub bounds: Rect,
+    /// Rendered *ink* bounds — what the node actually painted. For text this can
+    /// extend past `bounds` (descenders/side bearings); when it does, content is
+    /// being clipped. `None` ⇒ ink coincides with `bounds`.
+    pub ink: Option<Rect>,
     /// Supported actions.
     pub actions: Vec<Action>,
     /// Scroll info (scroll containers only).
@@ -288,6 +292,7 @@ impl SemanticsNode {
             classes: Vec::new(),
             states: Vec::new(),
             bounds: Rect::ZERO,
+            ink: None,
             actions: Vec::new(),
             scroll: None,
             text_selection: None,

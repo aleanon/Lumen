@@ -117,6 +117,10 @@ pub mod codes {
     pub const E0104: &str = "E0104";
     /// Layout overflow.
     pub const W0103: &str = "W0103";
+    /// Rendered ink is clipped by its own box — content (usually text) paints
+    /// past the layout box, so it gets cut off (e.g. a too-small line-height
+    /// clipping descenders).
+    pub const W0104: &str = "W0104";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).

@@ -265,7 +265,17 @@ fn handle<R: Renderer, E: Spawner>(
         "ui.getLayout" => {
             let node = resolve(app, sel(params)?)?;
             let b = node.bounds;
-            Ok(json!({ "bounds": { "x": b.x0, "y": b.y0, "w": b.width(), "h": b.height() } }))
+            let mut out = json!({
+                "bounds": { "x": b.x0, "y": b.y0, "w": b.width(), "h": b.height() },
+            });
+            // Rendered ink bounds + whether content is clipped by its own box.
+            if let Some(i) = node.ink {
+                // Vertical overflow = real clipping (see audit::check_clipping).
+                let over = (i.y1 - b.y1).max(b.y0 - i.y0);
+                out["ink"] = json!({ "x": i.x0, "y": i.y0, "w": i.width(), "h": i.height() });
+                out["clipped"] = json!(over > 0.5);
+            }
+            Ok(out)
         }
         "ui.screenshot" => {
             let annotate = params

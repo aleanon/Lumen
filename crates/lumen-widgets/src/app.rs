@@ -157,6 +157,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             shadow_cache: HashMap::new(),
             tree: Tree::new(),
             meta: HashMap::new(),
+            node_ink: HashMap::new(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
             sem_root: None,
             build_panic: None,
@@ -303,6 +304,11 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     shadow_cache: HashMap<(i32, i32, i32, i32, i32, u32), RgbaImage>,
     tree: Tree,
     meta: HashMap<NodeIndex, NodeMeta>,
+    /// Rendered *ink* bounds per node from the last paint — the union of what a
+    /// node actually painted (text uses the glyph-ink `run_rect`, which can extend
+    /// past the layout box via descenders/side bearings). Absent ⇒ ink == box.
+    /// Drives the clipping audit (W0104) and `ui.getLayout`'s `ink`.
+    node_ink: HashMap<NodeIndex, kurbo::Rect>,
     frame: RgbaImage,
     sem_root: Option<SemanticsNode>,
     /// If the last build panicked, the contained diagnostic (the previous good
@@ -604,7 +610,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// Structured diagnostics for the current frame (e.g. `W0103` layout
     /// overflow). Lets an agent detect and fix layout bugs by code.
     pub fn diagnostics(&self) -> Vec<lumen_core::Diagnostic> {
-        let mut diags = crate::audit::check_overflow(&self.semantics_doc().root);
+        let root = self.semantics_doc().root;
+        let mut diags = crate::audit::check_overflow(&root);
+        diags.extend(crate::audit::check_clipping(&root));
         if let Some(d) = &self.build_panic {
             diags.push(d.clone());
         }
@@ -1342,6 +1350,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     fn build_display_list(&mut self) -> (DisplayList, Vec<lumen_render::TextTarget>) {
         let mut dl = DisplayList::new();
         let mut text_targets: Vec<lumen_render::TextTarget> = Vec::new();
+        self.node_ink.clear(); // repopulated per node as text runs are emitted
         let order = self.tree.document_order();
         // Preorder depth of every node, and a partition into the main pass and the
         // overlay pass (nodes inside an `overlay` subtree). Overlays paint last so
@@ -1662,6 +1671,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                         }
                     }
                 }
+                // Record the glyph-ink bounds for this node so the clipping audit
+                // (W0104) and ui.getLayout can compare ink vs the layout box.
+                self.node_ink.insert(node, run_rect);
                 let run_id = dl.add_run(run);
                 dl.push(DrawCmd::GlyphRun {
                     run: run_id,
@@ -1889,6 +1901,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             }
         }
         s.bounds = self.tree.bounds(node);
+        s.ink = self.node_ink.get(&node).copied();
         let mut child = self.tree.first_child(node);
         while child.is_some() {
             s.children.push(self.build_semantics(child));

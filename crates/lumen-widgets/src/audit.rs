@@ -33,6 +33,38 @@ fn overflow(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
     }
 }
 
+/// Clipping audit (`W0104`): report any node whose rendered *ink* extends past
+/// its own layout box — content (usually text) is being cut off. This is the
+/// intent-vs-result check that plain box audits (overflow) can't see: the box is
+/// internally consistent, but the ink inside it exceeds it (e.g. a too-small
+/// line-height clipping descenders).
+pub fn check_clipping(root: &SemanticsNode) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    clipping(root, &mut out);
+    out
+}
+
+fn clipping(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
+    if let Some(ink) = n.ink {
+        let b = n.bounds;
+        // Vertical overflow only: descenders/ascenders cut by a too-short box is
+        // real clipping. Horizontal ink overhang is normal typography (glyph side
+        // bearings poke past the advance width without being clipped), so ignore
+        // it here to avoid flagging ordinary text.
+        let over = (ink.y1 - b.y1).max(b.y0 - ink.y0);
+        if over > 0.5 {
+            let who = n.id.as_ref().map(|i| i.as_str()).unwrap_or(&n.label);
+            out.push(Diagnostic::new(
+                codes::W0104,
+                format!("`{who}` content is clipped ({over:.0} px of ink above/below its box)"),
+            ));
+        }
+    }
+    for c in &n.children {
+        clipping(c, out);
+    }
+}
+
 /// An interactive node whose tappable area is below the minimum.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TouchViolation {
