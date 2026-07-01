@@ -34,10 +34,14 @@ impl<T: Serialize + DeserializeOwned + 'static> State for T {}
 /// Runtime-only (never part of a snapshot), so trait objects are fine here.
 trait StoredValue: 'static {
     fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
     fn to_json(&self) -> serde_json::Value;
 }
 impl<T: State> StoredValue for T {
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn to_json(&self) -> serde_json::Value {
@@ -597,18 +601,41 @@ impl<T: State> Signal<T> {
     }
 
     /// Mutate the value in place, then schedule subscribed scopes.
+    ///
+    /// The closure receives `&mut T` and runs while the store is borrowed, so it
+    /// must not read or write *other* signals (doing so re-enters the runtime and
+    /// panics on the borrow). Keep it a pure mutation of this value —
+    /// `|v| v.push(x)`. This is O(1) in the value's size (an in-place edit); it
+    /// does not clone the value.
     pub fn update(&self, cx: &impl WriteCx, f: impl FnOnce(&mut T)) {
         let rt = cx.runtime();
-        let mut v: T = {
-            let b = rt.inner.borrow();
-            b.slots
+        let batching = {
+            let mut b = rt.inner.borrow_mut();
+            {
+                let slot = b.slots.get_mut(&self.id).expect("signal slot missing");
+                let v = slot
+                    .value
+                    .as_any_mut()
+                    .downcast_mut::<T>()
+                    .expect("signal type mismatch");
+                f(v);
+            }
+            b.write_gen = b.write_gen.wrapping_add(1);
+            let subs: Vec<ScopeId> = b
+                .slots
                 .get(&self.id)
-                .and_then(|s| s.value.as_any().downcast_ref::<T>())
-                .expect("signal type mismatch")
-                .clone_via_json()
+                .map(|s| s.subs.iter().copied().collect())
+                .unwrap_or_default();
+            for s in subs {
+                if b.dirty_set.insert(s) {
+                    b.dirty.push(s);
+                }
+            }
+            b.batch_depth > 0
         };
-        f(&mut v);
-        rt.set_value(self.id, v);
+        if !batching {
+            rt.flush();
+        }
     }
 }
 
@@ -627,17 +654,6 @@ impl<T: State + Clone> Resource<T> {
     /// The current resource state.
     pub fn get(&self, cx: &impl ReadCx) -> ResourceState<T> {
         self.sig.get(cx)
-    }
-}
-
-/// A `Clone`-free clone via JSON round-trip, so `update` can work for any
-/// `State` type without requiring `T: Clone`.
-trait CloneViaJson {
-    fn clone_via_json(&self) -> Self;
-}
-impl<T: State> CloneViaJson for T {
-    fn clone_via_json(&self) -> Self {
-        serde_json::from_value(serde_json::to_value(self).expect("serialize")).expect("round-trip")
     }
 }
 

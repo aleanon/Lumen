@@ -6,6 +6,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use kurbo::{Point, Rect, Size, Vec2};
 use lumen_core::events::{Event, Modifiers, WheelEvent};
+use lumen_core::state::Runtime;
 use lumen_layout::{Dim, LayoutStyle, LayoutTree};
 use lumen_render::scene::cull_visible;
 use lumen_widgets::{widgets, widgets_m1, widgets_m4, App};
@@ -94,6 +95,26 @@ fn data_grid_1m_scroll(c: &mut Criterion) {
     });
 }
 
+/// A signal holding a large `Vec`; each iteration mutates one element via
+/// `update`. Guards that `update` is O(1) in the value size — an in-place
+/// mutation — rather than O(n) (a full clone of the value per write). A large
+/// collection kept in one signal is a common large-app shape (e.g. a todo/row
+/// list), so this is the write cost that scales with app state.
+fn signal_update_large_vec(c: &mut Criterion) {
+    let rt = Runtime::new();
+    let sig = rt.signal("big", || vec![0u64; 100_000]);
+    let mut i = 0usize;
+    c.bench_function("signal_update_large_vec", |b| {
+        b.iter(|| {
+            sig.update(&rt, |v| {
+                let n = v.len();
+                v[i % n] = v[i % n].wrapping_add(1);
+            });
+            i += 1;
+        });
+    });
+}
+
 /// Idle: pumping with no input queued. The scheduler should do no real work.
 fn idle_frame(c: &mut Criterion) {
     let app = App::new(|cx| {
@@ -114,6 +135,7 @@ criterion_group!(
     vlist_1m_scroll,
     data_grid_1m_scroll,
     cull_100k,
+    signal_update_large_vec,
     idle_frame
 );
 criterion_main!(perf);
