@@ -340,6 +340,25 @@ fn handle<R: Renderer, E: Spawner>(
                 .map(|d| json!({ "code": d.code, "message": d.message }))
                 .collect::<Vec<_>>()
         })),
+        "ui.probe" => {
+            // Pixel color at (x, y) in physical screenshot px.
+            let x = params.get("x").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let y = params.get("y").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let c = app.screenshot().pixel(x, y);
+            Ok(json!({ "color": [c[0], c[1], c[2], c[3]] }))
+        }
+        "ui.probeRegion" => {
+            // Uniform color of a w×h region at (x, y), or null if it varies.
+            let x = params.get("x").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let y = params.get("y").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let w = params.get("w").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let h = params.get("h").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let uniform = app
+                .screenshot()
+                .region_is_uniform(x, y, w, h)
+                .map(|c| json!([c[0], c[1], c[2], c[3]]));
+            Ok(json!({ "uniform": uniform }))
+        }
         "app.perf" => Ok(json!({
             "frame_ms_p50": 0.0, "frame_ms_p95": 0.0,
             "node_count": app.semantics_doc().root.elided().children.len(),

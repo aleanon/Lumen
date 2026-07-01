@@ -52,6 +52,43 @@ impl RgbaImage {
         &self.pixels
     }
 
+    /// The straight-alpha RGBA of the pixel at `(x, y)`, or transparent black if
+    /// out of bounds. A pixel probe for verifying rendered output (e.g. that a
+    /// text box's bottom row isn't all background — a present descender).
+    pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+        if x >= self.width || y >= self.height {
+            return [0, 0, 0, 0];
+        }
+        let i = ((y * self.width + x) * 4) as usize;
+        [
+            self.pixels[i],
+            self.pixels[i + 1],
+            self.pixels[i + 2],
+            self.pixels[i + 3],
+        ]
+    }
+
+    /// If every pixel in the `w`×`h` region at `(x, y)` is the same color, return
+    /// it; otherwise `None`. Lets a check assert e.g. "this row is all background"
+    /// (nothing painted) or, conversely, that a region has content. The region is
+    /// clamped to the image; an empty region yields `None`.
+    pub fn region_is_uniform(&self, x: u32, y: u32, w: u32, h: u32) -> Option<[u8; 4]> {
+        let x1 = (x + w).min(self.width);
+        let y1 = (y + h).min(self.height);
+        if x >= x1 || y >= y1 {
+            return None;
+        }
+        let first = self.pixel(x, y);
+        for py in y..y1 {
+            for px in x..x1 {
+                if self.pixel(px, py) != first {
+                    return None;
+                }
+            }
+        }
+        Some(first)
+    }
+
     /// Build from a tiny-skia pixmap, un-premultiplying each pixel.
     pub(crate) fn from_pixmap(pm: &Pixmap) -> RgbaImage {
         let mut pixels = Vec::with_capacity(pm.data().len());
