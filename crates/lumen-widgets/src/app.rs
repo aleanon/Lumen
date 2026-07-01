@@ -614,13 +614,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// Structured diagnostics for the current frame (e.g. `W0103` layout
     /// overflow). Lets an agent detect and fix layout bugs by code.
     pub fn diagnostics(&self) -> Vec<lumen_core::Diagnostic> {
-        let root = self.semantics_doc().root;
-        let mut diags = crate::audit::check_overflow(&root);
-        diags.extend(crate::audit::check_clipping(&root));
+        let mut diags = crate::audit::lint(&self.semantics_doc().root);
         if let Some(d) = &self.build_panic {
             diags.push(d.clone());
         }
         diags
+    }
+
+    /// The absolute visual-invariant lint (overflow / clipping / zero-area
+    /// interactive) over the current tree — see [`audit::lint`](crate::audit::lint).
+    /// Unlike goldens, catches first-time layout/render defects; usable in tests
+    /// and via the agent (`ui.lint`).
+    pub fn lint(&self) -> Vec<lumen_core::Diagnostic> {
+        crate::audit::lint(&self.semantics_doc().root)
     }
 
     // --- desktop system integration (T5.2) ---------------------------------

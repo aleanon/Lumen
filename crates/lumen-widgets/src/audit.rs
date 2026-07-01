@@ -65,6 +65,45 @@ fn clipping(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
     }
 }
 
+/// Zero-area interactive audit (`W0105`): an interactive node laid out with no
+/// width or height is clickable but invisible/unhittable — usually a missing size
+/// or empty content.
+pub fn check_zero_size(root: &SemanticsNode) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    zero_size(root, &mut out);
+    out
+}
+
+fn zero_size(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
+    let interactive = n.actions.iter().any(|a| matches!(a, Action::Click));
+    if interactive && (n.bounds.width() < 0.5 || n.bounds.height() < 0.5) {
+        let who = n.id.as_ref().map(|i| i.as_str()).unwrap_or(&n.label);
+        out.push(Diagnostic::new(
+            codes::W0105,
+            format!(
+                "`{who}` is interactive but has zero area ({:.0}×{:.0})",
+                n.bounds.width(),
+                n.bounds.height()
+            ),
+        ));
+    }
+    for c in &n.children {
+        zero_size(c, out);
+    }
+}
+
+/// The absolute visual-invariant lint: layout/render correctness checks that
+/// should always hold regardless of design — overflow (W0103), clipping (W0104),
+/// and zero-area interactive nodes (W0105). Unlike goldens (which catch
+/// *changes* vs a baseline), these catch *first-time* defects. Touch-target size
+/// and contrast are advisory (design-dependent) and stay separate.
+pub fn lint(root: &SemanticsNode) -> Vec<Diagnostic> {
+    let mut out = check_overflow(root);
+    out.extend(check_clipping(root));
+    out.extend(check_zero_size(root));
+    out
+}
+
 /// An interactive node whose tappable area is below the minimum.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TouchViolation {

@@ -121,6 +121,9 @@ pub mod codes {
     /// past the layout box, so it gets cut off (e.g. a too-small line-height
     /// clipping descenders).
     pub const W0104: &str = "W0104";
+    /// An interactive node laid out with zero area — clickable but invisible /
+    /// unhittable (usually a missing size or empty content).
+    pub const W0105: &str = "W0105";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).
