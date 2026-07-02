@@ -4,6 +4,27 @@
 (the paint/damage seam this sits above) and to the reactive store in
 `lumen-core/src/state.rs`.*
 
+> **Status (2026-07-03).**
+> **F0 ✅ done** — `Headless::rebuild_fresh` (oracle) + `assert_view_coherent` +
+> `Runtime::is_quiescent` and a `pump` fixpoint `debug_assert` (holds across the
+> whole suite). **F1 ✅ done** — `BuildCx::scope` memoized subtrees: per-signal
+> `Slot.version` + `Runtime::collect_reads`/`ReadSet`; a write re-runs only the
+> scopes that read it (proven by run-count tests); scope-local signal
+> namespacing; caches cleared on force/visual rebuilds. Perf unregressed (idle
+> 20ns). **F2 🟡 started** — nested-scope coherence + a 60-round randomized
+> coherence fuzz (validates the all-collectors invalidation). **F2 remaining is
+> the retained-node-graph pivot and is NOT done**, and two of its steps hit
+> constraints worth flagging before proceeding:
+> - *Incremental layout (step 1)* is bounded by the taffy finding (decision log,
+>   2026-06-24 R4): one `TaffyTree` can't be partially re-solved across disjoint
+>   subtrees. So retaining the node graph helps build + semantics, but incremental
+>   *layout* needs the separate-`TaffyTree` split, its own task. Until then F1
+>   memoizes the build while layout+paint still process the full tree each pump
+>   (paint already trimmed by R2 damage).
+> - *Handler-currency lint (step 3)* wants static closure-capture analysis, which
+>   needs a proc-macro (`syn`/`quote`) — outside ADR-003. Treat as an escalation:
+>   either accept the dep or ship a weaker runtime heuristic. Not attempted.
+
 > **Why this exists.** ADR-007 already commits the framework to *"fine-grained
 > signals (Solid-style), no VDOM/diffing … O(changed) updates."* The headless
 > runtime does **not** yet honor that: the T0.9 amendment (2026-06-15) records
