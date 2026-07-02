@@ -414,6 +414,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // Nothing changed — keep the retained frame, report no damage.
             self.last_damage = Damage::None;
         }
+        // F0 fixpoint contract: a settled pump leaves the reactive graph
+        // quiescent. Writes flush synchronously, so after dispatch + build
+        // nothing should stay dirty; if this fires, some effect is scheduling
+        // work that never drains (a real bug, not a perf issue).
+        debug_assert!(
+            self.rt.is_quiescent(),
+            "pump left the reactive graph non-quiescent"
+        );
         FrameStats {
             node_count: self.tree.len(),
             painted: self.last_damage != Damage::None,
@@ -607,6 +615,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// The current virtual-clock time (ms).
     pub fn now_ms(&self) -> f64 {
         self.clock_ms
+    }
+
+    /// The reactive runtime backing this app (state store + scheduler). Lets
+    /// tests/tools read `write_gen`/`is_quiescent` and drive signals directly.
+    pub fn runtime(&self) -> &Runtime {
+        &self.rt
     }
 
     /// Advance the virtual clock by `ms`.
@@ -1064,6 +1078,44 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// can't take down the window (C2 / T7.3). On panic the previous good frame
     /// is kept and a structured `E0701` diagnostic is recorded; a clean build
     /// clears it.
+    /// Rebuild the whole view from current state, bypassing every incremental
+    /// cache — the **coherence oracle** (F0): the tree as a pure function of the
+    /// store. Snapshot/restore, the CPU golden, replay determinism, and hot
+    /// reload all reduce to this one operation, and the fine-grained work (F1+)
+    /// must stay equal to it (`assert_view_coherent`).
+    pub fn rebuild_fresh(&mut self) {
+        self.clear_view_caches();
+        self.rebuild();
+    }
+
+    /// Drop any retained/memoized view state so the next build is from scratch.
+    /// A no-op until F1 introduces `cx.scope` caches; centralised here so the
+    /// oracle and hot-reload paths have one place to invalidate.
+    fn clear_view_caches(&mut self) {}
+
+    /// Assert the current (possibly incrementally-updated) view equals a fresh
+    /// rebuild from the same state — the F0 coherence invariant
+    /// `incremental == rebuild_fresh`. Compares the display list (render truth,
+    /// `DrawCmd: PartialEq`) and the semantics tree (agent truth, via `Debug`).
+    /// Trivially true today (every pump is already a fresh rebuild); it gains
+    /// teeth as F1/F2 add memoized/retained subtrees. Intended for tests + CI
+    /// over the gallery and examples.
+    pub fn assert_view_coherent(&mut self) {
+        let dl_before = self.last_dl.as_ref().map(|d| d.cmds.clone());
+        let sem_before = self.sem_root.as_ref().map(|s| format!("{s:?}"));
+        self.rebuild_fresh();
+        let dl_after = self.last_dl.as_ref().map(|d| d.cmds.clone());
+        let sem_after = self.sem_root.as_ref().map(|s| format!("{s:?}"));
+        assert!(
+            dl_before == dl_after,
+            "view incoherent: display list differs from a fresh rebuild"
+        );
+        assert!(
+            sem_before == sem_after,
+            "view incoherent: semantics tree differs from a fresh rebuild"
+        );
+    }
+
     fn rebuild(&mut self) {
         // Default to "nothing painted"; a successful paint sets the real damage.
         self.last_damage = Damage::None;

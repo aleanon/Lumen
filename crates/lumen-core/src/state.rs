@@ -279,6 +279,14 @@ impl Runtime {
         self.inner.borrow().write_gen
     }
 
+    /// True when no reactive scope is pending — the graph has reached a fixpoint.
+    /// A settled `pump` must leave the runtime quiescent (the F0 contract): all
+    /// writes flush synchronously, so once event dispatch + build finish, nothing
+    /// should remain dirty.
+    pub fn is_quiescent(&self) -> bool {
+        self.inner.borrow().dirty.is_empty()
+    }
+
     /// Number of stored values.
     pub fn len(&self) -> usize {
         self.inner.borrow().slots.len()
