@@ -164,6 +164,11 @@ impl WriteCx for ReadScope {
 struct Slot {
     value: Box<dyn StoredValue>,
     subs: HashSet<ScopeId>,
+    /// The `write_gen` at this value's last write (0 = never written since
+    /// creation). A [`ReadSet`] records per-signal versions so a memoized view
+    /// scope can tell whether *its* deps changed — finer than the global
+    /// `write_gen`, which only says *something* changed.
+    version: u64,
 }
 
 struct ScopeData {
@@ -188,6 +193,11 @@ struct Inner {
     dirty_set: HashSet<ScopeId>,
     batch_depth: u32,
     run_counter: u64,
+    /// Active read-collection windows ([`Runtime::collect_reads`]). Each signal
+    /// read pushes its id onto the top window, so a memoized view scope learns
+    /// exactly which signals it depends on. A stack so nested scopes attribute
+    /// reads to the innermost scope only (correct fine-grained nesting).
+    read_collectors: Vec<Vec<SignalId>>,
     /// Bumped on every value write (signal `set`, or a memo whose value actually
     /// changed). The runtime compares it across frames to skip a rebuild when no
     /// state changed since the last one. Conservative: `set` bumps even when the
@@ -199,6 +209,32 @@ struct Inner {
     pending: HashMap<String, serde_json::Value>,
     #[cfg(feature = "snapshot")]
     restore_diags: Vec<Diagnostic>,
+}
+
+/// The signals read during a [`Runtime::collect_reads`] window, each paired with
+/// its value-version at capture time. Lets a memoized view scope (F1) decide
+/// whether to re-run: it is *current* while none of those signals has been
+/// written since. Empty ⇒ the scope read no state (always current).
+#[derive(Clone, Default)]
+pub struct ReadSet {
+    deps: Vec<(SignalId, u64)>,
+}
+
+impl ReadSet {
+    /// True while every captured signal still holds the version it had at
+    /// capture — i.e. none has been written since. A written (or dropped) dep
+    /// makes this false, so the owning scope must re-run.
+    pub fn is_current(&self, rt: &Runtime) -> bool {
+        let b = rt.inner.borrow();
+        self.deps
+            .iter()
+            .all(|(id, ver)| b.slots.get(id).map(|s| s.version) == Some(*ver))
+    }
+
+    /// Whether the scope read no signals at all (a constant subtree).
+    pub fn is_empty(&self) -> bool {
+        self.deps.is_empty()
+    }
 }
 
 /// A self-describing snapshot of the entire store (ADR-011): field-tagged JSON,
@@ -287,6 +323,31 @@ impl Runtime {
         self.inner.borrow().dirty.is_empty()
     }
 
+    /// Run `f`, recording every signal it reads, and return the result plus a
+    /// [`ReadSet`] capturing those signals at their current versions (F1). A
+    /// memoized view scope re-runs only when `ReadSet::is_current` turns false —
+    /// i.e. one of the signals it read has since been written. Nesting is
+    /// correct: reads inside an inner `collect_reads` attribute to the inner
+    /// window only, so a parent scope isn't invalidated by a child's dep.
+    pub fn collect_reads<R>(&self, f: impl FnOnce() -> R) -> (R, ReadSet) {
+        self.inner.borrow_mut().read_collectors.push(Vec::new());
+        let r = f();
+        let ids = self
+            .inner
+            .borrow_mut()
+            .read_collectors
+            .pop()
+            .unwrap_or_default();
+        let b = self.inner.borrow();
+        let mut seen = HashSet::new();
+        let deps: Vec<(SignalId, u64)> = ids
+            .into_iter()
+            .filter(|id| seen.insert(*id))
+            .map(|id| (id, b.slots.get(&id).map(|s| s.version).unwrap_or(0)))
+            .collect();
+        (r, ReadSet { deps })
+    }
+
     /// Number of stored values.
     pub fn len(&self) -> usize {
         self.inner.borrow().slots.len()
@@ -330,6 +391,7 @@ impl Runtime {
                 Slot {
                     value,
                     subs: HashSet::new(),
+                    version: 0,
                 },
             );
         }
@@ -506,6 +568,20 @@ impl Runtime {
         }
     }
 
+    /// Record a read into *every* open [`Runtime::collect_reads`] window (no-op
+    /// when none is open — the common case during an untracked build). Reads
+    /// propagate to all enclosing windows, not just the innermost, so a memoized
+    /// outer scope is invalidated when an *inner* scope's dep changes — its
+    /// cached subtree embeds the inner one. (The inner scope still skips
+    /// independently when only a cousin changed: its own window saw only its own
+    /// reads.)
+    fn note_read(&self, id: SignalId) {
+        let mut b = self.inner.borrow_mut();
+        for win in b.read_collectors.iter_mut() {
+            win.push(id);
+        }
+    }
+
     fn read_with<T: 'static, R>(
         &self,
         cx: &impl ReadCx,
@@ -515,6 +591,7 @@ impl Runtime {
         if cx.tracks() {
             self.track(id);
         }
+        self.note_read(id);
         let b = self.inner.borrow();
         let slot = b.slots.get(&id).expect("signal slot missing");
         let v = slot
@@ -528,10 +605,12 @@ impl Runtime {
     fn set_value<T: State>(&self, id: SignalId, value: T) {
         let batching = {
             let mut b = self.inner.borrow_mut();
+            let ver = b.write_gen.wrapping_add(1);
+            b.write_gen = ver;
             if let Some(slot) = b.slots.get_mut(&id) {
                 slot.value = Box::new(value);
+                slot.version = ver;
             }
-            b.write_gen = b.write_gen.wrapping_add(1);
             let subs: Vec<ScopeId> = b
                 .slots
                 .get(&id)
@@ -564,10 +643,12 @@ impl Runtime {
         if !changed {
             return;
         }
-        b.write_gen = b.write_gen.wrapping_add(1);
+        let ver = b.write_gen.wrapping_add(1);
+        b.write_gen = ver;
         let subs: Vec<ScopeId> = match b.slots.get_mut(&id) {
             Some(slot) => {
                 slot.value = Box::new(value);
+                slot.version = ver;
                 slot.subs.iter().copied().collect()
             }
             None => {
@@ -576,6 +657,7 @@ impl Runtime {
                     Slot {
                         value: Box::new(value),
                         subs: HashSet::new(),
+                        version: ver,
                     },
                 );
                 Vec::new()
@@ -657,8 +739,11 @@ impl<T: State> Signal<T> {
         let rt = cx.runtime();
         let batching = {
             let mut b = rt.inner.borrow_mut();
+            let ver = b.write_gen.wrapping_add(1);
+            b.write_gen = ver;
             {
                 let slot = b.slots.get_mut(&self.id).expect("signal slot missing");
+                slot.version = ver;
                 let v = slot
                     .value
                     .as_any_mut()
@@ -666,7 +751,6 @@ impl<T: State> Signal<T> {
                     .expect("signal type mismatch");
                 f(v);
             }
-            b.write_gen = b.write_gen.wrapping_add(1);
             let subs: Vec<ScopeId> = b
                 .slots
                 .get(&self.id)

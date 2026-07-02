@@ -392,6 +392,18 @@ pub enum TaskRequest {
     Future(Box<dyn FnOnce(lumen_core::tasks::Sink) -> lumen_core::tasks::BoxFuture + Send>),
 }
 
+/// A memoized view scope's cached output plus the signals it read (F1). While
+/// `reads` stays current (none written since), the subtree is reused verbatim
+/// instead of re-running the scope closure.
+pub(crate) struct CachedScope {
+    reads: lumen_core::state::ReadSet,
+    element: Element,
+}
+
+/// Per-app store of memoized scope subtrees, keyed by scope identity path. Owned
+/// by `Headless`, persists across builds, threaded into `BuildCx`.
+pub(crate) type ScopeCache = std::collections::HashMap<String, CachedScope>;
+
 /// The build context handed to the root closure and components. Exposes signal
 /// creation, the (virtual) clock, time-driven animation, and background tasks.
 pub struct BuildCx<'a> {
@@ -401,10 +413,20 @@ pub struct BuildCx<'a> {
     continuous: Cell<bool>,
     read_clock: Cell<bool>,
     pub(crate) tasks: RefCell<Vec<TaskRequest>>,
+    /// Memoized subtrees (F1), persisted on `Headless` across builds.
+    scope_cache: &'a RefCell<ScopeCache>,
+    /// Identity-path prefix of the enclosing `scope` (empty at the root). Signal
+    /// keys created inside a scope are namespaced under it, so a reused component
+    /// gets its own state.
+    prefix: RefCell<String>,
 }
 
 impl<'a> BuildCx<'a> {
-    pub(crate) fn new(rt: &'a Runtime, now_ms: f64) -> BuildCx<'a> {
+    pub(crate) fn new(
+        rt: &'a Runtime,
+        now_ms: f64,
+        scope_cache: &'a RefCell<ScopeCache>,
+    ) -> BuildCx<'a> {
         BuildCx {
             rt,
             now_ms,
@@ -412,12 +434,84 @@ impl<'a> BuildCx<'a> {
             continuous: Cell::new(false),
             read_clock: Cell::new(false),
             tasks: RefCell::new(Vec::new()),
+            scope_cache,
+            prefix: RefCell::new(String::new()),
         }
     }
 
-    /// Create or re-attach a signal keyed by `name` (02 §4).
+    /// Create or re-attach a signal keyed by `name` (02 §4), namespaced under the
+    /// enclosing [`scope`](Self::scope) so a reused component gets its own state.
     pub fn signal<T: State>(&self, name: &str, init: impl FnOnce() -> T) -> Signal<T> {
-        self.rt.signal(name, init)
+        self.rt.signal(&self.scoped_key(name), init)
+    }
+
+    /// A memoized view region (F1). Runs `f` inside a read-tracking window and
+    /// caches the subtree it returns; on a later build the closure is **skipped**
+    /// (the cached subtree reused) while none of the signals it read has changed.
+    /// `id` must be unique among sibling scopes (like a signal key; use an
+    /// explicit index in a loop). Turns the store's fine-grained reactivity into
+    /// fine-grained *view* updates: a write re-runs only the scopes that read it
+    /// (and their ancestors, whose subtrees embed them).
+    ///
+    /// Scopes that emit a frame-request (read the clock, `animate`, `wake_*`, or
+    /// spawn a task) are never cached — they re-run every build, as they must.
+    pub fn scope(&mut self, id: &str, f: impl FnOnce(&mut BuildCx) -> Element) -> Element {
+        let key = self.scoped_key(id);
+        if let Some(el) = self.cached_if_current(&key) {
+            return el;
+        }
+        // Re-run: establish this scope's key prefix, collect its reads, and note
+        // whether it emitted any frame-request (⇒ not cacheable).
+        let rt = self.rt.clone();
+        let prev = self.prefix.replace(format!("{key}/"));
+        let before = self.request_fingerprint();
+        let (element, reads) = rt.collect_reads(|| f(self));
+        let cacheable = self.request_fingerprint() == before;
+        self.prefix.replace(prev);
+        if cacheable {
+            self.scope_cache.borrow_mut().insert(
+                key,
+                CachedScope {
+                    reads,
+                    element: element.clone(),
+                },
+            );
+        } else {
+            self.scope_cache.borrow_mut().remove(&key);
+        }
+        element
+    }
+
+    /// The cached subtree for `key` if its recorded deps are all still current.
+    fn cached_if_current(&self, key: &str) -> Option<Element> {
+        let cache = self.scope_cache.borrow();
+        let cached = cache.get(key)?;
+        cached
+            .reads
+            .is_current(self.rt)
+            .then(|| cached.element.clone())
+    }
+
+    /// `name` prefixed by the enclosing scope's identity path (identity for
+    /// signals + nested scopes).
+    fn scoped_key(&self, name: &str) -> String {
+        let p = self.prefix.borrow();
+        if p.is_empty() {
+            name.to_string()
+        } else {
+            format!("{p}{name}")
+        }
+    }
+
+    /// A cheap fingerprint of the frame-requests emitted so far; if a scope
+    /// changes it, the scope is time/task-dependent and must not be memoized.
+    fn request_fingerprint(&self) -> (bool, bool, usize, usize) {
+        (
+            self.continuous.get(),
+            self.read_clock.get(),
+            self.requests.borrow().len(),
+            self.tasks.borrow().len(),
+        )
     }
 
     /// The reactive runtime (for reading/writing signals during build).

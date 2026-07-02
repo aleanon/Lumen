@@ -21,6 +21,7 @@ use lumen_render::{
     RoundedRect,
 };
 use lumen_text::TextEngine;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// Hit-test z for overlay subtrees (dropdown menus, popovers, tooltips). They
@@ -190,6 +191,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             last_build_gen: 0,
             force_rebuild: false,
             last_build_clock: 0.0,
+            scope_cache: RefCell::new(HashMap::new()),
         };
         h
     }
@@ -361,6 +363,11 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// past this — so time-driven UI updates even without an explicit `animate`/
     /// `wake_at`.
     last_build_clock: f64,
+    /// Memoized `cx.scope` subtrees (F1), persisted across builds. A rebuild
+    /// reuses a scope's cached subtree while none of the signals it read has
+    /// changed; cleared by `clear_view_caches` (the oracle + non-signal
+    /// rebuilds). Coherence is guarded by `assert_view_coherent` (F0).
+    scope_cache: RefCell<crate::element::ScopeCache>,
 }
 
 impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
@@ -409,6 +416,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             || visual_changed
             || time_driven;
         if needs_rebuild {
+            // Scope memoization keys off signal versions only. A rebuild driven
+            // by something it can't observe — a forced invalidation (resize/
+            // scale/stylesheet/theme) or input-visual state (hover/focus/pressed,
+            // which widgets may read during build) — must not reuse stale
+            // subtrees, so drop the caches first and let this build repopulate.
+            if self.force_rebuild || visual_changed {
+                self.clear_view_caches();
+            }
             self.rebuild(); // baselines force_rebuild + last_build_gen
         } else {
             // Nothing changed — keep the retained frame, report no damage.
@@ -1088,10 +1103,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.rebuild();
     }
 
-    /// Drop any retained/memoized view state so the next build is from scratch.
-    /// A no-op until F1 introduces `cx.scope` caches; centralised here so the
-    /// oracle and hot-reload paths have one place to invalidate.
-    fn clear_view_caches(&mut self) {}
+    /// Drop all memoized `cx.scope` subtrees so the next build is from scratch.
+    /// Centralised here so the oracle (`rebuild_fresh`), hot reload, and
+    /// non-signal rebuilds (resize/theme/visual-state) share one invalidation
+    /// point — those paths change the frame without a tracked signal write, so
+    /// the version-based memo can't see them.
+    fn clear_view_caches(&mut self) {
+        self.scope_cache.borrow_mut().clear();
+    }
 
     /// Assert the current (possibly incrementally-updated) view equals a fresh
     /// rebuild from the same state — the F0 coherence invariant
@@ -1141,7 +1160,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
     fn rebuild_inner(&mut self) {
         let (root_el, requests) = {
-            let mut cx = BuildCx::new(&self.rt, self.clock_ms);
+            let mut cx = BuildCx::new(&self.rt, self.clock_ms, &self.scope_cache);
             let el = (self.root)(&mut cx);
             (el, cx.take_requests())
         };

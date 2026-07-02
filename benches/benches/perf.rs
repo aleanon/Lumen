@@ -115,6 +115,37 @@ fn signal_update_large_vec(c: &mut Criterion) {
     });
 }
 
+/// F1: a view of 200 memoized `cx.scope` rows where a single row's signal
+/// changes each iteration. With scope memoization the rebuild re-runs only the
+/// one changed scope (the other 199 reuse cached subtrees), so pump cost is
+/// ~independent of the row count — the "fine-grained view update" property.
+fn scope_memo_one_of_many(c: &mut Criterion) {
+    use lumen_core::state::Signal;
+    const N: i64 = 200;
+    let app = App::new(|cx| {
+        let rows: Vec<_> = (0..N)
+            .map(|i| {
+                cx.scope(&format!("row-{i}"), move |cx| {
+                    let s: Signal<i64> = cx.signal(&format!("v-{i}"), || 0);
+                    widgets::text(format!("row {i}: {}", s.get(cx.runtime())))
+                })
+            })
+            .collect();
+        widgets::column(rows)
+    });
+    let mut h = app.run_headless(Size::new(400.0, 600.0));
+    let mut i = 0i64;
+    c.bench_function("scope_memo_one_of_many", |b| {
+        b.iter(|| {
+            // Flip one row's signal, then pump — only that scope should re-run.
+            let s: Signal<i64> = h.runtime().signal(&format!("v-{}", i % N), || 0);
+            s.update(h.runtime(), |v| *v += 1);
+            h.pump();
+            i += 1;
+        });
+    });
+}
+
 /// Idle: pumping with no input queued. The scheduler should do no real work.
 fn idle_frame(c: &mut Criterion) {
     let app = App::new(|cx| {
@@ -136,6 +167,7 @@ criterion_group!(
     data_grid_1m_scroll,
     cull_100k,
     signal_update_large_vec,
+    scope_memo_one_of_many,
     idle_frame
 );
 criterion_main!(perf);
