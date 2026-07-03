@@ -11,19 +11,23 @@
 > `Slot.version` + `Runtime::collect_reads`/`ReadSet`; a write re-runs only the
 > scopes that read it (proven by run-count tests); scope-local signal
 > namespacing; caches cleared on force/visual rebuilds. Perf unregressed (idle
-> 20ns). **F2 🟡 started** — nested-scope coherence + a 60-round randomized
-> coherence fuzz (validates the all-collectors invalidation). **F2 remaining is
-> the retained-node-graph pivot and is NOT done**, and two of its steps hit
-> constraints worth flagging before proceeding:
-> - *Incremental layout (step 1)* is bounded by the taffy finding (decision log,
->   2026-06-24 R4): one `TaffyTree` can't be partially re-solved across disjoint
->   subtrees. So retaining the node graph helps build + semantics, but incremental
->   *layout* needs the separate-`TaffyTree` split, its own task. Until then F1
->   memoizes the build while layout+paint still process the full tree each pump
->   (paint already trimmed by R2 damage).
-> - *Handler-currency lint (step 3)* wants static closure-capture analysis, which
->   needs a proc-macro (`syn`/`quote`) — outside ADR-003. Treat as an escalation:
->   either accept the dep or ship a weaker runtime heuristic. Not attempted.
+> 20ns). **F2 🟡 partial** — nested-scope coherence + a 60-round randomized
+> coherence fuzz (validates the all-collectors invalidation), **plus the
+> handler-currency check (step 3)**. Two decisions resolved the earlier
+> escalations (decision log 2026-07-03):
+> - *Incremental layout (step 1) — SKIPPED.* One `TaffyTree` can't be partially
+>   re-solved across disjoint subtrees (R4), so full-tree layout stays; the
+>   O(changed) story is F1's build memoization + R2's damage paint. The
+>   separate-`TaffyTree` split is an out-of-scope future task; F2's
+>   retained-node-graph step is descoped accordingly.
+> - *Handler-currency lint (step 3) — DONE* via a new `lumen-macros` proc-macro
+>   (ADR-003 amendment: `syn`/`quote`/`proc-macro2`). `stable_handler!` asserts
+>   the handler is `Copy` (may capture only stable Copy state, never an owned
+>   snapshot); re-exported as `lumen_widgets::stable_handler`; passing +
+>   `compile_fail` doctests. Catches owned-state captures, not Copy indices.
+>
+> Remaining for a full retained view: the semantics projection (step 2) and the
+> per-property bindings (F3, gated on the authoring-API escalation).
 
 > **Why this exists.** ADR-007 already commits the framework to *"fine-grained
 > signals (Solid-style), no VDOM/diffing … O(changed) updates."* The headless

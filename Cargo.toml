@@ -4,6 +4,7 @@
 resolver = "2"
 members = [
     "crates/lumen-core",
+    "crates/lumen-macros",
     "crates/lumen-layout",
     "crates/lumen-render",
     "crates/lumen-text",
@@ -83,6 +84,7 @@ publish = false
 # feature-forwarding is what lets a `--no-default-features` app binary actually
 # drop `serde_json` app-wide despite Cargo's feature unification.
 lumen-core = { path = "crates/lumen-core", default-features = false }
+lumen-macros = { path = "crates/lumen-macros" }
 lumen-layout = { path = "crates/lumen-layout" }
 lumen-render = { path = "crates/lumen-render" }
 lumen-text = { path = "crates/lumen-text" }
@@ -128,6 +130,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tiny-skia = "0.11"
 accesskit = "0.17"
+# proc-macro toolchain (ADR-003 amendment 2026-07-03), for `lumen-macros`.
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
 
 # whitelisted dev deps (ADR-003)
 proptest = "1"

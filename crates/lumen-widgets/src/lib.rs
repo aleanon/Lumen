@@ -59,6 +59,32 @@ pub use app::{center, App, FrameStats, Headless, ReloadResult};
 pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
 /// The data layer: executors + the `Sink` background work pushes results through.
 pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
+/// Compile-time handler-currency check (F2): a handler may only capture stable
+/// `Copy` state (signal/memo handles, scalars), never owned snapshots that go
+/// stale when the handler is retained. See [`lumen_macros::stable_handler`].
+///
+/// A handler capturing only a `Signal` handle (which is `Copy`) passes:
+/// ```
+/// use lumen_core::state::{Runtime, Signal};
+/// let rt = Runtime::new();
+/// let count: Signal<i64> = rt.signal("c", || 0);
+/// let handler = lumen_widgets::stable_handler!(move |rt: &Runtime| count.update(rt, |c| *c += 1));
+/// handler(&rt);
+/// assert_eq!(count.get(&rt), 1);
+/// ```
+///
+/// Capturing an owned `String` snapshot is rejected at compile time:
+/// ```compile_fail
+/// use lumen_core::state::{Runtime, Signal};
+/// let rt = Runtime::new();
+/// let items: Signal<Vec<String>> = rt.signal("v", Vec::new);
+/// let draft = String::from("stale snapshot");
+/// // `draft` is a non-`Copy` owned value → the handler isn't `Copy` → rejected.
+/// let handler = lumen_widgets::stable_handler!(move |rt: &Runtime| {
+///     items.update(rt, |v| v.push(draft.clone()));
+/// });
+/// ```
+pub use lumen_macros::stable_handler;
 /// Re-exported so downstream crates can bound on the renderer backend (e.g.
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
 pub use lumen_render::{DefaultRenderer, Renderer, TinySkia};

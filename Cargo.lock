@@ -2090,6 +2090,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumen-macros"
+version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "lumen-render"
 version = "0.0.0"
 dependencies = [
@@ -2194,6 +2203,7 @@ dependencies = [
  "kurbo",
  "lumen-core",
  "lumen-layout",
+ "lumen-macros",
  "lumen-render",
  "lumen-style",
  "lumen-text",

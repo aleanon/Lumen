@@ -20,6 +20,7 @@ snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot"]
 
 [dependencies]
 lumen-core = { workspace = true }
+lumen-macros = { workspace = true }
 lumen-render = { workspace = true }
 lumen-layout = { workspace = true }
 lumen-text = { workspace = true }
