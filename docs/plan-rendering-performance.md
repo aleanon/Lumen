@@ -322,6 +322,46 @@ still well within the 16 ms budget, so this is **headroom, not a fix** — but i
 the last O(tree) step on the rebuild path (F1 memoizes the build; F3.4 patches
 paint-only props; only DL emission still walks the whole tree).
 
+## Profiling — is R5 worth it? (measured 2026-07-03)
+Phase breakdown of a **changed-frame full rebuild** (one field changes in an
+otherwise-static list; release build, warm caches):
+
+| phase | 60 text nodes (~gallery) | 500 text nodes |
+|---|---|---|
+| build (root closure, F1-memoized) | 6 µs | 42 µs |
+| build_node (tree + text measure) | 42 µs | 444 µs |
+| layout (taffy) | 14 µs | 79 µs |
+| compute_styles | ~0 | ~0 |
+| **build_display_list (R5 target)** | **1.8 ms** | **15.1 ms** |
+| raster (CPU, full-frame) | 2.1 ms | 23.4 ms |
+| semantics + dep_index | 10 µs | 125 µs |
+
+**Findings:**
+1. **DL emission is the dominant O(tree) step that is *not* incremental** — build
+   is F1-memoized (µs), layout/semantics are µs. Only `build_display_list` walks
+   the whole tree: **~30 µs per text node**, and it's **~entirely glyph-run
+   *construction*** (the shape/glyph rasters are already cached; this is building
+   the `GlyphRun` `DrawCmd`s). 1.8 ms (~46 % of a ~4 ms gallery frame), 15 ms at
+   500 nodes.
+2. **Damage is already correctly small** (`Region`, just the changed row) — the DL
+   *diff* works. The 23 ms CPU raster is the *headless* full-frame re-render
+   (tiny-skia AA isn't translation-invariant, so `render_damage` re-renders + crops
+   — decision log R2). On the **GPU/windowed** path the raster is incremental, so
+   there **DL emission is essentially the entire changed-frame cost** → R5 is the
+   #1 win.
+
+**Verdict: R5 is a significant win for large / text-heavy / high-frequency views**
+(cuts the 15 ms O(tree) re-emission to ~sub-ms for a one-field change), and it's
+the top remaining non-incremental step — but it stays **headroom** at typical
+scale (a 60-node frame is ~4 ms, well under the 16 ms budget).
+
+**Sharpened recommendation:** since the DL cost is ~entirely glyph-run
+construction, the **GlyphRun-cache slice below captures essentially all of R5's
+benefit** — full fragment splicing (clips/overlays/`ImageId` remapping) adds only
+the marginal rect/gradient/image share on top. **Do the GlyphRun cache first;**
+only pursue full fragmenting if profiling a real workload shows non-text emission
+dominating.
+
 ## Why it's tractable now
 The fine-grained work (`docs/plan-fine-grained-view.md`) built exactly the dirty
 structure this needs: F1 scope memoization knows **which subtrees didn't change**
