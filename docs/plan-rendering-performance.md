@@ -330,10 +330,42 @@ dirty set know **what a write touched**. R5 reuses that instead of inventing a n
 dirtiness model. The R0 coherence tools (`damage_equivalence`) + F0's
 `assert_view_coherent` guard it: the spliced DL must equal a full re-emission.
 
-## The hard part (name it up front)
-The DL is a **flat** list with `PushLayer`/`PopLayer` bracketing and absolute
-coordinates. Reusing a subtree's fragment requires that (a) its Elements are
-unchanged **and** (b) its layout box didn't move — a sibling growing above shifts
+## Three concrete sub-problems (found reading `emit_pass`, 2026-07-03)
+The current emitter is **flat**: `emit_pass` iterates document order with a
+depth-keyed `clip_stack`, opening/closing `overflow:hidden` layers on depth
+transitions. Turning that into reusable per-subtree fragments hits three real
+snags — spelling them out so the refactor isn't a surprise:
+
+1. **Clip bracketing must stay balanced per fragment.** A clip node emits
+   `PushLayer` at itself and `PopLayer` after its whole subtree. A *subtree*
+   fragment (node + all descendants) is contiguous and balanced — good — but the
+   flat depth-stack emitter must become **recursive** (open → children → close)
+   for fragments to be self-contained.
+2. **Overlays break subtree contiguity.** Overlay subtrees (dropdowns/popovers)
+   are pulled into a *second* pass (`overlay_order`) so they escape ancestor
+   clips. A subtree containing an overlay descendant therefore isn't contiguous
+   in the DL. Fragments must either exclude overlay descendants (emit them
+   separately, as today) or a subtree with an overlay child is marked
+   non-cacheable.
+3. **`ImageId` remapping on cross-build reuse.** `DrawCmd::Image` carries an
+   `ImageId` indexing `DisplayList.images`. Within one build all fragments share
+   one `images` vec (fine). But a fragment **cached from a previous build** holds
+   stale indices — reusing it must remap its `ImageId`s into the current build's
+   `images` (or fragments carry their own image bytes). `GlyphRun`/rects/gradients
+   have no such indirection, so an image-free subtree reuses verbatim.
+
+**Lower-risk first slice (recommended before full fragmenting):** most of the
+~928 µs is `GlyphRun` *construction* per text node. Caching the emitted `GlyphRun`
+`DrawCmd` per node — keyed by (string, style, snapped bounds) — and reusing it
+when unchanged captures much of the win with **none** of the clip/overlay/image
+complexity (a glyph run references the atlas, not `images`, and is a single
+self-contained cmd). This is the pragmatic R5.1′ if the full fragment refactor is
+deferred.
+
+## The origin-shift problem
+The DL uses absolute coordinates. Reusing a subtree's fragment requires that (a)
+its Elements are unchanged **and** (b) its layout box didn't move — a sibling
+growing above shifts
 everything below, changing absolute glyph coords even when the subtree itself is
 identical. So a fragment is either reused verbatim (unchanged + same origin),
 reused **translated** (unchanged + shifted by a delta), or re-emitted.

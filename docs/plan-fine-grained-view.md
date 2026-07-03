@@ -44,10 +44,13 @@
 > `ui.whatDependsOn` (predictive reverse index, classifies patch vs rebuild),
 > `ui.lastChange` (the pump records patched nodes / rebuild), `input.invokeAction`
 > (geometry-free actuation via the retained handler) + MCP entries. Conformance
-> (`introspection_f4.rs`) cross-checks predictive == actual == tree. The full
-> fine-grained arc F0→F4 is implemented. **Remaining follow-ons (not F0–F4):**
-> `class!`/`bind!`/`For` sugar; the separate-`TaffyTree` split for incremental
-> layout if a real workload needs it.
+> (`introspection_f4.rs`) cross-checks predictive == actual == tree. **F5 ✅ done**
+> — authoring sugar: `widgets::keyed` reactive lists + mark-and-sweep GC (F5.1,
+> churn stays bounded), reactive `bind_class` + the `bind!` macro (F5.2); `text!`
+> + `Dynamic`/`Prop` shipped in F3. The full fine-grained arc F0→F5 is
+> implemented. **Remaining follow-ons (not F0–F5):** incremental paint
+> (rendering plan R5 — planned, sub-problems documented, not yet built); the
+> separate-`TaffyTree` split for incremental layout if a real workload needs it.
 
 > **Why this exists.** ADR-007 already commits the framework to *"fine-grained
 > signals (Solid-style), no VDOM/diffing … O(changed) updates."* The headless
