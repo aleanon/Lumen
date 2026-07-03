@@ -177,6 +177,9 @@ pub struct Element {
     /// A reactive binding for this node's background colour (F3). Paint-only, so
     /// a change patches without relayout.
     pub dyn_bg: Option<Dynamic<Color>>,
+    /// A reactive binding appending classes (F5.2). Classes drive the `.lss`
+    /// cascade (which may change size), so a change is structural (rebuild).
+    pub dyn_classes: Option<Dynamic<Vec<String>>>,
     /// Children.
     pub children: Vec<Element>,
 }
@@ -215,6 +218,7 @@ impl Default for Element {
             scope_deps: None,
             dyn_text: None,
             dyn_bg: None,
+            dyn_classes: None,
             children: Vec::new(),
         }
     }
@@ -326,6 +330,14 @@ impl Element {
     /// paint-only prop, so a change patches without relayout.
     pub fn bind_background(mut self, d: Dynamic<Color>) -> Self {
         self.dyn_bg = Some(d);
+        self
+    }
+    /// Bind extra classes reactively (F5.2): the closure's `Vec<String>` is
+    /// appended to the static classes each build. A change is structural (classes
+    /// drive the `.lss` cascade). Use with `bind!`, e.g.
+    /// `.bind_class(bind!(|rt| if on.get(rt) { vec!["on".into()] } else { vec![] }))`.
+    pub fn bind_class(mut self, d: Dynamic<Vec<String>>) -> Self {
+        self.dyn_classes = Some(d);
         self
     }
     /// Set a uniform border (`width` logical px, `color`).

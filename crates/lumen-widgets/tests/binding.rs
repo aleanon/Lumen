@@ -8,7 +8,7 @@ use std::rc::Rc;
 use kurbo::Size;
 use lumen_core::state::Signal;
 use lumen_core::{Color, Dynamic};
-use lumen_widgets::{text, widgets, App, BuildCx};
+use lumen_widgets::{bind, text, widgets, App, BuildCx};
 
 fn find<'a>(
     n: &'a lumen_core::semantics::SemanticsNode,
@@ -242,6 +242,42 @@ fn what_depends_on_predicts_and_last_change_confirms() {
     s.set(h.runtime(), 9);
     h.pump();
     assert_eq!(h.last_change()["kind"], "rebuild");
+}
+
+#[test]
+fn reactive_class_toggles_and_reports_deps() {
+    // F5.2: a bound class list appends reactively; a change is structural
+    // (restyle), reported under byProp.class, coherent throughout.
+    let mut h = App::new(|cx: &mut BuildCx| {
+        let on: Signal<bool> = cx.signal("on", || false);
+        widgets::column(vec![widgets::text("x").id("t").bind_class(bind!(rt =>
+            if on.get(rt) {
+                vec!["active".to_string()]
+            } else {
+                vec![]
+            }
+        ))])
+    })
+    .run_headless(Size::new(120.0, 60.0));
+
+    assert!(
+        !h.semantics_json().to_string().contains("active"),
+        "off → no class"
+    );
+    assert_eq!(
+        h.get_deps("#t")["byProp"]["class"],
+        serde_json::json!(["on"])
+    );
+    h.assert_view_coherent();
+
+    let on: Signal<bool> = h.runtime().signal("on", || false);
+    on.set(h.runtime(), true);
+    h.pump();
+    assert!(
+        h.semantics_json().to_string().contains("active"),
+        "on → class applied"
+    );
+    h.assert_view_coherent();
 }
 
 /// Deterministic LCG.

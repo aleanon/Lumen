@@ -249,13 +249,20 @@ struct NodeDeps {
     scope: Vec<String>,
     text: Vec<String>,
     background: Vec<String>,
+    class: Vec<String>,
 }
 
 impl NodeDeps {
     /// De-duplicated union of all sources (for `SemanticsNode.deps`).
     fn union(&self) -> Vec<String> {
         let mut d: Vec<String> = Vec::new();
-        for k in self.scope.iter().chain(&self.text).chain(&self.background) {
+        for k in self
+            .scope
+            .iter()
+            .chain(&self.text)
+            .chain(&self.background)
+            .chain(&self.class)
+        {
             if !d.contains(k) {
                 d.push(k.clone());
             }
@@ -264,7 +271,10 @@ impl NodeDeps {
     }
 
     fn is_empty(&self) -> bool {
-        self.scope.is_empty() && self.text.is_empty() && self.background.is_empty()
+        self.scope.is_empty()
+            && self.text.is_empty()
+            && self.background.is_empty()
+            && self.class.is_empty()
     }
 }
 
@@ -1400,6 +1410,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             add(&m.deps.scope, "scope", "rebuild");
             add(&m.deps.text, "text", "rebuild");
             add(&m.deps.background, "background", "patch");
+            add(&m.deps.class, "class", "rebuild");
         }
         self.dep_index = idx;
     }
@@ -1537,6 +1548,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 "scope": deps.scope,
                 "text": deps.text,
                 "background": deps.background,
+                "class": deps.class,
             },
         })
     }
@@ -1635,8 +1647,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // hit-testing/measurement, recording their dependency keys per prop (F4).
         let mut text_deps: Vec<String> = Vec::new();
         let mut bg_deps: Vec<String> = Vec::new();
-        if el.dyn_text.is_some() || el.dyn_bg.is_some() {
+        let mut class_deps: Vec<String> = Vec::new();
+        if el.dyn_text.is_some() || el.dyn_bg.is_some() || el.dyn_classes.is_some() {
             let rt = self.rt.clone();
+            if let Some(d) = el.dyn_classes.clone() {
+                // Classes drive the `.lss` cascade (may change size) → NON-isolated
+                // (structural). Appended to the static classes.
+                let (classes, reads) = d.eval(&rt);
+                class_deps = reads.dep_keys(&rt);
+                self.structural_reads.extend(&reads);
+                el.classes.extend(classes);
+            }
             if let Some(d) = el.dyn_text.clone() {
                 // Text is size-affecting → NON-isolated: its reads are structural
                 // (a change relayouts via a full rebuild).
@@ -1668,6 +1689,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             scope: el.scope_deps.take().unwrap_or_default(),
             text: text_deps,
             background: bg_deps,
+            class: class_deps,
         };
 
         let mut flags = NodeFlags::VISIBLE;
