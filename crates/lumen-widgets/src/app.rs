@@ -192,6 +192,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             force_rebuild: false,
             last_build_clock: 0.0,
             scope_cache: RefCell::new(HashMap::new()),
+            scope_live: RefCell::new(std::collections::HashSet::new()),
             bg_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
             dep_index: HashMap::new(),
@@ -426,6 +427,9 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// changed; cleared by `clear_view_caches` (the oracle + non-signal
     /// rebuilds). Coherence is guarded by `assert_view_coherent` (F0).
     scope_cache: RefCell<crate::element::ScopeCache>,
+    /// Scope keys accessed during the current build (F5 GC). After the build,
+    /// cached scopes + scope-local signals whose key is absent are swept.
+    scope_live: RefCell<std::collections::HashSet<String>>,
     /// Retained paint-only prop bindings from the last build (F3.4). A change to
     /// one binding's deps patches its node + repaints, skipping the rebuild.
     bg_bindings: Vec<BoundBg>,
@@ -1208,6 +1212,26 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.scope_cache.borrow_mut().clear();
     }
 
+    /// F5 GC: drop cached scope subtrees + scope-local signals whose key was not
+    /// accessed this build (a keyed-list item that vanished). Keeps a churning
+    /// list bounded; correct because an absent scope isn't in the view, so a
+    /// fresh rebuild wouldn't produce it either (coherence preserved).
+    fn sweep_dead_scopes(&mut self) {
+        let dead: Vec<String> = {
+            let live = self.scope_live.borrow();
+            let cache = self.scope_cache.borrow();
+            cache
+                .keys()
+                .filter(|k| !live.contains(*k))
+                .cloned()
+                .collect()
+        };
+        for k in dead {
+            self.scope_cache.borrow_mut().remove(&k);
+            self.rt.evict_prefix(&format!("{k}/"));
+        }
+    }
+
     /// Assert the current (possibly incrementally-updated) view equals a fresh
     /// rebuild from the same state — the F0 coherence invariant
     /// `incremental == rebuild_fresh`. Compares the display list (render truth,
@@ -1298,11 +1322,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // in `build_node` isolate themselves out; text-binding reads are folded
         // into `structural_reads` there.
         let rt = self.rt.clone();
+        self.scope_live.borrow_mut().clear();
         let (root_el, requests, root_reads) = {
-            let mut cx = BuildCx::new(&self.rt, self.clock_ms, &self.scope_cache);
+            let mut cx = BuildCx::new(&self.rt, self.clock_ms, &self.scope_cache, &self.scope_live);
             let (el, reads) = rt.collect_reads(|| (self.root)(&mut cx));
             (el, cx.take_requests(), reads)
         };
+        // F5 GC: sweep cached scopes + scope-local signals absent this build.
+        self.sweep_dead_scopes();
         self.requests = requests;
         self.structural_reads = root_reads;
         self.bg_bindings.clear();

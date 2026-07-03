@@ -441,6 +441,10 @@ pub struct BuildCx<'a> {
     pub(crate) tasks: RefCell<Vec<TaskRequest>>,
     /// Memoized subtrees (F1), persisted on `Headless` across builds.
     scope_cache: &'a RefCell<ScopeCache>,
+    /// Scope keys accessed this build (F5 GC): after the build, cached scopes +
+    /// scope-local signals whose key is absent are swept, bounding a churning
+    /// keyed list's memory.
+    scope_live: &'a RefCell<std::collections::HashSet<String>>,
     /// Identity-path prefix of the enclosing `scope` (empty at the root). Signal
     /// keys created inside a scope are namespaced under it, so a reused component
     /// gets its own state.
@@ -452,6 +456,7 @@ impl<'a> BuildCx<'a> {
         rt: &'a Runtime,
         now_ms: f64,
         scope_cache: &'a RefCell<ScopeCache>,
+        scope_live: &'a RefCell<std::collections::HashSet<String>>,
     ) -> BuildCx<'a> {
         BuildCx {
             rt,
@@ -461,6 +466,7 @@ impl<'a> BuildCx<'a> {
             read_clock: Cell::new(false),
             tasks: RefCell::new(Vec::new()),
             scope_cache,
+            scope_live,
             prefix: RefCell::new(String::new()),
         }
     }
@@ -483,6 +489,7 @@ impl<'a> BuildCx<'a> {
     /// spawn a task) are never cached — they re-run every build, as they must.
     pub fn scope(&mut self, id: &str, f: impl FnOnce(&mut BuildCx) -> Element) -> Element {
         let key = self.scoped_key(id);
+        self.scope_live.borrow_mut().insert(key.clone());
         if let Some(el) = self.cached_if_current(&key) {
             return el;
         }

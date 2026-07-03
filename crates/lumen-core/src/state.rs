@@ -344,6 +344,28 @@ impl Runtime {
         self.inner.borrow().dirty.is_empty()
     }
 
+    /// Drop every stored signal whose key starts with `prefix` (F5 list GC): a
+    /// keyed scope that vanished this build sheds its scope-local state, so a
+    /// churning list doesn't leak slots. The interned key↔id mapping is kept
+    /// (cheap), so re-adding the same key re-creates the slot from its
+    /// initializer. Returns how many slots were removed.
+    pub fn evict_prefix(&self, prefix: &str) -> usize {
+        let mut b = self.inner.borrow_mut();
+        let ids: Vec<SignalId> = b
+            .key_to_id
+            .iter()
+            .filter(|(k, _)| k.starts_with(prefix))
+            .map(|(_, id)| *id)
+            .collect();
+        let mut n = 0;
+        for id in ids {
+            if b.slots.remove(&id).is_some() {
+                n += 1;
+            }
+        }
+        n
+    }
+
     /// Run `f`, recording every signal it reads, and return the result plus a
     /// [`ReadSet`] capturing those signals at their current versions (F1). A
     /// memoized view scope re-runs only when `ReadSet::is_current` turns false —

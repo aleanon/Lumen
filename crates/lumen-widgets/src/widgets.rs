@@ -12,6 +12,32 @@ use lumen_render::RgbaImage;
 use lumen_text::TextStyle;
 use std::rc::Rc;
 
+/// A keyed reactive list (F5.1): render each item inside its own `cx.scope`
+/// identified by `key(item)`, so reordering reuses each item's cached subtree
+/// (F1) and only added/removed/changed items re-run. The **stable key** (not the
+/// index) is the identity — capture it, not a position, in handlers. Vanished
+/// keys are swept after the build (their cache + scope-local signals freed), so a
+/// churning list stays memory-bounded. Keys must be unique within the list.
+///
+/// ```ignore
+/// let rows = widgets::keyed(cx, todos, |t| t.id.to_string(), |cx, t| row_view(cx, t));
+/// widgets::column(rows)
+/// ```
+pub fn keyed<T>(
+    cx: &mut BuildCx,
+    items: impl IntoIterator<Item = T>,
+    key: impl Fn(&T) -> String,
+    view: impl Fn(&mut BuildCx, &T) -> Element,
+) -> Vec<Element> {
+    items
+        .into_iter()
+        .map(|item| {
+            let k = key(&item);
+            cx.scope(&k, |cx| view(cx, &item))
+        })
+        .collect()
+}
+
 /// Static text.
 pub fn text(s: impl Into<String>) -> Element {
     Element::text(s)
