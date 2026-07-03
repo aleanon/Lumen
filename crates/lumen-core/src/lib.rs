@@ -10,6 +10,7 @@
 //! the public surface (02 §11).
 #![warn(missing_docs)]
 
+pub mod binding;
 pub mod color;
 pub mod diagnostics;
 pub mod events;
@@ -24,6 +25,7 @@ pub mod tasks;
 #[doc(hidden)]
 pub mod tree;
 
+pub use binding::{Dynamic, Prop};
 pub use color::Color;
 pub use diagnostics::{codes, Diagnostic, Severity, SourceSpan};
 pub use identity::{NodeIndex, StableId};
