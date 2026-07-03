@@ -200,7 +200,7 @@ pub fn pull_to_refresh(
             ..LayoutStyle::default()
         },
         children: content,
-        on_wheel: Some(Rc::new(move |rt, dy| {
+        on_wheel: Some(Rc::new(move |rt, _dx, dy| {
             // Wheel delta < 0 is an upward pull; at the top it triggers refresh.
             let at_top = offset.get(rt) <= 0.0;
             if at_top && dy <= -threshold && !refreshing.get(rt) {

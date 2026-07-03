@@ -48,7 +48,7 @@ impl Scrollable {
             },
             // Positive wheel delta scrolls toward the end (the shell normalizes
             // the OS sign so wheel-down moves the content down).
-            on_wheel: Some(Rc::new(move |rt, dy| {
+            on_wheel: Some(Rc::new(move |rt, _dx, dy| {
                 offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
             })),
             children: vec![inner],

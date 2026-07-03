@@ -1005,7 +1005,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 let mut n = self.tree.hit_test(we.pos);
                 while let Some(node) = n {
                     if let Some(h) = self.meta.get(&node).and_then(|m| m.on_wheel.clone()) {
-                        h(&self.rt, we.delta.y);
+                        h(&self.rt, we.delta.x, we.delta.y);
                         break;
                     }
                     let parent = self.tree.parent(node);
@@ -1143,7 +1143,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             0.0
         };
         if let Some(h) = self.meta.get(&node).and_then(|m| m.on_drag.clone()) {
-            h(&self.rt, frac_x, frac_y);
+            h(&self.rt, frac_x, frac_y, pos);
         }
     }
 

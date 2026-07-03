@@ -235,7 +235,7 @@ fn build(cx: &mut BuildCx) -> Element {
             flex_direction: FlexDirection::Column,
             ..LayoutStyle::default()
         },
-        on_wheel: Some(std::rc::Rc::new(move |rt, dy| {
+        on_wheel: Some(std::rc::Rc::new(move |rt, _dx, dy| {
             scroll.update(rt, |o| *o = (*o + dy).clamp(0.0, MAX_Y))
         })),
         on_key: Some(std::rc::Rc::new(move |rt, ke| {
@@ -279,7 +279,7 @@ fn build(cx: &mut BuildCx) -> Element {
                 ..LayoutStyle::default()
             },
             // frac_y along the track maps directly to the scroll offset (jump).
-            on_drag: Some(std::rc::Rc::new(move |rt, _fx, fy| {
+            on_drag: Some(std::rc::Rc::new(move |rt, _fx, fy, _pos| {
                 scroll.set(rt, fy * MAX_Y)
             })),
             children: vec![thumb],

@@ -73,7 +73,7 @@ impl Slider {
                 ..LayoutStyle::default()
             },
             // Horizontal control → the x fraction along the track sets the value.
-            on_drag: Some(Rc::new(move |rt, fx, _fy| {
+            on_drag: Some(Rc::new(move |rt, fx, _fy, _pos| {
                 value.set(rt, min + fx * (max - min))
             })),
             children: vec![track, thumb],

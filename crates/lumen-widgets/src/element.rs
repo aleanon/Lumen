@@ -16,13 +16,14 @@ use std::rc::Rc;
 
 /// A click/activate handler. Re-registered every build; never stored (ADR-013).
 pub type Handler = Rc<dyn Fn(&Runtime)>;
-/// A wheel handler receiving the vertical delta (logical px).
-pub type WheelHandler = Rc<dyn Fn(&Runtime, f64)>;
+/// A wheel handler receiving the horizontal and vertical delta (logical px).
+/// Most consumers scroll vertically (`dy`); a 2D surface (spreadsheet) uses both.
+pub type WheelHandler = Rc<dyn Fn(&Runtime, f64, f64)>;
 /// A drag handler receiving the pointer's fraction along the node's width and
-/// height (`frac_x`, `frac_y`), each clamped to `0.0..=1.0`. Horizontal controls
-/// (sliders, the pane-grid split) use `frac_x`; vertical ones (a scrollbar) use
-/// `frac_y`.
-pub type DragHandler = Rc<dyn Fn(&Runtime, f64, f64)>;
+/// height (`frac_x`, `frac_y`, each clamped to `0.0..=1.0`) **and** the pointer's
+/// window-space position. Sliders/scrollbars use the fractions; pixel drags
+/// (resizing a column, panning) use the absolute position.
+pub type DragHandler = Rc<dyn Fn(&Runtime, f64, f64, kurbo::Point)>;
 /// A committed-text handler (text inputs).
 pub type TextHandler = Rc<dyn Fn(&Runtime, &str)>;
 /// A key handler on the focused node, receiving each `KeyDown` (the node decides

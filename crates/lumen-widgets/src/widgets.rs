@@ -209,7 +209,7 @@ pub fn slider(cx: &BuildCx, name: &str, min: f64, max: f64) -> Element {
             height: Dim::px(THUMB as f32),
             ..LayoutStyle::default()
         },
-        on_drag: Some(Rc::new(move |rt, f, _| {
+        on_drag: Some(Rc::new(move |rt, f, _, _| {
             value.set(rt, min + f * (max - min))
         })),
         children: vec![track, thumb],
@@ -244,7 +244,7 @@ pub fn scroll(
             height: Dim::px(viewport_h as f32),
             ..LayoutStyle::default()
         },
-        on_wheel: Some(Rc::new(move |rt, dy| {
+        on_wheel: Some(Rc::new(move |rt, _dx, dy| {
             offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
         })),
         children: vec![inner],

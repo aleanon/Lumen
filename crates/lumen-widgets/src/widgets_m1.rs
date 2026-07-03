@@ -236,7 +236,7 @@ pub fn virtual_list(
             height: Dim::px(viewport_h as f32),
             ..LayoutStyle::default()
         },
-        on_wheel: Some(Rc::new(move |rt, dy| {
+        on_wheel: Some(Rc::new(move |rt, _dx, dy| {
             offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
         })),
         children,
