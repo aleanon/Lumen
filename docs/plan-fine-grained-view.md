@@ -26,8 +26,12 @@
 >   snapshot); re-exported as `lumen_widgets::stable_handler`; passing +
 >   `compile_fail` doctests. Catches owned-state captures, not Copy indices.
 >
-> Remaining for a full retained view: the semantics projection (step 2) and the
-> per-property bindings (F3, gated on the authoring-API escalation).
+> *Semantics projection (step 2) — DONE* (adapted): with layout skipped,
+> render/semantics already can't drift, so the projection delivered is the
+> *reactive* structure — each `cx.scope` root carries its signal dependency
+> keys into `SemanticsNode.deps` (and `ui.getLayout`), the foundation F4's
+> `getDeps` reads. Remaining: per-property bindings (F3, gated on the
+> authoring-API escalation).
 
 > **Why this exists.** ADR-007 already commits the framework to *"fine-grained
 > signals (Solid-style), no VDOM/diffing … O(changed) updates."* The headless
