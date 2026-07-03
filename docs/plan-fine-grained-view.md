@@ -30,8 +30,10 @@
 > render/semantics already can't drift, so the projection delivered is the
 > *reactive* structure — each `cx.scope` root carries its signal dependency
 > keys into `SemanticsNode.deps` (and `ui.getLayout`), the foundation F4's
-> `getDeps` reads. Remaining: per-property bindings (F3, gated on the
-> authoring-API escalation).
+> `getDeps` reads. **F3 authoring-API escalation RESOLVED (2026-07-03): option
+> B — author-expressed bindings + `lumen-macros` sugar** (design in the F3 phase
+> below); reopens the retained-node-graph (build once, patch props) *minus*
+> incremental layout. F3 is now specced and unblocked, not yet implemented.
 
 > **Why this exists.** ADR-007 already commits the framework to *"fine-grained
 > signals (Solid-style), no VDOM/diffing … O(changed) updates."* The headless
@@ -187,15 +189,13 @@ lint (below).
   node graph, never in stored state, so the ADR's hard precondition holds. ⚠️
   *This is an escalation (§2 item 2/3 territory): record the amendment, don't
   silently redefine an ADR.*
-- **Authoring API** — the goal is to keep `build(cx) -> Element` as the authoring
-  surface (model (a)'s ergonomics) with the runtime doing fine-grained work
-  underneath. Phases F1–F2 are achievable **transparently** (framework memoizes
-  scopes; author code unchanged, `cx.scope` optional). Phase F3 (per-property
-  bindings) is where an authoring-API question opens: either the framework
-  *infers* holes by recording which signals each `Element` prop read during
-  build, or authors express bindings explicitly. ⚠️ *The F3 API surface is an
-  open escalation (post-1.0 API per §2 item 3) — F3 does not start until it is
-  resolved in the decision log.*
+- **Authoring API** — F1–F2 are **transparent** (framework memoizes scopes;
+  author code unchanged, `cx.scope` optional). F3 (per-property bindings) *does*
+  change the authoring surface. **Resolved (2026-07-03, decision log): option B —
+  author-expressed bindings, with `lumen-macros` sugar** (`text!`/`For`), chosen
+  because the framework is pre-1.0 with no consumers and declared bindings beat
+  inferred holes for observability. Un-bound `build -> Element` code still
+  compiles (props default to `Static`); F3 details are in its phase below.
 
 ---
 
@@ -267,22 +267,100 @@ place; semantics are **projected** from retained nodes (structural fan-out).
 Harness green with a *real* incremental path; lint clean across examples; agent
 `getTree`/`getLayout` identical between incremental and `rebuild_fresh`.
 
-# Phase F3 — Per-property bindings (true model c) *(gated on API escalation)*
+# Phase F3 — Per-property bindings (true model c)
 
-## Target
-Dynamic props update single node props without re-running the scope body;
-incremental render + incremental semantics.
+**API decision (2026-07-03): option B — author-expressed bindings, with macro
+sugar** (decision log). Rationale: the framework is pre-1.0 with no external
+consumers, so the API is free to change; on the merits, *declared* bindings beat
+*inferred* holes for an AI-first framework — the reactive graph the agent
+inspects == the graph the author wrote == the graph that drives updates, with no
+third inferred version to drift. Declared boundaries also make the once-vs-
+reactive distinction syntactically honest (unlike A, where `build` looks
+immediate-mode but runs once).
 
-## Steps (sketch — details pending the API decision)
-1. Represent a dynamic prop as `(deps, project)`; on dep change, update the one
-   prop + its semantic projection + mark that node's paint dirty (feeds the R2
-   damage system).
-2. Incremental semantics: only changed nodes' semantic fields update.
-3. `getDeps` + change-attribution verbs read the binding subscriptions.
+## The model
+
+The view is built **once**; a dynamic prop is a **binding** — a small
+`(deps, project)` derivation that re-runs *only that prop* when its deps change,
+never the surrounding build. Two distinct kinds of "dynamic", designed apart on
+purpose:
+
+- **Binding (a *value* changes).** A `Dynamic<T>` = `Rc<dyn Fn(&ReadCx) -> T>`
+  wrapping a reactive closure. An `Element` prop that can vary holds
+  `Prop<T> = Static(T) | Dynamic(Binding<T>)`. `text!(cx, "Count: {count}")`
+  expands to a `Dynamic<String>` capturing `count`.
+- **Structure (the *tree shape* changes).** A list growing/shrinking, a
+  conditional subtree — handled by a **keyed scope** (`For`/`cx.scope` with
+  explicit identity, F1's primitive), which re-runs the scope body to add/remove
+  nodes. Bindings never change structure; scopes never patch a leaf prop. The
+  `text!`-vs-`For` split is the authoring rule, documented from day one.
+
+## Authoring surface (`lumen-macros`)
+
+The ergonomic tax of B (`text(Dynamic::new(move |c| format!("{}", count.get(c))))`)
+dissolves with sugar, emitted by the proc-macro crate already in the workspace:
+
+```rust
+// value binding — reactive hole in a string:
+text!(cx, "Count: {count}")            // → Dynamic<String> depending on `count`
+// prop bindings:
+node.class(class!(cx, if active { "on" } else { "off" }))
+node.opacity(bind!(cx, fade.get(cx)))
+// structure — keyed list (re-runs body per item, patches props within):
+For::keyed(cx, items, |cx, item| row!( text!(cx, "{item.name}") ))
+```
+
+The macro records each binding's dep keys directly (it knows the captured
+signals), so the `deps` projection (F2 step 2) becomes exact per-prop rather than
+per-scope.
+
+## Retained node graph (reopened here — *minus* incremental layout)
+
+"Build once, patch props" requires **retaining the node graph** (F2 step 1,
+skipped earlier for layout reasons). B reopens node retention but **not**
+incremental layout — those are separable:
+
+- **Paint-only prop change** (color, class, opacity, transform, fixed-size
+  content): patch the retained node's field → mark one paint tile via R2 damage.
+  *Fully surgical*, no layout, no rebuild.
+- **Size-affecting prop change** (text content, show/hide): patch the field →
+  full-tree layout (taffy skip stands) → R2 damage paint. Surgical build+paint,
+  full layout. Accept this until/unless the separate-`TaffyTree` split is done.
+
+So the retained tree persists across pumps; bindings patch fields in place; the
+old `build_node` full rebuild remains the coherence oracle (`rebuild_fresh`).
+
+## Coherence & observability extensions
+
+- **Oracle (F0) extends per-prop.** `assert_view_coherent` already compares the
+  whole display list + semantics vs `rebuild_fresh`; with bindings it gains
+  teeth at prop granularity — a binding that patches the wrong field (or forgets
+  the semantic projection) diverges from a fresh build and fails.
+- **Anti-drift (F2 §2) stays structural.** A binding updates a node field; the
+  semantic projection reads the *same* field, so render + a11y + agent can't
+  desync (the binding fans out to both, by construction — not two code paths).
+- **`getDeps` (F4) becomes exact.** Per-prop bindings carry their own
+  subscriptions, so the agent can answer "what does *this prop* depend on", and
+  change-attribution reports exactly which props re-ran on a write.
+
+## Steps (each independently green, gated by F0)
+
+1. `Prop<T>` + `Dynamic<T>`/`Binding` in `lumen-core`; `Element` props that can
+   vary become `Prop<T>` (default `Static`, so un-bound authoring is unchanged).
+2. Retain the node graph on `Headless`; a first build populates it; subsequent
+   pumps apply bindings whose deps changed (via `ReadSet`), patching node fields
+   + marking R2 damage; size-affecting fields flag a full relayout.
+3. `text!` / `class!` / `bind!` / `For` macros in `lumen-macros` (emit bindings +
+   exact dep keys; `stable_handler!`'s HRTB technique reused for closures).
+4. Semantic projection reads the patched fields (F2 §2 fan-out); per-prop `deps`.
+5. `ui.getDeps` + change-attribution (rolls into F4).
 
 ## Acceptance
-Harness green; "edit one field" updates exactly one node's prop + one paint tile;
-`getDeps` returns the correct subscription set.
+Harness green (incremental == `rebuild_fresh`, now at prop granularity); "recolor
+one node" updates exactly one field + one paint tile with **no** layout and **no**
+scope re-run; "edit one text" patches the field + relayouts (full-tree) + one
+tile; `getDeps` returns the exact per-prop subscription set; existing
+`build -> Element` code (no bindings) still compiles and behaves as today.
 
 # Phase F4 — Agent introspection of the reified graph *(additive protocol)*
 
@@ -304,15 +382,18 @@ F1  cx.scope memoized subtrees (transparent, opt-in)  ── ships value alone
       │
 F2  Retained node graph + semantics projection + handler lint  ── the pivot
       │
-F3  Per-property bindings  ── BLOCKED on API escalation (decision log)
+F3  Per-property bindings (option B) ── API decided; reopens node retention
       │
 F4  getDeps / change-attribution / invokeAction  ── additive verbs
 ```
 
 F0 first, always. **F1 is shippable on its own** and delivers most of the
 large-app perf with the least risk (it never abandons full rebuild). F2 is the
-real retained-view pivot. F3 is the only phase that may touch the authoring API
-and must not start before the escalation resolves. F4 rides on F3's reified graph.
+retained-view pivot (incremental layout skipped; observability projection +
+handler lint done). F3 changes the authoring API (option B — author-expressed
+bindings + macro sugar, resolved in the decision log) and reopens node retention
+(build once, patch props) *minus* incremental layout. F4 rides on F3's per-prop
+reified graph.
 
 # Risks & mitigations
 
@@ -325,8 +406,10 @@ and must not start before the escalation resolves. F4 rides on F3's reified grap
 - **Stale handler captures.** → W-code lint in F2; the "capture identity" rule
   documented from F1.
 - **ADR-013 wording drift.** → Escalate the amendment before F2 lands.
-- **Post-1.0 authoring-API break at F3.** → F1/F2 are transparent; F3 gated on an
-  explicit decision-log entry (prefer hole-inference to keep `build -> Element`).
+- **Authoring-API change at F3.** → Resolved (2026-07-03): option B (author-
+  expressed bindings + `lumen-macros` sugar); acceptable because the framework is
+  pre-1.0 with no consumers. Un-bound `build -> Element` still compiles (props
+  default `Static`).
 
 # Acceptance (whole plan)
 
