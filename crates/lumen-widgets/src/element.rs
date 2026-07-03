@@ -16,9 +16,10 @@ use std::rc::Rc;
 
 /// A click/activate handler. Re-registered every build; never stored (ADR-013).
 pub type Handler = Rc<dyn Fn(&Runtime)>;
-/// A wheel handler receiving the horizontal and vertical delta (logical px).
-/// Most consumers scroll vertically (`dy`); a 2D surface (spreadsheet) uses both.
-pub type WheelHandler = Rc<dyn Fn(&Runtime, f64, f64)>;
+/// A wheel handler receiving the horizontal and vertical delta (logical px) and
+/// the modifier state. Most consumers scroll vertically (`dy`); a 2D surface
+/// (spreadsheet) uses both, and reads the modifiers (e.g. Ctrl+wheel to zoom).
+pub type WheelHandler = Rc<dyn Fn(&Runtime, f64, f64, lumen_core::events::Modifiers)>;
 /// A drag handler receiving the pointer's fraction along the node's width and
 /// height (`frac_x`, `frac_y`, each clamped to `0.0..=1.0`) **and** the pointer's
 /// window-space position. Sliders/scrollbars use the fractions; pixel drags

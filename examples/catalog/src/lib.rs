@@ -235,7 +235,7 @@ fn build(cx: &mut BuildCx) -> Element {
             flex_direction: FlexDirection::Column,
             ..LayoutStyle::default()
         },
-        on_wheel: Some(std::rc::Rc::new(move |rt, _dx, dy| {
+        on_wheel: Some(std::rc::Rc::new(move |rt, _dx, dy, _mods| {
             scroll.update(rt, |o| *o = (*o + dy).clamp(0.0, MAX_Y))
         })),
         on_key: Some(std::rc::Rc::new(move |rt, ke| {
