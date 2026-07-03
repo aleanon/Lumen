@@ -39,11 +39,15 @@
 > `structural_reads` + `patch_bg_bindings`; `replay_reads` fixes the F1×F3.4
 > skipped-scope interaction). Size-affecting (text) bindings rebuild (F1-memoized)
 > — retained incremental layout stays out of scope (taffy skip). Guarded by the
-> F0 oracle + an 80-round mixed fuzz. **F4 📋 planned** (not implemented) —
-> additive agent verbs over the reified graph: `ui.getDeps` (per-prop),
-> `ui.whatDependsOn` (predictive reverse index), `ui.lastChange` (change
-> attribution), `input.invokeAction` (geometry-free actuation) + MCP entries;
-> full sub-plan in the F4 phase below.
+> F0 oracle + an 80-round mixed fuzz. **F4 ✅ done** — additive agent verbs over
+> the reified graph: `ui.getDeps` (per-prop, from a retained `NodeDeps` split),
+> `ui.whatDependsOn` (predictive reverse index, classifies patch vs rebuild),
+> `ui.lastChange` (the pump records patched nodes / rebuild), `input.invokeAction`
+> (geometry-free actuation via the retained handler) + MCP entries. Conformance
+> (`introspection_f4.rs`) cross-checks predictive == actual == tree. The full
+> fine-grained arc F0→F4 is implemented. **Remaining follow-ons (not F0–F4):**
+> `class!`/`bind!`/`For` sugar; the separate-`TaffyTree` split for incremental
+> layout if a real workload needs it.
 
 > **Why this exists.** ADR-007 already commits the framework to *"fine-grained
 > signals (Solid-style), no VDOM/diffing … O(changed) updates."* The headless
