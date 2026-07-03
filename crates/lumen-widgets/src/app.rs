@@ -2107,32 +2107,42 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // edit re-rasterizes ≤1 glyph. `block` also drives the caret /
                 // selection geometry below (same layout).
                 let scale = self.scale as f32;
-                let block = self
-                    .text
-                    .shaped(txt, &ts, m.wrap_width, lumen_text::TextAlign::Start);
-                let (mut run, images) = block.glyph_run(tx as f32, ty as f32, scale);
-                // The run's bounding rect over *actual glyph ink* (a glyph can
-                // overhang the logical box via side bearings) — drives damage, so
-                // it must cover every pixel the run paints. Dest rects are logical.
-                let mut run_rect = Rect::new(tx, ty, tx, ty);
-                for g in &run.glyphs {
-                    run_rect = run_rect.union(Rect::new(
-                        g.x as f64,
-                        g.y as f64,
-                        (g.x + g.w) as f64,
-                        (g.y + g.h) as f64,
-                    ));
-                }
-                // Intern this run's glyph bitmaps into the frame-wide tables
-                // (dedup by stable id) and remap the run's local indices.
-                let remap: Vec<u32> = images.into_iter().map(|gi| dl.intern_glyph(gi)).collect();
-                for g in &mut run.glyphs {
-                    g.image = remap[g.image as usize];
-                }
-                // Selection highlight (behind the glyphs) for a focused editor.
+                // R5: reuse the cached **origin-relative** glyph run — translate to
+                // (tx, ty) and intern its glyphs (cloning only ones new to this
+                // frame). Skips the per-frame `glyph_run` rebuild (the dominant
+                // display-list-emission cost) byte-identically — the pen rounds
+                // before the origin is added, so translation commutes. Ink +
+                // metrics come from the cache.
+                let (run, run_rect, metrics) = {
+                    let cached = self.text.shaped_run(
+                        txt,
+                        &ts,
+                        m.wrap_width,
+                        lumen_text::TextAlign::Start,
+                        scale,
+                    );
+                    let mut run = cached.run.clone();
+                    for g in &mut run.glyphs {
+                        g.x += tx as f32;
+                        g.y += ty as f32;
+                        g.image = dl.intern_glyph_ref(&cached.images[g.image as usize]);
+                    }
+                    let run_rect = Rect::new(
+                        cached.ink[0] as f64 + tx,
+                        cached.ink[1] as f64 + ty,
+                        cached.ink[2] as f64 + tx,
+                        cached.ink[3] as f64 + ty,
+                    );
+                    (run, run_rect, cached.metrics)
+                };
+                // Selection highlight (behind the glyphs) for a focused editor —
+                // re-shape (cached, cheap) for the selection geometry.
                 if focused && m.caret_byte.is_some() {
                     if let Some((a, b)) = m.selection.filter(|(a, b)| a != b) {
                         let sel = Color::srgb8(0x1a, 0x73, 0xe8, 0x55);
+                        let block =
+                            self.text
+                                .shaped(txt, &ts, m.wrap_width, lumen_text::TextAlign::Start);
                         for (x0, y0, x1, y1) in block.selection_rects(a, b) {
                             dl.push(DrawCmd::Rect {
                                 rect: Rect::new(
@@ -2151,15 +2161,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // Record the glyph-ink bounds for this node so the clipping audit
                 // (W0104) and ui.getLayout can compare ink vs the layout box.
                 self.node_ink.insert(node, run_rect);
-                self.node_text_metrics.insert(node, block.metrics());
+                self.node_text_metrics.insert(node, metrics);
                 let run_id = dl.add_run(run);
                 dl.push(DrawCmd::GlyphRun {
                     run: run_id,
                     brush: Brush::Solid(text_color),
                     rect: run_rect,
                 });
-                // Caret (in front) for a focused editor.
+                // Caret (in front) for a focused editor — re-shape (cached) for
+                // the caret geometry.
                 if let Some(caret) = m.caret_byte.filter(|_| focused) {
+                    let block =
+                        self.text
+                            .shaped(txt, &ts, m.wrap_width, lumen_text::TextAlign::Start);
                     let (cx, cy, ch) = block.caret_pos(caret);
                     let w = 1.5;
                     dl.push(DrawCmd::Rect {

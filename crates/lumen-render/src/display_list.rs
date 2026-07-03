@@ -363,6 +363,18 @@ impl DisplayList {
         self.glyph_images.push(img);
         i
     }
+
+    /// Intern by reference (R5): look the glyph up by stable key and **clone** the
+    /// coverage image only when it isn't already present — so reusing a cached run
+    /// pays a clone only for glyphs new to this frame.
+    pub fn intern_glyph_ref(&mut self, img: &GlyphImage) -> u32 {
+        if let Some(i) = self.glyph_images.iter().position(|g| g.key == img.key) {
+            return i as u32;
+        }
+        let i = self.glyph_images.len() as u32;
+        self.glyph_images.push(img.clone());
+        i
+    }
 }
 
 impl DrawCmd {

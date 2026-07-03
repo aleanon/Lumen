@@ -220,6 +220,26 @@ impl ShapeKey {
 /// Clear the shaped-layout cache above this many entries (bounds a long session
 /// with many distinct strings, e.g. an animated numeric readout).
 const SHAPE_CACHE_CAP: usize = 2048;
+/// Cap for the glyph-run cache (R5). Same rationale as the shape cache.
+const RUN_CACHE_CAP: usize = 4096;
+
+/// A cached, **origin-relative** glyph run (R5 incremental paint): the positioned
+/// glyphs (laid out at origin 0,0), their coverage images, the ink bounds
+/// `[x0,y0,x1,y1]`, and metrics. The paint layer interns the images into the
+/// frame and translates the run by the node's origin — so a static (or merely
+/// scrolled) label reuses this instead of re-running `glyph_run` (the dominant
+/// display-list-emission cost). Byte-identical to building at the origin
+/// directly, because `glyph_run` rounds the pen *before* adding the origin.
+pub struct CachedRun {
+    /// Glyphs positioned relative to origin (0, 0).
+    pub run: lumen_render::GlyphRun,
+    /// Coverage images referenced by the run (local indices).
+    pub images: Vec<lumen_render::GlyphImage>,
+    /// Ink bounds `[x0, y0, x1, y1]`, origin-relative.
+    pub ink: [f32; 4],
+    /// Typographic metrics (position-independent).
+    pub metrics: TextMetrics,
+}
 
 /// The text engine: owns the bundled-font context. Reuse across layouts.
 pub struct TextEngine {
@@ -231,6 +251,10 @@ pub struct TextEngine {
     /// measure it and to paint it, every frame — this collapses that to one
     /// shaping per `(text, geometry, wrap)` and reuses it across frames.
     shape_cache: HashMap<ShapeKey, TextBlock>,
+    /// Cache of origin-relative glyph runs keyed by `(ShapeKey, scale)` (R5). The
+    /// paint layer translates + interns these instead of re-building the run each
+    /// frame — the dominant display-list-emission cost for text.
+    run_cache: HashMap<(ShapeKey, u32), CachedRun>,
 }
 
 impl Default for TextEngine {
@@ -266,6 +290,7 @@ impl TextEngine {
             layout_cx: LayoutContext::new(),
             family,
             shape_cache: HashMap::new(),
+            run_cache: HashMap::new(),
         }
     }
 
@@ -280,8 +305,9 @@ impl TextEngine {
             .collection
             .register_fonts(parley::fontique::Blob::from(bytes), None);
         // A new family can change fallback shaping for any string, so drop cached
-        // shaped blocks.
+        // shaped blocks + runs.
         self.shape_cache.clear();
+        self.run_cache.clear();
         let (id, _) = registered.first()?;
         self.font_cx
             .collection
@@ -312,6 +338,47 @@ impl TextEngine {
             self.shape_cache.insert(key.clone(), block);
         }
         &self.shape_cache[&key]
+    }
+
+    /// Like [`shaped`](Self::shaped) but returns the **origin-relative glyph run**
+    /// (R5): positioned glyphs, coverage images, ink, and metrics, cached by
+    /// `(ShapeKey, scale)`. The paint layer translates + interns it, skipping the
+    /// per-frame `glyph_run` rebuild for static/scrolled text.
+    pub fn shaped_run(
+        &mut self,
+        text: &str,
+        base: &TextStyle,
+        max_width: Option<f32>,
+        align: TextAlign,
+        scale: f32,
+    ) -> &CachedRun {
+        let key = (ShapeKey::new(text, base, max_width, align), scale.to_bits());
+        if !self.run_cache.contains_key(&key) {
+            let cached = {
+                let block = self.shaped(text, base, max_width, align);
+                let (run, images) = block.glyph_run(0.0, 0.0, scale);
+                // Origin-relative ink; starts at the origin (0,0) like the paint
+                // layer's `run_rect`, then unions each glyph.
+                let mut ink = [0f32; 4];
+                for g in &run.glyphs {
+                    ink[0] = ink[0].min(g.x);
+                    ink[1] = ink[1].min(g.y);
+                    ink[2] = ink[2].max(g.x + g.w);
+                    ink[3] = ink[3].max(g.y + g.h);
+                }
+                CachedRun {
+                    run,
+                    images,
+                    ink,
+                    metrics: block.metrics(),
+                }
+            };
+            if self.run_cache.len() >= RUN_CACHE_CAP {
+                self.run_cache.clear();
+            }
+            self.run_cache.insert(key.clone(), cached);
+        }
+        &self.run_cache[&key]
     }
 
     /// Shape and lay out `text`. `ranges` apply per-byte-range style overrides

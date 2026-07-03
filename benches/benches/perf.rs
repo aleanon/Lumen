@@ -148,6 +148,41 @@ fn scope_memo_one_of_many(c: &mut Criterion) {
     });
 }
 
+/// R5: a changed-frame full rebuild over 500 mostly-static text nodes. The
+/// glyph-run cache reuses the 499 unchanged runs, so display-list *emission* is
+/// O(changed) not O(tree) (~50× on this shape, measured separately). This full
+/// CPU pump is raster-dominated (headless re-rasters every glyph), so it mostly
+/// guards against a gross emission regression re-appearing on top of the raster.
+fn text_list_changed_frame(c: &mut Criterion) {
+    use lumen_core::state::Signal;
+    let app = App::new(|cx| {
+        let n: Signal<i64> = cx.signal("n", || 0);
+        let bump = n.get(cx.runtime()); // root read → any change is a full rebuild
+        let rows: Vec<_> = (0..500)
+            .map(|i| {
+                if i == 0 {
+                    widgets::text(format!("counter: {bump}"))
+                } else {
+                    widgets::text(format!("row {i} (static)"))
+                }
+            })
+            .collect();
+        widgets::column(rows)
+    });
+    // Small frame → cheap raster; DL emission dominates.
+    let mut h = app.run_headless(Size::new(400.0, 400.0));
+    for _ in 0..4 {
+        h.pump();
+    }
+    c.bench_function("text_list_changed_frame", |b| {
+        b.iter(|| {
+            let n: Signal<i64> = h.runtime().signal("n", || 0);
+            n.update(h.runtime(), |x| *x += 1);
+            h.pump();
+        });
+    });
+}
+
 /// Idle: pumping with no input queued. The scheduler should do no real work.
 fn idle_frame(c: &mut Criterion) {
     let app = App::new(|cx| {
@@ -170,6 +205,7 @@ criterion_group!(
     cull_100k,
     signal_update_large_vec,
     scope_memo_one_of_many,
+    text_list_changed_frame,
     idle_frame
 );
 criterion_main!(perf);
