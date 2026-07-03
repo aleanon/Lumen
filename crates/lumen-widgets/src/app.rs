@@ -208,6 +208,18 @@ pub struct AppSnapshot {
     focused: Option<StableId>,
 }
 
+/// Combine a node's scope deps and binding deps (F3) into one de-duplicated
+/// list for the semantic projection, or `None` if both are empty.
+fn merge_deps(scope: Option<Vec<String>>, binding: Vec<String>) -> Option<Vec<String>> {
+    let mut d = scope.unwrap_or_default();
+    for k in binding {
+        if !d.contains(&k) {
+            d.push(k);
+        }
+    }
+    (!d.is_empty()).then_some(d)
+}
+
 /// Parse a stylesheet, returning it only if error-free.
 fn parse_sheet(src: &str) -> Option<lumen_style::Stylesheet> {
     let (sheet, diags) = lumen_style::parse("app.lss", src);
@@ -1325,7 +1337,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     #[allow(clippy::too_many_arguments)]
     fn build_node(
         &mut self,
-        el: Element,
+        mut el: Element,
         tree: &mut Tree,
         layout: &mut LayoutTree,
         meta: &mut HashMap<NodeIndex, NodeMeta>,
@@ -1342,6 +1354,30 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // give them an elevated z to match — otherwise content that paints *under*
         // the overlay but comes later in document order would steal its clicks.
         let this_overlay = in_overlay || el.overlay;
+
+        // F3: evaluate reactive prop bindings *before* the content is read for
+        // hit-testing/measurement, recording their dependency keys (merged into
+        // this node's `deps` for observability alongside any scope deps).
+        let mut binding_deps: Vec<String> = Vec::new();
+        if el.dyn_text.is_some() || el.dyn_bg.is_some() {
+            let rt = self.rt.clone();
+            if let Some(d) = el.dyn_text.clone() {
+                let (s, reads) = d.eval(&rt);
+                binding_deps.extend(reads.dep_keys(&rt));
+                // The string is the node's content *and* its accessible label
+                // (Element::text sets both); keep them in sync.
+                el.label = s.clone();
+                el.content = match std::mem::take(&mut el.content) {
+                    NodeContent::Text(_, ts) => NodeContent::Text(s, ts),
+                    _ => NodeContent::Text(s, lumen_text::TextStyle::default()),
+                };
+            }
+            if let Some(d) = el.dyn_bg.clone() {
+                let (c, reads) = d.eval(&rt);
+                binding_deps.extend(reads.dep_keys(&rt));
+                el.background = Some(c);
+            }
+        }
 
         let mut flags = NodeFlags::VISIBLE;
         let interactive = el.background.is_some()
@@ -1446,7 +1482,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 scroll: el.scroll,
                 focusable: el.focusable,
                 elide: el.elide_semantics,
-                scope_deps: el.scope_deps,
+                scope_deps: merge_deps(el.scope_deps, binding_deps),
                 on_click: el.on_click,
                 on_wheel: el.on_wheel,
                 on_drag: el.on_drag,

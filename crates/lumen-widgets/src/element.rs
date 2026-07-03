@@ -6,7 +6,7 @@
 
 use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
 use lumen_core::state::{Runtime, State};
-use lumen_core::{Color, Signal, StableId};
+use lumen_core::{Color, Dynamic, Signal, StableId};
 use lumen_layout::{Dim, Display, FlexDirection, LayoutStyle};
 use lumen_render::RgbaImage;
 use lumen_text::TextStyle;
@@ -171,6 +171,12 @@ pub struct Element {
     /// of the signals that scope depends on — projected into semantics (F2) so
     /// the agent can see the reactive structure. Set by `scope`; not authored.
     pub scope_deps: Option<Vec<String>>,
+    /// A reactive binding for this node's text content (F3, option B). When set,
+    /// the build evaluates it to produce the string; the `text!` macro emits it.
+    pub dyn_text: Option<Dynamic<String>>,
+    /// A reactive binding for this node's background colour (F3). Paint-only, so
+    /// a change patches without relayout.
+    pub dyn_bg: Option<Dynamic<Color>>,
     /// Children.
     pub children: Vec<Element>,
 }
@@ -207,6 +213,8 @@ impl Default for Element {
             overlay: false,
             shadow: None,
             scope_deps: None,
+            dyn_text: None,
+            dyn_bg: None,
             children: Vec::new(),
         }
     }
@@ -305,6 +313,19 @@ impl Element {
     /// Set the background fill.
     pub fn background(mut self, color: Color) -> Self {
         self.background = Some(color);
+        self
+    }
+    /// Bind this node's text content to a reactive closure (F3, option B). The
+    /// build re-evaluates it each frame the binding's deps change; prefer the
+    /// `text!` macro sugar. Only meaningful on a text element.
+    pub fn bind_text(mut self, d: Dynamic<String>) -> Self {
+        self.dyn_text = Some(d);
+        self
+    }
+    /// Bind this node's background colour to a reactive closure (F3) — a
+    /// paint-only prop, so a change patches without relayout.
+    pub fn bind_background(mut self, d: Dynamic<Color>) -> Self {
+        self.dyn_bg = Some(d);
         self
     }
     /// Set a uniform border (`width` logical px, `color`).
