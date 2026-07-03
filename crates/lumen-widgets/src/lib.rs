@@ -85,6 +85,9 @@ pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
 /// });
 /// ```
 pub use lumen_macros::stable_handler;
+/// F3 binding sugar: `text!(cx, "Count: {count}")` → a reactive text element
+/// whose string tracks the interpolated signals. See [`lumen_macros::text`].
+pub use lumen_macros::text;
 /// Re-exported so downstream crates can bound on the renderer backend (e.g.
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
 pub use lumen_render::{DefaultRenderer, Renderer, TinySkia};

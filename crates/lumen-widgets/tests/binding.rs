@@ -5,7 +5,7 @@
 use kurbo::Size;
 use lumen_core::state::Signal;
 use lumen_core::{Color, Dynamic};
-use lumen_widgets::{widgets, App, BuildCx};
+use lumen_widgets::{text, widgets, App, BuildCx};
 
 fn find<'a>(
     n: &'a lumen_core::semantics::SemanticsNode,
@@ -75,5 +75,29 @@ fn bound_background_tracks_its_signal() {
     let on: Signal<bool> = h.runtime().signal("on", || false);
     on.set(h.runtime(), true);
     h.pump();
+    h.assert_view_coherent();
+}
+
+#[test]
+fn text_macro_sugar_tracks_signals_and_reports_deps() {
+    let mut h = App::new(|cx: &mut BuildCx| {
+        let a: Signal<i64> = cx.signal("a", || 1);
+        let b: Signal<i64> = cx.signal("b", || 2);
+        widgets::column(vec![text!(cx, "{a} + {b}").id("sum")])
+    })
+    .run_headless(Size::new(200.0, 80.0));
+
+    assert!(h.semantics_json().to_string().contains("1 + 2"));
+    let doc = h.semantics_doc();
+    let mut deps = find(&doc.root, "sum").and_then(|n| n.deps.clone()).unwrap();
+    deps.sort();
+    assert_eq!(deps, vec!["a".to_string(), "b".to_string()]);
+    drop(doc);
+    h.assert_view_coherent();
+
+    let a: Signal<i64> = h.runtime().signal("a", || 1);
+    a.set(h.runtime(), 40);
+    h.pump();
+    assert!(h.semantics_json().to_string().contains("40 + 2"));
     h.assert_view_coherent();
 }
