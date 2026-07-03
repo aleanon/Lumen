@@ -210,18 +210,6 @@ pub struct AppSnapshot {
     focused: Option<StableId>,
 }
 
-/// Combine a node's scope deps and binding deps (F3) into one de-duplicated
-/// list for the semantic projection, or `None` if both are empty.
-fn merge_deps(scope: Option<Vec<String>>, binding: Vec<String>) -> Option<Vec<String>> {
-    let mut d = scope.unwrap_or_default();
-    for k in binding {
-        if !d.contains(&k) {
-            d.push(k);
-        }
-    }
-    (!d.is_empty()).then_some(d)
-}
-
 /// Parse a stylesheet, returning it only if error-free.
 fn parse_sheet(src: &str) -> Option<lumen_style::Stylesheet> {
     let (sheet, diags) = lumen_style::parse("app.lss", src);
@@ -246,6 +234,34 @@ struct BoundBg {
     deps: lumen_core::state::ReadSet,
 }
 
+/// Per-node reactive dependencies, split by source (F4). The union projects to
+/// `SemanticsNode.deps` (F2); the breakdown backs `ui.getDeps` and the reverse
+/// index. `background` deps update via a paint-only patch; `scope`/`text` via a
+/// rebuild (F3.4).
+#[derive(Default, Clone)]
+struct NodeDeps {
+    scope: Vec<String>,
+    text: Vec<String>,
+    background: Vec<String>,
+}
+
+impl NodeDeps {
+    /// De-duplicated union of all sources (for `SemanticsNode.deps`).
+    fn union(&self) -> Vec<String> {
+        let mut d: Vec<String> = Vec::new();
+        for k in self.scope.iter().chain(&self.text).chain(&self.background) {
+            if !d.contains(k) {
+                d.push(k.clone());
+            }
+        }
+        d
+    }
+
+    fn is_empty(&self) -> bool {
+        self.scope.is_empty() && self.text.is_empty() && self.background.is_empty()
+    }
+}
+
 struct NodeMeta {
     id: Option<StableId>,
     role: Role,
@@ -257,8 +273,8 @@ struct NodeMeta {
     scroll: Option<lumen_core::semantics::ScrollInfo>,
     focusable: bool,
     elide: bool,
-    /// Signal dependency keys if this node is a `cx.scope` root (F2 projection).
-    scope_deps: Option<Vec<String>>,
+    /// Per-prop signal dependencies (F2 union → semantics; F4 breakdown).
+    deps: NodeDeps,
     on_click: Option<Handler>,
     on_wheel: Option<crate::element::WheelHandler>,
     on_drag: Option<crate::element::DragHandler>,
@@ -1398,6 +1414,35 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         serde_json::Value::Object(map)
     }
 
+    /// The reactive dependencies of the node a `selector` resolves to (F4
+    /// `ui.getDeps`): the union of signal keys plus a per-prop breakdown
+    /// (`scope`, `text`, `background`). `null` if the selector doesn't resolve to
+    /// exactly one node. Snapshot builds only.
+    #[cfg(feature = "snapshot")]
+    pub fn get_deps(&self, selector: &str) -> serde_json::Value {
+        let root = self.semantics_doc().root.elided();
+        let Ok(id) = lumen_core::semantics::resolve_one(&root, selector) else {
+            return serde_json::Value::Null;
+        };
+        let node = self
+            .tree
+            .document_order()
+            .into_iter()
+            .find(|n| n.index() == id);
+        let Some(deps) = node.and_then(|n| self.meta.get(&n)).map(|m| &m.deps) else {
+            return serde_json::Value::Null;
+        };
+        serde_json::json!({
+            "node": format!("node-{id}"),
+            "deps": deps.union(),
+            "byProp": {
+                "scope": deps.scope,
+                "text": deps.text,
+                "background": deps.background,
+            },
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn build_node(
         &mut self,
@@ -1420,16 +1465,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let this_overlay = in_overlay || el.overlay;
 
         // F3: evaluate reactive prop bindings *before* the content is read for
-        // hit-testing/measurement, recording their dependency keys (merged into
-        // this node's `deps` for observability alongside any scope deps).
-        let mut binding_deps: Vec<String> = Vec::new();
+        // hit-testing/measurement, recording their dependency keys per prop (F4).
+        let mut text_deps: Vec<String> = Vec::new();
+        let mut bg_deps: Vec<String> = Vec::new();
         if el.dyn_text.is_some() || el.dyn_bg.is_some() {
             let rt = self.rt.clone();
             if let Some(d) = el.dyn_text.clone() {
                 // Text is size-affecting → NON-isolated: its reads are structural
                 // (a change relayouts via a full rebuild).
                 let (s, reads) = d.eval(&rt);
-                binding_deps.extend(reads.dep_keys(&rt));
+                text_deps = reads.dep_keys(&rt);
                 self.structural_reads.extend(&reads);
                 // The string is the node's content *and* its accessible label
                 // (Element::text sets both); keep them in sync.
@@ -1443,7 +1488,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // Background is paint-only → ISOLATED + retained: a change patches
                 // this node in place without a rebuild (F3.4).
                 let (c, reads) = d.eval_isolated(&rt);
-                binding_deps.extend(reads.dep_keys(&rt));
+                bg_deps = reads.dep_keys(&rt);
                 el.background = Some(c);
                 self.bg_bindings.push(BoundBg {
                     node,
@@ -1452,6 +1497,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 });
             }
         }
+        let node_deps = NodeDeps {
+            scope: el.scope_deps.take().unwrap_or_default(),
+            text: text_deps,
+            background: bg_deps,
+        };
 
         let mut flags = NodeFlags::VISIBLE;
         let interactive = el.background.is_some()
@@ -1556,7 +1606,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 scroll: el.scroll,
                 focusable: el.focusable,
                 elide: el.elide_semantics,
-                scope_deps: merge_deps(el.scope_deps, binding_deps),
+                deps: node_deps,
                 on_click: el.on_click,
                 on_wheel: el.on_wheel,
                 on_drag: el.on_drag,
@@ -2140,7 +2190,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             }
         }
         s.bounds = self.tree.bounds(node);
-        s.deps = m.and_then(|m| m.scope_deps.clone());
+        s.deps = m.and_then(|m| (!m.deps.is_empty()).then(|| m.deps.union()));
         s.ink = self.node_ink.get(&node).copied();
         s.text_metrics =
             self.node_text_metrics

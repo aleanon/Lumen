@@ -263,6 +263,7 @@ fn handle<R: Renderer, E: Spawner>(
             Ok(app.semantics_doc().to_json(raw))
         }
         "ui.getStyles" => Ok(app.get_styles(sel(params)?)),
+        "ui.getDeps" => Ok(app.get_deps(sel(params)?)),
         "ui.getLayout" => {
             let node = resolve(app, sel(params)?)?;
             let b = node.bounds;
@@ -561,6 +562,10 @@ pub fn mcp_manifest() -> Value {
             tool("ui_screenshot", "Capture a PNG screenshot, optionally ID-annotated."),
             tool("ui_getStyles", "Computed styles for a selector."),
             tool("ui_getLayout", "Layout bounds for a selector."),
+            tool(
+                "ui_getDeps",
+                "Reactive signal dependencies of a selector (union + per-prop).",
+            ),
             tool("input_click", "Click the node a selector resolves to."),
             tool("input_type", "Focus a node and type text."),
             tool("input_key", "Press a key chord."),

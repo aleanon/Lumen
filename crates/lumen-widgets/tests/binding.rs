@@ -141,6 +141,38 @@ fn bg_binding_patches_without_rebuild() {
     h2.assert_view_coherent();
 }
 
+#[test]
+fn get_deps_reports_per_prop_breakdown() {
+    // F4.1: a node with both a text and a background binding reports each prop's
+    // deps distinctly, and the union.
+    let h = App::new(|cx: &mut BuildCx| {
+        let t: Signal<i64> = cx.signal("t", || 0);
+        let g: Signal<bool> = cx.signal("g", || false);
+        widgets::column(vec![widgets::text("x")
+            .id("n")
+            .bind_text(Dynamic::new(move |rt| format!("{}", t.get(rt))))
+            .bind_background(Dynamic::new(move |rt| {
+                if g.get(rt) {
+                    Color::srgb8(0, 0, 0, 255)
+                } else {
+                    Color::srgb8(255, 255, 255, 255)
+                }
+            }))])
+    })
+    .run_headless(Size::new(120.0, 60.0));
+
+    let d = h.get_deps("#n");
+    assert_eq!(d["byProp"]["text"], serde_json::json!(["t"]));
+    assert_eq!(d["byProp"]["background"], serde_json::json!(["g"]));
+    assert_eq!(d["byProp"]["scope"], serde_json::json!([]));
+    let mut union: Vec<String> =
+        serde_json::from_value(d["deps"].clone()).expect("deps is a string array");
+    union.sort();
+    assert_eq!(union, vec!["g".to_string(), "t".to_string()]);
+    // Unresolvable selector → null.
+    assert!(h.get_deps("#missing").is_null());
+}
+
 /// Deterministic LCG.
 fn lcg(s: &mut u64) -> u64 {
     *s = s
