@@ -39,8 +39,11 @@
 > `structural_reads` + `patch_bg_bindings`; `replay_reads` fixes the F1×F3.4
 > skipped-scope interaction). Size-affecting (text) bindings rebuild (F1-memoized)
 > — retained incremental layout stays out of scope (taffy skip). Guarded by the
-> F0 oracle + an 80-round mixed fuzz. **Follow-ons:** `class!`/`bind!`/`For`
-> sugar and the `ui.getDeps` verb (F4).
+> F0 oracle + an 80-round mixed fuzz. **F4 📋 planned** (not implemented) —
+> additive agent verbs over the reified graph: `ui.getDeps` (per-prop),
+> `ui.whatDependsOn` (predictive reverse index), `ui.lastChange` (change
+> attribution), `input.invokeAction` (geometry-free actuation) + MCP entries;
+> full sub-plan in the F4 phase below.
 
 > **Why this exists.** ADR-007 already commits the framework to *"fine-grained
 > signals (Solid-style), no VDOM/diffing … O(changed) updates."* The headless
@@ -371,12 +374,95 @@ tile; `getDeps` returns the exact per-prop subscription set; existing
 
 # Phase F4 — Agent introspection of the reified graph *(additive protocol)*
 
-## Steps
-1. `ui.getDeps`, change-attribution, `input.invokeAction` (all additive optional
-   methods; schema stays back-compatible per §2).
-2. MCP tool manifest entries.
-3. Conformance: drive an example, assert change-attribution matches the nodes the
-   harness says changed.
+**Goal.** Turn the reactive graph F0–F3 built into agent-answerable questions:
+*what does this node depend on*, *what will change if I set signal X*, *what
+just changed and why*, and *activate this control without pixels*. All additive
+optional JSON-RPC methods + MCP entries — no change to existing verbs or the
+`lumen-semantics/1` schema (§2-safe). The data already exists; F4 is mostly
+exposure + one reverse index + recording what the pump did.
+
+**Foundation already in place (F0–F3).** Per-node `SemanticsNode.deps`
+(scope + binding dep keys) is in `ui.getLayout`; `structural_reads`, per-binding
+`ReadSet`s (`bg_bindings`), and scope `ReadSet`s exist; `NodeMeta` holds the live
+handlers; `pump` already routes a change to *patch* vs *rebuild*. So F4 reads
+these out rather than computing anything new.
+
+## F4.1 — `ui.getDeps { selector }` (per-prop dependency query)
+
+The node's deps are already merged onto `SemanticsNode.deps`. F4.1 adds the
+*breakdown*: retain the split in `build_node` (`scope`, `text`, `background`
+dep-key lists) instead of merging into one, in a per-node `NodeDeps`.
+
+- Verb → `{ node, deps: [union], byProp: { scope: [...], text: [...], background: [...] } }`.
+- **Change:** replace `merge_deps` with a retained `NodeDeps` on the node (union
+  still projected to `SemanticsNode.deps` for back-compat); `ui.getDeps` reads it.
+- **Verify:** a text+bg node reports `byProp.text` and `byProp.background`
+  distinctly; union equals today's `deps`.
+
+## F4.2 — Reverse index + `ui.whatDependsOn { signal }` (predictive)
+
+Invert the per-node deps into `signal-key → [nodes]`, built once per rebuild.
+Answers "if I write X, what updates" **without** writing — and classifies each
+dependent by how it would update (from F3.4's split):
+
+- Verb → `{ signal, dependents: [{ node, via: "scope"|"text"|"background", update: "rebuild"|"patch" }] }`
+  (`background` ⇒ `patch`; `scope`/`text` ⇒ `rebuild`).
+- **Change:** `Headless` builds a `HashMap<String, Vec<Dependent>>` at the end of
+  rebuild from the retained `NodeDeps` + `bg_bindings`.
+- **Verify:** `whatDependsOn(sig)` lists exactly the nodes whose `deps` contain
+  `sig`, with the right `update` class; empty for an unread signal.
+
+## F4.3 — Change attribution (`ui.lastChange`)
+
+Record what the last `pump` actually did, so the agent can confirm cause→effect
+after a write. `pump` already branches (rebuild / `patch_bg_bindings` / idle);
+have each branch record a `ChangeReport`.
+
+- `patch_bg_bindings` records the patched node ids (`update: "patch"`).
+- a structural rebuild records the scopes that re-ran (the F1 cache already knows
+  skipped-vs-run) and whether it was a full rebuild (`update: "rebuild"`).
+- Verb `ui.lastChange` → `{ kind: "idle"|"patch"|"rebuild", nodes: [...], scopes_reran: n }`;
+  also fold a compact form into `FrameStats`.
+- **Verify:** set a bg signal → `lastChange.kind == "patch"`, `nodes == [that node]`;
+  set a scope signal → `kind == "rebuild"`, that scope in `scopes_reran`; and the
+  reported node set matches a display-list diff vs the pre-write frame.
+
+## F4.4 — `input.invokeAction { selector, action }` (geometry-free actuation)
+
+Activate a control by running its retained handler directly, instead of
+synthesizing a pointer at `center(bounds)` and re-hit-testing (fragile under
+overlap/transforms). The handler lives in `NodeMeta` (`on_click`, …).
+
+- New `Headless::invoke_action(selector, Action) -> Result<..>`: resolve selector
+  → `NodeIndex` → call `meta[node].on_click(&rt)` for `Click` (focus/dismiss for
+  those actions), then `pump()`.
+- Verb `input.invokeAction { selector, action }` → `{ ok, node }`. Sibling to
+  `input.click`; more robust (no pixel/hit-test).
+- **Verify:** `invokeAction(#inc, "click")` drives the counter identically to
+  `input.click`, and still works when the target is occluded (where a pixel click
+  would miss).
+
+## F4.5 — MCP manifest + conformance
+
+- Add `tool()` entries: `ui_getDeps`, `ui_whatDependsOn`, `ui_lastChange`,
+  `input_invokeAction`.
+- Conformance (over an example): `whatDependsOn(X)` predicts a node set; write
+  `X` + pump; `lastChange` reports the same set; a display-list diff confirms it;
+  `invokeAction` drives a handler. Asserts the predictive, actual, and coherence
+  views all agree.
+
+## Acceptance
+Four additive verbs + MCP entries; existing verbs/schema unchanged. `getDeps`
+gives per-prop subscriptions; `whatDependsOn` predicts and `lastChange` confirms
+the *same* node set (cross-checked against a frame diff); `invokeAction` actuates
+geometry-free. No new deps; the reactive graph the agent queries is the one the
+author declared (F3) and the runtime drives.
+
+## Not in F4 (follow-ons)
+`class!`/`bind!`/`For` authoring sugar (F3 tail); the **ADR-013 wording
+amendment** now due (handlers "re-registered each build()" → "re-created when the
+owning scope re-runs"); and the separate-`TaffyTree` split for incremental layout
+(if a real workload ever makes full-tree layout the bottleneck).
 
 ---
 
