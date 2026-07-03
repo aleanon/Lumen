@@ -463,10 +463,64 @@ geometry-free. No new deps; the reactive graph the agent queries is the one the
 author declared (F3) and the runtime drives.
 
 ## Not in F4 (follow-ons)
-`class!`/`bind!`/`For` authoring sugar (F3 tail); the **ADR-013 wording
-amendment** now due (handlers "re-registered each build()" → "re-created when the
-owning scope re-runs"); and the separate-`TaffyTree` split for incremental layout
-(if a real workload ever makes full-tree layout the bottleneck).
+The separate-`TaffyTree` split for incremental layout (if a real workload ever
+makes full-tree layout the bottleneck; = R4 in the rendering plan). The
+`class!`/`bind!`/`For` authoring sugar is F5 below. (The ADR-013 wording
+amendment is **done**, 2026-07-03.)
+
+---
+
+# Phase F5 — Authoring sugar *(completes the option-B surface)*
+
+**Goal.** The binding *primitive* (`Dynamic`/`Prop`) and `text!` ship; F5 adds
+the two remaining ergonomic pieces so real apps aren't verbose: **reactive lists**
+(the structural counterpart to bindings) and **reactive props beyond text**. All
+additive; un-sugared code keeps working.
+
+## F5.1 — `For` keyed lists *(the structural primitive — highest value)*
+
+Bindings handle *value* changes; a list growing/shrinking/reordering is a
+*structure* change, which F3 said stays a **keyed scope**. F5.1 packages that
+pattern so authors don't hand-roll `format!("row-{}", key)` scopes.
+
+- A plain helper (no macro needed): `widgets::keyed(cx, items, key_fn, view_fn)
+  -> Vec<Element>` — for each item, opens `cx.scope(&key, |cx| view_fn(cx, item))`
+  keyed by `key_fn(item)`. Reordering reuses each item's cached subtree (F1); only
+  added/removed/changed items re-run. The stable key (not the index) is the
+  identity — fixing the `todos` index-capture fragility for good.
+- **Slot lifecycle:** removed items leave a stale `scope_cache` entry (and their
+  scope-local signals leave a store slot). F5.1 adds a **mark-and-sweep**: `keyed`
+  records the keys it emitted this build; after the build, scopes/signals under a
+  key not seen this frame are evicted (the `scope_cache` GC flagged since F1, now
+  needed). Guards against unbounded growth on churning lists.
+- **Verify:** reorder → no item re-runs (run-count); insert/remove → only the
+  delta re-runs; the cache + store don't grow across many add/remove cycles
+  (the memory question, now bounded); coherent throughout.
+
+## F5.2 — Reactive class + `bind!` *(props beyond text)*
+
+- **Reactive class:** `Element.dyn_classes: Option<Dynamic<Vec<String>>>` +
+  `bind_class` builder, evaluated in `build_node` like `dyn_text`. Classes drive
+  the `.lss` cascade → may change padding/size, so class deps are **structural**
+  (rebuild, non-isolated) — not a paint-only patch. Sugar `class!(cx, cond, "on",
+  "off")` (or a small decl-macro) for the common toggle.
+- **`bind!` generic sugar:** a `macro_rules!` `bind!(cx, |rt| expr)` →
+  `Dynamic::new(move |rt| expr)` with the initial value evaluated against `cx`,
+  usable with any `.bind_*` builder (`bind_background`, `bind_class`). Thin, but
+  removes the `Dynamic::new(move |rt| …)` boilerplate and keeps the reactive
+  boundary explicit.
+- **Reactive `bind_background` already exists** (F3); F5.2 just adds the class
+  path + the generic macro; opacity/transform bindings can follow the same mould
+  when a widget needs them.
+- **Verify:** a class toggle restyles (rebuild) and stays coherent; `bind!` +
+  `bind_background` matches hand-written `Dynamic::new`.
+
+## F5 sequencing & acceptance
+`For` first (structural primitive + the GC that makes lists safe), then reactive
+class/`bind!`. Acceptance: a keyed todo-style list reorders with zero item
+re-runs, add/remove touches only the delta, cache/store stay bounded across
+churn; a reactive class toggles style coherently; existing un-sugared examples
+unchanged. Guarded by the F0 oracle + a list-churn fuzz.
 
 ---
 

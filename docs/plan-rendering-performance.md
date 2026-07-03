@@ -309,6 +309,71 @@ output to serial; small trees are unaffected (stay serial); no new deps.
 
 ---
 
+# Phase R5 — Retained per-subtree display lists  *(incremental paint; builds on the F-series)*
+
+## Current state
+`build_display_list` re-emits **every** node's `DrawCmd`s into one flat list each
+rebuild (glyph runs, rects, layers), then `damage_between(prev, next)` diffs it to
+repaint only the changed region (R2). The *raster* is already incremental, but the
+**display-list emission itself** is not — it's the dominant remaining per-frame
+cost on a changed frame (~928 µs on the gallery, mostly glyph-run + DL emission,
+measured after the shaped-text cache + skip-rebuild landed). A changed frame is
+still well within the 16 ms budget, so this is **headroom, not a fix** — but it is
+the last O(tree) step on the rebuild path (F1 memoizes the build; F3.4 patches
+paint-only props; only DL emission still walks the whole tree).
+
+## Why it's tractable now
+The fine-grained work (`docs/plan-fine-grained-view.md`) built exactly the dirty
+structure this needs: F1 scope memoization knows **which subtrees didn't change**
+(a skipped scope's Elements are identical), and `structural_reads`/the reactive
+dirty set know **what a write touched**. R5 reuses that instead of inventing a new
+dirtiness model. The R0 coherence tools (`damage_equivalence`) + F0's
+`assert_view_coherent` guard it: the spliced DL must equal a full re-emission.
+
+## The hard part (name it up front)
+The DL is a **flat** list with `PushLayer`/`PopLayer` bracketing and absolute
+coordinates. Reusing a subtree's fragment requires that (a) its Elements are
+unchanged **and** (b) its layout box didn't move — a sibling growing above shifts
+everything below, changing absolute glyph coords even when the subtree itself is
+identical. So a fragment is either reused verbatim (unchanged + same origin),
+reused **translated** (unchanged + shifted by a delta), or re-emitted.
+
+## Sub-phases (each independently green, gated by R0 + F0)
+
+**R5.1 — Fragmented emission (no behavior change).** Restructure
+`build_display_list` to emit into per-subtree **fragments** keyed by node identity
+(the scope path / `StableId`), then concatenate in document order. Layer
+bracketing stays balanced within/around fragments. Output byte-identical to today
+(golden + `assert_view_coherent`). This is pure refactor; it sets up caching.
+
+**R5.2 — Reuse clean, same-origin fragments.** Retain the fragment map across
+frames. On rebuild, a subtree whose scope was **skipped** (F1) *and* whose layout
+origin is unchanged reuses its cached fragment verbatim; changed/moved subtrees
+re-emit. Splice cached + fresh fragments in document order. So a counter tick
+re-emits the one changed number's fragment, not the whole tree. `assert_view_coherent`
+proves the spliced DL == a full re-emission.
+
+**R5.3 — Translate-reuse for shifted subtrees.** A subtree that's unchanged but
+**moved** (origin delta `d`) reuses its fragment with every coordinate offset by
+`d` (emit fragments in subtree-local coords + a base offset, or post-translate).
+Turns "a row inserted at top" from O(rows below) re-emission into O(1) per shifted
+row. Requires the fragment to be position-relative; `damage_equivalence` +
+byte-diff guard the translation.
+
+## ADR-003 / determinism
+No new deps. The CPU display list stays the golden contract — R5 only changes
+*how* it's assembled, never its contents, so goldens are untouched by construction
+(byte-identical). The coherence oracle is the safety net at every sub-phase.
+
+## Acceptance
+A single-field change on a large view (e.g. the 200-scope bench) re-emits O(1)
+fragments, not O(tree) — measured as a drop in the changed-frame DL-emission time
+— while the resulting display list is **byte-identical** to a full re-emission
+(`assert_view_coherent` + golden). R5.1 alone is a zero-risk refactor; R5.2/R5.3
+are the incremental wins, each guarded.
+
+---
+
 # Sequencing
 
 ```
