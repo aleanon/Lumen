@@ -96,6 +96,31 @@ fn window_resize_reveals_more_rows() {
 }
 
 #[test]
+fn resizing_a_row_grows_the_cell_not_the_gap() {
+    // Regression: a text-bearing cell used to ignore its explicit height and
+    // size to the glyphs, so a resized row left an empty gap instead of a taller
+    // cell. Assert the row-header *box* actually grows to the new height.
+    let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
+    h.pump();
+    let before = h.node_bounds_by_id("rh-2").expect("row header 2").height();
+    assert!(before < 30.0, "default row height, got {before}");
+
+    // Row 2's bottom border ≈ window y = TOOLBAR(46)+HDR_H(26)+3*DH(24) = 144.
+    h.inject(Event::PointerDown(pe(24.0, 144.0)));
+    h.inject(Event::PointerMove(pe(24.0, 169.0)));
+    h.inject(Event::PointerMove(pe(24.0, 194.0)));
+    h.inject(Event::PointerUp(pe(24.0, 194.0)));
+    h.pump();
+
+    let after = h.node_bounds_by_id("rh-2").expect("row header 2").height();
+    assert!(
+        after > before + 30.0,
+        "the resized row's cell grew to fill the slot: {before} -> {after}"
+    );
+    h.assert_view_coherent();
+}
+
+#[test]
 fn dragging_a_column_header_edge_resizes_it() {
     let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
     h.pump();

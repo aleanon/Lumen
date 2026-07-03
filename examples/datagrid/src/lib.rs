@@ -141,22 +141,37 @@ fn filled(x: f64, y: f64, w: f64, h: f64, bg: Color) -> Element {
     e
 }
 
-fn text_in(mut e: Element, s: String, font: f32, color: Color, weight: f32) -> Element {
-    e.label = s.clone();
-    e.content = lumen_widgets::NodeContent::Text(s, Default::default());
+/// A bare text leaf, sized to its glyphs. It goes *inside* a sized cell box (as
+/// a child) rather than on the box itself: a text-bearing element sizes its own
+/// height to the glyphs and ignores an explicit `height`, so putting the label
+/// on the box directly would collapse a resized row back to text height and
+/// leave the extra space empty. Keeping text in a child lets the box own its
+/// height while the label is just centred within it.
+fn label_el(s: String, font: f32, color: Color, weight: f32) -> Element {
+    let mut e = Element {
+        label: s.clone(),
+        content: lumen_widgets::NodeContent::Text(s, Default::default()),
+        ..Element::default()
+    };
     if let Some(ts) = e.text_style_mut() {
         ts.font_size = font;
         ts.color = color;
         ts.weight = weight;
     }
-    e.style.padding = Edges {
+    e
+}
+
+/// Put a left-aligned, vertically-centred label inside a (sized) cell box.
+fn text_in(mut cell: Element, s: String, font: f32, color: Color, weight: f32) -> Element {
+    cell.style.padding = Edges {
         left: Dim::px(6.0),
         right: Dim::px(4.0),
-        top: Dim::px(3.0),
+        top: Dim::px(2.0),
         bottom: Dim::px(2.0),
     };
-    e.style.align_items = Some(Align::Center);
-    e
+    cell.style.align_items = Some(Align::Center); // vertical-centre the label
+    cell.children.push(label_el(s, font, color, weight));
+    cell
 }
 
 fn build(cx: &mut BuildCx) -> Element {
@@ -203,17 +218,31 @@ fn build(cx: &mut BuildCx) -> Element {
         }
     }
 
-    // Column headers.
+    // Column headers (stable ids so their resized box is addressable).
     for c in c0..c1 {
         let w = size_of(&cwv, DW, c);
-        let hdr = filled(cx_of(c), 0.0, w, HDR_H, p.hdr);
-        layers.push(text_in(hdr, col_name(c), 11.0, p.muted, 700.0));
+        let mut hdr = text_in(
+            filled(cx_of(c), 0.0, w, HDR_H, p.hdr),
+            col_name(c),
+            11.0,
+            p.muted,
+            700.0,
+        );
+        hdr.id = Some(format!("ch-{c}").into());
+        layers.push(hdr);
     }
     // Row headers.
     for r in r0..r1 {
         let h = size_of(&rhv, DH, r);
-        let hdr = filled(0.0, ry_of(r), HDR_W, h, p.hdr);
-        layers.push(text_in(hdr, format!("{}", r + 1), 11.0, p.muted, 700.0));
+        let mut hdr = text_in(
+            filled(0.0, ry_of(r), HDR_W, h, p.hdr),
+            format!("{}", r + 1),
+            11.0,
+            p.muted,
+            700.0,
+        );
+        hdr.id = Some(format!("rh-{r}").into());
+        layers.push(hdr);
     }
     // Resize handles last, so they sit above the neighbouring header for hit-testing
     // (each handle straddles the border it owns and the next header's leading edge).
