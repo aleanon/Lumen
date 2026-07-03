@@ -30,10 +30,17 @@
 > render/semantics already can't drift, so the projection delivered is the
 > *reactive* structure — each `cx.scope` root carries its signal dependency
 > keys into `SemanticsNode.deps` (and `ui.getLayout`), the foundation F4's
-> `getDeps` reads. **F3 authoring-API escalation RESOLVED (2026-07-03): option
-> B — author-expressed bindings + `lumen-macros` sugar** (design in the F3 phase
-> below); reopens the retained-node-graph (build once, patch props) *minus*
-> incremental layout. F3 is now specced and unblocked, not yet implemented.
+> `getDeps` reads. **F3 ✅ done (option B)** — `Dynamic<T>`/`Prop<T>` binding
+> primitive; bindable `Element` text + background (`bind_text`/`bind_background`)
+> evaluated during build with per-prop deps merged into `SemanticsNode.deps`;
+> the `text!(cx, "…{sig}…")` sugar; and the **surgical retained patch**: a
+> paint-only (background) binding change patches its node + repaints via R2
+> damage with no rebuild/relayout/scope-re-run (isolated reads +
+> `structural_reads` + `patch_bg_bindings`; `replay_reads` fixes the F1×F3.4
+> skipped-scope interaction). Size-affecting (text) bindings rebuild (F1-memoized)
+> — retained incremental layout stays out of scope (taffy skip). Guarded by the
+> F0 oracle + an 80-round mixed fuzz. **Follow-ons:** `class!`/`bind!`/`For`
+> sugar and the `ui.getDeps` verb (F4).
 
 > **Why this exists.** ADR-007 already commits the framework to *"fine-grained
 > signals (Solid-style), no VDOM/diffing … O(changed) updates."* The headless
