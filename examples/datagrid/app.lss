@@ -1,0 +1,20 @@
+@tokens {
+    page: #0e1118ff;
+    bar: #161c28ff;
+    ink: #f1f5fbff;
+    muted: #8b94a7ff;
+    accent: #4d7cfeff;
+    hdr: #232c3eff;
+    row: #2a3346ff;
+}
+
+.app { background: $page; }
+.bar { background: $bar; }
+.title { color: $ink; }
+.info { color: $muted; }
+
+.corner { background: $hdr; color: $muted; }
+.colhdr { background: $hdr; color: $accent; }
+.rowhdr { background: $hdr; color: $muted; }
+
+.zbtn { background: $accent; color: #ffffffff; border-radius: 8px; }

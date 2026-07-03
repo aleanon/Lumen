@@ -39,6 +39,7 @@ members = [
     "examples/chrono-stopwatch",
     "examples/styling",
     "examples/counter",
+    "examples/datagrid",
     "examples/todos",
     "examples/widget_gallery",
     "examples/catalog",
