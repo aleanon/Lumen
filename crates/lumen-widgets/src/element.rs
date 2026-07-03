@@ -512,13 +512,18 @@ impl<'a> BuildCx<'a> {
     }
 
     /// The cached subtree for `key` if its recorded deps are all still current.
+    /// A skipped scope replays its deps into the enclosing collectors so they
+    /// still count as structural (F1 × F3.4) — otherwise a change to a memoized
+    /// scope's signal would go unnoticed.
     fn cached_if_current(&self, key: &str) -> Option<Element> {
         let cache = self.scope_cache.borrow();
         let cached = cache.get(key)?;
-        cached
-            .reads
-            .is_current(self.rt)
-            .then(|| cached.element.clone())
+        if cached.reads.is_current(self.rt) {
+            self.rt.replay_reads(&cached.reads);
+            Some(cached.element.clone())
+        } else {
+            None
+        }
     }
 
     /// `name` prefixed by the enclosing scope's identity path (identity for

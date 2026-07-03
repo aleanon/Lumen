@@ -192,6 +192,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             force_rebuild: false,
             last_build_clock: 0.0,
             scope_cache: RefCell::new(HashMap::new()),
+            bg_bindings: Vec::new(),
+            structural_reads: lumen_core::state::ReadSet::default(),
         };
         h
     }
@@ -233,6 +235,15 @@ pub enum ReloadResult {
     Ok,
     /// The edit was rejected; the previous stylesheet stays live.
     Failed(Vec<lumen_core::Diagnostic>),
+}
+
+/// A retained paint-only prop binding (F3.4): its node, the binding, and the
+/// signals it last read. When those change, the runtime re-evaluates the binding
+/// and patches `meta[node]` + repaints — no rebuild, no relayout.
+struct BoundBg {
+    node: NodeIndex,
+    dynamic: lumen_core::Dynamic<Color>,
+    deps: lumen_core::state::ReadSet,
 }
 
 struct NodeMeta {
@@ -382,6 +393,13 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// changed; cleared by `clear_view_caches` (the oracle + non-signal
     /// rebuilds). Coherence is guarded by `assert_view_coherent` (F0).
     scope_cache: RefCell<crate::element::ScopeCache>,
+    /// Retained paint-only prop bindings from the last build (F3.4). A change to
+    /// one binding's deps patches its node + repaints, skipping the rebuild.
+    bg_bindings: Vec<BoundBg>,
+    /// Signals whose change requires a structural rebuild (root + scope + text-
+    /// binding reads; paint-only bindings are isolated out). `is_current` false ⇒
+    /// rebuild; else a paint-only binding change can be patched (F3.4).
+    structural_reads: lumen_core::state::ReadSet,
 }
 
 impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
@@ -425,10 +443,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // the clock has advanced since that build — then the frame would differ.
         let time_driven = (self.requests.read_clock || self.requests.continuous)
             && self.clock_ms != self.last_build_clock;
+        let write_changed = self.rt.write_gen() != self.last_build_gen;
+        // F3.4: a structural signal changed ⇒ rebuild; a change confined to
+        // paint-only (background) bindings ⇒ patch that node + repaint, no
+        // rebuild/relayout. `structural_reads` is every build-time read except
+        // isolated paint-only bindings.
+        let structural_current = self.structural_reads.is_current(&self.rt);
         let needs_rebuild = self.force_rebuild
-            || self.rt.write_gen() != self.last_build_gen
             || visual_changed
-            || time_driven;
+            || time_driven
+            || (write_changed && !structural_current);
         if needs_rebuild {
             // Scope memoization keys off signal versions only. A rebuild driven
             // by something it can't observe — a forced invalidation (resize/
@@ -439,6 +463,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 self.clear_view_caches();
             }
             self.rebuild(); // baselines force_rebuild + last_build_gen
+        } else if write_changed
+            && self
+                .bg_bindings
+                .iter()
+                .any(|b| !b.deps.is_current(&self.rt))
+        {
+            self.patch_bg_bindings();
         } else {
             // Nothing changed — keep the retained frame, report no damage.
             self.last_damage = Damage::None;
@@ -1149,6 +1180,32 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         );
     }
 
+    /// F3.4: re-evaluate the paint-only bindings whose deps changed, patch each
+    /// node's background in the retained `meta`, and repaint. R2 damage limits
+    /// the raster to exactly the changed region — no rebuild, no relayout, no
+    /// scope re-run. The retained tree stays a pure function of the store
+    /// (guarded by `assert_view_coherent`).
+    fn patch_bg_bindings(&mut self) {
+        let rt = self.rt.clone();
+        let stale: Vec<usize> = self
+            .bg_bindings
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| !b.deps.is_current(&rt))
+            .map(|(i, _)| i)
+            .collect();
+        for i in stale {
+            let (color, reads) = self.bg_bindings[i].dynamic.eval_isolated(&rt);
+            let node = self.bg_bindings[i].node;
+            self.bg_bindings[i].deps = reads;
+            if let Some(m) = self.meta.get_mut(&node) {
+                m.background = Some(color);
+            }
+        }
+        self.last_damage = self.paint();
+        self.last_build_gen = self.rt.write_gen();
+    }
+
     fn rebuild(&mut self) {
         // Default to "nothing painted"; a successful paint sets the real damage.
         self.last_damage = Damage::None;
@@ -1173,12 +1230,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     }
 
     fn rebuild_inner(&mut self) {
-        let (root_el, requests) = {
+        // F3.4: capture the root build's reads (structural — a change rebuilds).
+        // Scope reads propagate into this window; paint-only bindings evaluated
+        // in `build_node` isolate themselves out; text-binding reads are folded
+        // into `structural_reads` there.
+        let rt = self.rt.clone();
+        let (root_el, requests, root_reads) = {
             let mut cx = BuildCx::new(&self.rt, self.clock_ms, &self.scope_cache);
-            let el = (self.root)(&mut cx);
-            (el, cx.take_requests())
+            let (el, reads) = rt.collect_reads(|| (self.root)(&mut cx));
+            (el, cx.take_requests(), reads)
         };
         self.requests = requests;
+        self.structural_reads = root_reads;
+        self.bg_bindings.clear();
 
         // Dispatch background-work requests this build emitted, on the executor.
         // The runtime owns the executor + the deferred-op channel, so it mints
@@ -1362,8 +1426,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         if el.dyn_text.is_some() || el.dyn_bg.is_some() {
             let rt = self.rt.clone();
             if let Some(d) = el.dyn_text.clone() {
+                // Text is size-affecting → NON-isolated: its reads are structural
+                // (a change relayouts via a full rebuild).
                 let (s, reads) = d.eval(&rt);
                 binding_deps.extend(reads.dep_keys(&rt));
+                self.structural_reads.extend(&reads);
                 // The string is the node's content *and* its accessible label
                 // (Element::text sets both); keep them in sync.
                 el.label = s.clone();
@@ -1373,9 +1440,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 };
             }
             if let Some(d) = el.dyn_bg.clone() {
-                let (c, reads) = d.eval(&rt);
+                // Background is paint-only → ISOLATED + retained: a change patches
+                // this node in place without a rebuild (F3.4).
+                let (c, reads) = d.eval_isolated(&rt);
                 binding_deps.extend(reads.dep_keys(&rt));
                 el.background = Some(c);
+                self.bg_bindings.push(BoundBg {
+                    node,
+                    dynamic: d,
+                    deps: reads,
+                });
             }
         }
 

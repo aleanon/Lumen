@@ -42,6 +42,13 @@ impl<T> Dynamic<T> {
     pub fn eval(&self, rt: &Runtime) -> (T, ReadSet) {
         rt.collect_reads(|| (self.f)(rt))
     }
+
+    /// Like [`eval`](Self::eval) but the reads are hidden from enclosing scopes
+    /// (an isolated boundary) — used for paint-only prop bindings that patch
+    /// without a rebuild, so a change never re-runs the surrounding scope (F3.4).
+    pub fn eval_isolated(&self, rt: &Runtime) -> (T, ReadSet) {
+        rt.collect_reads_isolated(|| (self.f)(rt))
+    }
 }
 
 /// An element property that is either a fixed value or a [`Dynamic`] binding.

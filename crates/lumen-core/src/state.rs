@@ -236,6 +236,16 @@ impl ReadSet {
         self.deps.is_empty()
     }
 
+    /// Merge another read set's deps in (dedup by signal id), for building a
+    /// combined "structural" read set from several sources (F3).
+    pub fn extend(&mut self, other: &ReadSet) {
+        for &(id, ver) in &other.deps {
+            if !self.deps.iter().any(|(i, _)| *i == id) {
+                self.deps.push((id, ver));
+            }
+        }
+    }
+
     /// The stable string keys of the signals captured, for observability — a
     /// scope's dependency list projected into the agent's view (F2). Order
     /// follows first-read; unknown ids (dropped) are skipped.
@@ -349,6 +359,47 @@ impl Runtime {
             .read_collectors
             .pop()
             .unwrap_or_default();
+        (r, self.snapshot_reads(ids))
+    }
+
+    /// Like [`collect_reads`](Self::collect_reads), but hides the reads from any
+    /// *enclosing* window — an isolated reactive boundary (a paint-only prop
+    /// binding, F3). Its deps belong to the binding alone, not the surrounding
+    /// scope/structural collector, so a change to them can patch that one prop
+    /// without re-running the build.
+    pub fn collect_reads_isolated<R>(&self, f: impl FnOnce() -> R) -> (R, ReadSet) {
+        // Detach the outer stack so reads don't propagate up; run with one fresh
+        // window; restore the outer stack.
+        let outer = std::mem::take(&mut self.inner.borrow_mut().read_collectors);
+        self.inner.borrow_mut().read_collectors.push(Vec::new());
+        let r = f();
+        let ids = self
+            .inner
+            .borrow_mut()
+            .read_collectors
+            .pop()
+            .unwrap_or_default();
+        self.inner.borrow_mut().read_collectors = outer;
+        (r, self.snapshot_reads(ids))
+    }
+
+    /// Re-notify the currently-open collectors of a previously-captured read
+    /// set. Used when a memoized scope is *skipped* (F1): its closure doesn't
+    /// run, but its deps must still reach the enclosing scope / structural window
+    /// (F3.4), since a change to them still requires re-running it.
+    pub fn replay_reads(&self, reads: &ReadSet) {
+        let mut b = self.inner.borrow_mut();
+        if b.read_collectors.is_empty() {
+            return;
+        }
+        let ids: Vec<SignalId> = reads.deps.iter().map(|(id, _)| *id).collect();
+        for win in b.read_collectors.iter_mut() {
+            win.extend(ids.iter().copied());
+        }
+    }
+
+    /// Stamp a list of read signal ids with their current versions (dedup).
+    fn snapshot_reads(&self, ids: Vec<SignalId>) -> ReadSet {
         let b = self.inner.borrow();
         let mut seen = HashSet::new();
         let deps: Vec<(SignalId, u64)> = ids
@@ -356,7 +407,7 @@ impl Runtime {
             .filter(|id| seen.insert(*id))
             .map(|id| (id, b.slots.get(&id).map(|s| s.version).unwrap_or(0)))
             .collect();
-        (r, ReadSet { deps })
+        ReadSet { deps }
     }
 
     /// Number of stored values.

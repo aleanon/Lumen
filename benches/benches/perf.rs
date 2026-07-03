@@ -137,8 +137,10 @@ fn scope_memo_one_of_many(c: &mut Criterion) {
     let mut i = 0i64;
     c.bench_function("scope_memo_one_of_many", |b| {
         b.iter(|| {
-            // Flip one row's signal, then pump — only that scope should re-run.
-            let s: Signal<i64> = h.runtime().signal(&format!("v-{}", i % N), || 0);
+            // Flip one row's signal (namespaced under its scope), then pump —
+            // only that scope re-runs; the other 199 reuse cached subtrees.
+            let j = i % N;
+            let s: Signal<i64> = h.runtime().signal(&format!("row-{j}/v-{j}"), || 0);
             s.update(h.runtime(), |v| *v += 1);
             h.pump();
             i += 1;

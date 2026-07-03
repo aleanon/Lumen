@@ -57,8 +57,9 @@ pub fn stable_handler(input: TokenStream) -> TokenStream {
 
 /// `text!(cx, "literal with {signal} holes")` → a reactive text element (F3).
 ///
-/// Each `{name}` interpolates the current value of signal `name` in scope
-/// (`name.get(rt)`), and `{name:spec}` applies a format spec. The macro emits a
+/// **Every** `{name}` hole is a signal read (`name.get(rt)`); non-signal values
+/// must be baked into the literal or interpolated via `bind_text` directly.
+/// `{name:spec}` applies a format spec. The macro emits a
 /// [`Dynamic`](lumen_core::Dynamic) binding capturing those signals, so the text
 /// re-evaluates when any of them changes, and records them as the node's deps.
 /// With no holes it is just a static text element. `lumen_core` + `lumen_widgets`
