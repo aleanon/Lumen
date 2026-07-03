@@ -3,7 +3,9 @@
 //! window resize reveals more rows, and dragging a header edge resizes that
 //! column/row — all staying coherent.
 
-use lumen_core::events::{Event, Modifiers, PointerButton, PointerEvent, PointerKind, WheelEvent};
+use lumen_core::events::{
+    Event, Modifiers, PointerButton, PointerEvent, PointerKind, TextInputEvent, WheelEvent,
+};
 use lumen_core::geometry::{Point, Size, Vec2};
 use lumen_widgets::Headless;
 
@@ -15,6 +17,12 @@ fn pe(x: f64, y: f64) -> PointerEvent {
         modifiers: Default::default(),
         click_count: 1,
     }
+}
+
+fn click(h: &mut Headless, x: f64, y: f64) {
+    h.inject(Event::PointerDown(pe(x, y)));
+    h.inject(Event::PointerUp(pe(x, y)));
+    h.pump();
 }
 
 fn wheel(h: &mut Headless, dx: f64, dy: f64) {
@@ -92,6 +100,77 @@ fn window_resize_reveals_more_rows() {
         large > small,
         "resize revealed more cells: {small} -> {large}"
     );
+    h.assert_view_coherent();
+}
+
+#[test]
+fn clicking_a_cell_lets_you_type_and_commits() {
+    let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
+    h.pump();
+
+    // Click cell B2 (col idx 1: x≈144; row idx 1: y≈108) → it becomes the editor.
+    click(&mut h, 144.0, 108.0);
+    let editing: lumen_core::state::Signal<Option<(u32, u32)>> =
+        h.runtime().signal("editing", || None);
+    assert_eq!(editing.get(h.runtime()), Some((1, 1)), "B2 is being edited");
+
+    // Type; then commit by clicking another cell.
+    h.inject(Event::TextInput(TextInputEvent { text: "x".into() }));
+    h.pump();
+    click(&mut h, 144.0, 132.0); // B3
+
+    let edits: lumen_core::state::Signal<Vec<(u32, u32, String)>> =
+        h.runtime().signal("edits", Vec::new);
+    let v = edits.get(h.runtime());
+    let b2 = v
+        .iter()
+        .find(|(r, c, _)| (*r, *c) == (1, 1))
+        .map(|(_, _, s)| s.clone());
+    assert_eq!(
+        b2.as_deref(),
+        Some("21x"),
+        "typed into B2 committed, got {v:?}"
+    );
+    h.assert_view_coherent();
+}
+
+#[test]
+fn ctrl_wheel_zooms() {
+    let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
+    h.pump();
+    let zoom: lumen_core::state::Signal<f64> = h.runtime().signal("zoom", || 1.0);
+    assert_eq!(zoom.get(h.runtime()), 1.0);
+
+    // Ctrl + wheel-up zooms in; a plain wheel does not.
+    h.inject(Event::Wheel(WheelEvent {
+        pos: Point::new(400.0, 400.0),
+        delta: Vec2::new(0.0, -200.0),
+        modifiers: Modifiers::CTRL,
+    }));
+    h.pump();
+    assert!(zoom.get(h.runtime()) > 1.1, "ctrl+wheel zoomed in");
+    assert!(info(&h).contains('%'), "toolbar shows the zoom level");
+    h.assert_view_coherent();
+}
+
+#[test]
+fn dragging_the_vertical_thumb_scrolls() {
+    let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
+    h.pump();
+    let thumb = h.node_bounds_by_id("vthumb").expect("vertical thumb");
+    let (cx, cy) = (
+        thumb.x0 + thumb.width() / 2.0,
+        thumb.y0 + thumb.height() / 2.0,
+    );
+
+    h.inject(Event::PointerDown(pe(cx, cy)));
+    h.inject(Event::PointerMove(pe(cx, cy + 200.0)));
+    h.inject(Event::PointerUp(pe(cx, cy + 200.0)));
+    h.pump();
+
+    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sy", || 0.0);
+    assert!(sy.get(h.runtime()) > 100.0, "thumb drag scrolled down");
+    assert!(!info(&h).contains("rows 1–"));
     h.assert_view_coherent();
 }
 

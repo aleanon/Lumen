@@ -24,6 +24,7 @@ lumen-core = { workspace = true }
 lumen-render = { workspace = true }
 lumen-widgets = { workspace = true }
 lumen-layout = { workspace = true }
+lumen-text = { workspace = true }
 
 [dev-dependencies]
 lumen-shell = { workspace = true }
