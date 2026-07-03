@@ -234,6 +234,8 @@ struct NodeMeta {
     scroll: Option<lumen_core::semantics::ScrollInfo>,
     focusable: bool,
     elide: bool,
+    /// Signal dependency keys if this node is a `cx.scope` root (F2 projection).
+    scope_deps: Option<Vec<String>>,
     on_click: Option<Handler>,
     on_wheel: Option<crate::element::WheelHandler>,
     on_drag: Option<crate::element::DragHandler>,
@@ -1444,6 +1446,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 scroll: el.scroll,
                 focusable: el.focusable,
                 elide: el.elide_semantics,
+                scope_deps: el.scope_deps,
                 on_click: el.on_click,
                 on_wheel: el.on_wheel,
                 on_drag: el.on_drag,
@@ -2027,6 +2030,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             }
         }
         s.bounds = self.tree.bounds(node);
+        s.deps = m.and_then(|m| m.scope_deps.clone());
         s.ink = self.node_ink.get(&node).copied();
         s.text_metrics =
             self.node_text_metrics

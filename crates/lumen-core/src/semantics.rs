@@ -298,6 +298,11 @@ pub struct SemanticsNode {
     pub text_selection: Option<TextSelection>,
     /// Rust widget type name (debug aid).
     pub type_name: String,
+    /// If this node is the root of a `cx.scope`, the stable keys of the signals
+    /// that scope depends on — the reactive graph projected into observability
+    /// (F2). Lets the agent see *why* a subtree updates. `None` ⇒ not a scope
+    /// root (or a scope that read no state).
+    pub deps: Option<Vec<String>>,
     /// Whether this node is elided (pure layout, no semantic contribution).
     pub elide: bool,
     /// Children (raw, pre-elision).
@@ -322,6 +327,7 @@ impl SemanticsNode {
             scroll: None,
             text_selection: None,
             type_name: String::new(),
+            deps: None,
             elide: false,
             children: Vec::new(),
         }
@@ -388,6 +394,9 @@ impl SemanticsNode {
             );
         }
         obj.insert("type".into(), json!(self.type_name));
+        if let Some(deps) = &self.deps {
+            obj.insert("deps".into(), json!(deps));
+        }
         obj.insert(
             "children".into(),
             Value::Array(self.children.iter().map(|c| c.to_json()).collect()),

@@ -235,6 +235,17 @@ impl ReadSet {
     pub fn is_empty(&self) -> bool {
         self.deps.is_empty()
     }
+
+    /// The stable string keys of the signals captured, for observability — a
+    /// scope's dependency list projected into the agent's view (F2). Order
+    /// follows first-read; unknown ids (dropped) are skipped.
+    pub fn dep_keys(&self, rt: &Runtime) -> Vec<String> {
+        let b = rt.inner.borrow();
+        self.deps
+            .iter()
+            .filter_map(|(id, _)| b.id_to_key.get(id.0 as usize).cloned())
+            .collect()
+    }
 }
 
 /// A self-describing snapshot of the entire store (ADR-011): field-tagged JSON,

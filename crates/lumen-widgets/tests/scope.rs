@@ -105,3 +105,36 @@ fn scope_namespaces_local_state() {
     );
     h.assert_view_coherent();
 }
+
+#[test]
+fn scope_deps_project_into_semantics() {
+    // F2 step 2: a scope root carries its signal dependencies in the semantics
+    // tree, so the agent can see *why* the subtree updates.
+    let mut h = App::new(|cx: &mut BuildCx| {
+        let count: Signal<i64> = cx.signal("count", || 0);
+        widgets::column(vec![cx.scope("counter", move |cx| {
+            widgets::text(format!("count={}", count.get(cx.runtime()))).id("counter")
+        })])
+    })
+    .run_headless(Size::new(200.0, 80.0));
+
+    let doc = h.semantics_doc();
+    let node = find(&doc.root, "counter").expect("scoped node present");
+    assert_eq!(
+        node.deps.as_deref(),
+        Some(&["count".to_string()][..]),
+        "the scope root lists its signal dependency"
+    );
+    h.assert_view_coherent();
+}
+
+/// Depth-first find a node by author id.
+fn find<'a>(
+    n: &'a lumen_core::semantics::SemanticsNode,
+    id: &str,
+) -> Option<&'a lumen_core::semantics::SemanticsNode> {
+    if n.id.as_ref().map(|s| s.0.as_str()) == Some(id) {
+        return Some(n);
+    }
+    n.children.iter().find_map(|c| find(c, id))
+}

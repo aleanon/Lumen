@@ -40,6 +40,7 @@
         },
         "label": { "type": "string" },
         "value": { "type": "string" },
+        "deps": { "type": "array", "items": { "type": "string" } },
         "classes": { "type": "array", "items": { "type": "string" } },
         "states": {
           "type": "array",

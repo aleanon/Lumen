@@ -286,6 +286,11 @@ fn handle<R: Renderer, E: Spawner>(
                     "content_height": tm.content_height,
                 });
             }
+            // Reactive dependencies if this node is a `cx.scope` root (F2): the
+            // signals whose change re-runs this subtree.
+            if let Some(deps) = &node.deps {
+                out["deps"] = json!(deps);
+            }
             Ok(out)
         }
         "ui.screenshot" => {

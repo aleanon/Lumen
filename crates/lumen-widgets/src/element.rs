@@ -167,6 +167,10 @@ pub struct Element {
     pub overlay: bool,
     /// Optional drop shadow behind the box.
     pub shadow: Option<Shadow>,
+    /// If this element is the root a [`BuildCx::scope`] returned, the stable keys
+    /// of the signals that scope depends on — projected into semantics (F2) so
+    /// the agent can see the reactive structure. Set by `scope`; not authored.
+    pub scope_deps: Option<Vec<String>>,
     /// Children.
     pub children: Vec<Element>,
 }
@@ -202,6 +206,7 @@ impl Default for Element {
             clip: false,
             overlay: false,
             shadow: None,
+            scope_deps: None,
             children: Vec::new(),
         }
     }
@@ -465,9 +470,12 @@ impl<'a> BuildCx<'a> {
         let rt = self.rt.clone();
         let prev = self.prefix.replace(format!("{key}/"));
         let before = self.request_fingerprint();
-        let (element, reads) = rt.collect_reads(|| f(self));
+        let (mut element, reads) = rt.collect_reads(|| f(self));
         let cacheable = self.request_fingerprint() == before;
         self.prefix.replace(prev);
+        // Project the scope's signal dependencies onto its subtree root, for
+        // observability (F2) — the agent sees why this subtree updates.
+        element.scope_deps = Some(reads.dep_keys(self.rt));
         if cacheable {
             self.scope_cache.borrow_mut().insert(
                 key,
