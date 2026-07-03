@@ -173,6 +173,77 @@ fn get_deps_reports_per_prop_breakdown() {
     assert!(h.get_deps("#missing").is_null());
 }
 
+#[test]
+fn invoke_action_runs_handler_geometry_free() {
+    // F4.4: activate a control by its retained handler, no pixel synthesis.
+    let mut h = App::new(|cx: &mut BuildCx| {
+        let count: Signal<i64> = cx.signal("count", || 0);
+        widgets::column(vec![
+            widgets::text(format!("count={}", count.get(cx.runtime()))).id("lbl"),
+            widgets::button("+1", move |rt| count.update(rt, |c| *c += 1)).id("inc"),
+        ])
+    })
+    .run_headless(Size::new(120.0, 80.0));
+
+    h.invoke_action("#inc", "click")
+        .expect("clicked the button");
+    assert!(h.semantics_json().to_string().contains("count=1"));
+    h.invoke_action("#inc", "click").expect("clicked again");
+    assert!(h.semantics_json().to_string().contains("count=2"));
+
+    // A node with no click handler, or an unresolvable selector, errors.
+    assert!(h.invoke_action("#lbl", "click").is_err());
+    assert!(h.invoke_action("#missing", "click").is_err());
+}
+
+#[test]
+fn what_depends_on_predicts_and_last_change_confirms() {
+    // F4.2 + F4.3: whatDependsOn predicts the node + update kind for a signal;
+    // writing it and pumping makes lastChange report the same.
+    let mut h = App::new(|cx: &mut BuildCx| {
+        let s: Signal<i64> = cx.signal("srow", || 0);
+        let g: Signal<i64> = cx.signal("gcol", || 0);
+        widgets::column(vec![cx.scope("row", move |cx| {
+            widgets::text(format!("{}", s.get(cx.runtime())))
+                .id("r")
+                .bind_background(Dynamic::new(move |rt| {
+                    Color::srgb8((g.get(rt) & 0xff) as u8, 0, 0, 255)
+                }))
+        })])
+    })
+    .run_headless(Size::new(120.0, 60.0));
+
+    // Predictive: the background signal patches; the structural signal rebuilds.
+    let g_dep = h.what_depends_on("gcol");
+    assert_eq!(g_dep["dependents"][0]["update"], "patch");
+    assert_eq!(g_dep["dependents"][0]["via"], "background");
+    let g_node = g_dep["dependents"][0]["node"].as_str().unwrap().to_string();
+
+    let s_dep = h.what_depends_on("srow");
+    assert_eq!(s_dep["dependents"][0]["update"], "rebuild");
+    assert_eq!(s_dep["dependents"][0]["via"], "scope");
+
+    // Unread signal → no dependents.
+    assert_eq!(
+        h.what_depends_on("nope")["dependents"],
+        serde_json::json!([])
+    );
+
+    // Actual: writing the bg signal → a patch of exactly that node.
+    let g: Signal<i64> = h.runtime().signal("gcol", || 0);
+    g.set(h.runtime(), 5);
+    h.pump();
+    let lc = h.last_change();
+    assert_eq!(lc["kind"], "patch");
+    assert_eq!(lc["nodes"], serde_json::json!([g_node]));
+
+    // Writing the structural signal → a rebuild.
+    let s: Signal<i64> = h.runtime().signal("srow", || 0);
+    s.set(h.runtime(), 9);
+    h.pump();
+    assert_eq!(h.last_change()["kind"], "rebuild");
+}
+
 /// Deterministic LCG.
 fn lcg(s: &mut u64) -> u64 {
     *s = s

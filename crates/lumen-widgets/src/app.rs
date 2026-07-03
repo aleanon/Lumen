@@ -194,6 +194,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             scope_cache: RefCell::new(HashMap::new()),
             bg_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
+            dep_index: HashMap::new(),
+            last_change: ChangeReport {
+                kind: "idle",
+                nodes: Vec::new(),
+            },
         };
         h
     }
@@ -260,6 +265,18 @@ impl NodeDeps {
     fn is_empty(&self) -> bool {
         self.scope.is_empty() && self.text.is_empty() && self.background.is_empty()
     }
+}
+
+/// A reverse-index entry (F4.2): a node that depends on some signal, and how it
+/// would update when that signal changes.
+#[derive(Clone)]
+struct DepEntry {
+    /// Node index (serialized as `node-<index>`).
+    node: u32,
+    /// Which prop the dependency is through: `scope` / `text` / `background`.
+    via: &'static str,
+    /// How a change propagates: `rebuild` (scope/text) or `patch` (background).
+    update: &'static str,
 }
 
 struct NodeMeta {
@@ -416,6 +433,20 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// binding reads; paint-only bindings are isolated out). `is_current` false ⇒
     /// rebuild; else a paint-only binding change can be patched (F3.4).
     structural_reads: lumen_core::state::ReadSet,
+    /// Reverse index (F4.2): signal key → the nodes that depend on it and how
+    /// they'd update. Rebuilt each `rebuild` from the per-node `NodeDeps`.
+    dep_index: HashMap<String, Vec<DepEntry>>,
+    /// What the last `pump` actually did (F4.3 change attribution).
+    last_change: ChangeReport,
+}
+
+/// What a `pump` did, for change attribution (F4.3).
+#[derive(Clone, Default)]
+struct ChangeReport {
+    /// `"idle"`, `"patch"` (paint-only bindings), or `"rebuild"` (structural).
+    kind: &'static str,
+    /// Node indices that were patched/rebuilt-with-changed-output this pump.
+    nodes: Vec<u32>,
 }
 
 impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
@@ -489,6 +520,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         } else {
             // Nothing changed — keep the retained frame, report no damage.
             self.last_damage = Damage::None;
+            self.last_change = ChangeReport {
+                kind: "idle",
+                nodes: Vec::new(),
+            };
         }
         // F0 fixpoint contract: a settled pump leaves the reactive graph
         // quiescent. Writes flush synchronously, so after dispatch + build
@@ -1210,6 +1245,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .filter(|(_, b)| !b.deps.is_current(&rt))
             .map(|(i, _)| i)
             .collect();
+        let mut patched: Vec<u32> = Vec::new();
         for i in stale {
             let (color, reads) = self.bg_bindings[i].dynamic.eval_isolated(&rt);
             let node = self.bg_bindings[i].node;
@@ -1217,9 +1253,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             if let Some(m) = self.meta.get_mut(&node) {
                 m.background = Some(color);
             }
+            patched.push(node.index());
         }
         self.last_damage = self.paint();
         self.last_build_gen = self.rt.write_gen();
+        self.last_change = ChangeReport {
+            kind: "patch",
+            nodes: patched,
+        };
     }
 
     fn rebuild(&mut self) {
@@ -1243,6 +1284,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.force_rebuild = false;
         self.last_build_gen = self.rt.write_gen();
         self.last_build_clock = self.clock_ms;
+        // F4.3: a structural rebuild. Per-node change-diffing is deferred; the
+        // agent reads the fresh tree via `getTree`. (Patches report exact nodes.)
+        self.last_change = ChangeReport {
+            kind: "rebuild",
+            nodes: Vec::new(),
+        };
     }
 
     fn rebuild_inner(&mut self) {
@@ -1304,6 +1351,30 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.compute_styles();
         self.last_damage = self.paint();
         self.sem_root = Some(self.build_semantics(self.tree.root()));
+        self.rebuild_dep_index();
+    }
+
+    /// F4.2: rebuild the reverse index (signal key → dependent nodes) from the
+    /// per-node `NodeDeps`. `background` deps update via a patch, `scope`/`text`
+    /// via a rebuild.
+    fn rebuild_dep_index(&mut self) {
+        let mut idx: HashMap<String, Vec<DepEntry>> = HashMap::new();
+        for (node, m) in &self.meta {
+            let id = node.index();
+            let mut add = |keys: &[String], via, update| {
+                for k in keys {
+                    idx.entry(k.clone()).or_default().push(DepEntry {
+                        node: id,
+                        via,
+                        update,
+                    });
+                }
+            };
+            add(&m.deps.scope, "scope", "rebuild");
+            add(&m.deps.text, "text", "rebuild");
+            add(&m.deps.background, "background", "patch");
+        }
+        self.dep_index = idx;
     }
 
     /// Resolve the `.lss` cascade for every node, storing both the typed `Style`
@@ -1441,6 +1512,75 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 "background": deps.background,
             },
         })
+    }
+
+    /// The nodes that depend on `signal` and how they'd update if it changed
+    /// (F4.2 `ui.whatDependsOn`) — predictive, no write. Empty for a signal the
+    /// view doesn't read. Snapshot builds only.
+    #[cfg(feature = "snapshot")]
+    pub fn what_depends_on(&self, signal: &str) -> serde_json::Value {
+        let dependents: Vec<serde_json::Value> = self
+            .dep_index
+            .get(signal)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "node": format!("node-{}", e.node),
+                    "via": e.via,
+                    "update": e.update,
+                })
+            })
+            .collect();
+        serde_json::json!({ "signal": signal, "dependents": dependents })
+    }
+
+    /// What the last `pump` did (F4.3 `ui.lastChange`): `kind` is
+    /// `idle`/`patch`/`rebuild`; `nodes` are the exact patched nodes (a rebuild
+    /// reports none — read the fresh tree via `getTree`). Snapshot builds only.
+    #[cfg(feature = "snapshot")]
+    pub fn last_change(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": self.last_change.kind,
+            "nodes": self.last_change.nodes.iter().map(|n| format!("node-{n}")).collect::<Vec<_>>(),
+        })
+    }
+
+    /// Activate a control by running its retained handler directly (F4.4),
+    /// instead of synthesizing a pointer at its centre and re-hit-testing — more
+    /// robust under overlap/transforms. `action` is `click`/`focus`/`dismiss`.
+    /// Pumps afterward; returns the node index or an error string.
+    pub fn invoke_action(&mut self, selector: &str, action: &str) -> Result<u32, String> {
+        let root = self.semantics_doc().root.elided();
+        let id = lumen_core::semantics::resolve_one(&root, selector)
+            .map_err(|_| format!("selector `{selector}` did not resolve to one node"))?;
+        let node = self
+            .tree
+            .document_order()
+            .into_iter()
+            .find(|n| n.index() == id)
+            .ok_or_else(|| "resolved node is not live".to_string())?;
+        let m = self.meta.get(&node);
+        match action {
+            "click" => {
+                let handler = m.and_then(|m| m.on_click.clone());
+                match handler {
+                    Some(h) => h(&self.rt),
+                    None => return Err(format!("node `{selector}` has no click handler")),
+                }
+            }
+            "focus" => self.focused_id = m.and_then(|m| m.id.clone()),
+            "dismiss" => {
+                let handler = m.and_then(|m| m.on_dismiss.clone());
+                if let Some(h) = handler {
+                    h(&self.rt);
+                }
+            }
+            other => return Err(format!("unsupported action `{other}`")),
+        }
+        self.pump();
+        Ok(id)
     }
 
     #[allow(clippy::too_many_arguments)]

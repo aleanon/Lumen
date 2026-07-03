@@ -264,6 +264,14 @@ fn handle<R: Renderer, E: Spawner>(
         }
         "ui.getStyles" => Ok(app.get_styles(sel(params)?)),
         "ui.getDeps" => Ok(app.get_deps(sel(params)?)),
+        "ui.whatDependsOn" => {
+            let sig = params
+                .get("signal")
+                .and_then(|v| v.as_str())
+                .ok_or((-32602, "missing `signal`".to_string()))?;
+            Ok(app.what_depends_on(sig))
+        }
+        "ui.lastChange" => Ok(app.last_change()),
         "ui.getLayout" => {
             let node = resolve(app, sel(params)?)?;
             let b = node.bounds;
@@ -376,6 +384,18 @@ fn handle<R: Renderer, E: Spawner>(
             app.inject(Event::PointerUp(PointerEvent::at(p)));
             app.pump();
             Ok(json!({ "ok": true, "node": format!("node-{}", node.node) }))
+        }
+        "input.invokeAction" => {
+            // Geometry-free actuation: run the node's handler directly (F4.4).
+            let selector = sel(params)?;
+            let action = params
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("click");
+            let id = app
+                .invoke_action(selector, action)
+                .map_err(|e| (-32602, e))?;
+            Ok(json!({ "ok": true, "node": format!("node-{id}") }))
         }
         "input.type" => {
             let node = resolve_action(app, params)?;
@@ -566,7 +586,19 @@ pub fn mcp_manifest() -> Value {
                 "ui_getDeps",
                 "Reactive signal dependencies of a selector (union + per-prop).",
             ),
+            tool(
+                "ui_whatDependsOn",
+                "Predict which nodes update (patch vs rebuild) if a signal changes.",
+            ),
+            tool(
+                "ui_lastChange",
+                "What the last pump did: idle/patch/rebuild + patched nodes.",
+            ),
             tool("input_click", "Click the node a selector resolves to."),
+            tool(
+                "input_invokeAction",
+                "Activate a control by its handler (geometry-free): click/focus/dismiss.",
+            ),
             tool("input_type", "Focus a node and type text."),
             tool("input_key", "Press a key chord."),
             tool("input_scroll", "Scroll a node."),
