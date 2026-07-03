@@ -5,8 +5,9 @@
 //!
 //! Only the cells in the viewport are materialized (a few hundred `Element`
 //! nodes), so the grid stays O(viewport) no matter how far you scroll:
-//! * **Mouse wheel** scrolls (vertical, and horizontal via a trackpad / shift);
-//!   scrolling toward an edge simply reveals the next rows/columns.
+//! * **Mouse wheel** scrolls vertically (**Shift + wheel** scrolls horizontally,
+//!   as does a trackpad's x delta); scrolling toward an edge reveals the next
+//!   rows/columns.
 //! * **Ctrl/Cmd + wheel** zooms the grid in and out (scales cell sizes + font).
 //! * **Draggable scrollbars** on the right and bottom edges.
 //! * **Click a cell to edit it** — a text field opens in place; Enter or clicking
@@ -375,6 +376,10 @@ fn build(cx: &mut BuildCx) -> Element {
         if mods.contains(Modifiers::CTRL) || mods.contains(Modifiers::META) {
             // Ctrl/Cmd + wheel → zoom (wheel-up zooms in).
             zoom.update(rt, |zz| *zz = (*zz * (1.0 - dy * 0.0016)).clamp(ZMIN, ZMAX));
+        } else if mods.contains(Modifiers::SHIFT) {
+            // Shift + wheel → scroll horizontally (the vertical delta drives x).
+            let zz = zoom.get(rt).clamp(ZMIN, ZMAX);
+            sx.update(rt, |o| *o = (*o + (dy + dx) / zz).max(0.0));
         } else {
             let zz = zoom.get(rt).clamp(ZMIN, ZMAX);
             sy.update(rt, |o| *o = (*o + dy / zz).max(0.0));
@@ -390,7 +395,7 @@ fn build(cx: &mut BuildCx) -> Element {
     let info = text_in(
         Element::default(),
         format!(
-            "{}%  ·  rows {}–{}, cols {}–{}  ·  {}×{} seeded  ·  ctrl+wheel zoom · {}",
+            "{}%  ·  rows {}–{}, cols {}–{}  ·  {}×{} seeded  ·  ctrl+wheel zoom · shift+wheel ↔ · {}",
             (z * 100.0).round() as i64,
             r0 + 1,
             r1,

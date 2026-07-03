@@ -135,6 +135,28 @@ fn clicking_a_cell_lets_you_type_and_commits() {
 }
 
 #[test]
+fn shift_wheel_scrolls_horizontally() {
+    let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
+    h.pump();
+    // Shift + vertical wheel moves the horizontal offset, not the vertical one.
+    h.inject(Event::Wheel(WheelEvent {
+        pos: Point::new(400.0, 400.0),
+        delta: Vec2::new(0.0, 600.0),
+        modifiers: Modifiers::SHIFT,
+    }));
+    h.pump();
+    let sx: lumen_core::state::Signal<f64> = h.runtime().signal("sx", || 0.0);
+    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sy", || 0.0);
+    assert!(sx.get(h.runtime()) > 100.0, "shift+wheel scrolled right");
+    assert_eq!(sy.get(h.runtime()), 0.0, "vertical offset unchanged");
+    assert!(
+        info(&h).contains("cols") && !info(&h).contains("cols A–"),
+        "columns scrolled"
+    );
+    h.assert_view_coherent();
+}
+
+#[test]
 fn ctrl_wheel_zooms() {
     let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
     h.pump();
