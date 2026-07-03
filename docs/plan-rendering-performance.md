@@ -311,6 +311,19 @@ output to serial; small trees are unaffected (stay serial); no new deps.
 
 # Phase R5 — Retained per-subtree display lists  *(incremental paint; builds on the F-series)*
 
+> **Status (2026-07-03): the glyph-run-cache slice is DONE (commit e7ae0fa)** —
+> and it captured essentially the whole win the profiling predicted.
+> `TextEngine::shaped_run` caches the **origin-relative** glyph run (keyed by the
+> existing `ShapeKey` + scale); the paint layer translates + interns-by-ref
+> instead of rebuilding `glyph_run`. **Measured on a one-field change:
+> build_display_list 1.8 ms → 94 µs (60 nodes), 15.1 ms → 304 µs (500 nodes) —
+> O(tree) → O(changed), ~50×, byte-identical (all goldens pass).** Handles static
+> *and* scrolled text (position isn't in the key). **Remaining (optional, likely
+> not worth it):** full per-subtree fragment splicing (R5.1–R5.3 below) would add
+> only the marginal rect/gradient/image emission on top — pursue only if profiling
+> a real workload shows non-text emission dominating (the three sub-problems below
+> — clip contiguity, overlays, `ImageId` remapping — are its real cost).
+
 ## Current state
 `build_display_list` re-emits **every** node's `DrawCmd`s into one flat list each
 rebuild (glyph runs, rects, layers), then `damage_between(prev, next)` diffs it to
