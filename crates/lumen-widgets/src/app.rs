@@ -1109,6 +1109,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .find(|n| self.meta.get(n).and_then(|m| m.id.as_ref()) == Some(id))
     }
 
+    /// The rendered bounds of the node with stable id `id`, if present. Looked
+    /// up by id (not node index), so it survives the rebuilds that renumber
+    /// nodes — handy for asserting a layout reflowed after a state change.
+    pub fn node_bounds_by_id(&self, id: &str) -> Option<Rect> {
+        let id: StableId = id.into();
+        self.node_by_id(&id).map(|n| self.tree.bounds(n))
+    }
+
     fn move_focus(&mut self, forward: bool) {
         let current = self.focused_node();
         if let Some(next) = lumen_core::events::next_focus(&self.tree, current, forward) {
@@ -1334,7 +1342,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let rt = self.rt.clone();
         self.scope_live.borrow_mut().clear();
         let (root_el, requests, root_reads) = {
-            let mut cx = BuildCx::new(&self.rt, self.clock_ms, &self.scope_cache, &self.scope_live);
+            let mut cx = BuildCx::new(
+                &self.rt,
+                self.clock_ms,
+                &self.scope_cache,
+                &self.scope_live,
+                self.size,
+            );
             let (el, reads) = rt.collect_reads(|| (self.root)(&mut cx));
             (el, cx.take_requests(), reads)
         };

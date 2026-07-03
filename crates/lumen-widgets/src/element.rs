@@ -462,6 +462,10 @@ pub struct BuildCx<'a> {
     /// keys created inside a scope are namespaced under it, so a reused component
     /// gets its own state.
     prefix: RefCell<String>,
+    /// Logical surface size at build time. A resize forces a rebuild, so a view
+    /// that materializes only what fits (a virtualized grid) can read this to
+    /// size its viewport and reveal more content as the window grows.
+    size: lumen_core::geometry::Size,
 }
 
 impl<'a> BuildCx<'a> {
@@ -470,6 +474,7 @@ impl<'a> BuildCx<'a> {
         now_ms: f64,
         scope_cache: &'a RefCell<ScopeCache>,
         scope_live: &'a RefCell<std::collections::HashSet<String>>,
+        size: lumen_core::geometry::Size,
     ) -> BuildCx<'a> {
         BuildCx {
             rt,
@@ -481,7 +486,14 @@ impl<'a> BuildCx<'a> {
             scope_cache,
             scope_live,
             prefix: RefCell::new(String::new()),
+            size,
         }
+    }
+
+    /// The logical surface size at build time (a resize triggers a rebuild, so
+    /// reading this keeps a virtualized view sized to the current window).
+    pub fn size(&self) -> lumen_core::geometry::Size {
+        self.size
     }
 
     /// Create or re-attach a signal keyed by `name` (02 §4), namespaced under the
