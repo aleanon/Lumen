@@ -94,7 +94,23 @@ statics when the app needs them (`Grid::zoom_of(cx, name)`).
 - **Semantics are mandatory, not optional.** Set `role`, `label`, and the
   relevant `actions`/`states`/`value`/`focusable`. This is how the agent sees and
   drives the UI and how a11y works — the framework's core value. A node with no
-  role/label is invisible to both. (`.ai_docs/03-spec-semantics-agent.md`.)
+  role/label is invisible to both. The vocabulary is closed enums in
+  `lumen_core::semantics` (`.ai_docs/03-spec-semantics-agent.md`) — pick from what
+  exists; if nothing fits, use `Role::Group` (a container) or `Role::Generic`
+  (a leaf), never invent a variant:
+  - **`Role`:** `Window Button Checkbox Radio Switch Slider TextInput Text Image
+    Link List ListItem Table Row Cell ColumnHeader TabList Tab TabPanel Menu
+    MenuItem Dialog Alert Tooltip Progress Group ScrollArea Tree TreeItem ComboBox
+    Generic`
+  - **`State`:** `Focused Hovered Pressed Disabled Checked Unchecked Mixed Selected
+    Expanded Collapsed Readonly Required Invalid Busy`
+  - **`Action`:** `Click Focus Blur SetValue Increment Decrement ScrollIntoView
+    Expand Collapse Dismiss`
+  - A toggle/disclosure mirrors its state both ways: put the boolean pair
+    (`Checked/Unchecked`, `Expanded/Collapsed`) in `states` **and** the matching
+    `actions` (`Click`, or `Expand`/`Collapse`) so the agent can both read and act.
+  - `focusable: true` + `on_click` gives Space/Enter activation for free (the
+    framework routes focused-key activation to `on_click`) — you don't wire keys.
 - **Handlers capture only stable `Copy` state** — signal/memo handles, scalars —
   **never** an owned snapshot (`String`/`Vec`/`Rc`/a cloned value), which goes
   stale when the handler is retained (ADR-013). When in doubt wrap with
@@ -127,8 +143,20 @@ statics when the app needs them (`Grid::zoom_of(cx, name)`).
 
 Sliders/scrollbars read the drag fraction; pixel drags (resize, pan) read `pos`.
 For reactive props without a rebuild, prefer the `text!` / `bind!` macros and
-`Prop<T>`/`Dynamic<T>` (F3); for keyed lists / conditional structure use
-`cx.scope` / `For`, not a binding.
+`Prop<T>`/`Dynamic<T>` (F3).
+
+**Conditional structure inside a widget = plain conditional `children`.** Show a
+subtree only when open? Push it or don't: `children: if is { vec![body] } else {
+vec![] }` (see `check_box.rs`'s `tick()`). Do **not** reach for `cx.scope`/`For`
+here — those need `&mut BuildCx`, but a self-stateful widget's `new(cx: &BuildCx,
+…)` only has `&self`. `cx.scope`/`For` are for `&mut BuildCx` *view functions* and
+keyed lists at the app level, not for a widget builder. The build is still a pure
+function of the signal, so the coherence oracle covers the toggle.
+
+**Builder that needs the state to shape later setters** (e.g. `.body(children)`
+mounting content only when open): snapshot the read value into the struct in
+`new` (`Accordion { el, name, is_open }`) so the later setter uses it without
+re-touching `cx`. Namespace any tagged sub-nodes under `name` (`{name}-body`).
 
 ## Gotchas (hard-won — check every one)
 
@@ -173,13 +201,20 @@ h.assert_view_coherent();                 // incremental == rebuild_fresh
 ```
 
 Assert the *rendered result* where it matters (`node_bounds_by_id`, semantics),
-not just that a signal moved — a layout can be wrong while the state is right.
+not just that a signal moved — a layout can be wrong while the state is right. For
+conditional structure, assert the subtree is **absent** when off (a tagged node's
+`node_bounds_by_id` is `None`, or `node_count` is lower) and **present** when on.
+
+Run the module tests with **`--lib`**: `cargo test -p lumen-widgets --lib <name>`.
+Without `--lib`, a bare `<name>` filter matches integration-test *files*, runs
+**zero** of your unit tests, and still prints `ok` — a false green.
 
 ## Before you commit
 
 - `cargo fmt --all`
 - `cargo clippy -p lumen-widgets --all-targets` — no warnings (docs included)
-- `cargo test -p lumen-widgets <name>` green, incl. `assert_view_coherent`
+- `cargo test -p lumen-widgets --lib <name>` green (the `--lib` matters — a bare
+  filter can match zero unit tests and still report `ok`), incl. `assert_view_coherent`
 - `cargo build --workspace` if you changed a shared handler signature or export
 - Commit with a clear message describing what the widget does (`AGENT.md`).
 
