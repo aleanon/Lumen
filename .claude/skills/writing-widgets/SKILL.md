@@ -24,6 +24,13 @@ stateful, `grid.rs` builder) — match its shape, doc density, and idioms.
 State lives in `cx.signal(name, init)`, **not** in the struct. Read the current
 value to render (`sig.get(cx.runtime())`); mutate only inside handlers.
 
+**Non-default initial state gets an explicit setter** (`.open()`, `.checked()`),
+not caller-side signal pre-seeding. `cx.signal(name, init)` only runs `init` on
+first creation, so pre-creating the signal to seed a value is order-dependent
+(first `cx.signal` wins) and can diverge between `run_headless` and the live shell.
+A widget that can start in a non-default state should own that via a setter that
+writes the signal deterministically.
+
 ## Step 2 — copy the template
 
 ### Stateless / self-stateful (the common case)
@@ -175,6 +182,10 @@ re-touching `cx`. Namespace any tagged sub-nodes under `name` (`{name}-body`).
   `Copy` struct — don't reach for `const` `srgb8`.
 - **Sizes are logical px** via `Dim::px`/`Dim::pct`; absolute children set
   `Position::Absolute` + `inset`. `Dim::px` takes `f32`.
+- **Draw icons as shapes, not exotic Unicode.** The bundled font (which the
+  deterministic headless renderer + goldens use) lacks arrows/chevrons/most
+  symbols — they render as tofu headless. Use `widgets::canvas` for a chevron/tick
+  (see `check_box.rs`'s `tick()`), or stick to glyphs the bundled font has.
 
 ## Step 4 — register
 
@@ -234,7 +245,11 @@ examples/<name>/
 - Register the crate in the **workspace root `Cargo.toml`** `members` list.
 - In `build`, show the widget doing its thing, and give the interactive trigger a
   **stable `.id(...)`** so the live agent can address it (selectors are CSS-like;
-  a unique `#id` is the reliable one — a match must be unambiguous).
+  a unique `#id` is the reliable one — a match must be unambiguous). **Use only
+  `[a-z0-9-]` in ids/names** — the selector treats `.` as a class delimiter, so a
+  dotted id (`#faq.returns`) parses as id `faq` + class `returns` and won't match.
+  This bites widgets that derive child ids from `name` (e.g. `{name}-body`): pass
+  a dash-cased `name` like `faq-returns`, not `faq.returns`.
 
 ### 6b. Headless smoke — look at the frame
 
@@ -271,10 +286,18 @@ tests.
    shot("/tmp/<name>-after.png")
    ```
    Then `Read` both PNGs and confirm the interaction did what it should (e.g. the
-   accordion body appeared, the chevron flipped). Other verbs: `ui.getTree`,
-   `ui.getLayout {selector}`, `ui.lint` (finds overflow/contrast/clip defects),
-   `input.invokeAction {selector, action}` (geometry-free).
+   accordion body appeared). Prefer a **structural** assertion for the state
+   change — `ui.getTree` (child count, `state=['expanded']`, the node's label) or
+   `ui.getLayout {selector}` — over reading it off the pixels: the bundled/headless
+   font lacks decorative glyphs (arrows ▶▼, many symbols), which render as tofu, so
+   "the chevron flipped" is not reliably visible in a screenshot even when the
+   state is correct. Screenshots verify layout; `getTree`/state verify behaviour.
+   Other verbs: `ui.lint` (overflow/contrast/clip defects), `input.invokeAction
+   {selector, action}` (geometry-free).
 3. **Kill the background process** when done (don't leave a window/port open).
+   `just run-agent` is a bash→cargo→window tree and the recipe name isn't in the
+   process args, so match the **example binary**: `pkill -f "<name>-win"`. Confirm
+   the port is closed.
 
 ## Before you commit
 
