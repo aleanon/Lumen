@@ -47,13 +47,14 @@ fn virtualized_bounded_and_scrolls() {
         (300..2000).contains(&n),
         "viewport node count bounded, got {n}"
     );
-    assert!(info(&h).contains("rows 1–"), "starts at row 1");
+    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sy", || 0.0);
+    assert_eq!(sy.get(h.runtime()), 0.0, "starts at the top");
     h.assert_view_coherent();
 
-    // Wheel down → the visible row range moves and the node count stays bounded.
+    // Wheel down → the offset moves and the node count stays bounded.
     wheel(&mut h, 0.0, 4000.0);
     let after = h.pump().node_count;
-    assert!(!info(&h).contains("rows 1–"), "scrolled off the top");
+    assert!(sy.get(h.runtime()) > 100.0, "scrolled off the top");
     assert!(
         (300..2000).contains(&after),
         "still bounded after scroll, got {after}"
@@ -62,7 +63,7 @@ fn virtualized_bounded_and_scrolls() {
 
     // Wheel back to the top.
     wheel(&mut h, 0.0, -9000.0);
-    assert!(info(&h).contains("rows 1–"), "scrolled back to row 1");
+    assert_eq!(sy.get(h.runtime()), 0.0, "scrolled back to the top");
     h.assert_view_coherent();
 }
 
@@ -73,7 +74,7 @@ fn scrolls_past_the_old_u16_ceiling() {
     // Scroll far past where a u16 (65535) grid would have run out of rows.
     let deep = 70_000.0 * 24.0; // ≈ row 70000, well beyond u16::MAX
     wheel(&mut h, 0.0, deep);
-    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sy", || 0.0);
+    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sy", || 0.0);
     assert!(
         sy.get(h.runtime()) >= 65535.0 * 24.0,
         "scrolled into u32 territory"
@@ -83,7 +84,6 @@ fn scrolls_past_the_old_u16_ceiling() {
         (300..2000).contains(&n),
         "still bounded that far out, got {n}"
     );
-    assert!(!info(&h).contains("rows 1–"));
     h.assert_view_coherent();
 }
 
@@ -145,14 +145,10 @@ fn shift_wheel_scrolls_horizontally() {
         modifiers: Modifiers::SHIFT,
     }));
     h.pump();
-    let sx: lumen_core::state::Signal<f64> = h.runtime().signal("sx", || 0.0);
-    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sy", || 0.0);
+    let sx: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sx", || 0.0);
+    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sy", || 0.0);
     assert!(sx.get(h.runtime()) > 100.0, "shift+wheel scrolled right");
     assert_eq!(sy.get(h.runtime()), 0.0, "vertical offset unchanged");
-    assert!(
-        info(&h).contains("cols") && !info(&h).contains("cols A–"),
-        "columns scrolled"
-    );
     h.assert_view_coherent();
 }
 
@@ -160,7 +156,7 @@ fn shift_wheel_scrolls_horizontally() {
 fn ctrl_wheel_zooms() {
     let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
     h.pump();
-    let zoom: lumen_core::state::Signal<f64> = h.runtime().signal("zoom", || 1.0);
+    let zoom: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.zoom", || 1.0);
     assert_eq!(zoom.get(h.runtime()), 1.0);
 
     // Ctrl + wheel-up zooms in; a plain wheel does not.
@@ -179,7 +175,7 @@ fn ctrl_wheel_zooms() {
 fn dragging_the_vertical_thumb_scrolls() {
     let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
     h.pump();
-    let thumb = h.node_bounds_by_id("vthumb").expect("vertical thumb");
+    let thumb = h.node_bounds_by_id("sheet-vthumb").expect("vertical thumb");
     let (cx, cy) = (
         thumb.x0 + thumb.width() / 2.0,
         thumb.y0 + thumb.height() / 2.0,
@@ -190,9 +186,8 @@ fn dragging_the_vertical_thumb_scrolls() {
     h.inject(Event::PointerUp(pe(cx, cy + 200.0)));
     h.pump();
 
-    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sy", || 0.0);
+    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sy", || 0.0);
     assert!(sy.get(h.runtime()) > 100.0, "thumb drag scrolled down");
-    assert!(!info(&h).contains("rows 1–"));
     h.assert_view_coherent();
 }
 
@@ -203,7 +198,10 @@ fn resizing_a_row_grows_the_cell_not_the_gap() {
     // cell. Assert the row-header *box* actually grows to the new height.
     let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
     h.pump();
-    let before = h.node_bounds_by_id("rh-2").expect("row header 2").height();
+    let before = h
+        .node_bounds_by_id("sheet-rh-2")
+        .expect("row header 2")
+        .height();
     assert!(before < 30.0, "default row height, got {before}");
 
     // Row 2's bottom border ≈ window y = TOOLBAR(46)+HDR_H(26)+3*DH(24) = 144.
@@ -213,7 +211,10 @@ fn resizing_a_row_grows_the_cell_not_the_gap() {
     h.inject(Event::PointerUp(pe(24.0, 194.0)));
     h.pump();
 
-    let after = h.node_bounds_by_id("rh-2").expect("row header 2").height();
+    let after = h
+        .node_bounds_by_id("sheet-rh-2")
+        .expect("row header 2")
+        .height();
     assert!(
         after > before + 30.0,
         "the resized row's cell grew to fill the slot: {before} -> {after}"
@@ -231,7 +232,10 @@ fn dragging_a_column_header_edge_resizes_it() {
     let border_x = 48.0 + 3.0 * 64.0;
     // The handle for the *next* column (cx-3) marks where column 3 starts; it must
     // shift right once column 2 widens — proof the grid actually reflowed.
-    let before = h.node_bounds_by_id("cx-3").expect("cx-3 handle exists").x0;
+    let before = h
+        .node_bounds_by_id("sheet-cx-3")
+        .expect("cx-3 handle exists")
+        .x0;
 
     h.inject(Event::PointerDown(pe(border_x, 58.0)));
     h.inject(Event::PointerMove(pe(border_x + 60.0, 58.0)));
@@ -239,7 +243,7 @@ fn dragging_a_column_header_edge_resizes_it() {
     h.pump();
 
     // Column 2 now has a width override (wider than the 64px default)...
-    let cw: lumen_core::state::Signal<Vec<(u32, f64)>> = h.runtime().signal("cw", Vec::new);
+    let cw: lumen_core::state::Signal<Vec<(u32, f64)>> = h.runtime().signal("sheet.cw", Vec::new);
     let over = cw.get(h.runtime());
     let w = over.iter().find(|(k, _)| *k == 2).map(|(_, w)| *w);
     assert!(
@@ -247,7 +251,10 @@ fn dragging_a_column_header_edge_resizes_it() {
         "column 2 widened by the drag, override = {over:?}"
     );
     // ...and everything to its right actually moved over.
-    let after = h.node_bounds_by_id("cx-3").expect("cx-3 handle exists").x0;
+    let after = h
+        .node_bounds_by_id("sheet-cx-3")
+        .expect("cx-3 handle exists")
+        .x0;
     assert!(
         after > before + 40.0,
         "column 3 reflowed right: {before} -> {after}"

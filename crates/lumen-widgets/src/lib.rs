@@ -22,6 +22,7 @@ pub mod container;
 pub mod design;
 pub mod element;
 pub mod forms;
+pub mod grid;
 pub mod i18n;
 pub mod label;
 mod macros;
@@ -141,6 +142,7 @@ pub fn renderer_override() -> Option<Box<dyn Renderer>> {
 pub use button::Button;
 pub use check_box::CheckBox;
 pub use container::Container;
+pub use grid::{CellRef, Grid, GridStyle};
 pub use label::Label;
 pub use pick_list::PickList;
 pub use progress_bar::ProgressBar;
