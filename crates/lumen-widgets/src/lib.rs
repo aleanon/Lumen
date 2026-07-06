@@ -9,6 +9,7 @@
 #![warn(missing_docs)]
 
 pub mod a11y;
+pub mod accordion;
 pub mod app;
 pub mod asset;
 pub mod audit;
@@ -139,6 +140,7 @@ pub fn renderer_override() -> Option<Box<dyn Renderer>> {
 }
 // The widget library — each builds its `Element` inside `::new()`, in its own
 // file. Lower to `Element` via `From`; compose with `col!`/`row!` or `Container`.
+pub use accordion::Accordion;
 pub use button::Button;
 pub use check_box::CheckBox;
 pub use container::Container;
