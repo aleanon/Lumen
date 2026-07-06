@@ -209,6 +209,73 @@ Run the module tests with **`--lib`**: `cargo test -p lumen-widgets --lib <name>
 Without `--lib`, a bare `<name>` filter matches integration-test *files*, runs
 **zero** of your unit tests, and still prints `ok` — a false green.
 
+## Step 6 — ship a runnable example and drive it in the live window
+
+A widget isn't done until there's an example that uses it *and you've looked at it
+running*. Headless tests prove logic; the live window proves it renders and reacts
+in a real shell (GPU, hit-testing, focus) — things headless can't catch.
+
+### 6a. Create an example crate `examples/<name>/`
+
+Mirror `examples/counter/` (the minimal template):
+
+```
+examples/<name>/
+  Cargo.toml        # [lib] + [[bin]] (headless PNG) + [[example]] "<name>-win" (shell)
+  src/lib.rs        # pub fn main_app() -> App { App::new(build).stylesheet(include_str!("../app.lss")) }
+  src/main.rs       # headless smoke: main_app().run_headless(size).pump(); write screenshot PNG
+  examples/win.rs   # `<name>::main_app().run(Size::new(w, h));`  (use lumen_shell::RunExt)
+  app.lss           # minimal stylesheet
+```
+
+- `Cargo.toml` deps: `lumen-core`, `lumen-render`, `lumen-widgets`, `lumen-layout`
+  (all `{ workspace = true }`); dev-dep `lumen-shell`. The `[[example]]` name **must**
+  be `<name>-win` (the `just run` recipes look for it).
+- Register the crate in the **workspace root `Cargo.toml`** `members` list.
+- In `build`, show the widget doing its thing, and give the interactive trigger a
+  **stable `.id(...)`** so the live agent can address it (selectors are CSS-like;
+  a unique `#id` is the reliable one — a match must be unambiguous).
+
+### 6b. Headless smoke — look at the frame
+
+```
+cargo run -p <name>          # writes /tmp/<name>.png; then Read it to eyeball layout
+```
+Confirms it builds and lays out before you spin up a window.
+
+### 6c. Drive the live window (the framework's see-and-click ability)
+
+`lumen-shell` embeds the agent protocol into the **running** window: newline-
+delimited JSON-RPC over TCP, so you can screenshot and click the real GUI (see
+`live-window-agent` in memory / `.ai_docs/03-spec-semantics-agent.md`). Needs a
+display (`DISPLAY` set — true on this dev box); if none, skip 6c and rely on 6b +
+tests.
+
+1. Launch it in the **background** (release build → first run is slow; wait for
+   the port to accept a connection):
+   ```
+   just run-agent <name>          # window + JSON-RPC on 127.0.0.1:9230
+   ```
+2. Drive it with a tiny socket client, and **view the screenshots** to verify the
+   visible state actually changes across an interaction:
+   ```python
+   import socket, json, base64
+   f = socket.create_connection(("127.0.0.1", 9230)).makefile("rwb")
+   def rpc(method, **params):
+       f.write((json.dumps({"jsonrpc":"2.0","id":1,"method":method,"params":params})+"\n").encode()); f.flush()
+       return json.loads(f.readline())
+   def shot(path):  # result.image_base64 is a base64 PNG
+       open(path,"wb").write(base64.b64decode(rpc("ui.screenshot")["result"]["image_base64"]))
+   shot("/tmp/<name>-before.png")
+   rpc("input.click", selector="#<trigger-id>")   # or input.key / input.scroll / input.type
+   shot("/tmp/<name>-after.png")
+   ```
+   Then `Read` both PNGs and confirm the interaction did what it should (e.g. the
+   accordion body appeared, the chevron flipped). Other verbs: `ui.getTree`,
+   `ui.getLayout {selector}`, `ui.lint` (finds overflow/contrast/clip defects),
+   `input.invokeAction {selector, action}` (geometry-free).
+3. **Kill the background process** when done (don't leave a window/port open).
+
 ## Before you commit
 
 - `cargo fmt --all`
@@ -216,6 +283,10 @@ Without `--lib`, a bare `<name>` filter matches integration-test *files*, runs
 - `cargo test -p lumen-widgets --lib <name>` green (the `--lib` matters — a bare
   filter can match zero unit tests and still report `ok`), incl. `assert_view_coherent`
 - `cargo build --workspace` if you changed a shared handler signature or export
+- An `examples/<name>/` crate exists, registered in the workspace `members`; you
+  ran it (`cargo run -p <name>`, viewed the PNG) and, where a display is available,
+  drove it once in the live window (`just run-agent <name>` → screenshot → click →
+  screenshot) and confirmed the visible state changed.
 - Commit with a clear message describing what the widget does (`AGENT.md`).
 
 ## References
