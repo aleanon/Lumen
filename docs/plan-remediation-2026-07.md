@@ -351,10 +351,20 @@ on this box; AccessKit diff test green.
   caret/selection editing in `rich_text_editor` on top of RichDoc,
   find/replace UI; spell-check/variable-axes/CRDT explicitly *planned*.
   [D#45]
-- **M.5 (M)** **ADR-M2: HTTP client** (recommend `ureq` on the thread
-  pool — no async runtime). `lumen-net` convenience + `pokedex`/
-  `download_progress` examples; `WasmSpawner` (`spawn_local`) for web
-  parity. [D#46, backlog Part D]
+- **M.5 (M)** **ADR-M2 (decided 2026-07-08): no framework HTTP client.**
+  The framework ships the *executor seam*, the user brings the transport
+  (reqwest on their runtime, ureq on the thread pool, fetch on wasm —
+  their call). Work items: (a) generic executor surface with the
+  platform-conditional `MaybeSend` bound (native `Send`, wasm `!Send`) so
+  one trait fits tokio handles, the thread pool, and `spawn_local`;
+  (b) `WasmSpawner` (`spawn_local`); (c) fix or remove the noop-waker
+  `Runtime::resource` poll path (state.rs:540) — resources are
+  completion-based via `Sink`, the framework never drives foreign wakers;
+  (d) harden the re-entry contract: `Sink` is the only `Send` handle,
+  stale-generation discard documented + tested; (e) the canonical
+  bring-your-own-client recipes live in the `lumen-data-async` skill;
+  `pokedex`/`download_progress` examples use a client as **dev-deps**
+  (nothing ships in the framework tree). [D#46, backlog Part D]
 - **M.6 (S)** Examples tail: QR encoder (pure-Rust dep via ADR-M1),
   vectorial text (swash outlines → Canvas), sysinfo (feature-gated),
   exit/url_handler/multi-window/integration examples (needs P.3d).
@@ -400,7 +410,7 @@ on this box; AccessKit diff test green.
 | ADR-D2 | Dev-server transport: build 03 §4 or rewrite §4 to watcher design | C.6→C.7, P.2 | Minimal socket only when tier-2 push lands |
 | ADR-P1 | Desktop OS deps: arboard, rfd, muda (ADR-003 escalations) | P.3 | Approve; clipboard first |
 | ADR-M1 | Image/QR codec deps | M.1, M.6 | `image` crate default-features-off |
-| ADR-M2 | HTTP client | M.5 | `ureq` (blocking, thread pool) |
+| ADR-M2 | HTTP client | M.5 | **DECIDED 2026-07-08: none** — executor seam only (`MaybeSend` trait, `WasmSpawner`, Sink contract); user brings the client; skill carries the recipes |
 | ADR-M3 | Audio/video de-scope to post-2.0 | M.7 | De-scope |
 | ADR-R1 | R4 threaded layout + Vello stay parked | R.7 | Park both |
 
