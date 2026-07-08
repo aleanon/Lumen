@@ -210,11 +210,10 @@ transition) works verbatim; property-table "rendered" column ≥90 %;
 - **C.5 (M)** Client & security: `lumen agent call <method> <json>` CLI;
   thin **MCP server** over the protocol (make `mcp_manifest` real); bearer
   token for non-loopback binds. [D#23, D#26]
-- **C.6 (M)** **ADR-D2: dev-server transport.** Decide: implement 03 §4
-  (length-prefixed frames, `LUMEN_DEV_ADDR`) *or* bless the in-process
-  watcher + shell endpoint as the design and rewrite §4. Recommendation:
-  implement a minimal socket protocol only when a consumer exists (tier-2
-  push, device proxying — C.7/P phase); until then rewrite §4. [D#24]
+- **C.6 (S)** **ADR-D2 (decided): rewrite 03 §4** to the in-process
+  watcher + shell-endpoint design (fold into D0.2's rewrite) + decision-log
+  entry; a minimal socket protocol is built inside C.7/P.2 when its first
+  consumer (tier-2 push, device proxying, web bridge) lands. [D#24]
 - **C.7 (L)** Tier-2 live orchestration (watch → incremental `cargo build`
   → `dylib_update` push → swap in running app; abi-hash tier-3 downgrade)
   and tier-3 process-level restart driver (`restart_request` +
@@ -247,10 +246,9 @@ chevrons render; a flaky-timing test written naively passes via retries.
 
 ## Phase W — Widgets & core API (after ADRs; parallel with B)
 
-- **W.0 (S)** **ADR-W1: Widget trait.** Decide 02 §3: implement the unified
-  trait or amend spec to bless `LeafWidget` + composite fns. Recommendation:
-  amend spec (the shipped model is coherent), but **add the missing leaf
-  `event()` hook** to `LeafWidget` either way. [D#2]
+- **W.0 (S)** **ADR-W1 (decided): amend 02 §3** to bless `LeafWidget` +
+  composite fns as the widget model; write the decision-log entry; **add
+  the missing leaf `event()` hook** to `LeafWidget`. [D#2]
 - **W.1 (L)** Missing M2 widgets: Popover (generalize pick_list's anchored
   overlay: screen-edge flipping, dismiss), Sheet, Drawer, SearchField;
   promote Toast/Spinner/Chip from examples. [D#10]
@@ -266,11 +264,9 @@ chevrons render; a flaky-timing test written naively passes via retries.
   snapshot fns; `#[state_registry]` for stored trait objects; emit W0001
   (duplicate StableId) and W0301 (unnamed focusable) as diagnostics;
   `App::run` shape per ADR-W1 companion decision. [D#6,7,8]
-- **W.5 (M)** **ADR-W2: facade rule.** Recommendation: keep direct crate
-  imports as the blessed style for *examples in-repo* (they are framework
-  tests) but make `lumen new` scaffolds facade-only; amend 02 §11
-  accordingly. If instead full migration is chosen: mechanical sweep of 38
-  Cargo.tomls / 91 files. [D#9]
+- **W.5 (S)** **ADR-W2 (decided): bless direct crate imports in-repo**;
+  `lumen new` scaffolds facade-only; amend 02 §11 + decision-log entry.
+  (No 91-file migration.) [D#9]
 
 **Acceptance:** 02 §10 widget table has no "missing" row for M0–M4; every
 new widget follows writing-widgets (test triple + example + live smoke).
@@ -294,10 +290,11 @@ new widget follows writing-widgets (test triple + example + live smoke).
   (min(cores,4), spawn-on-first-job). [G perf#5, resources#4/5]
 - **R.6 (M)** Gates: cold-start bench (<300 ms) + memory/leak gate in CI;
   put GPU-parity + golden suites in CI. [D#40, D#36]
-- **R.7 (S)** **ADR-R1: de-scopes.** R4 threaded layout stays parked
-  (virtualization is the answer; revisit on demand); `Backend::
-  VelloCompute` marked *evaluation slot, post-2.0*; both reflected in
-  06-task-graph (T6.1 ✗→planned, T6.6 rescoped). [D#39,41]
+- **R.7 (S)** **ADR-R1 (decided):** R4 threaded layout parked
+  (virtualization is the answer); `Backend::VelloCompute` marked
+  *evaluation slot, post-2.0*; both reflected in 06-task-graph (T6.1
+  ✗→planned, T6.6 rescoped) with the **binding revisit triggers** recorded
+  in the decision-gates table below. [D#39,41]
 
 **Acceptance:** small-update GPU frame re-renders only the damage region
 (measured via timestamp queries or frame capture); hello ≤5 MB stripped;
@@ -314,8 +311,10 @@ iOS remains build-only)
   loop), input events, CPU present via canvas first, WebGPU present as
   follow-up; agent bridge over WebSocket; headless-Chromium test leg;
   enforced wasm size gate. [D#33]
-- **P.3 (M)** **ADR-P1: desktop OS deps** (arboard/rfd/muda — ADR-003
-  escalations). Then slices in testability order, each behind the existing
+- **P.3 (M)** **ADR-P1 (decided): arboard/rfd/muda approved** (decision-log
+  entries at landing; rfd Linux backend sub-decision at P.3b — portal
+  backend, async dep contained to lumen-shell, GTK fallback if it leaks).
+  Slices in testability order, each behind the existing
   portable APIs and live-window-verifiable on this box: arboard clipboard
   (P.3a), rfd file/color dialogs (P.3b), muda native menus (P.3c),
   multi-window (P.3d: shell loop refactor keyed by WindowId, `WindowDesc`
@@ -338,9 +337,10 @@ on this box; AccessKit diff test green.
 
 ## Phase M — Media, motion, text, examples tail
 
-- **M.1 (M)** **ADR-M1: image codecs** (`image` crate subset or zune —
-  jpeg/webp/GIF/APNG; avif optional). Shared decode cache; `ferris` +
-  full `image` examples. [D#42, 08 tail]
+- **M.1 (M)** **ADR-M1 (decided): `image` crate, default-features off** —
+  jpeg + gif + webp, feature-gated for lean builds; avif deferred. Shared
+  decode cache; animated-image asset type (frame sequences + clock);
+  `ferris` + full `image` examples. [D#42, 08 tail]
 - **M.2 (L)** SVG completion: gradients, transforms, groups, text,
   clips (or ADR to adopt usvg). Lottie: de-scope to post-2.0 (ADR-M1
   addendum). [D#42]
@@ -369,8 +369,9 @@ on this box; AccessKit diff test green.
   vectorial text (swash outlines → Canvas), sysinfo (feature-gated),
   exit/url_handler/multi-window/integration examples (needs P.3d).
   [D#46]
-- **M.7 (—)** Audio/video/capture: **de-scope to post-2.0** (ADR-M3);
-  stubs stay as the deterministic CI contract; T6.3 re-marked. [D#43]
+- **M.7 (—)** **ADR-M3 (decided):** audio/video/capture de-scoped to
+  post-2.0; stubs stay as the deterministic CI contract; T6.3 re-marked
+  in D0.1. [D#43]
 
 ## Phase E — Ecosystem & production
 
@@ -401,18 +402,29 @@ on this box; AccessKit diff test green.
 
 ---
 
-## Decision gates (need your call / an ADR before their phase)
+## Decision gates — ALL DECIDED 2026-07-08 (user approved the recommendations)
 
-| ADR | Decision | Blocking | Recommendation |
-|---|---|---|---|
-| ADR-W1 | Widget trait: implement 02 §3 or amend spec to LeafWidget+fns | W.0→W.*, E.2 | Amend spec; add leaf `event()` hook |
-| ADR-W2 | Facade rule: migrate 91 files or bless direct imports in-repo | W.5 | Bless in-repo; facade-only in `lumen new` |
-| ADR-D2 | Dev-server transport: build 03 §4 or rewrite §4 to watcher design | C.6→C.7, P.2 | Minimal socket only when tier-2 push lands |
-| ADR-P1 | Desktop OS deps: arboard, rfd, muda (ADR-003 escalations) | P.3 | Approve; clipboard first |
-| ADR-M1 | Image/QR codec deps | M.1, M.6 | `image` crate default-features-off |
-| ADR-M2 | HTTP client | M.5 | **DECIDED 2026-07-08: none** — executor seam only (`MaybeSend` trait, `WasmSpawner`, Sink contract); user brings the client; skill carries the recipes |
-| ADR-M3 | Audio/video de-scope to post-2.0 | M.7 | De-scope |
-| ADR-R1 | R4 threaded layout + Vello stay parked | R.7 | Park both |
+No phase is blocked on a decision. Each gets a formal `07-decision-log.md`
+entry when its phase starts (per ADR-003, before any dep is added).
+
+| ADR | Decision (final) | Affects |
+|---|---|---|
+| ADR-W1 | **Amend 02 §3 to the shipped model** (`LeafWidget` + composite fns); **add the missing leaf `event()` hook** to `LeafWidget` | W.0→W.*, E.2 |
+| ADR-W2 | **Bless direct crate imports for in-repo examples** (they are framework tests); `lumen new` scaffolds are facade-only; amend 02 §11 | W.5 |
+| ADR-D2 | **Rewrite 03 §4** to the watcher + shell-endpoint design now; build a minimal socket protocol only when a consumer exists (tier-2 push / device proxying, C.7/P) | C.6→C.7, P.2 |
+| ADR-P1 | **Approve arboard + rfd + muda**, landed in testability order (clipboard → dialogs → menus → multi-window). Sub-decision at P.3b: rfd's Linux backend — default to the xdg-portal backend with its async dep (zbus) contained to `lumen-shell`; fall back to GTK if the executor leaks beyond the shell crate | P.3 |
+| ADR-M1 | **`image` crate, default-features off**: jpeg + gif + webp; **avif deferred** (pure-Rust decoder immaturity); Lottie de-scoped to post-2.0; QR via `qrcodegen`-class pure-Rust dep. Codecs feature-gated so lean builds drop them; versions workspace-pinned (golden stability) | M.1, M.2, M.6 |
+| ADR-M2 | **No framework HTTP client** — executor seam only (`MaybeSend` trait, `WasmSpawner`, Sink re-entry contract); user brings the client; recipes live in the `lumen-data-async` skill; examples use clients as dev-deps | M.5 |
+| ADR-M3 | **Audio/video/capture de-scoped to post-2.0**; deterministic stubs remain the CI contract; T6.3 re-marked in D0.1 | M.7 |
+| ADR-R1 | **R4 threaded layout and Vello stay parked**, with explicit revisit triggers (below); T6.1/T6.6 re-marked in D0.1 | R.7 |
+
+**ADR-R1 revisit triggers (binding):** R4 — a real app's dirty-subtree
+relayout exceeds the 2 ms budget *after* Phase A lands, or the cold-start
+gate shows a >50 ms initial layout on a production screen. Vello — a
+path-heavy *animated* bench (morphing paths, not cacheable by R.2's
+tessellation cache) misses frame budget on target mobile hardware, or
+Vello reaches a stable release whose WebGPU compute baseline the supported
+platforms meet.
 
 ## Coverage matrix
 
