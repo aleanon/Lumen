@@ -122,10 +122,20 @@ signal write touches, then confirm what the pump actually did.
 ### 3.2 Actions
 
 Synthesized into the same input queue as OS input — every action is
-reproducible as a test. Results: `{ ok: true, node: "node-42" }` or a
-JSON-RPC error (`-32601` unknown method; `-32000` with the resolver's
+reproducible as a test. **Auto-wait (C.1a, 2026-07-09):** every selector
+action polls at 10 ms — pumping so deferred task results apply — until the
+selector resolves to exactly one *actionable* node (non-empty bounds, not
+`disabled`) or `timeout_ms` elapses (param on any action; default 5000).
+`Ambiguous` fails immediately with candidates. Not yet waited on:
+clock-driven animation settling (C.1b — poll `ui.getTree`/use `ui.waitFor`
+around animations). Results: `{ ok: true, node: "node-42" }` or a JSON-RPC
+error (`-32601` unknown method; `-32000` with `Timeout(…)` /
 `NotFound { nearest }` / `Ambiguous { candidates }`; structured error codes
 planned, C.4).
+
+| Method | Params | Notes |
+|---|---|---|
+| `ui.waitFor` | `{ selector, state?, text?, timeout_ms? }` | blocks until the node exists (and carries `state` / label-or-value equals `text`); the explicit wait primitive |
 
 | Method | Params | Notes |
 |---|---|---|
@@ -170,14 +180,15 @@ Each item carries its remediation-plan task. `app.logs` (C.2) · `state.get`
 (C.4) · `events.subscribe` + `event.*` notifications (C.4) · `input.drag`
 node-to-node (C.4) · `input.hover` (C.4) · `input.gesture` (C.4) ·
 `app.setValue` (C.4) · `app.command` / `cx.register_command` (C.4) ·
-`session.start`/`session.stop` (C.4) · `reload.apply` (C.4) · auto-wait +
-`timeout_ms` on all actions and `ui.waitFor` (C.1) · `input.click`
-`{pos, button, count}` (C.4) · `input.type {clear}` (C.4) · `input.scroll`
-`{dx, to}` (C.4) · `ui.getTree {selector}` subtree (C.4) · `ui.screenshot`
-`{max_width}` (C.4) · runtime `node-N` ids as selectors (C.3) · real
-`app.perf` from `FrameStats` (C.2) · MCP server + packaged client
-`lumen agent call` (C.5) · bearer-token auth (C.5) · CLI-hosted endpoint
-(`lumen agent serve`, C.8).
+`session.start`/`session.stop` (C.4) · `reload.apply` (C.4) · auto-wait for
+clock-driven **animation settling** (C.1b; existence/actionability/async
+waiting shipped in C.1a) · `input.click` `{pos, button, count}` (C.4) ·
+`input.type {clear}` (C.4) · `input.scroll` `{dx, to}` (C.4) ·
+`ui.getTree {selector}` subtree (C.4) · `ui.screenshot` `{max_width}` (C.4)
+· runtime `node-N` ids as selectors (C.3) · real `app.perf` from
+`FrameStats` (C.2) · MCP server + packaged client `lumen agent call` (C.5)
+· bearer-token auth (C.5) · CLI-hosted endpoint (`lumen agent serve`,
+C.8).
 
 ## 4. Dev-loop wiring (per ADR-D2)
 

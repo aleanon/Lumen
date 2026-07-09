@@ -377,6 +377,65 @@ fn handle<R: Renderer, E: Spawner>(
             "frame_ms_p50": 0.0, "frame_ms_p95": 0.0,
             "node_count": app.semantics_doc().root.elided().children.len(),
         })),
+        "ui.waitFor" => {
+            // C.1a: block until a node matching `selector` exists — and
+            // optionally carries `state` / has label-or-value equal to
+            // `text` — pumping between 10 ms polls so deferred task results
+            // apply. The explicit wait for anything the actions' implicit
+            // auto-wait doesn't cover. Not covered yet: clock-driven
+            // animation settling (C.1b).
+            let selector = sel(params)?.to_string();
+            let want_state = params
+                .get("state")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let want_text = params
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5000);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+            loop {
+                app.pump();
+                let root = app.semantics_doc().root.elided();
+                if let Ok(id) = resolve_one(&root, &selector) {
+                    if let Some(n) = find_node(&root, id) {
+                        let state_ok = want_state
+                            .as_deref()
+                            .is_none_or(|s| n.states.iter().any(|st| st.as_str() == s));
+                        let text_ok = want_text
+                            .as_deref()
+                            .is_none_or(|t| n.label.trim() == t || n.value.as_deref() == Some(t));
+                        if state_ok && text_ok {
+                            return Ok(json!({
+                                "ok": true,
+                                "node": format!("node-{}", n.node),
+                                "states": n.states.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                                "label": n.label,
+                            }));
+                        }
+                    }
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err((
+                        -32000,
+                        format!(
+                            "Timeout({timeout_ms}ms) waiting for `{selector}`{}{}",
+                            want_state
+                                .map(|s| format!(" state={s}"))
+                                .unwrap_or_default(),
+                            want_text
+                                .map(|t| format!(" text={t:?}"))
+                                .unwrap_or_default()
+                        ),
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
         "input.click" => {
             let node = resolve_action(app, params)?;
             let p = center(node.bounds);
@@ -507,12 +566,59 @@ fn resolve<R: Renderer, E: Spawner>(
     }
 }
 
+/// C.1a auto-wait (05 §3, the live slice): before acting, poll every 10 ms —
+/// pumping between polls so deferred task results apply — until the selector
+/// resolves to exactly one *actionable* node (non-empty bounds, not
+/// `disabled`), or `timeout_ms` (param; default 5000) elapses. `Ambiguous`
+/// fails immediately with the candidates (05 §3 rule). Clock-driven animation
+/// settling is NOT waited on yet (C.1b — the shell owns the wall→virtual
+/// clock; see docs/plan-remediation-2026-07.md).
 fn resolve_action<R: Renderer, E: Spawner>(
     app: &mut Headless<R, E>,
     params: &Value,
 ) -> Result<SemanticsNode, (i64, String)> {
-    app.pump();
-    resolve(app, sel(params)?)
+    let selector = sel(params)?.to_string();
+    let timeout_ms = params
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5000);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    loop {
+        app.pump();
+        let root = app.semantics_doc().root.elided();
+        match resolve_one(&root, &selector) {
+            Ok(id) => {
+                if let Some(n) = find_node(&root, id) {
+                    let actionable = n.bounds.width() > 0.0
+                        && n.bounds.height() > 0.0
+                        && !n.states.iter().any(|s| s.as_str() == "disabled");
+                    if actionable {
+                        return Ok(n.clone());
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return Err((
+                            -32000,
+                            format!(
+                                "Timeout({timeout_ms}ms): `{selector}` resolved but is not \
+                                 actionable (zero-size or disabled): {:?} {:?}",
+                                n.bounds, n.states
+                            ),
+                        ));
+                    }
+                }
+            }
+            // Exactly-one is the contract: >1 matches can't be waited away.
+            Err(e @ lumen_core::semantics::ResolveError::Ambiguous { .. }) => {
+                return Err((-32000, format!("{e:?}")));
+            }
+            Err(e) => {
+                if std::time::Instant::now() >= deadline {
+                    return Err((-32000, format!("Timeout({timeout_ms}ms): {e:?}")));
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 fn find_node(root: &SemanticsNode, id: u32) -> Option<&SemanticsNode> {

@@ -116,9 +116,13 @@ The ones you'll actually use:
 
 ### Live-window traps (each one has burned an agent)
 
-- **No auto-wait.** Live actions pump exactly once. After any action,
-  re-query until the expected state appears (`wait_until` above). Never
-  assert on the reply of the action itself.
+- **Auto-wait covers existence, not settling.** Since C.1a, selector
+  actions wait (10 ms polls, `timeout_ms` param, default 5 s) for the node
+  to exist, be non-zero-sized, not disabled — including nodes that appear
+  from async results. `ui.waitFor {selector, state?, text?}` is the
+  explicit wait. **Clock-driven animations are NOT waited on** (C.1b
+  pending): after acting, verify the *final* state via `ui.waitFor` or
+  `wait_until` rather than asserting on the action's reply.
 - **`node-N` ids are not selectors.** `ui.getTree` returns `node-13`; the
   selector grammar rejects it (`NotFound{nearest:[]}`). Re-derive `#id`,
   `role`, `.class`, or `:text-contains("…")` — and prefer a stable `#id`.
