@@ -94,6 +94,20 @@ fn expand_nested(sheet: &mut Stylesheet) {
     sheet.items.extend(new_rules.into_iter().map(Item::Rule));
 }
 
+/// The expected value type for E0103 validation (B.7a) — covers the
+/// *applied* property set (04 §10 "rendered"/"applied"); parse-only
+/// properties are unvalidated until they gain runtime meaning.
+fn expected_value_type(property: &str) -> Option<&'static str> {
+    Some(match property {
+        "background" | "color" | "border-color" => "color",
+        "width" | "height" | "gap" | "padding" | "margin" | "border-radius" | "font-size"
+        | "border-width" => "length",
+        "opacity" | "font-weight" => "number",
+        "display" | "flex-direction" => "keyword",
+        _ => return None,
+    })
+}
+
 struct Parser {
     toks: Vec<Token>,
     pos: usize,
@@ -503,6 +517,28 @@ impl Parser {
             false
         };
         self.expect(Tk::Semi, "`;`");
+        // B.7a: parse-time type validation for the applied property set —
+        // a mismatch is E0103 with the expected type (04 §9; the code was
+        // defined-but-dead until now, and `apply()` silently ignored bad
+        // values). `$token`/function/list values pass through (resolved or
+        // interpreted later).
+        if let Some(expected) = expected_value_type(&property) {
+            let ok = match (&value, expected) {
+                (Value::Var(_) | Value::Function(..) | Value::List(_), _) => true,
+                (Value::Color(_), "color") => true,
+                (Value::Number(..), "length") | (Value::Number(..), "number") => true,
+                (Value::Keyword(k), "length") => k == "auto",
+                (Value::Keyword(_), "keyword") => true,
+                _ => false,
+            };
+            if !ok {
+                self.err_at(
+                    codes::E0103,
+                    format!("`{property}` expects a {expected}, got `{value:?}`"),
+                    span,
+                );
+            }
+        }
         Some(Declaration {
             property,
             value,

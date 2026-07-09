@@ -97,10 +97,11 @@ Every `.lss` property has exactly one corresponding typed setter; the macro test
 Unknown property → `E0102` with Levenshtein did-you-mean; type mismatch → `E0103` with expected type; unknown token → `E0104`. All include file/line/col span. A stylesheet with errors is rejected atomically (old one stays live).
 
 *Status:* E0101/E0102 (did-you-mean)/E0104 + atomic reject + spans are
-implemented. **E0103 is never emitted** — type mismatches are silently
-ignored (plan B.7). `border-width`/`border-color` are applied but missing
-from the known-property list, so they raise a spurious E0102 (plan B.7).
-Unknown units are silently treated as unitless (plan B.7).
+implemented. **E0103 fires since B.7a** for type mismatches on the applied
+property set (color/length/number/keyword expectations; `$token`,
+function, and list values pass through) — the sheet is rejected
+atomically. `border-width`/`border-color` are in the known-property list
+(B.7a). Unknown units are still silently treated as unitless (plan B.7).
 
 ## 10. Implementation status by property (2026-07-09)
 

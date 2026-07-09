@@ -47,6 +47,10 @@ pub const KNOWN_PROPERTIES: &[&str] = &[
     // visual
     "background",
     "border",
+    // Applied by `apply()` since the borders work — were missing here, so
+    // using them raised a spurious E0102 (B.7a).
+    "border-width",
+    "border-color",
     "border-top",
     "border-right",
     "border-bottom",

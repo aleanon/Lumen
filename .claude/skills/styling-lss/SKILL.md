@@ -111,11 +111,11 @@ planned (B.5). Test both themes: `TestApp::with_options(size, theme)`.
 
 - `E0101` parse error + `E0102` unknown property (with did-you-mean) +
   `E0104` unknown token — all fire, with file/line/col spans.
-- **`E0103` (type mismatch) never fires** — `opacity: red` is silently
-  ignored. When a value seems ignored, check `ui.getStyles` first.
-- `border-width:`/`border-color:` **work but raise a spurious E0102**
-  (missing from the known-property list; B.7). Prefer the `border:`
-  shorthand.
+- **`E0103` fires since B.7a**: `opacity: red`, `background: 12px`,
+  `display: 4px` etc. are rejected atomically with the expected type
+  (applied property set; `$token`/function/list values pass through).
+- `border-width:`/`border-color:` are legitimate known properties now
+  (B.7a — the spurious E0102 is gone).
 - Unknown units are treated as unitless without warning — `12padding` won't
   complain.
 
