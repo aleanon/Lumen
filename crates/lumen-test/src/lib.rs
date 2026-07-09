@@ -234,7 +234,43 @@ impl Locator {
         Ok(())
     }
 
+    /// Right-click the single matched node (synthesizes a secondary-button
+    /// pointer down/up at its center; T.2).
+    pub async fn right_click(&self) -> Result<(), LocatorError> {
+        let id = self.wait_one().await?;
+        let bounds = self.node_bounds(id).unwrap_or(Rect::ZERO);
+        let p = center(bounds);
+        let mut down = PointerEvent::at(p);
+        down.button = lumen_core::events::PointerButton::Right;
+        let mut up = PointerEvent::at(p);
+        up.button = lumen_core::events::PointerButton::Right;
+        let mut h = self.inner.borrow_mut();
+        h.inject(Event::PointerDown(down));
+        h.inject(Event::PointerUp(up));
+        h.pump();
+        Ok(())
+    }
+
+    /// Focus the node and append `text` keystrokes (no clearing — the 05 §2
+    /// counterpart to [`fill`](Self::fill); T.2).
+    pub async fn type_text(&self, text: &str) -> Result<(), LocatorError> {
+        let id = self.wait_one().await?;
+        let bounds = self.node_bounds(id).unwrap_or(Rect::ZERO);
+        let p = center(bounds);
+        let mut h = self.inner.borrow_mut();
+        h.inject(Event::PointerDown(PointerEvent::at(p)));
+        h.inject(Event::PointerUp(PointerEvent::at(p)));
+        h.inject(Event::TextInput(TextInputEvent {
+            text: text.to_string(),
+        }));
+        h.pump();
+        Ok(())
+    }
+
     /// Focus the node and type `text` (through the committed-text path).
+    /// **Known divergence from 05 §2:** does not clear existing content yet
+    /// (appends, like [`type_text`](Self::type_text)) — clearing lands with
+    /// the editor clear mechanism (plan C.4, `input.type {clear}`).
     pub async fn fill(&self, text: &str) -> Result<(), LocatorError> {
         let id = self.wait_one().await?;
         let bounds = self.node_bounds(id).unwrap_or(Rect::ZERO);
@@ -401,110 +437,127 @@ pub fn expect(locator: Locator) -> Expect {
     Expect { locator }
 }
 
+/// Poll `$cond` (an expression evaluating to `Result<bool, LocatorError>`)
+/// on the virtual clock until it passes or the 05 §3 budget elapses — so
+/// **every** assertion auto-retries (T.2). A `NotFound` keeps waiting (the
+/// node may appear); `Ambiguous`/`Parse` fail fast (waiting can't fix them).
+macro_rules! retrying {
+    ($self:ident, $cond:expr) => {{
+        let mut waited = 0.0;
+        loop {
+            match $cond {
+                Ok(true) => return Ok(()),
+                Ok(false) | Err(LocatorError::NotFound { .. }) | Err(LocatorError::Timeout) => {}
+                Err(e) => return Err(e),
+            }
+            if waited >= TIMEOUT_MS {
+                return Err(LocatorError::Timeout);
+            }
+            {
+                let mut h = $self.locator.inner.borrow_mut();
+                h.advance_clock(POLL_MS);
+                h.pump();
+            }
+            waited += POLL_MS;
+        }
+    }};
+}
+
 impl Expect {
     /// Assert the locator resolves to a node (auto-waiting).
     pub async fn to_exist(&self) -> Result<(), LocatorError> {
         self.locator.wait_one().await.map(|_| ())
     }
 
+    /// Assert the matched node is visible: resolved with non-empty bounds
+    /// (auto-retrying).
+    pub async fn to_be_visible(&self) -> Result<(), LocatorError> {
+        retrying!(self, {
+            self.locator
+                .bounds()
+                .await
+                .map(|b| b.width() > 0.0 && b.height() > 0.0)
+        })
+    }
+
     /// Assert the matched node's text equals `text` (auto-retrying).
     pub async fn to_have_text(&self, text: &str) -> Result<(), LocatorError> {
-        let mut waited = 0.0;
-        loop {
-            if let Ok(got) = self.locator.text().await {
-                if got == text {
-                    return Ok(());
-                }
-            }
-            if waited >= TIMEOUT_MS {
-                return Err(LocatorError::Timeout);
-            }
-            {
-                let mut h = self.locator.inner.borrow_mut();
-                h.advance_clock(POLL_MS);
-                h.pump();
-            }
-            waited += POLL_MS;
-        }
+        retrying!(self, self.locator.text().await.map(|got| got == text))
     }
 
-    /// Assert the matched node contains `text` (substring).
+    /// Assert the matched node contains `text` (substring, auto-retrying).
     pub async fn to_contain_text(&self, text: &str) -> Result<(), LocatorError> {
-        let got = self.locator.text().await?;
-        if got.contains(text) {
-            Ok(())
-        } else {
-            Err(LocatorError::Timeout)
-        }
+        retrying!(self, {
+            self.locator.text().await.map(|got| got.contains(text))
+        })
     }
 
-    /// Assert the matched node's value equals `value`.
+    /// Assert the matched node's value equals `value` (auto-retrying).
     pub async fn to_have_value(&self, value: &str) -> Result<(), LocatorError> {
-        if self.locator.value().await?.as_deref() == Some(value) {
-            Ok(())
-        } else {
-            Err(LocatorError::Timeout)
-        }
+        retrying!(self, {
+            self.locator
+                .value()
+                .await
+                .map(|v| v.as_deref() == Some(value))
+        })
     }
 
-    /// Assert the matched node has state `state` (e.g. `"checked"`, `"focused"`).
+    /// Assert the matched node has state `state` (e.g. `"checked"`,
+    /// `"focused"`; auto-retrying).
     pub async fn to_have_state(&self, state: &str) -> Result<(), LocatorError> {
-        if self.locator.states().await?.iter().any(|s| s == state) {
-            Ok(())
-        } else {
-            Err(LocatorError::Timeout)
-        }
+        retrying!(self, {
+            self.locator
+                .states()
+                .await
+                .map(|s| s.iter().any(|s| s == state))
+        })
     }
 
-    /// Assert the matched node is focused.
+    /// Assert the matched node is focused (auto-retrying).
     pub async fn to_be_focused(&self) -> Result<(), LocatorError> {
         self.to_have_state("focused").await
     }
 
-    /// Assert the matched node is disabled.
+    /// Assert the matched node is disabled (auto-retrying).
     pub async fn to_be_disabled(&self) -> Result<(), LocatorError> {
         self.to_have_state("disabled").await
     }
 
-    /// Assert the selector resolves to exactly `n` nodes.
+    /// Assert the selector resolves to exactly `n` nodes (auto-retrying).
     pub async fn to_have_count(&self, n: usize) -> Result<(), LocatorError> {
-        if self.locator.count().await == n {
-            Ok(())
-        } else {
-            Err(LocatorError::Timeout)
-        }
+        retrying!(self, {
+            Ok::<bool, LocatorError>(self.locator.count().await == n)
+        })
     }
 
-    /// Assert a computed style property equals the canonical `value` JSON.
+    /// Assert a computed style property equals the canonical `value` JSON
+    /// (auto-retrying).
     pub async fn to_have_style(
         &self,
         prop: &str,
         value: serde_json::Value,
     ) -> Result<(), LocatorError> {
-        let got = self.locator.style(prop).await;
-        if got.get("value") == Some(&value) || got == value {
-            Ok(())
-        } else {
-            Err(LocatorError::Timeout)
-        }
+        retrying!(self, {
+            let got = self.locator.style(prop).await;
+            Ok::<bool, LocatorError>(got.get("value") == Some(&value) || got == value)
+        })
     }
 
-    /// Assert the matched node's bounds are within `tol` of `expected`.
+    /// Assert the matched node's bounds are within `tol` of `expected`
+    /// (auto-retrying).
     pub async fn to_have_bounds_within(
         &self,
         expected: Rect,
         tol: f64,
     ) -> Result<(), LocatorError> {
-        let b = self.locator.bounds().await?;
-        let ok = (b.x0 - expected.x0).abs() <= tol
-            && (b.y0 - expected.y0).abs() <= tol
-            && (b.width() - expected.width()).abs() <= tol
-            && (b.height() - expected.height()).abs() <= tol;
-        if ok {
-            Ok(())
-        } else {
-            Err(LocatorError::Timeout)
-        }
+        retrying!(self, {
+            self.locator.bounds().await.map(|b| {
+                (b.x0 - expected.x0).abs() <= tol
+                    && (b.y0 - expected.y0).abs() <= tol
+                    && (b.width() - expected.width()).abs() <= tol
+                    && (b.height() - expected.height()).abs() <= tol
+            })
+        })
     }
 }
 

@@ -42,12 +42,13 @@ block_on(async {
   with options `size(w, h)`, `scale(f)`, `theme(dark)`, `app(expr)`
   (default: `main_app()` in scope), `platform(name)` (⇒ `#[ignore]`).
   The manual `#[test]` + `block_on` form remains fine.
-- **Only `to_have_text` auto-retries.** Every other `expect` method
-  (`to_exist`, `to_have_value`, `to_have_state`, …) is one-shot and its
-  `Timeout` error just means "false right now". For anything async/animated,
-  `app.pump_until_idle().await` first, or advance `app.clock()`.
-- Locator has `click/fill/press/hover/focus/dblclick/drag_to/set_value` +
-  queries. **No `right_click`, `type_text`, or `scroll_into_view`.**
+- **Every `expect` assertion auto-retries** (T.2) on the virtual clock —
+  time-driven and animated conditions settle inside the assertion; no
+  explicit `clock().advance` needed. `Ambiguous`/`Parse` still fail fast.
+- Locator has `click/right_click/fill/type_text/press/hover/focus/
+  dblclick/drag_to/set_value` + queries and `to_be_visible`. **No
+  `scroll_into_view` yet** (pairs with `input.scroll {to}`, plan C.4);
+  `fill` currently appends (doesn't clear — same C.4 pairing).
 - Headless locator *actions* do auto-wait (10 ms polls, 5 s, virtual-clock
   aware) with `NotFound{nearest}`/`Ambiguous{candidates}` errors.
 - Animations: never sleep — `app.clock().advance(ms)` is deterministic.

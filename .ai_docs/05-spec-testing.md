@@ -49,7 +49,7 @@ impl Locator {
     pub fn nth(&self, i: usize) -> Locator; pub fn first(&self) -> Locator;
 }
 
-// assertions (auto-retrying until pass or timeout)
+// assertions (ALL auto-retrying on the virtual clock until pass or timeout — T.2)
 expect(loc).to_exist().await;            expect(loc).to_be_visible().await;
 expect(loc).to_have_text("…").await;     expect(loc).to_contain_text("…").await;
 expect(loc).to_have_value(v).await;      expect(loc).to_be_disabled().await;
