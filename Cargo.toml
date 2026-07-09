@@ -12,6 +12,7 @@ members = [
     "crates/lumen-widgets",
     "crates/lumen-shell",
     "crates/lumen-test",
+    "crates/skills-smoke",
     "crates/lumen-agent",
     "crates/lumen-cli",
     "crates/lumen",

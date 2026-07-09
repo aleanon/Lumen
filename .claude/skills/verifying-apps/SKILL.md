@@ -27,9 +27,14 @@ Two APIs, same runtime:
 - **App-level** (integration test): `lumen_test::TestApp`:
 
 ```rust
-let mut app = TestApp::new(main_app()).await;          // or with_options(size, theme)
-app.locator("#save").click().await.unwrap();
-expect(&app.locator("#status")).to_have_text("Saved").await.unwrap();
+use lumen_test::{block_on, expect, TestApp};
+
+block_on(async {
+    let mut app = TestApp::new(main_app());            // or with_options(size, theme)
+    app.pump_until_idle().await;
+    app.locator("#save").click().await.unwrap();
+    expect(app.locator("#status")).to_have_text("Saved").await.unwrap();
+});
 ```
 
 **Reality checks (as of 2026-07; plan T.1/T.2 close these):**
