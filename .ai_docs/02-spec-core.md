@@ -2,6 +2,11 @@
 
 This document defines the public contracts of `lumen-core`, `lumen-layout`, and `lumen-render` that other crates and user code depend on. Signatures here are binding; internal implementation is free. Where a signature must change to compile, keep semantics identical and record the amendment (rule 1 of 00).
 
+> **Amended 2026-07-09** to the shipped model per the docs↔code audit and
+> ADR-W1/ADR-W2 (`docs/plan-remediation-2026-07.md`): the widget model is
+> `LeafWidget` + composite functions (§3), `run` lives on `RunExt` (§8),
+> and items not yet built are marked *planned* with their plan task.
+
 ## 1. Workspace & naming
 Workspace crates: `lumen-core`, `lumen-layout`, `lumen-render`, `lumen-text`, `lumen-style`, `lumen-widgets`, `lumen-shell`, `lumen-test`, `lumen-agent`, `lumen-cli`, plus `lumen` (facade re-exporting the public API; user code depends only on `lumen` and `lumen-test`). Examples live in `examples/`, benchmarks in `benches/`, golden images in `tests/golden/<platform>/`.
 
@@ -23,44 +28,44 @@ Every node also has an **identity path**: the sequence of (component type, slot 
 
 ## 3. Elements, widgets, components
 
+The widget model (**amended per ADR-W1**, replacing the earlier unified
+`Widget` trait): **composites are plain functions** returning `Element`
+(`fn counter(cx: &mut BuildCx, props: …) -> Element`); **custom leaves**
+implement `LeafWidget` and mount via `NodeContent::Custom` /
+`widgets::leaf()`:
+
 ```rust
-/// A description of a widget: type + props + children. Cheap, built every rebuild.
-pub struct Element { /* opaque */ }
+/// A description of a widget subtree. Cheap, built every rebuild.
+/// Common fields (id/role/style/children/handlers) are flat; mutually-
+/// exclusive leaf content lives in `content: NodeContent`
+/// (Box/Text/Image/Canvas/Custom).
+pub struct Element { /* see lumen-widgets/src/element.rs */ }
 
-pub trait Widget: 'static {
-    /// Composite widgets implement this and nothing else.
-    fn build(&mut self, cx: &mut BuildCx) -> Element { Element::leaf() }
-
-    // Leaf widgets implement the following. Defaults are correct for composites.
-    fn layout(&mut self, cx: &mut LayoutCx, bc: &BoxConstraints) -> Size { cx.layout_children_default(bc) }
-    fn paint(&mut self, cx: &mut PaintCx, scene: &mut SceneBuilder) {}
-    fn event(&mut self, cx: &mut EventCx, event: &Event) -> EventStatus { EventStatus::Ignored }
-
-    /// MANDATORY for leaf widgets; composites inherit semantics from children.
-    fn semantics(&self, node: &mut SemanticsNode) {}
-
-    fn type_name(&self) -> &'static str { core::any::type_name::<Self>() }
+pub trait LeafWidget: 'static {
+    fn measure(&self, …) -> Size;
+    fn paint(&self, …);
+    /// MANDATORY — how the agent and a11y see the leaf.
+    fn semantics(&self, node: &mut SemanticsNode);
+    // fn event(&mut self, …) -> EventStatus   — planned (plan W.0): custom
+    // leaves currently have no event hook; interactivity comes from the
+    // Element-level `on_*` handlers.
 }
 ```
 
-```rust
-pub struct BoxConstraints { pub min: Size, pub max: Size }
-pub enum EventStatus { Handled, Ignored }
-```
+**Builder surface.** Every widget exposes the common modifiers (via
+`impl_common!`): `.id(impl Into<StableId>)`, `.class(&str)` (repeatable),
+`.background(…)`, `.style(LayoutStyle)`, `.element[_mut]()`. Event handlers
+are the typed `Element` fields `on_click` / `on_key` / `on_wheel` /
+`on_drag` / `on_text` / `on_drop` / `on_dismiss` / `on_caret_set` (exact
+signatures in the `writing-widgets` skill). *Planned:* `.key(impl Hash)`
+(today: the `widgets::keyed()` helper, plan W.3), a generic
+`.on(EventKind, handler)` (W.3), `.style(Style)` taking the typed 04 §8
+style (W.3, pairs with the Phase-B cascade work).
 
-**Builder surface.** Every widget constructor returns an `ElementBuilder` with the universal modifiers:
-
-```rust
-impl ElementBuilder {
-    pub fn id(self, id: impl Into<StableId>) -> Self;
-    pub fn class(self, class: &str) -> Self;            // repeatable
-    pub fn style(self, style: Style) -> Self;            // typed inline style (see 04 §8)
-    pub fn key(self, key: impl Hash) -> Self;            // identity in dynamic lists
-    pub fn on(self, event: EventKind, handler: impl Handler) -> Self;
-}
-```
-
-**Components** are functions: `fn counter(cx: &mut BuildCx, props: CounterProps) -> Element`. The `#[component]` attribute macro wraps a function into a `Widget` with memoized props (`PartialEq` on props skips rebuild). Children compose via `Row((a, b, c))`-style tuples and `for`-loops with `.key(...)`.
+**Components** are functions; memoization is signal-based via `cx.scope`
+(a scope whose recorded signal reads are current returns its cached
+subtree). *Planned:* the `#[component]` attribute macro with
+`PartialEq`-on-props memoization (plan W.3).
 
 ## 4. Signals & state store (binding discipline)
 
@@ -78,20 +83,27 @@ impl<T: State> Signal<T> {
 }
 
 impl BuildCx {
-    /// Creates or re-attaches state. Key = identity path + `name`.
+    /// Creates or re-attaches state. Key = scope prefix + `name`.
     pub fn signal<T: State>(&mut self, name: &str, init: impl FnOnce() -> T) -> Signal<T>;
-    pub fn memo<T: PartialEq + State>(&mut self, name: &str, f: impl Fn(&ReadScope) -> T + 'static) -> Memo<T>;
-    pub fn effect(&mut self, name: &str, f: impl Fn(&ReadScope) + 'static);
-    pub fn resource<T: State>(&mut self, name: &str, fut: impl Future<Output = T> + 'static) -> Resource<T>;
+    /// Signal-read-memoized subtree (the shipped memoization primitive).
+    pub fn scope(&mut self, name: &str, f: impl FnOnce(&mut BuildCx) -> Element) -> Element;
+    /// Async data keyed by (name, deps): re-fetches when deps change.
+    pub fn resource<T: State>(&mut self, name: &str, deps: …, fetch: …) -> Resource<T>;
 }
+// `memo`/`effect` live on `Runtime` (spec-shaped), reachable via
+// `cx.runtime()`; convenience forwards on BuildCx are planned (plan W.3).
+// NOTE: `Runtime::resource(name, fut)` (the future-taking form) currently
+// polls once with a noop waker — do NOT hand it a real async future; use
+// the (name, deps, fetch) form / `resource_blocking` on the thread pool.
+// Fixed by ADR-M2's executor-seam work (plan M.5).
 ```
 
 Rules (enforced by the type system where possible, by review otherwise):
 - Reading a signal inside `build`/`memo`/`effect` subscribes that scope; writing schedules exactly the subscribed scopes — no whole-tree work.
 - Writes are batched per event-loop turn; effects run after rebuild, before paint.
 - **The state store is the only retained mutable state.** Widgets are rebuilt-from-scratch descriptions; anything that must survive a rebuild, a hot reload, or a snapshot restart goes in the store.
-- **Forbidden in stored state:** closures, function pointers, raw pointers, channels, handles to OS resources. Trait objects only via the `#[state_registry]` typetag-style mechanism: `Box<dyn StoredTrait>` where every impl is registered, serialized by registry name, vtables rebuilt on load.
-- Snapshot format: self-describing, field-tagged (postcard is NOT acceptable; use `serde_json` in dev, optionally CBOR later). Missing new fields take `Default`; unknown old fields are dropped with diagnostic `W0002`.
+- **Forbidden in stored state:** closures, function pointers, raw pointers, channels, handles to OS resources. Trait objects only via the `#[state_registry]` typetag-style mechanism: `Box<dyn StoredTrait>` where every impl is registered, serialized by registry name, vtables rebuilt on load. *(`#[state_registry]` is planned — plan W.4; stored trait objects are unsupported today.)*
+- Snapshot format: self-describing, field-tagged (postcard is NOT acceptable; use `serde_json` in dev, optionally CBOR later). Missing new fields take `Default`; unknown old fields are dropped with diagnostic `W0002`. *(The `State: Serialize + DeserializeOwned` bound is gated on the default-on `snapshot` feature; `--no-default-features` relaxes it to `'static` and drops serde_json — the deliberate lean-build deviation.)*
 
 ```rust
 /// Checkpoint protocol — required for hot reload tiers 2–3 and future linker project.
@@ -102,6 +114,10 @@ pub trait Checkpoint {
     fn resume(&mut self);
 }
 ```
+
+*(Status: the trait is planned — plan W.4. The capability exists as ad-hoc
+fns: `Runtime::{snapshot, load_pending, finish_restore, is_quiescent}` +
+`AppSnapshot`/`App::run_headless_restored`, used by the tier-3 tests.)*
 
 ## 5. Hot-data SoA (internal layout, observable invariants)
 
@@ -157,9 +173,11 @@ pub struct App;
 impl App {
     pub fn new(root: impl Fn(&mut BuildCx) -> Element + 'static) -> Self;
     pub fn stylesheet(self, lss: &str) -> Self;           // also loadable from file via CLI
-    pub fn run(self) -> ! ;                                // winit shell
     pub fn run_headless(self, size: Size) -> Headless;     // CPU renderer, no OS deps
 }
+// The windowed entry lives in lumen-shell (amended): `lumen_shell::run(app,
+// size)` / the `RunExt` extension trait — `app.run(Size::new(w, h))` — which
+// returns when the window closes (not `-> !`).
 pub struct Headless;  // used by lumen-test and lumen-agent in headless mode
 impl Headless {
     pub fn pump(&mut self) -> FrameStats;                  // process queue, layout, paint
@@ -172,6 +190,13 @@ impl Headless {
 ## 9. Diagnostics
 All warnings/errors are `Diagnostic { code: &'static str, severity, message, span: Option<SourceSpan>, node: Option<StableId> }`, serialized to JSON on the agent protocol and printed human-readably on stderr. Codes are stable API: `E####` errors, `W####` warnings; maintain a registry table in `lumen-core/diagnostics.md`. Initial assignments: W0001 duplicate StableId, W0002 dropped state field, E0101 .lss parse error, E0102 unknown style property (with did-you-mean), W0103 layout overflow, E0201 shader compile error, W0301 missing semantics on focusable leaf.
 
+*Status:* emitted today — W0002, E0101, E0102, E0104, W0103/W0104
+(ink-clipping)/W0105 (zero-area interactive) via the audit lint, E0201,
+W0401 (i18n missing key), E0701 (contained panic). **Defined but never
+emitted:** W0001 (duplicate-id detection unimplemented — plan W.4), W0301
+(the audit lint checks it without emitting the code — plan W.4), E0103
+(style type mismatches silent — plan B.7).
+
 ## 10. Built-in widget set
 **M0 primitives (10):** Text, Image, Row, Column, Stack, Scroll, Button, TextFieldBasic (single-style, pre-IME), Checkbox, Slider.
 **M1 additions (to 30 total):** RichText, Icon, Spacer, Divider, Grid, Wrap, Padding, Align, SplitPane, TextField (full IME), TextArea, Radio, Switch, Stepper, Select, Tooltip, Popover, Menu, Tabs, VirtualList.
@@ -181,5 +206,12 @@ All warnings/errors are `Diagnostic { code: &'static str, severity, message, spa
 
 Every widget ships with: rustdoc + example, `.lss`-styleable parts documented (type name + parts as classes, e.g. `slider .track`, `slider .thumb`), semantics (role/states/actions per 03 §2), keyboard map, golden test, semantic-tree test.
 
+*Status (2026-07-09):* M0 10/10 and M3 6/6 shipped; M1 17/20 (missing:
+standalone **Align**, **Popover** — overlay primitives exist); M2 4/10
+(missing: **Sheet, Drawer, SearchField**; **Toast/Spinner/Chip**
+example-only); M4 5/11 (missing: **Combobox, ColorPicker, Skeleton, Avatar,
+Pagination, RangeSlider, FilePicker, pie chart**; line chart example-only).
+Plan W.1/W.2. Widget parts-as-classes are unimplemented (plan B.7).
+
 ## 11. Versioning
-Pre-1.0: workspace-wide lockstep version `0.x`. Public-contract changes require a decision-log entry. The facade crate `lumen` re-exports everything user-facing; nothing in user examples may import `lumen_core` directly.
+Pre-1.0: workspace-wide lockstep version `0.x`. Public-contract changes require a decision-log entry. The facade crate `lumen` re-exports everything user-facing. **Facade rule (amended per ADR-W2):** *in-repo examples* may depend on the internal crates directly (they double as framework tests); **scaffolded user apps (`lumen new`) are facade-only** — user code depends on `lumen` and `lumen-test` alone.
