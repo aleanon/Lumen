@@ -89,9 +89,13 @@ One JSON object per line, one reply line per request; requests are bridged
 onto the UI thread and dispatched against the live runtime, and the window
 redraws after each action. A WebSocket transport (`serve_one`/
 `serve_one_session`, tungstenite) exists and is used by the conformance
-tests; nothing serves it in the live shell. `mcp_manifest()` exports a static
-MCP tool list; there is **no MCP server yet** (planned, C.5). Loopback only;
-no auth (bearer tokens planned with non-loopback binds, C.5).
+tests. **Packaged clients (C.5):** `lumen agent call <method> [json]`
+(one-shot; auto-discovers the address) and `lumen agent mcp` — a real MCP
+stdio server whose tools come from `mcp_manifest()` (`ui_getTree` ↔
+`ui.getTree`), proxying `tools/call` onto the endpoint; point any MCP
+client at it while `just run-agent` runs. **Auth (C.5):** a non-loopback
+bind is refused unless `LUMEN_AGENT_TOKEN` is set; every request must then
+carry `"auth": "<token>"` (the packaged clients attach it from the env).
 
 ### 3.1 Observation
 
@@ -190,12 +194,13 @@ notifications (C.4b) · `input.drag` node-to-node (C.4b) · `input.gesture`
 (C.4b) · `session.start`/`session.stop` (C.4b) · `reload.apply` (C.4b) ·
 auto-wait for clock-driven **animation settling** (C.1b;
 existence/actionability/async waiting shipped in C.1a) · `input.click
-{pos}` (C.4b) · `input.scroll {to}` (C.4b)
-· MCP server + packaged client `lumen agent call` (C.5) · bearer-token auth
-(C.5) · CLI-hosted endpoint (`lumen agent serve`, C.8b). *(Shipped since
-the re-ground: C.1a auto-wait + `ui.waitFor`; C.2 `app.logs` + real
-`app.perf`; C.3 live `session.*`, `node-N` selectors, readable resolver
-errors; C.8a port-0 + discovery file + `app.quit` + `just stop-agent`.)*
+{pos}` (C.4b) · `input.scroll {to}` (C.4b) · CLI-hosted endpoint (`lumen
+agent serve` proxying a managed app, C.8b). *(Shipped since the re-ground:
+C.1a auto-wait + `ui.waitFor`; C.2 `app.logs` + real `app.perf`; C.3 live
+`session.*`, `node-N` selectors, readable resolver errors; C.4a state.get/
+subtree-getTree/max_width/hover/click-opts/scroll-dx/type-clear; C.5
+`lumen agent call` + MCP stdio server + bearer auth; C.8a port-0 +
+discovery + `app.quit` + `just stop-agent`.)*
 
 ## 4. Dev-loop wiring (per ADR-D2)
 

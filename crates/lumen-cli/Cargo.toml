@@ -28,3 +28,5 @@ lumen = { workspace = true }
 lumen-core = { workspace = true }
 lumen-style = { workspace = true }
 lumen-widgets = { workspace = true }
+# C.5: mcp_manifest + protocol types for `lumen agent`.
+lumen-agent = { workspace = true }

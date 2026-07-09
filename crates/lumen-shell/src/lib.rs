@@ -161,6 +161,15 @@ fn watch_styles(path: &str, proxy: EventLoopProxy<ShellEvent>) {
 /// line on stderr.
 #[cfg(feature = "agent")]
 fn serve_agent(addr: &str, proxy: EventLoopProxy<ShellEvent>) {
+    // C.5: a non-loopback bind exposes the app to the network — refuse it
+    // unless a bearer token is configured (each request must then carry
+    // `"auth": "<token>"`; `lumen agent call` attaches LUMEN_AGENT_TOKEN).
+    let loopback =
+        addr.starts_with("127.") || addr.starts_with("localhost:") || addr.starts_with("[::1]");
+    if !loopback && std::env::var("LUMEN_AGENT_TOKEN").is_err() {
+        eprintln!("lumen agent: refusing non-loopback bind {addr} without LUMEN_AGENT_TOKEN");
+        return;
+    }
     let listener = match TcpListener::bind(addr) {
         Ok(l) => l,
         Err(e) => {
@@ -266,6 +275,20 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 let resp = if let Some(h) = &mut self.headless {
                     let v = serde_json::from_str::<serde_json::Value>(&req)
                         .unwrap_or(serde_json::Value::Null);
+                    // C.5: when a bearer token is configured, every request
+                    // must carry it — checked before anything dispatches.
+                    if let Ok(token) = std::env::var("LUMEN_AGENT_TOKEN") {
+                        if v.get("auth").and_then(|a| a.as_str()) != Some(token.as_str()) {
+                            let id = v.get("id").cloned().unwrap_or(serde_json::Value::Null);
+                            let _ = reply.send(
+                                serde_json::json!({ "jsonrpc": "2.0", "id": id,
+                                    "error": { "code": -32001,
+                                               "message": "unauthorized: missing/invalid `auth` token" } })
+                                .to_string(),
+                            );
+                            return;
+                        }
+                    }
                     // C.8a: `app.quit` is a *shell* method (only the event
                     // loop can exit) — reply, then shut down cleanly. No
                     // more pkill teardown.

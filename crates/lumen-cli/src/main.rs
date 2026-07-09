@@ -37,11 +37,21 @@ fn run() -> i32 {
         },
         Some("package") => cmd_package(json),
         Some("add") => cmd_add(positional.get(1).copied(), json),
+        // C.5: the packaged agent client + MCP stdio server.
+        Some("agent") => match positional.get(1).copied() {
+            Some("call") => lumen_cli::agent::cmd_call(
+                positional.get(2).copied(),
+                positional.get(3).copied(),
+                json,
+            ),
+            Some("mcp") => lumen_cli::agent::cmd_mcp(),
+            _ => fail(json, "agent", "usage: lumen agent <call|mcp> …"),
+        },
         Some(other) => fail(json, "usage", &format!("unknown command `{other}`")),
         None => fail(
             json,
             "usage",
-            "usage: lumen <new|run|test|package> [--platform <p>] [--json]",
+            "usage: lumen <new|run|test|package|add|agent> [--platform <p>] [--json]",
         ),
     }
 }
