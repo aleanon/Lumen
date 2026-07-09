@@ -2094,6 +2094,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 .and_then(|s| s.border_radius)
                 .map(|r| r as f64)
                 .unwrap_or(m.corner_radius);
+            // B.3: `.lss` opacity < 1 wraps the node's subtree in a
+            // compositing layer — tracked on the same depth-keyed stack as
+            // the clip layer, so it pops when the subtree ends.
+            let opacity = css.and_then(|s| s.opacity).unwrap_or(1.0);
+            if opacity < 1.0 {
+                dl.push(DrawCmd::PushLayer {
+                    clip: None,
+                    opacity: opacity.clamp(0.0, 1.0),
+                    transform: kurbo::Affine::IDENTITY,
+                    blend: BlendMode::SourceOver,
+                });
+                clip_stack.push(d);
+            }
             // overflow:hidden — open a clip layer for this node's subtree (its own
             // fill + descendants paint into it, masked to its rounded bounds).
             if m.clip {

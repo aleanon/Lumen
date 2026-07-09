@@ -112,7 +112,7 @@ Plan tasks: layout → A.2, visual/typography → B.3/B.4, motion → B.5.
 | Level | Properties |
 |---|---|
 | **rendered** | `background` (solid color only), `border` (shorthand width+color), `border-radius` (single value), `backdrop-filter` (blur/saturate + beyond-spec `refraction`/`specular`), `color` (text); **layout (A.2, 2026-07-09):** `display`, `flex-direction`, `width`, `height`, `gap` (both axes), `padding` (whole-side), `margin` (whole-side) — note text-bearing nodes still derive `height` from their glyphs (the text-height rule), and state-part layout rules (`:hovered { width: … }`) relayout via the normal rebuild path |
-| **applied, no effect** | `opacity`, `font-size`, `font-weight` (parsed into the typed style; unread by paint/measure — plan B.4) |
+| **applied, no effect** | `font-size`, `font-weight` (parsed into the typed style; unread by measure — plan B.4). `opacity` **renders since B.3a** (subtree compositing layer) |
 | **parse-only** | remaining layout (`flex-wrap/grow/shrink/basis`, `justify-*`, `align-*`, `row/column-gap`, `grid-*` (track lists unparsed), `min/max-*`, `aspect-ratio`, `position`, `inset`, `overflow`, per-side `padding-*`/`margin-*`/`border-*`), background gradients, `shadow`, `blend-mode`, `filter`, `clip`, `transform(-origin)`, `z-index`, `visibility`, `cursor`, `font-family/style/features/variation`, `line-height`, `letter-spacing`, `text-align/overflow/wrap/decoration`, `selection-color`, `transition`, `animation`, `animation-force` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity

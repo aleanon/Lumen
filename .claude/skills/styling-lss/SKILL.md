@@ -38,6 +38,7 @@ padding/margin/border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 | `border-radius: 6px` | single value only; `4px 8px …` lists rejected |
 | `color: <color>` | text color |
 | `backdrop-filter: blur(8px) saturate(1.2) refraction(2) specular(0.5)` | full glass stack (refraction/specular are Lumen extensions) |
+| `opacity: 0.5` | subtree compositing layer (B.3a) |
 | `@tokens { … }` / `@theme light|dark { … }` / `$token` | full token resolution, theme-scoped first |
 | **Nested rules** `&:hovered { … }` / `&.class { … }` / `& > .part { … }` | flattened at parse into real rules with correct specificity (B.1) |
 | Descendant/child combinators (`.card .btn`, `#x > .y`) | match the **real ancestor chain** since B.1 — before that only the rightmost compound was checked, so `dialog button` hit every button |
@@ -50,8 +51,8 @@ numeric only.
 ## Silent no-ops — do NOT use (until the noted plan task lands)
 
 - **All layout properties** (A.2) — see the one rule.
-- `opacity`, `font-size`, `font-weight` — applied to the computed style but
-  ignored by paint/measure (A.2/B.4).
+- `font-size`, `font-weight` — applied to the computed style but ignored
+  by measure (B.4). (`opacity` renders since B.3a.)
 - Background **gradients**, `shadow`, `blend-mode`, `filter`, `clip`,
   `transform`, `z-index`, `visibility`, `cursor` (B.3).
 - All typography: `font-family/style/features/variation`, `line-height`,
