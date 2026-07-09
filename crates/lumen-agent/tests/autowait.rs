@@ -59,6 +59,41 @@ fn wait_for_blocks_on_text() {
 }
 
 #[test]
+fn node_ids_from_get_tree_are_selectors() {
+    // C.3: an agent can act on exactly the node it just observed.
+    let mut h = App::new(build)
+        .with_executor(ThreadPoolSpawner::new(2))
+        .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    // Wait for the async button, then find its runtime id in the tree.
+    let waited = call(&mut h, "ui.waitFor", json!({ "selector": "#late" }));
+    let node_id = waited["result"]["node"].as_str().unwrap().to_string();
+    assert!(node_id.starts_with("node-"), "{waited}");
+    let resp = call(&mut h, "input.click", json!({ "selector": node_id }));
+    assert_eq!(resp["result"]["ok"], json!(true), "{resp}");
+}
+
+#[test]
+fn ambiguous_errors_list_candidates_readably() {
+    // Two buttons with the same label: `button` matches both.
+    let mut h = App::new(|_cx| {
+        widgets::column(vec![
+            widgets::button("A", |_| {}).id("a"),
+            widgets::button("B", |_| {}).id("b"),
+        ])
+    })
+    .with_executor(ThreadPoolSpawner::new(1))
+    .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    let resp = call(&mut h, "input.click", json!({ "selector": "button" }));
+    let msg = resp["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        msg.contains("Ambiguous") && msg.contains("node-") && msg.contains("#id"),
+        "readable ambiguity with candidates + advice: {resp}"
+    );
+}
+
+#[test]
 fn misses_time_out_with_readable_errors() {
     let mut h = App::new(build)
         .with_executor(ThreadPoolSpawner::new(2))

@@ -123,9 +123,11 @@ The ones you'll actually use:
   explicit wait. **Clock-driven animations are NOT waited on** (C.1b
   pending): after acting, verify the *final* state via `ui.waitFor` or
   `wait_until` rather than asserting on the action's reply.
-- **`node-N` ids are not selectors.** `ui.getTree` returns `node-13`; the
-  selector grammar rejects it (`NotFound{nearest:[]}`). Re-derive `#id`,
-  `role`, `.class`, or `:text-contains("…")` — and prefer a stable `#id`.
+- **`node-N` ids ARE selectors since C.3** — act on exactly the node
+  `ui.getTree`/`ui.waitFor` returned. They're per-rebuild runtime ids
+  though: re-query after structural changes; prefer a stable `#id` in
+  committed tests. Ambiguous/NotFound errors are now readable and list
+  `node-N` candidates.
 - **Dotted ids are unselectable.** `#faq.returns` parses as id `faq` +
   class `returns`. Ids must be `[a-z0-9-]`. If `tree` shows a dotted id,
   that's an app bug — fix the id, don't work around it.
@@ -140,8 +142,11 @@ The ones you'll actually use:
   from the tree, verify *layout* from pixels, and never assert iconography
   from either without checking the other. If the UI needs an icon, draw it
   as a shape (`widgets::canvas`).
-- **`session.exportTest` doesn't work on the live window** (shell routes
-  plain dispatch until plan C.3). Record→export is headless-only.
+- **Record→export works live since C.3**: the shell routes through a
+  recording `Session` — after exploring, `session.assertText`/
+  `assertState` then `session.exportTest {fnName, appExpr}` returns a
+  compilable `lumen-test` source reproducing the run. Commit it as the
+  regression test.
 
 ### Port lifecycle
 

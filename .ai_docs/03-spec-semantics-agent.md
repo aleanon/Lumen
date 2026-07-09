@@ -78,7 +78,7 @@ part       := '#' ident                  // StableId equals
 ```
 Matching runs over the **elided** semantic tree, document order. Examples: `#save-button`, `button:text("Continue")`, `dialog .footer > button:nth(2)`, `list_item:has(:text-contains("invoice"))`.
 
-Resolution semantics shared by tests and agent: a selector resolves to all matches; actions require exactly one match and return `Ambiguous` (with the match list) or `NotFound` (with nearest-miss candidates) otherwise. **Gotchas:** the runtime ids `ui.getTree` returns (`node-42`) are *not* valid selectors yet (planned, C.3) — re-derive a `#id`/role/text selector; `ident` treats `.` as a class delimiter, so ids must be `[a-z0-9-]` (a dotted id `#faq.returns` parses as id `faq` + class `returns`). Headless `lumen-test` actions auto-wait per 05 §3; **live agent actions do not auto-wait yet** (planned, C.1) — poll `ui.getTree` after acting.
+Resolution semantics shared by tests and agent: a selector resolves to all matches; actions require exactly one match and return `Ambiguous` (with the `node-N` candidate list and advice) or `NotFound` otherwise. Agent methods additionally accept the runtime ids `ui.getTree` returns (`node-42`) as direct lookups (C.3) — act on exactly the node you observed. **Gotcha:** `ident` treats `.` as a class delimiter, so ids must be `[a-z0-9-]` (a dotted id `#faq.returns` parses as id `faq` + class `returns`). Actions auto-wait (existence/actionability/async — C.1a) both headless and live; clock-driven animation settling is not waited on yet (C.1b).
 
 ## 3. `lumen-agent` protocol — as implemented
 
@@ -160,9 +160,9 @@ planned, C.4).
 | `session.assertState` | assert a node's semantic state |
 | `session.exportTest` | `{ name }` → standalone `lumen-test` Rust source reproducing the recorded steps + assertions (compiles under `cargo test`) |
 
-**Availability caveat:** the live shell currently routes plain `dispatch`,
-so `session.*` works only on the WebSocket test path; routing the shell
-through `Session` is planned (C.3).
+Available on **both** the live shell (routed through a recording `Session`
+since C.3 — explore the window, commit the exported test) and the
+WebSocket test path.
 
 ### 3.4 The live-window loop (operational contract)
 
@@ -186,10 +186,10 @@ clock-driven **animation settling** (C.1b; existence/actionability/async
 waiting shipped in C.1a) · `input.click` `{pos, button, count}` (C.4) ·
 `input.type {clear}` (C.4) · `input.scroll` `{dx, to}` (C.4) ·
 `ui.getTree {selector}` subtree (C.4) · `ui.screenshot` `{max_width}` (C.4)
-· runtime `node-N` ids as selectors (C.3) · MCP server + packaged client
-`lumen agent call` (C.5) · bearer-token auth (C.5) · CLI-hosted endpoint
-(`lumen agent serve`, C.8). *(Shipped since the re-ground: C.1a auto-wait +
-`ui.waitFor`; C.2 `app.logs` + real `app.perf`.)*
+· MCP server + packaged client `lumen agent call` (C.5) · bearer-token auth
+(C.5) · CLI-hosted endpoint (`lumen agent serve`, C.8). *(Shipped since the
+re-ground: C.1a auto-wait + `ui.waitFor`; C.2 `app.logs` + real `app.perf`;
+C.3 live `session.*`, `node-N` selectors, readable resolver errors.)*
 
 ## 4. Dev-loop wiring (per ADR-D2)
 

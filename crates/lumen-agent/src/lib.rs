@@ -419,7 +419,7 @@ fn handle<R: Renderer, E: Spawner>(
             loop {
                 app.pump();
                 let root = app.semantics_doc().root.elided();
-                if let Ok(id) = resolve_one(&root, &selector) {
+                if let Ok(id) = resolve_selector(&root, &selector) {
                     if let Some(n) = find_node(&root, id) {
                         let state_ok = want_state
                             .as_deref()
@@ -571,16 +571,61 @@ fn sel(params: &Value) -> Result<&str, (i64, String)> {
         .ok_or((-32602, "missing `selector`".to_string()))
 }
 
+/// Resolve `selector` over the elided tree: the 03 §2 grammar, **plus** the
+/// runtime ids `ui.getTree` returns (`node-42`) as direct lookups (C.3) —
+/// so an agent can act on exactly the node it just observed.
+fn resolve_selector(
+    root: &SemanticsNode,
+    selector: &str,
+) -> Result<u32, lumen_core::semantics::ResolveError> {
+    if let Some(n) = selector
+        .strip_prefix("node-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        if find_node(root, n).is_some() {
+            return Ok(n);
+        }
+        return Err(lumen_core::semantics::ResolveError::NotFound {
+            nearest: Vec::new(),
+        });
+    }
+    resolve_one(root, selector)
+}
+
+/// Readable resolver-miss text (C.3): names the selector and lists the
+/// candidates instead of a raw `Debug` dump.
+fn resolve_err_msg(selector: &str, e: &lumen_core::semantics::ResolveError) -> String {
+    use lumen_core::semantics::ResolveError as E;
+    match e {
+        E::NotFound { nearest } if nearest.is_empty() => {
+            format!("NotFound: no node matches `{selector}`")
+        }
+        E::NotFound { nearest } => {
+            format!("NotFound: no node matches `{selector}` — nearest: {nearest:?}")
+        }
+        E::Ambiguous { candidates } => format!(
+            "Ambiguous: {} nodes match `{selector}` — use a unique #id or :nth(); candidates: {}",
+            candidates.len(),
+            candidates
+                .iter()
+                .map(|c| format!("node-{c}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        other => format!("{other:?}"),
+    }
+}
+
 fn resolve<R: Renderer, E: Spawner>(
     app: &Headless<R, E>,
     selector: &str,
 ) -> Result<SemanticsNode, (i64, String)> {
     let root = app.semantics_doc().root.elided();
-    match resolve_one(&root, selector) {
+    match resolve_selector(&root, selector) {
         Ok(id) => find_node(&root, id)
             .cloned()
             .ok_or((-32000, "node vanished".to_string())),
-        Err(e) => Err((-32000, format!("{e:?}"))),
+        Err(e) => Err((-32000, resolve_err_msg(selector, &e))),
     }
 }
 
@@ -604,7 +649,7 @@ fn resolve_action<R: Renderer, E: Spawner>(
     loop {
         app.pump();
         let root = app.semantics_doc().root.elided();
-        match resolve_one(&root, &selector) {
+        match resolve_selector(&root, &selector) {
             Ok(id) => {
                 if let Some(n) = find_node(&root, id) {
                     let actionable = n.bounds.width() > 0.0
@@ -627,11 +672,17 @@ fn resolve_action<R: Renderer, E: Spawner>(
             }
             // Exactly-one is the contract: >1 matches can't be waited away.
             Err(e @ lumen_core::semantics::ResolveError::Ambiguous { .. }) => {
-                return Err((-32000, format!("{e:?}")));
+                return Err((-32000, resolve_err_msg(&selector, &e)));
             }
             Err(e) => {
                 if std::time::Instant::now() >= deadline {
-                    return Err((-32000, format!("Timeout({timeout_ms}ms): {e:?}")));
+                    return Err((
+                        -32000,
+                        format!(
+                            "Timeout({timeout_ms}ms): {}",
+                            resolve_err_msg(&selector, &e)
+                        ),
+                    ));
                 }
             }
         }

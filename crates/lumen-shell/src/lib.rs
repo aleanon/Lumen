@@ -111,6 +111,8 @@ pub fn run(app: App, size: Size) {
         ime_active: false,
         last_frame: Instant::now(),
         pending_resize: false,
+        #[cfg(feature = "agent")]
+        agent_session: lumen_agent::Session::new(),
     };
     event_loop.run_app(&mut shell).expect("run app");
 }
@@ -227,6 +229,11 @@ struct Shell {
     /// event storm into a single `RedrawRequested`, where we apply the resize and
     /// present exactly once — one GPU render per displayed frame, not per event.
     pending_resize: bool,
+    /// C.3: agent requests route through a recording [`lumen_agent::Session`],
+    /// so `session.assertText`/`assertState`/`exportTest` work against the
+    /// **live** window — explore live, commit the exported regression test.
+    #[cfg(feature = "agent")]
+    agent_session: lumen_agent::Session,
 }
 
 impl ApplicationHandler<ShellEvent> for Shell {
@@ -240,7 +247,9 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 let resp = if let Some(h) = &mut self.headless {
                     let v = serde_json::from_str::<serde_json::Value>(&req)
                         .unwrap_or(serde_json::Value::Null);
-                    lumen_agent::dispatch(h, &v).to_string()
+                    // C.3: route through the recording Session so the live
+                    // window supports session.* (assert + exportTest).
+                    self.agent_session.dispatch(h, &v).to_string()
                 } else {
                     r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"app not ready"}}"#
                         .to_string()
