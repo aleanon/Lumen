@@ -122,8 +122,10 @@ of iced examples, and every primitive it needs is already in the display list.
 
 Capabilities landed (each verified on Linux, gated commits):
 - **E8.1 Canvas** ☑ — `lumen_render::canvas::Frame` + `widgets::canvas`.
-- **E8.2 Overlays** ☑ (partial) — `widgets_extra::modal` + toast example; anchored
-  dropdown popups (combo/menu/tooltip positioning) PENDING.
+- **E8.2 Overlays** ☑ (partial) — `widgets_extra::modal` + toast example;
+  **anchored dropdown popups landed** (`widgets::pick_list`, an anchored
+  overlay with dismiss — the pattern to generalize into Popover, plan W.1);
+  combo/menu/tooltip positioning on top of it still PENDING.
 - **E8.3 Networking** ☑ (partial) — WebSocket client (`tungstenite`); HTTP
   fetch (pokedex/download_progress) PENDING (async runtime + HTTP client = ADR-003
   escalation).

@@ -24,7 +24,7 @@ All targets compile to native machine code; no webview, no JS bridge.
 
 **Two renderers, one display list.**
 - **CPU reference renderer** (tiny-skia): deterministic, headless, runs in CI without GPU/display. This is the renderer of record for golden-image tests.
-- **GPU renderer** (wgpu): batched, atlased (glyphs, images), with layer caching and damage tracking / partial redraw. Paths tessellated via lyon for v1; a compute-rasterization backend (Vello-style) is an M4 evaluation, not a v1 dependency.
+- **GPU renderer** (wgpu): batched, atlased glyphs, direct-to-surface present. *Status:* damage is computed but the GPU path currently re-encodes the full frame (scissor/partial redraw planned, plan R.1); no cross-frame layer caching yet (plan R.2); paths tessellated via lyon per frame (tessellation cache planned, R.2). A compute-rasterization backend (Vello-style) is parked post-2.0 per ADR-R1.
 - Parity contract: GPU output must match CPU goldens within the perceptual threshold defined in `05-spec-testing.md` §4.
 
 **Hybrid tree + SoA hot data.** Widget logic and composition live in a tree of nodes (ergonomic, hierarchical — matches how styles cascade and events bubble). Per-frame hot data (bounds, transforms, opacity, clip, flags, z-order) lives in flat structure-of-arrays keyed by `NodeIndex` (`02-spec-core.md` §5). Culling, hit-testing, and damage aggregation are linear scans over packed arrays — ECS-grade cache behavior for bulk passes without ECS's structural costs for hierarchy. This is the resolved answer to "tree vs ECS for large UIs."
@@ -32,7 +32,7 @@ All targets compile to native machine code; no webview, no JS bridge.
 **Virtualization in the core.** Lazy list/grid/tree containers materialize only visible children; a million-row table costs a screenful. Live-widget count, not data size, bounds memory.
 
 ## 3. Layout & text
-- Flexbox + CSS Grid + absolute positioning via Taffy, wrapped behind `lumen-layout` so the engine is replaceable. Incremental: dirty subtrees only.
+- Flexbox + CSS Grid + absolute positioning via Taffy, wrapped behind `lumen-layout` so the engine is replaceable. *Status:* the live pump currently rebuilds tree + layout in full on structural change (`relayout_subtree` exists but is unwired); incremental dirty-subtree layout lands with the retained pipeline (plan A.3/A.4).
 - Text via parley (shaping/layout) + swash (scaling/hinting): bidi, fallback, emoji, variable fonts; IME and text editing are part of the core text stack, not a widget afterthought. CJK + bidi tests from the first text task.
 
 ## 4. Component model (summary; normative spec in 02)
@@ -56,10 +56,10 @@ Every reload emits a structured result event (tier, status, components swapped, 
 **Future track (separate project, out of v1 scope):** a Rust-aware hot-patching linker (function-level binary patching + dependency-graph-aware dylib reload, Subsecond/Live++ class). Lumen's obligation now is only to keep the **checkpoint protocol** (quiesce → serialize → resume) and the state discipline intact so that project can slot in as an upgraded tier 2. Recorded as ADR-014.
 
 ## 8. Tooling
-- **`lumen` CLI**: `new`, `run --platform …`, `test`, `inspect`, `agent serve`; every command supports `--json`.
+- **`lumen` CLI**: `new`, `run --platform …`, `test`, `package`, `add`; every command supports `--json`. *Planned:* `inspect`, `agent serve`, `test --platform gpu` (plan C.8).
 - **Emulators**: orchestrate, don't reinvent — Android Emulator via avdmanager/adb, iOS Simulator via `xcrun simctl`. Hot reload + agent protocol over the same dev socket on all platforms.
 - **`lumen-test`**: Playwright-class harness — locators over the semantic tree, auto-waiting, input synthesis, text/state/layout/style/pixel assertions, trace recording. Spec in 05.
-- **`lumen-agent`**: MCP server + JSON-RPC wrapping any running app — `get_tree`, `screenshot` (with optional ID-annotation overlay), styles/layout queries, logs/diagnostics, event subscription, and the same synthesized input as the test harness, plus `export_session_as_test`. Spec in 03.
+- **`lumen-agent`**: JSON-RPC wrapping any running app — `ui.getTree`, `ui.screenshot` (annotation overlay + element zoom), styles/layout/reactive-dependency queries, diagnostics/lint, and the same synthesized input as the test harness, plus session→test export (headless path). *Planned:* logs, event subscription, a real MCP server (plan C.2/C.4/C.5). Spec in 03 (rewritten to the implemented protocol).
 - **Inspector** (M4): devtools app built in Lumen itself; everything it shows is also available as agent JSON.
 
 ## 9. Performance targets (CI-gated where marked)
