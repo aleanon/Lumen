@@ -181,6 +181,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             node_style: HashMap::new(),
             node_computed: HashMap::new(),
             style_env: None,
+            scope_spans: HashMap::new(),
             menu: crate::system::MenuModel::default(),
             invoked_menu: Vec::new(),
             system_requests: Vec::new(),
@@ -409,6 +410,9 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     node_computed: HashMap<NodeIndex, HashMap<String, lumen_style::Computed>>,
     /// A.2: per-rebuild cascade env (None when no stylesheet is attached).
     style_env: Option<StyleEnv>,
+    /// A.3.1: per-rebuild scope→node-span map (scope key → subtree root +
+    /// preorder node count). The retained-graph splice replaces these spans.
+    scope_spans: HashMap<String, (NodeIndex, u32)>,
     input: InputQueue,
     pointer: PointerState,
     // Animation/timer requests from the latest build (02 §8, time-driven UI).
@@ -1402,6 +1406,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // generational — a reused index must not inherit a stale style).
         self.node_style.clear();
         self.node_computed.clear();
+        self.scope_spans.clear();
         self.style_env = self.app_sheet.as_ref().map(|sheet| StyleEnv {
             sources: [lumen_style::StyleSource {
                 origin: lumen_style::Origin::App,
@@ -1461,6 +1466,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             add(&m.deps.class, "class", "rebuild");
         }
         self.dep_index = idx;
+    }
+
+    /// The node span a [`BuildCx::scope`](crate::BuildCx::scope) produced this
+    /// build: its subtree-root node and preorder node count (A.3.1). `key` is
+    /// the full scope key (the `id` passed to `scope`, prefixed by enclosing
+    /// scopes). Introspection for the retained-pipeline work and tests.
+    pub fn scope_span(&self, key: &str) -> Option<(NodeIndex, u32)> {
+        self.scope_spans.get(key).copied()
     }
 
     /// Set/replace the app stylesheet at runtime (tier-1 hot reload). A broken
@@ -1629,6 +1642,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         parent: Option<NodeIndex>,
         in_overlay: bool,
     ) -> (NodeIndex, LayoutNode) {
+        // A.3.1: a scope-root element records its node span. Nodes allocate
+        // preorder in the fresh per-rebuild tree, so a subtree is the
+        // contiguous range [span_start, tree.len()) once its children are
+        // lowered — the anchor the retained-graph splice (A.3.3) replaces.
+        // Taken before the children are consumed (partial-move below).
+        let span_start = tree.len();
+        let span_key = el.scope_key.take();
         let node = match parent {
             None => tree.insert_root(),
             Some(p) => tree.insert_child(p),
@@ -1885,6 +1905,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             },
         );
         built.push((node, lnode));
+        if let Some(key) = span_key {
+            self.scope_spans
+                .insert(key, (node, (tree.len() - span_start) as u32));
+        }
         (node, lnode)
     }
 

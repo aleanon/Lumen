@@ -173,6 +173,11 @@ pub struct Element {
     /// of the signals that scope depends on — projected into semantics (F2) so
     /// the agent can see the reactive structure. Set by `scope`; not authored.
     pub scope_deps: Option<Vec<String>>,
+    /// The full scope key when this element is a [`BuildCx::scope`] root
+    /// (A.3.1, docs/plan-retained-pipeline.md): lets `build_node` record the
+    /// scope's node span — the anchor the retained-graph splice will replace.
+    /// Set by `scope`; not authored.
+    pub scope_key: Option<String>,
     /// A reactive binding for this node's text content (F3, option B). When set,
     /// the build evaluates it to produce the string; the `text!` macro emits it.
     pub dyn_text: Option<Dynamic<String>>,
@@ -218,6 +223,7 @@ impl Default for Element {
             overlay: false,
             shadow: None,
             scope_deps: None,
+            scope_key: None,
             dyn_text: None,
             dyn_bg: None,
             dyn_classes: None,
@@ -530,6 +536,9 @@ impl<'a> BuildCx<'a> {
         // Project the scope's signal dependencies onto its subtree root, for
         // observability (F2) — the agent sees why this subtree updates.
         element.scope_deps = Some(reads.dep_keys(self.rt));
+        // A.3.1: tag the root with its scope key so `build_node` records the
+        // node span (cached clones inherit the tag).
+        element.scope_key = Some(key.clone());
         if cacheable {
             self.scope_cache.borrow_mut().insert(
                 key,

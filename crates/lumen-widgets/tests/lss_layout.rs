@@ -4,7 +4,7 @@
 //! from the stylesheet are real, not parse-only.
 
 use kurbo::Size;
-use lumen_widgets::{col, row, widgets, App};
+use lumen_widgets::{col, widgets, App};
 
 #[test]
 fn lss_width_and_height_size_a_box() {
