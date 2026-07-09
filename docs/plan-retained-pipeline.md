@@ -29,7 +29,7 @@ frames, or intentional re-approval).
 - Memoized `cx.scope` hits deep-clone their cached `Element` (element.rs
   ~556); scope/signal keys are `format!`ed `String`s.
 
-## A.1 — Hover/focus/pressed stop wiping the scope caches (S)
+## A.1 ✅ done (2026-07-09) — Hover/focus/pressed stop wiping the scope caches (S)
 
 **Change:** in `pump`, clear caches only for `force_rebuild`
 (resize/scale/stylesheet/theme — inputs a closure *can* observe via

@@ -515,12 +515,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             || time_driven
             || (write_changed && !structural_current);
         if needs_rebuild {
-            // Scope memoization keys off signal versions only. A rebuild driven
-            // by something it can't observe — a forced invalidation (resize/
-            // scale/stylesheet/theme) or input-visual state (hover/focus/pressed,
-            // which widgets may read during build) — must not reuse stale
-            // subtrees, so drop the caches first and let this build repopulate.
-            if self.force_rebuild || visual_changed {
+            // Scope memoization keys off signal versions only, so a rebuild
+            // driven by a forced invalidation (resize/scale/stylesheet/theme —
+            // inputs a build can observe through `cx`) must not reuse stale
+            // subtrees: drop the caches and let this build repopulate.
+            //
+            // Visual state (hover/focus/pressed) deliberately does NOT clear
+            // them (A.1, docs/plan-retained-pipeline.md): `BuildCx` exposes no
+            // accessor for it, so no view closure can depend on it — it is
+            // applied *after* the closures run (node flags in `build_node`,
+            // `.lss` state parts in `compute_styles`, focus ring/caret in
+            // paint), all of which a memoized rebuild re-does for every node
+            // regardless. Pointer motion therefore gets F1-memoized rebuilds
+            // instead of unmemoized O(tree) ones. Guarded by
+            // tests/hover_memo.rs; if visual state ever becomes readable from
+            // `BuildCx`, it must be signal-backed so scopes record the read.
+            if self.force_rebuild {
                 self.clear_view_caches();
             }
             self.rebuild(); // baselines force_rebuild + last_build_gen
