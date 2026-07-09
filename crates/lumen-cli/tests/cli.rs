@@ -56,6 +56,27 @@ fn new_scaffolds_app_and_emits_json() {
         "scaffold uses main_app convention"
     );
 
+    // S0.8: the dev-loop kit ships with every scaffold — windowed entry,
+    // just recipes, the agent client, and the four app-facing skills.
+    assert!(demo.join("examples/win.rs").exists());
+    assert!(demo.join("justfile").exists());
+    assert!(demo.join("scripts/agent_client.py").exists());
+    for skill in [
+        "building-apps",
+        "styling-lss",
+        "verifying-apps",
+        "debugging-lumen",
+    ] {
+        let path = demo.join(".claude/skills").join(skill).join("SKILL.md");
+        let body =
+            std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{} missing", path.display()));
+        assert!(body.starts_with("---\n"), "frontmatter stays first");
+        assert!(
+            body.contains("Scaffolded copy"),
+            "scaffold note injected after frontmatter"
+        );
+    }
+
     std::fs::remove_dir_all(&dir).ok();
 }
 

@@ -200,6 +200,55 @@ fn fail(json: bool, command: &str, message: &str) -> i32 {
     2
 }
 
+/// Note prepended (after the frontmatter) to skills copied into a scaffold,
+/// re-grounding framework-repo paths/idioms for a standalone app.
+const SKILL_SCAFFOLD_NOTE: &str = "\
+> **Scaffolded copy** (shipped by `lumen new`). In this project, import\n\
+> through the `lumen` facade (`use lumen::widgets::…`) instead of the\n\
+> internal `lumen_core`/`lumen_widgets` crates the framework repo's\n\
+> examples use (ADR-W2). `scripts/agent_client.py` and the `justfile` are\n\
+> included here (`just run-agent` enables the endpoint via the facade's\n\
+> `agent` feature); paths like `.ai_docs/…`, `docs/…`, `examples/…`, and\n\
+> `crates/…` refer to the Lumen framework repository.\n";
+
+/// The four app-facing skills shipped into every scaffold (plan S0.8),
+/// embedded at CLI build time so they version with the framework.
+const SCAFFOLD_SKILLS: [(&str, &str); 4] = [
+    (
+        "building-apps",
+        include_str!("../../../.claude/skills/building-apps/SKILL.md"),
+    ),
+    (
+        "styling-lss",
+        include_str!("../../../.claude/skills/styling-lss/SKILL.md"),
+    ),
+    (
+        "verifying-apps",
+        include_str!("../../../.claude/skills/verifying-apps/SKILL.md"),
+    ),
+    (
+        "debugging-lumen",
+        include_str!("../../../.claude/skills/debugging-lumen/SKILL.md"),
+    ),
+];
+
+/// Insert the scaffold note directly after the skill's `---` frontmatter so
+/// the frontmatter stays first (skill loaders require it).
+fn with_scaffold_note(skill: &str) -> String {
+    let close = "\n---\n";
+    match skill[3..].find(close) {
+        Some(i) => {
+            let split = 3 + i + close.len();
+            format!(
+                "{}\n{SKILL_SCAFFOLD_NOTE}{}",
+                &skill[..split],
+                &skill[split..]
+            )
+        }
+        None => format!("{SKILL_SCAFFOLD_NOTE}\n{skill}"),
+    }
+}
+
 /// `lumen new <name>`: scaffold an app crate using the `main_app()` convention.
 fn cmd_new(name: Option<&str>, json: bool) -> i32 {
     let Some(name) = name else {
@@ -264,13 +313,48 @@ fn cmd_new(name: Option<&str>, json: bool) -> i32 {
             }});\n}}\n"
     );
 
+    // Windowed entry (desktop): `just run` / `just run-agent`.
+    let win_rs = format!(
+        "//! Windowed entry: `just run` (or `cargo run --release --example win`).\n\
+         use lumen::geometry::Size;\n\
+         use lumen::RunExt;\n\n\
+         fn main() {{\n    \
+            {name}::main_app().run(Size::new(800.0, 600.0));\n\
+         }}\n"
+    );
+    // Task runner mirroring the framework repo's recipes the skills teach.
+    let justfile = "# `just` lists recipes. Release builds: debug rendering is ~35x slower.\n\n\
+        # Open the app in a desktop window.\n\
+        run:\n    cargo run --release --example win\n\n\
+        # Window + agent endpoint (JSON-RPC) so an AI can observe and drive it.\n\
+        # See .claude/skills/verifying-apps and scripts/agent_client.py.\n\
+        run-agent addr=\"127.0.0.1:9230\":\n    \
+        LUMEN_AGENT_ADDR={{addr}} cargo run --release --example win --features lumen/agent\n\n\
+        # Headless tests (CI-safe, no display needed).\n\
+        test:\n    cargo test\n";
+
     if let Err(e) = (|| -> std::io::Result<()> {
         std::fs::create_dir_all(dir.join("src"))?;
         std::fs::create_dir_all(dir.join("tests"))?;
+        std::fs::create_dir_all(dir.join("examples"))?;
+        std::fs::create_dir_all(dir.join("scripts"))?;
         std::fs::write(dir.join("Cargo.toml"), cargo_toml)?;
         std::fs::write(dir.join("src/lib.rs"), lib_rs)?;
         std::fs::write(dir.join("src/main.rs"), main_rs)?;
         std::fs::write(dir.join("tests/app.rs"), test_rs)?;
+        std::fs::write(dir.join("examples/win.rs"), win_rs)?;
+        std::fs::write(dir.join("justfile"), justfile)?;
+        std::fs::write(
+            dir.join("scripts/agent_client.py"),
+            include_str!("../../../scripts/agent_client.py"),
+        )?;
+        // The app-facing skill suite, so an agent opening this project knows
+        // how to build, style, verify, and debug it (plan S0.8).
+        for (skill, body) in SCAFFOLD_SKILLS {
+            let d = dir.join(".claude/skills").join(skill);
+            std::fs::create_dir_all(&d)?;
+            std::fs::write(d.join("SKILL.md"), with_scaffold_note(body))?;
+        }
         Ok(())
     })() {
         return fail(json, "new", &format!("could not scaffold: {e}"));

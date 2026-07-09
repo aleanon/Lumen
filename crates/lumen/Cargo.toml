@@ -14,6 +14,9 @@ publish = false
 # --no-default-features`.)
 default = ["wgpu"]
 wgpu = ["lumen-widgets/wgpu", "lumen-render/wgpu"]
+# The live-window agent endpoint (JSON-RPC on LUMEN_AGENT_ADDR) — default-off,
+# forwarded to the desktop shell. Scaffolded apps use it via `just run-agent`.
+agent = ["lumen-shell/agent"]
 
 [dependencies]
 lumen-core = { workspace = true }
