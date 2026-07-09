@@ -14,11 +14,13 @@
 > real ancestor chain — previously only the rightmost compound was checked,
 > so `dialog button` matched every button. **`@media` gates on the live
 > window since B.2** (width/height/scale/platform/pointer from the real
-> context; resize re-resolves). Still true until the rest of B:
-> `@media container(...)` is a parse error (B.2b); `transition:`/
-> `animation:` are **unwired** (no keyframe playback, B.5); runtime state
-> selectors are only `focused`/`hovered` (write `:hovered`, not `:hover` —
-> B.6). See §10 for the per-property table. Authoring guidance lives in the
+> context; resize re-resolves). **State selectors carry the full vocabulary
+> since B.6a**: interaction states with CSS-familiar aliases
+> (`:hovered`/`:hover`, `:focused`/`:focus`, `:pressed`/`:active`) plus
+> every semantic widget state (`:checked`, `:disabled`, `:expanded`, …).
+> Still true until the rest of B: `@media container(...)` is a parse error
+> (B.2b); `transition:`/`animation:` are **unwired** (no keyframe playback,
+> B.5). See §10 for the per-property table. Authoring guidance lives in the
 > `styling-lss` skill.
 
 ## 1. Grammar (EBNF)

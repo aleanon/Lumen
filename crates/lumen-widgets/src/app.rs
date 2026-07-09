@@ -1827,13 +1827,24 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // once memo hits become shared `Rc` subtrees the merge must move to a
         // per-node copy instead.
         if let Some(env) = &self.style_env {
+            // B.6a: the full state vocabulary — interaction states carry
+            // their CSS-familiar aliases (spec examples write `:hover`), and
+            // the widget's semantic states (checked/disabled/expanded/…)
+            // are style-matchable, so `checkbox:checked { … }` just works.
             let mut states = Vec::new();
             if flags.contains(NodeFlags::FOCUSED) {
                 states.push("focused".to_string());
+                states.push("focus".to_string());
             }
             if flags.contains(NodeFlags::HOVERED) {
                 states.push("hovered".to_string());
+                states.push("hover".to_string());
             }
+            if el.id.is_some() && self.pressed.as_ref().is_some_and(|(_, id)| *id == el.id) {
+                states.push("pressed".to_string());
+                states.push("active".to_string());
+            }
+            states.extend(el.states.iter().map(|s| s.as_str().to_string()));
             let desc = lumen_style::NodeDesc {
                 id: el.id.as_ref().map(|i| i.as_str().to_string()),
                 classes: el.classes.clone(),

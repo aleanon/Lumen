@@ -64,16 +64,19 @@ numeric only.
 - Relative colors `oklch(from $x calc(…) …)` — parse error (B.7).
 - Widget parts (`slider .track`) — no widget exposes parts yet (B.7).
 
-## State selectors
+## State selectors (full vocabulary since B.6a)
 
-The runtime exposes exactly two state parts: **`:focused`** and
-**`:hovered`** — note *hovered*, not the CSS-style `:hover` (which never
-matches). `:disabled`/`:pressed`/`:checked` don't match yet (B.6).
+Interaction states match under both spellings — `:hovered`/`:hover`,
+`:focused`/`:focus`, `:pressed`/`:active` — and **every semantic widget
+state is matchable**: `:checked`/`:unchecked`, `:disabled`, `:selected`,
+`:expanded`/`:collapsed`, `:invalid`, `:busy`, … (the closed set in
+`lumen_core::semantics::State`).
 
 ```lss
 button.primary { background: $primary; color: $bg; border-radius: 6px; }
-button.primary:hovered { background: #3b82f6ff; }
-button.primary:focused { border: 2px solid $primary; }
+button.primary:hover { background: #3b82f6ff; }
+checkbox:checked { background: #22aa44ff; }
+button:disabled { background: #888888ff; }
 ```
 
 ## Themes & tokens (this part is solid)
