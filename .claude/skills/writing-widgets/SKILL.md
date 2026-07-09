@@ -260,44 +260,31 @@ Confirms it builds and lays out before you spin up a window.
 
 ### 6c. Drive the live window (the framework's see-and-click ability)
 
-`lumen-shell` embeds the agent protocol into the **running** window: newline-
-delimited JSON-RPC over TCP, so you can screenshot and click the real GUI (see
-`live-window-agent` in memory / `.ai_docs/03-spec-semantics-agent.md`). Needs a
-display (`DISPLAY` set — true on this dev box); if none, skip 6c and rely on 6b +
-tests.
+The full live-verification playbook is the **`verifying-apps` skill** —
+follow its Rung 4. Short form, using the shared client
+(`scripts/agent_client.py`, stdlib-only):
 
-1. Launch it in the **background** (release build → first run is slow; wait for
-   the port to accept a connection):
+1. `just run-agent <name>` in the **background**, then
+   `python3 scripts/agent_client.py wait-port` (release build — first run
+   is slow). Needs a display (`DISPLAY` set — true on this dev box); if
+   none, skip 6c and rely on 6b + tests.
+2. Drive and verify:
+   ```bash
+   python3 scripts/agent_client.py screenshot /tmp/<name>-before.png
+   python3 scripts/agent_client.py click '#<trigger-id>'
+   python3 scripts/agent_client.py tree | grep <trigger-id>   # state flipped?
+   python3 scripts/agent_client.py screenshot /tmp/<name>-after.png
    ```
-   just run-agent <name>          # window + JSON-RPC on 127.0.0.1:9230
-   ```
-2. Drive it with a tiny socket client, and **view the screenshots** to verify the
-   visible state actually changes across an interaction:
-   ```python
-   import socket, json, base64
-   f = socket.create_connection(("127.0.0.1", 9230)).makefile("rwb")
-   def rpc(method, **params):
-       f.write((json.dumps({"jsonrpc":"2.0","id":1,"method":method,"params":params})+"\n").encode()); f.flush()
-       return json.loads(f.readline())
-   def shot(path):  # result.image_base64 is a base64 PNG
-       open(path,"wb").write(base64.b64decode(rpc("ui.screenshot")["result"]["image_base64"]))
-   shot("/tmp/<name>-before.png")
-   rpc("input.click", selector="#<trigger-id>")   # or input.key / input.scroll / input.type
-   shot("/tmp/<name>-after.png")
-   ```
-   Then `Read` both PNGs and confirm the interaction did what it should (e.g. the
-   accordion body appeared). Prefer a **structural** assertion for the state
-   change — `ui.getTree` (child count, `state=['expanded']`, the node's label) or
-   `ui.getLayout {selector}` — over reading it off the pixels: the bundled/headless
-   font lacks decorative glyphs (arrows ▶▼, many symbols), which render as tofu, so
-   "the chevron flipped" is not reliably visible in a screenshot even when the
-   state is correct. Screenshots verify layout; `getTree`/state verify behaviour.
-   Other verbs: `ui.lint` (overflow/contrast/clip defects), `input.invokeAction
-   {selector, action}` (geometry-free).
-3. **Kill the background process** when done (don't leave a window/port open).
-   `just run-agent` is a bash→cargo→window tree and the recipe name isn't in the
-   process args, so match the **example binary**: `pkill -f "<name>-win"`. Confirm
-   the port is closed.
+   Or the library's `wait_until` for stateful waits (live actions do NOT
+   auto-wait). Then `Read` both PNGs. Prefer **structural** assertions
+   (`tree` states, `ui.getLayout`) over pixels — decorative glyphs render
+   as tofu; screenshots verify layout, the tree verifies behaviour. Also
+   useful: `agent_client.py lint`, `input.invokeAction` (geometry-free),
+   element zoom (`screenshot --selector '#x' --scale 4`).
+3. **Kill the window** when done: `pkill -x "<name>-win"` (names ≤15
+   chars). Careful with `pkill -f` — it matches *your own shell's* command
+   line and kills your script; if you need `-f`, bracket the pattern:
+   `pkill -f "[a]ccordion-win"`. Confirm the port closed.
 
 ## Before you commit
 
@@ -312,10 +299,25 @@ tests.
   screenshot) and confirmed the visible state changed.
 - Commit with a clear message describing what the widget does (`AGENT.md`).
 
+## Promoting an example widget into lumen-widgets
+
+Toast/Spinner/Chip/line-chart-class widgets often start life inside an
+example. Promotion checklist (plan W.1/W.2 tracks the queue): move the
+code into `crates/lumen-widgets/src/<name>.rs` in the canonical shape
+(Steps 1–3), register (Step 4), add the headless test module (Step 5),
+re-point the example at the library widget, and update the availability
+table in the `building-apps` skill + 02 §10's status note (doc-currency
+rule, AGENT.md).
+
 ## References
 
 - `.ai_docs/02-spec-core.md` — element/build model, `BuildCx`, signals.
 - `.ai_docs/03-spec-semantics-agent.md` — roles, actions, states.
 - `.ai_docs/07-decision-log.md` — ADR-013 (handler currency), F1–F4 reactivity.
 - `.ai_docs/05-spec-testing.md` — headless/coherence testing.
-- Widgets: `button.rs`, `check_box.rs`, `slider.rs`, `text_input.rs`, `grid.rs`.
+- Widgets: `button.rs` (stateless), `check_box.rs`/`slider.rs` (stateful),
+  `text_input.rs`, `grid.rs` (builder), **`pick_list.rs` (anchored overlay
+  dropdown — the pattern for Popover-class widgets: overlay + dismiss +
+  edge handling)**.
+- Skills: `verifying-apps` (the verification ladder this skill's Steps 5–6
+  plug into), `building-apps`, `debugging-lumen`.
