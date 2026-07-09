@@ -322,16 +322,21 @@ impl Locator {
         Ok(())
     }
 
-    /// Focus the node and type `text` (through the committed-text path).
-    /// **Known divergence from 05 §2:** does not clear existing content yet
-    /// (appends, like [`type_text`](Self::type_text)) — clearing lands with
-    /// the editor clear mechanism (plan C.4, `input.type {clear}`).
+    /// Focus the node and **replace** its content with `text` (05 §2):
+    /// select-all (the editors' Ctrl+A binding), then the committed text
+    /// lands over the selection. Use [`type_text`](Self::type_text) to
+    /// append instead. (C.4a closed the earlier append-only divergence.)
     pub async fn fill(&self, text: &str) -> Result<(), LocatorError> {
         let id = self.wait_one().await?;
         let bounds = self.node_bounds(id).unwrap_or(Rect::ZERO);
         let mut h = self.inner.borrow_mut();
         h.inject(Event::PointerDown(PointerEvent::at(center(bounds))));
         h.inject(Event::PointerUp(PointerEvent::at(center(bounds))));
+        h.inject(Event::KeyDown(lumen_core::events::KeyEvent {
+            key: Key::Character("a".into()),
+            modifiers: lumen_core::events::Modifiers::CTRL,
+            repeat: false,
+        }));
         h.inject(Event::TextInput(TextInputEvent {
             text: text.to_string(),
         }));

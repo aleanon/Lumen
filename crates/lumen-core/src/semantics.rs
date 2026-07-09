@@ -356,8 +356,10 @@ impl SemanticsNode {
         c
     }
 
+    /// This node (and its subtree) as the 03 §1 JSON. Public since C.4a so
+    /// the agent's `ui.getTree {selector}` can serialize a subtree.
     #[cfg(feature = "snapshot")]
-    fn to_json(&self) -> Value {
+    pub fn to_json(&self) -> Value {
         let mut obj = serde_json::Map::new();
         obj.insert("node".into(), json!(format!("node-{}", self.node)));
         if let Some(id) = &self.id {

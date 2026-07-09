@@ -46,9 +46,10 @@ block_on(async {
   time-driven and animated conditions settle inside the assertion; no
   explicit `clock().advance` needed. `Ambiguous`/`Parse` still fail fast.
 - Locator has `click/right_click/fill/type_text/press/hover/focus/
-  dblclick/drag_to/set_value` + queries and `to_be_visible`. **No
-  `scroll_into_view` yet** (pairs with `input.scroll {to}`, plan C.4);
-  `fill` currently appends (doesn't clear — same C.4 pairing).
+  dblclick/drag_to/set_value` + queries and `to_be_visible`. **`fill`
+  replaces since C.4a** (select-all + commit — full editors; the pre-IME
+  `text_field_basic` still appends); `type_text` appends. **No
+  `scroll_into_view` yet** (pairs with `input.scroll {to}`, plan C.4b).
 - Headless locator *actions* do auto-wait (10 ms polls, 5 s, virtual-clock
   aware) with `NotFound{nearest}`/`Ambiguous{candidates}` errors.
 - Animations: never sleep — `app.clock().advance(ms)` is deterministic.
@@ -118,7 +119,8 @@ The ones you'll actually use:
 | `ui.screenshot {}` / `{selector, scale}` | full frame / zoomed element crop with box+ink overlay |
 | `ui.lint` / `app.diagnostics` | overflow W0103, clip W0104, zero-area W0105, contrast |
 | `ui.getDeps` / `ui.whatDependsOn` / `ui.lastChange` | *why* did it update — predict, act, confirm idle/patch/rebuild |
-| `input.click/type/key/scroll {selector,…}` | scroll is `dy`-only; type appends |
+| `input.click/hover/type/key/scroll {selector,…}` | click takes `button`/`count` (double-click); type takes `clear: true` (full editors); scroll takes `dx`+`dy` (C.4a) |
+| `state.get {key?}` / `ui.getTree {selector}` / `ui.screenshot {max_width}` | store snapshot; subtree-only reply; downscaled frame for vision budgets (C.4a) |
 | `input.invokeAction {selector, action}` | geometry-free — use when overlap/transform makes clicks flaky |
 
 ### Live-window traps (each one has burned an agent)

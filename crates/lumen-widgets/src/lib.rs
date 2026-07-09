@@ -92,7 +92,7 @@ pub use lumen_macros::stable_handler;
 pub use lumen_macros::text;
 /// Re-exported so downstream crates can bound on the renderer backend (e.g.
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
-pub use lumen_render::{DefaultRenderer, Renderer, TinySkia};
+pub use lumen_render::{DefaultRenderer, Renderer, RgbaImage, TinySkia};
 pub use tasks::{Resource, TaskError};
 
 /// An explicit renderer choice from the command line (`--wgpu` / `--tiny-skia`)

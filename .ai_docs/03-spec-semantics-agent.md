@@ -97,10 +97,11 @@ no auth (bearer tokens planned with non-loopback binds, C.5).
 
 | Method | Params | Result |
 |---|---|---|
-| `ui.getTree` | `{ raw?: bool }` | semantics doc per §1 (elided unless `raw`) |
+| `ui.getTree` | `{ raw?: bool, selector?: string }` | semantics doc per §1 (elided unless `raw`); with `selector`, just that subtree (C.4a) |
+| `state.get` | `{ key?: string }` | state-store snapshot as JSON — whole store, or one signal key (C.4a) |
 | `ui.getLayout` | `{ selector }` | `{ bounds, ink?, clipped?, text_metrics?, deps? }` |
 | `ui.getStyles` | `{ selector }` | computed style map (04 §7 serialization) |
-| `ui.screenshot` | `{ annotate?: bool }` | `{ image_base64, width, height, annotations?: [{node, id, bounds}] }` — full frame |
+| `ui.screenshot` | `{ annotate?: bool, max_width?: int }` | `{ image_base64, width, height, annotations?: [{node, id, bounds}] }` — full frame; `max_width` downscales (nearest, aspect-preserving — vision token budgets, C.4a) |
 | `ui.screenshot` | `{ selector, scale?: f64 = 4, overlay?: bool = true }` | zoomed crop of one element; overlay draws the box (blue) and ink (red) outlines — a defect magnifier |
 | `ui.lint` | `{}` | `{ findings: [{code, message}] }` (layout/contrast audits: W0103/W0104/W0105/W0301, WCAG) |
 | `app.diagnostics` | `{}` | `{ diagnostics: [Diagnostic] }` (02 §9) |
@@ -140,11 +141,12 @@ planned, C.4).
 
 | Method | Params | Notes |
 |---|---|---|
-| `input.click` | `{ selector }` | pointer down+up at the node's center |
+| `input.click` | `{ selector, button?: "left"\|"right"\|"middle", count?: 1–3 }` | pointer down+up at the node's center; `count: 2` = double-click (C.4a) |
+| `input.hover` | `{ selector }` | pointer move over the node — tooltips, `:hovered` (C.4a) |
 | `input.invokeAction` | `{ selector, action?: string = "click" }` | geometry-free: runs the node's retained handler (`click`/`focus`/`dismiss`/…) — robust under overlap/transforms |
-| `input.type` | `{ selector, text }` | click-to-focus, then committed `TextInput`; **appends** (`clear` planned, C.4) |
+| `input.type` | `{ selector, text, clear?: bool }` | click-to-focus, then committed `TextInput`; `clear: true` replaces via the editor's select-all (full editors; the pre-IME `text_field_basic` appends regardless) (C.4a) |
 | `input.key` | `{ keys }` | chord syntax `"Ctrl+Shift+P"`; named keys: Tab Enter Space Escape Backspace Delete Arrow* Home End PageUp PageDown, plus single characters |
-| `input.scroll` | `{ selector?, dy }` | vertical only (`dx`/`to` planned, C.4) |
+| `input.scroll` | `{ selector?, dx?, dy? }` | both axes (`to: top\|bottom\|{x,y}` planned, C.4b) |
 | `input.drop` | `{ selector, … }` | external file/text drop onto a node |
 | `input.setLocale` | `{ locale }` | switches locale incl. RTL mirroring |
 | `menu.invoke` | `{ id }` | invokes an enabled menu item |
@@ -182,15 +184,13 @@ WebSocket test path.
 
 ### 3.5 Planned (not yet implemented — do not call)
 
-Each item carries its remediation-plan task. `state.get` (C.4) ·
-`events.subscribe` + `event.*` notifications (C.4) · `input.drag`
-node-to-node (C.4) · `input.hover` (C.4) · `input.gesture` (C.4) ·
-`app.setValue` (C.4) · `app.command` / `cx.register_command` (C.4) ·
-`session.start`/`session.stop` (C.4) · `reload.apply` (C.4) · auto-wait for
-clock-driven **animation settling** (C.1b; existence/actionability/async
-waiting shipped in C.1a) · `input.click` `{pos, button, count}` (C.4) ·
-`input.type {clear}` (C.4) · `input.scroll` `{dx, to}` (C.4) ·
-`ui.getTree {selector}` subtree (C.4) · `ui.screenshot` `{max_width}` (C.4)
+Each item carries its remediation-plan task. `events.subscribe` + `event.*`
+notifications (C.4b) · `input.drag` node-to-node (C.4b) · `input.gesture`
+(C.4b) · `app.setValue` (C.4b) · `app.command` / `cx.register_command`
+(C.4b) · `session.start`/`session.stop` (C.4b) · `reload.apply` (C.4b) ·
+auto-wait for clock-driven **animation settling** (C.1b;
+existence/actionability/async waiting shipped in C.1a) · `input.click
+{pos}` (C.4b) · `input.scroll {to}` (C.4b)
 · MCP server + packaged client `lumen agent call` (C.5) · bearer-token auth
 (C.5) · CLI-hosted endpoint (`lumen agent serve`, C.8b). *(Shipped since
 the re-ground: C.1a auto-wait + `ui.waitFor`; C.2 `app.logs` + real

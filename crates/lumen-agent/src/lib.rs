@@ -260,7 +260,21 @@ fn handle<R: Renderer, E: Spawner>(
     match method {
         "ui.getTree" => {
             let raw = params.get("raw").and_then(|v| v.as_bool()).unwrap_or(false);
+            // C.4a: an optional selector narrows the reply to one subtree —
+            // cheaper for big apps and exactly what a vision loop re-queries.
+            if let Some(selector) = params.get("selector").and_then(|v| v.as_str()) {
+                let node = resolve(app, selector)?;
+                return Ok(json!({ "root": node.to_json() }));
+            }
             Ok(app.semantics_doc().to_json(raw))
+        }
+        "state.get" => {
+            // C.4a: the state store as JSON — whole snapshot, or one signal.
+            let snap = app.runtime().snapshot().0;
+            match params.get("key").and_then(|v| v.as_str()) {
+                Some(key) => Ok(json!({ "key": key, "value": snap.get(key) })),
+                None => Ok(json!({ "state": snap })),
+            }
         }
         "ui.getStyles" => Ok(app.get_styles(sel(params)?)),
         "ui.getDeps" => Ok(app.get_deps(sel(params)?)),
@@ -335,6 +349,12 @@ fn handle<R: Renderer, E: Spawner>(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let img = app.screenshot();
+            // C.4a: `max_width` downscales the reply (vision-model token
+            // budgets) — nearest-neighbor keeps it cheap and deterministic.
+            let img = match params.get("max_width").and_then(|v| v.as_u64()) {
+                Some(mw) if mw > 0 && (img.width() as u64) > mw => downscale(&img, mw as u32),
+                _ => img,
+            };
             let mut out = json!({
                 "image_base64": base64::encode(&img.to_png()),
                 "width": img.width(),
@@ -457,8 +477,36 @@ fn handle<R: Renderer, E: Spawner>(
         "input.click" => {
             let node = resolve_action(app, params)?;
             let p = center(node.bounds);
-            app.inject(Event::PointerDown(PointerEvent::at(p)));
-            app.inject(Event::PointerUp(PointerEvent::at(p)));
+            // C.4a: optional button ("left"|"right"|"middle") + count
+            // (double-click = 2). Each press round-trips down/up with the
+            // running click_count, the same shape the shell synthesizes.
+            let button = match params.get("button").and_then(|v| v.as_str()) {
+                Some("right") => lumen_core::events::PointerButton::Right,
+                Some("middle") => lumen_core::events::PointerButton::Middle,
+                _ => lumen_core::events::PointerButton::Left,
+            };
+            let count = params
+                .get("count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1)
+                .clamp(1, 3) as u8;
+            for i in 1..=count {
+                let mut down = PointerEvent::at(p);
+                down.button = button;
+                down.click_count = i;
+                let mut up = PointerEvent::at(p);
+                up.button = button;
+                up.click_count = i;
+                app.inject(Event::PointerDown(down));
+                app.inject(Event::PointerUp(up));
+            }
+            app.pump();
+            Ok(json!({ "ok": true, "node": format!("node-{}", node.node) }))
+        }
+        "input.hover" => {
+            // C.4a: move the pointer over the node (tooltips, :hovered).
+            let node = resolve_action(app, params)?;
+            app.inject(Event::PointerMove(PointerEvent::at(center(node.bounds))));
             app.pump();
             Ok(json!({ "ok": true, "node": format!("node-{}", node.node) }))
         }
@@ -483,6 +531,20 @@ fn handle<R: Renderer, E: Spawner>(
             let p = center(node.bounds);
             app.inject(Event::PointerDown(PointerEvent::at(p)));
             app.inject(Event::PointerUp(PointerEvent::at(p)));
+            // C.4a: `clear: true` replaces instead of appending — select-all
+            // (the editors' Ctrl+A binding), then the committed text lands
+            // over the selection.
+            if params
+                .get("clear")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                app.inject(Event::KeyDown(KeyEvent {
+                    key: Key::Character("a".into()),
+                    modifiers: Modifiers::CTRL,
+                    repeat: false,
+                }));
+            }
             app.inject(Event::TextInput(TextInputEvent { text: text.into() }));
             app.pump();
             Ok(json!({ "ok": true }))
@@ -497,13 +559,15 @@ fn handle<R: Renderer, E: Spawner>(
             Ok(json!({ "ok": true }))
         }
         "input.scroll" => {
+            // C.4a: both axes (`dx` for horizontal panes/carousels).
+            let dx = params.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let dy = params.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let p = resolve_action(app, params)
                 .map(|n| center(n.bounds))
                 .unwrap_or(Point::new(0.0, 0.0));
             app.inject(Event::Wheel(lumen_core::events::WheelEvent {
                 pos: p,
-                delta: kurbo::Vec2::new(0.0, dy),
+                delta: kurbo::Vec2::new(dx, dy),
                 modifiers: Modifiers::empty(),
             }));
             app.pump();
@@ -688,6 +752,22 @@ fn resolve_action<R: Renderer, E: Spawner>(
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
+}
+
+/// Nearest-neighbor downscale to `max_width`, preserving aspect (C.4a).
+fn downscale(img: &lumen_widgets::RgbaImage, max_width: u32) -> lumen_widgets::RgbaImage {
+    let (w, h) = (img.width(), img.height());
+    let nw = max_width.max(1);
+    let nh = ((h as u64 * nw as u64) / w as u64).max(1) as u32;
+    let mut out = Vec::with_capacity((nw as usize) * (nh as usize) * 4);
+    for y in 0..nh {
+        let sy = (y as u64 * h as u64 / nh as u64) as u32;
+        for x in 0..nw {
+            let sx = (x as u64 * w as u64 / nw as u64) as u32;
+            out.extend_from_slice(&img.pixel(sx, sy));
+        }
+    }
+    lumen_widgets::RgbaImage::from_raw(nw, nh, out)
 }
 
 fn find_node(root: &SemanticsNode, id: u32) -> Option<&SemanticsNode> {
