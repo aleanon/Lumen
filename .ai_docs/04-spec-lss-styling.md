@@ -2,6 +2,18 @@
 
 `.lss` (Lumen Style Sheets) is a typed, CSS-like declarative styling language. It is parsed at app startup, hot-reloaded by the dev server (tier 1), and mirrored 1:1 by a typed Rust `Style` API. Parse/validation failures keep the previous stylesheet live and emit `E0101`/`E0102` diagnostics with spans.
 
+> **⚠ Implementation status (2026-07-09, from the docs↔code audit).** This
+> spec describes the target language. The **parser** accepts essentially all
+> of it; the **runtime applies a subset**. Until remediation Phases A/B land
+> (`docs/plan-remediation-2026-07.md`): **layout properties do not reach
+> layout** (styles are computed after the layout pass — write layout in Rust
+> `LayoutStyle`, use `.lss` for colors/borders/backdrop); `@media` rules
+> apply **unconditionally**; nested `&` rules parse but are **dropped**;
+> `transition:`/`animation:` are **unwired** (no keyframe playback); runtime
+> state selectors are only `focused`/`hovered` (write `:hovered`, not
+> `:hover`). See §10 for the per-property table. Authoring guidance lives in
+> the `styling-lss` skill.
+
 ## 1. Grammar (EBNF)
 
 ```
@@ -74,3 +86,32 @@ Every `.lss` property has exactly one corresponding typed setter; the macro test
 
 ## 9. Error behavior
 Unknown property → `E0102` with Levenshtein did-you-mean; type mismatch → `E0103` with expected type; unknown token → `E0104`. All include file/line/col span. A stylesheet with errors is rejected atomically (old one stays live).
+
+*Status:* E0101/E0102 (did-you-mean)/E0104 + atomic reject + spans are
+implemented. **E0103 is never emitted** — type mismatches are silently
+ignored (plan B.7). `border-width`/`border-color` are applied but missing
+from the known-property list, so they raise a spurious E0102 (plan B.7).
+Unknown units are silently treated as unitless (plan B.7).
+
+## 10. Implementation status by property (2026-07-09)
+
+Three levels: **rendered** (visible effect), **applied** (parsed into the
+typed style but ignored downstream), **parse-only** (name known, dropped).
+Plan tasks: layout → A.2, visual/typography → B.3/B.4, motion → B.5.
+
+| Level | Properties |
+|---|---|
+| **rendered** | `background` (solid color only), `border` (shorthand width+color), `border-radius` (single value), `backdrop-filter` (blur/saturate + beyond-spec `refraction`/`specular`), `color` (text) |
+| **applied, no effect** | `opacity`, `font-size`, `font-weight`, `display`, `flex-direction`, `width`, `height`, `gap`, `padding`, `margin` (whole-side values parse into the typed style; layout ones never reach layout, the others are unread in paint) |
+| **parse-only** | all remaining layout (`flex-wrap/grow/shrink/basis`, `justify-*`, `align-*`, `row/column-gap`, `grid-*` (track lists unparsed), `min/max-*`, `aspect-ratio`, `position`, `inset`, `overflow`, per-side `padding-*`/`margin-*`/`border-*`), background gradients, `shadow`, `blend-mode`, `filter`, `clip`, `transform(-origin)`, `z-index`, `visibility`, `cursor`, `font-family/style/features/variation`, `line-height`, `letter-spacing`, `text-align/overflow/wrap/decoration`, `selection-color`, `transition`, `animation`, `animation-force` |
+
+Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
++ `!important` **work**; nested `&` rules **dropped** (B.1); `@media`
+**unconditional** (engine exists, unwired — B.2); `@media container(...)`
+**parse error** (B.2); relative colors `oklch(from …)` **unsupported**
+(B.7); theme-switch animation **missing** (B.5); widget parts
+(`slider .track`, `cx.part`) **missing** (B.7); cascade origins other than
+the app sheet **unreachable** (B.6); `style_parity!` covers 11 hand-picked
+properties, not set equality (B.7); `get_styles` serialization lacks `span`
+and only reaches the `stylesheet` source (B.7). This section is deleted
+when Phase B completes and the spec becomes unconditionally normative.
