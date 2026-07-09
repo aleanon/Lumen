@@ -53,11 +53,11 @@ fn build(cx: &mut BuildCx) -> Element {
     // Seed the first section open; the other two default to collapsed. The init
     // closure only runs on first creation, so `Accordion::new`'s `|| false` is a
     // no-op once this signal exists.
-    cx.signal("faq.shipping", || true);
+    cx.signal("faq-shipping", || true);
 
     let shipping = section(
         cx,
-        "faq.shipping",
+        "faq-shipping",
         "faq-shipping",
         "How long does shipping take?",
         vec![
@@ -67,7 +67,7 @@ fn build(cx: &mut BuildCx) -> Element {
     );
     let returns = section(
         cx,
-        "faq.returns",
+        "faq-returns",
         "faq-returns",
         "What is your return policy?",
         vec![
@@ -78,7 +78,7 @@ fn build(cx: &mut BuildCx) -> Element {
     );
     let support = section(
         cx,
-        "faq.support",
+        "faq-support",
         "faq-support",
         "How do I contact support?",
         vec![
