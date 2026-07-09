@@ -2,7 +2,17 @@
 
 Topologically ordered. `Deps` are hard prerequisites. Acceptance = listed commands exit 0 in CI (Linux + Windows + macOS unless noted). M0 is fully decomposed; M1–M4 are decomposed to PR-sized tasks but with coarser acceptance — refine each into subtasks (recorded in this file) when you start the milestone.
 
-Legend: ☐ open ☐→ in progress ☑ done. Update checkboxes in the task's merge commit.
+Legend: ☐ open ☐→ in progress ☑ done ◐ **partial** (a real, tested slice
+shipped; the rest is planned) ✗ **not implemented** (placeholder/model only).
+Update checkboxes in the task's merge commit.
+
+> **Status re-mark (2026-07-09).** The 2026-07 docs↔code audit
+> (`docs/review-docs-vs-code-2026-07.md`) found many ☑ marks covered only the
+> headless/deterministic slice of their task while the OS/hardware/CI half was
+> unbuilt. Those marks are corrected to ◐/✗ below, each with a one-line
+> reality note pointing at `docs/backlog.md` and the remediation plan
+> (`docs/plan-remediation-2026-07.md`, task IDs like P.1/C.7). The acceptance
+> texts are left as written — they remain the bar for flipping back to ☑.
 
 ---
 
@@ -41,7 +51,8 @@ Event enum per 02 §6; capture/bubble dispatch via SoA hit-test; pointer enter/l
 `SemanticsNode` building during rebuild; elision rules; schema per 03 §1 (validated against a JSON Schema file checked into repo); selector engine per 03 §2.
 *Accept:* `cargo test -p lumen-core semantics::` — schema validation on fixtures; selector test table (≥30 cases incl. `:has`, `:nth`, ambiguity errors with candidates).
 
-**T0.9 ☑ Headless app + harness seed. ← verification gate.** Deps: T0.3–T0.8
+**T0.9 ◐ Headless app + harness seed. ← verification gate.** Deps: T0.3–T0.8
+*(◐: everything shipped except the `#[lumen::test]` macro — tests hand-construct `TestApp` + `block_on`; plan T.1.)*
 `App::run_headless`, `Headless::{pump, inject, screenshot, semantics_json}` (02 §8); minimal `lumen-test`: `#[lumen::test]`, `TestApp`, `Locator` with click/fill/press/text, `expect` with to_exist/to_have_text, auto-wait per 05 §3, exact-golden `expect_screenshot`, virtual clock.
 *Accept:* `cargo test -p lumen-test` self-tests: auto-wait succeeds on delayed-appearance fixture, fails `Ambiguous` with candidates on duplicate fixture; golden round-trip works; `LUMEN_UPDATE_GOLDENS` re-records.
 
@@ -77,8 +88,10 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 ## M2 — Testing & AI loop complete
 **T2.1 ☑ lumen-test full surface** (all of 05 §2: drag, set_value, styles/bounds assertions, perceptual GPU goldens, per-test size/scale/theme). *Accept:* harness self-test suite.
 **T2.2 ☑ Traces** (05 §5) + failure artifacts. *Accept:* trace schema validation; failing test embeds screenshot+tree.
-**T2.3 ☑ Tier-2 hot patch.** cdylib registry, incremental rebuild orchestration, libloading swap, state-preservation, abi_hash downgrade to tier 3, intentional dylib leak. *Accept:* integration: edit a `build()` fn → swap <2 s on warm cache, counter state preserved; change state shape → that component resets, others preserved; core-crate edit → automatic tier-3 with state restore.
-**T2.4 ☑ Tier-3 snapshot restart.** *Accept:* kill/rebuild/restore round-trip preserves signals, scroll, focus.
+**T2.3 ◐ Tier-2 hot patch.** cdylib registry, incremental rebuild orchestration, libloading swap, state-preservation, abi_hash downgrade to tier 3, intentional dylib leak.
+*(◐: swap mechanics + abi gate real and tested (`lumen-cli/src/hotpatch.rs`, fixtures `hot_a/b/c`); no live orchestration — no rebuild driver or push into a running app; plan C.7.)* *Accept:* integration: edit a `build()` fn → swap <2 s on warm cache, counter state preserved; change state shape → that component resets, others preserved; core-crate edit → automatic tier-3 with state restore.
+**T2.4 ◐ Tier-3 snapshot restart.** *Accept:* kill/rebuild/restore round-trip preserves signals, scroll, focus.
+*(◐: state snapshot/restore real (`AppSnapshot`, `run_headless_restored`, tier3.rs test); the "kill/rebuild" is an in-process drop — no process-level restart driver; plan C.7.)*
 **T2.5 ☑ `session.exportTest`.** Recording, codegen to lumen-test source, auto-assertions. *Accept:* recorded session on settings app exports a test that compiles and passes.
 **T2.6 ☑ Perf gates.** criterion benches: 10k-node dirty-subtree layout <2 ms; 1M-row VirtualList scroll ≥120 fps equivalent frame budget on reference desktop runner; idle = 0 frames. CI regression gate ±10%. *Accept:* bench workflow green + gate script.
 **M2-exit ☑:** an agent connected only to `lumen-agent` can explore the settings app, export a regression suite, and the suite runs green in CI on 3 OSes.
@@ -86,20 +99,26 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 ---
 
 ## M3 — Mobile
-**T3.1 ☑ Android shell** (cargo-ndk, GameActivity, surface lifecycle, touch, soft-keyboard/IME, safe areas). *Accept:* hello app runs on API-34 emulator in CI (headless emulator), agent screenshot matches golden perceptually.
+**T3.1 ◐ Android shell** (cargo-ndk, GameActivity, surface lifecycle, touch, soft-keyboard/IME, safe areas). *Accept:* hello app runs on API-34 emulator in CI (headless emulator), agent screenshot matches golden perceptually.
+*(◐: renders + surface lifecycle + tier-1 reload verified on the local emulator; **all input events are dropped** (`imp.rs` `_ => {}`) — no touch/IME/safe-areas/back; mobile CI is commented out; plan P.1.)*
 **T3.2 ☑ Android orchestration** (`lumen run --platform android`: AVD provision, build, install, log stream, adb reverse for dev socket). *Accept:* scripted end-to-end on CI emulator incl. tier-1 hot reload.
-**T3.3 ☑ iOS shell** (UIKit host, Metal surface, touch/IME/safe areas, Xcode project template). *Accept:* hello app on iOS Simulator (macOS runner) with agent screenshot golden.
-**T3.4 ☑ iOS orchestration** (`simctl` boot/install/launch/screenshot; dev socket). *Accept:* scripted e2e on simulator incl. tier-1 reload; tier-2 verified on simulator, documented as tier-3-only on physical devices.
+**T3.3 ◐ iOS shell** (UIKit host, Metal surface, touch/IME/safe areas, Xcode project template). *Accept:* hello app on iOS Simulator (macOS runner) with agent screenshot golden.
+*(◐: headless `render_into()` only; template uses CoreGraphics (not Metal) and references FFI symbols that don't exist; no macOS/simulator on this box; see `docs/cross-platform-readiness.md`; plan P.5.)*
+**T3.4 ◐ iOS orchestration** (`simctl` boot/install/launch/screenshot; dev socket). *Accept:* scripted e2e on simulator incl. tier-1 reload; tier-2 verified on simulator, documented as tier-3-only on physical devices.
+*(◐: `scripts/ios_orchestrate.sh` exists but has never run against a simulator (no macOS); plan P.5.)*
 **T3.5 ☑ Gestures + mobile widgets** (GestureEvent full params; BottomNav, NavigationRail, AppBar, pull-to-refresh, DatePicker, TimePicker; touch target ≥44 px audit). *Accept:* gesture synthesis tests (pinch/pan/long-press) + widget test triples on both emulators.
-**T3.6 ☑ `lumen test --platform android|ios_sim`.** *Accept:* M0-exit test passes unmodified on both.
-**M3-exit ☑:** settings app runs on Android emulator + iOS Simulator; same test suite green on desktop+both; agent loop (edit `.lss` → reload → screenshot) works against the Android emulator.
+**T3.6 ◐ `lumen test --platform android|ios_sim`.** *Accept:* M0-exit test passes unmodified on both.
+*(◐: a bash-script dispatcher that cross-compiles the test binary and pushes goldens via adb — not the specced TestApp-over-dev-socket proxying; iOS leg unexercised.)*
+**M3-exit ◐:** settings app runs on Android emulator + iOS Simulator; same test suite green on desktop+both; agent loop (edit `.lss` → reload → screenshot) works against the Android emulator.
+*(◐: the Android emulator leg is real (local); the iOS-Simulator leg has never run; no touch on either.)*
 
 ---
 
 ## M4 — Depth & 1.0
 **T4.1 ☑ ShaderWidget** (WGSL, typed uniforms, built-ins, CPU fallback fill, shader hot reload, E0201 diagnostics). *Accept:* GPU-runner goldens for 3 sample shaders; broken-shader edit keeps old pipeline + diagnostic.
 **T4.2 ☑ DataGrid + Tree + charts + RichTextEditor.** *Accept:* test triples; DataGrid 1M-row gate added to perf suite.
-**T4.3 ☑ AccessKit integration** (role/state map per 03 §1; platform a11y smoke tests). *Accept:* map table complete; VoiceOver/NVDA manual checklist documented + automated AccessKit-tree diff tests.
+**T4.3 ◐ AccessKit integration** (role/state map per 03 §1; platform a11y smoke tests). *Accept:* map table complete; VoiceOver/NVDA manual checklist documented + automated AccessKit-tree diff tests.
+*(◐: role/state map + `accesskit::TreeUpdate` builder real and tested in-memory (`a11y.rs`); **no `accesskit_winit` adapter** — the tree never reaches the OS; backlog A5; plan P.4.)*
 **T4.4 ☑ Inspector app** (tree view, style editor, animation scrubber, trace replay — built in Lumen). *Accept:* inspector drives itself via lumen-agent in a self-test.
 **T4.5 ☑ Remaining widget set, API audit, rustdoc pass, 1.0 freeze.** *Accept:* `cargo doc` no warnings; public-API diff reviewed; semver-checks clean.
 **M4-exit ☑ = 13 of `01-architecture.md`:** an agent, given only the CLI and lumen-agent, scaffolds an app, implements a multi-screen styled UI with one custom shader, verifies on desktop + both mobile emulators, generates a passing test suite from its own session, and fixes an injected layout bug using structured diagnostics — zero human intervention. Script this as `examples/agent-gauntlet/` and run it as the release gate.
@@ -114,12 +133,15 @@ gaps that stop teams shipping **real apps**: the framework doesn't run on the
 lacks the **app-level scaffolding** (i18n, routing, forms) every product needs.
 New ADRs: web/WASM backend; RTL layout; routing & global-state model.*
 
-**T5.1 ☑ Web / WASM target.** wgpu→WebGPU with a WebGL2 fallback; a canvas-only shell (no DOM widgets); the CPU reference renderer compiled to wasm for golden parity; agent bridge over WebSocket/`postMessage`; asset/font streaming; wasm size budget. *Accept:* the settings + inspector apps run in headless Chromium, driven unmodified through `lumen-agent`, matching a perceptual golden; `lumen run --platform web`; wasm bundle under a gated size.
-**T5.2 ☑ Desktop system integration.** Multi-window + multi-monitor (DPI/scale per window), native menu bar + context menus, system tray, native file/color dialogs, rich clipboard (text/image/files), drag-and-drop intra- and inter-app, OS notifications — all behind portable APIs surfaced on the agent + synthesizable in `lumen-test`. *Accept:* a multi-window app driven by the agent (focus, menu invoke, DnD between windows); clipboard + drop events synthesized headlessly in a test triple.
+**T5.1 ◐ Web / WASM target.** wgpu→WebGPU with a WebGL2 fallback; a canvas-only shell (no DOM widgets); the CPU reference renderer compiled to wasm for golden parity; agent bridge over WebSocket/`postMessage`; asset/font streaming; wasm size budget. *Accept:* the settings + inspector apps run in headless Chromium, driven unmodified through `lumen-agent`, matching a perceptual golden; `lumen run --platform web`; wasm bundle under a gated size.
+*(◐: only the CPU-wasm golden-parity leg is real (one-shot `render_into` + 2D-canvas `putImageData`); no WebGPU/WebGL2, no event loop, no agent bridge, no headless-Chromium leg, size printed not gated; plan P.2.)*
+**T5.2 ◐ Desktop system integration.** Multi-window + multi-monitor (DPI/scale per window), native menu bar + context menus, system tray, native file/color dialogs, rich clipboard (text/image/files), drag-and-drop intra- and inter-app, OS notifications — all behind portable APIs surfaced on the agent + synthesizable in `lumen-test`. *Accept:* a multi-window app driven by the agent (focus, menu invoke, DnD between windows); clipboard + drop events synthesized headlessly in a test triple.
+*(◐: the portable/headless model layer is real (`system.rs`, in-memory clipboard, agent methods); **zero OS wiring** — no arboard/rfd/muda deps, shell is single-window; backlog A4; ADR-P1 approved; plan P.3.)*
 **T5.3 ☑ Internationalization & RTL.** Fluent-style message catalogs with structured missing-key diagnostics; ICU-class locale formatting (date/number/plural/currency); **RTL layout mirroring** in `lumen-layout` (start/end resolution, logical insets); per-locale theming; agent `input.setLocale`. *Accept:* one app rendered in en / ar / ja with RTL-mirror goldens; locale switch via agent reflows + re-mirrors; missing-translation surfaces as a `W####` code.
 **T5.4 ☑ Navigation, global state, undo/redo, persistence.** Typed router with a back stack + deep links + guards; global stores layered on the signal runtime; a command/undo-redo history; whole-app state save/load (building on the Checkpoint protocol). *Accept:* deep-link navigation + multi-step undo/redo driven by the agent; app state round-trips through save→relaunch and through a tier-3 restart.
 **T5.5 ☑ Forms & validation.** Declarative form state, sync + async validators, input masks/formatters, error→diagnostic surfacing with accessible error association (a11y `described_by`). *Accept:* a validated multi-field form; the agent fills it, reads validation failures as **structured data** (not pixels), corrects them, and submits.
-**M5-exit ☑:** an agent, given only the CLI + lumen-agent, scaffolds and builds a **localized (RTL+LTR), multi-window, routed, form-driven CRUD app**, runs it on **desktop + web + the Android emulator**, exercises undo and deep-links, and exports a passing cross-platform suite from its own session — scripted as `examples/agent-gauntlet-web/`, added to the release gate.
+**M5-exit ◐:** an agent, given only the CLI + lumen-agent, scaffolds and builds a **localized (RTL+LTR), multi-window, routed, form-driven CRUD app**, runs it on **desktop + web + the Android emulator**, exercises undo and deep-links, and exports a passing cross-platform suite from its own session — scripted as `examples/agent-gauntlet-web/`, added to the release gate.
+*(◐: the gauntlet runs **headless on desktop**; "multi-window" is the model layer, the web leg is the CPU-wasm golden only.)*
 
 ---
 
@@ -131,13 +153,20 @@ world-class motion system, and the compute-rasterization + multi-threading work
 flagged as a v1 evaluation. New ADRs: Vello-class GPU backend; media pipeline;
 motion/choreography model.*
 
-**T6.1 ☑ Vello-class GPU rasterizer.** A compute-shader path/scene rasterizer behind the existing display-list contract (selectable vs the lyon path); multi-threaded scene building; CPU↔GPU perceptual parity preserved. *Accept:* a complex vector scene matches the CPU golden within threshold on a GPU runner; path-heavy perf gate beats the lyon baseline; idle/damage contracts unchanged.
-**T6.2 ☑ Vector & image media.** SVG rendering, Lottie/animated-vector playback, GIF/APNG, and jpeg/webp/avif decode with a shared image cache/atlas; declarative asset references resolved by the dev server (tier-1 hot-swap). *Accept:* SVG + Lottie goldens at fixed clock; codec round-trips; a swapped asset reloads live.
-**T6.3 ☑ Audio / video / capture.** A media pipeline: hardware-accelerated video decode where available + a deterministic software path for CI, audio playback, and mic/camera capture, all clocked to the render loop. *Accept:* a video frame at a fixed timestamp matches a golden via the software decoder; capture surfaces are stubbable and agent-observable.
-**T6.4 ☑ Motion system.** Physics springs, gesture-driven interruptible animations, **shared-element transitions** across routes, and a choreography/timeline API; the inspector's scrubber becomes a keyframe editor. *Accept:* gesture-driven + shared-element transition tests are deterministic under the virtual clock; choreographed sequence golden.
-**T6.5 ☑ Advanced text & editing.** A real rich-text document model (styles, lists, tables, links, images), selection that spans widgets, find/replace, spell-check hooks, variable-font axis controls, and CRDT-ready edit hooks for future collaboration. *Accept:* rich-editor test triple; cross-widget selection + find/replace driven by the agent.
-**T6.6 ☑ Performance at scale.** Multi-threaded layout, on-device GPU damage/partial redraw, a memory profiler + leak gate, and CI enforcement of the remaining `01 §9` budgets (cold start <300 ms desktop / <800 ms mobile, hello-world <5 MB). *Accept:* a 100k-node scene + all `01 §9` budgets gated in CI on the reference runners.
-**M6-exit ☑:** a **media-rich, animated app** (video + SVG + shared-element navigation + a rich-text editor) holds 120 fps desktop / 60 fps mobile and passes every perf gate, agent-verified on desktop + both mobile emulators — added to the release gate.
+**T6.1 ✗ Vello-class GPU rasterizer.** A compute-shader path/scene rasterizer behind the existing display-list contract (selectable vs the lyon path); multi-threaded scene building; CPU↔GPU perceptual parity preserved. *Accept:* a complex vector scene matches the CPU golden within threshold on a GPU runner; path-heavy perf gate beats the lyon baseline; idle/damage contracts unchanged.
+*(✗: `Backend::VelloCompute` is a placeholder enum variant; the real GPU path is wgpu + lyon CPU tessellation. Only the backend seam + threaded viewport cull landed. **Parked post-2.0 per ADR-R1** with binding revisit triggers in `docs/plan-remediation-2026-07.md`.)*
+**T6.2 ◐ Vector & image media.** SVG rendering, Lottie/animated-vector playback, GIF/APNG, and jpeg/webp/avif decode with a shared image cache/atlas; declarative asset references resolved by the dev server (tier-1 hot-swap). *Accept:* SVG + Lottie goldens at fixed clock; codec round-trips; a swapped asset reloads live.
+*(◐: PNG decode + an SVG subset parser + cached assets are real; **no jpeg/webp/gif/apng/avif/Lottie**. ADR-M1: `image` crate jpeg+gif+webp planned (plan M.1), avif deferred, Lottie post-2.0.)*
+**T6.3 ✗ Audio / video / capture.** A media pipeline: hardware-accelerated video decode where available + a deterministic software path for CI, audio playback, and mic/camera capture, all clocked to the render loop. *Accept:* a video frame at a fixed timestamp matches a golden via the software decoder; capture surfaces are stubbable and agent-observable.
+*(✗: only deterministic stub models exist (`TestPattern`, `AudioBuffer::sine`, empty `CaptureSource`) — they remain the CI contract. **De-scoped post-2.0 per ADR-M3.**)*
+**T6.4 ◐ Motion system.** Physics springs, gesture-driven interruptible animations, **shared-element transitions** across routes, and a choreography/timeline API; the inspector's scrubber becomes a keyframe editor. *Accept:* gesture-driven + shared-element transition tests are deterministic under the virtual clock; choreographed sequence golden.
+*(◐: springs (interruptible), `SharedElement` morph, and `Timeline` choreography exist as tested library code; **not wired** into routes/gestures — apps call `bounds_at` manually; no keyframe evaluator. Plan B.5/M.3.)*
+**T6.5 ◐ Advanced text & editing.** A real rich-text document model (styles, lists, tables, links, images), selection that spans widgets, find/replace, spell-check hooks, variable-font axis controls, and CRDT-ready edit hooks for future collaboration. *Accept:* rich-editor test triple; cross-widget selection + find/replace driven by the agent.
+*(◐: `RichDoc` = bold/italic runs + find/replace + cross-selection; lists/tables/links/images/spell-check/axes/CRDT absent, and the `rich_text_editor` widget doesn't use RichDoc. Plan M.4.)*
+**T6.6 ◐ Performance at scale.** Multi-threaded layout, on-device GPU damage/partial redraw, a memory profiler + leak gate, and CI enforcement of the remaining `01 §9` budgets (cold start <300 ms desktop / <800 ms mobile, hello-world <5 MB). *Accept:* a 100k-node scene + all `01 §9` budgets gated in CI on the reference runners.
+*(◐: perf_gate (5 budgets incl. 100k cull) runs in CI. Multi-threaded layout **parked per ADR-R1** (backlog R4); GPU damage scissor planned (plan R.1); no memory/leak/cold-start gates (plan R.6); size gate prints without failing and hello is 22.1 MB vs <5 MB (plan R.4 + T.4 font subset).)*
+**M6-exit ◐:** a **media-rich, animated app** (video + SVG + shared-element navigation + a rich-text editor) holds 120 fps desktop / 60 fps mobile and passes every perf gate, agent-verified on desktop + both mobile emulators — added to the release gate.
+*(◐: `agent-gauntlet-media` runs headless-desktop with the stub video source; frame budget is wall-clocked around `pump` (app.perf is stubbed); no mobile legs.)*
 
 ---
 
@@ -149,12 +178,18 @@ that doesn't just build UIs but **operates** them (repairs regressions, imports
 designs, certifies a11y) autonomously. Culminates in the 2.0 release. New ADRs:
 distribution/signing; plugin ABI; the ADR-014 hot-patching-linker tier-2 slot.*
 
-**T7.1 ☑ Distribution & packaging.** `lumen package` → per-OS installers/bundles (msix/dmg/AppImage/apk/ipa), code signing + notarization, delta auto-update, an asset-optimization pipeline, reproducible builds, and binary-size + supply-chain (`cargo-deny`/SBOM) gates. *Accept:* signed, installable artifacts produced per platform; the agent triggers a versioned release end-to-end.
-**T7.2 ☑ Plugin & widget ecosystem.** Third-party `Widget` distribution over a stable ABI; `lumen add <widget>`; a Storybook-class component gallery app (self-testing); semver-checked widget APIs; doc generation. *Accept:* an external widget crate is installed and driven by the agent unmodified; the gallery drives every widget through its own self-test.
-**T7.3 ☑ Production hardening.** Error boundaries + panic recovery scoped to UI subtrees, crash/diagnostic reporting hooks, opt-in privacy-respecting telemetry, a security review, and fuzzing of the `.lss`/agent/asset parsers. *Accept:* an injected panic is contained to its subtree and reported as a structured diagnostic (app stays alive); parser fuzz gate green.
-**T7.4 ☑ Accessibility certification.** Real VoiceOver / NVDA / Orca driven in CI (not just AccessKit-tree diffs), a WCAG 2.2 AA audit with automated checks where possible, a11y of the inspector + agent themselves, and localized accessibility. *Accept:* screen-reader smoke tests pass in CI on 3 OSes; the WCAG checklist is automated where automatable and signed off where manual.
-**T7.5 ☑ AI-native frontier.** An agent **auto-repair loop** (detect a regression → localize it via diagnostics + traces → patch → verify, unattended); the ADR-014 function-level hot-patching linker slotted in as an upgraded tier 2 (checkpoint protocol unchanged); design-import (Figma/Sketch → `.lss` + widgets) with agent reconciliation; self-describing components for agent authoring. *Accept:* the agent autonomously repairs an **injected functional regression** end-to-end with zero human edits; a design-import round-trips to a styled screen.
-**M7-exit ☑ (2.0 release gate):** the grand gauntlet — an agent, given only the CLI + lumen-agent, **ships a complete production app** across all five platforms (desktop ×3 + web + mobile ×2): signed/notarized and installable, screen-reader-certified, localized (RTL+LTR), extended with a third-party plugin, with media + motion; it then **auto-repairs an injected regression** and re-ships — the entire pipeline green, zero human intervention, as `examples/agent-gauntlet-2/` and the 2.0 release gate.
+**T7.1 ◐ Distribution & packaging.** `lumen package` → per-OS installers/bundles (msix/dmg/AppImage/apk/ipa), code signing + notarization, delta auto-update, an asset-optimization pipeline, reproducible builds, and binary-size + supply-chain (`cargo-deny`/SBOM) gates. *Accept:* signed, installable artifacts produced per platform; the agent triggers a versioned release end-to-end.
+*(◐: one portable unsigned `.bundle/` dir + manifest; apk via script; cargo-deny in CI. No installers/signing/notarization/auto-update/SBOM — backlog C3; plan E.1 (AppImage first).)*
+**T7.2 ◐ Plugin & widget ecosystem.** Third-party `Widget` distribution over a stable ABI; `lumen add <widget>`; a Storybook-class component gallery app (self-testing); semver-checked widget APIs; doc generation. *Accept:* an external widget crate is installed and driven by the agent unmodified; the gallery drives every widget through its own self-test.
+*(◐: source-level `LeafWidget` trait + in-repo plugin example real; `lumen add` appends `crate = "*"`; no stable ABI/registry. ADR-W1 blesses the source-level story; plan E.2.)*
+**T7.3 ◐ Production hardening.** Error boundaries + panic recovery scoped to UI subtrees, crash/diagnostic reporting hooks, opt-in privacy-respecting telemetry, a security review, and fuzzing of the `.lss`/agent/asset parsers. *Accept:* an injected panic is contained to its subtree and reported as a structured diagnostic (app stays alive); parser fuzz gate green.
+*(◐: panic containment real (boundary + E0701). No fuzz targets, no crash-report hook; telemetry not planned (privacy stance). Plan E.3.)*
+**T7.4 ✗ Accessibility certification.** Real VoiceOver / NVDA / Orca driven in CI (not just AccessKit-tree diffs), a WCAG 2.2 AA audit with automated checks where possible, a11y of the inspector + agent themselves, and localized accessibility. *Accept:* screen-reader smoke tests pass in CI on 3 OSes; the WCAG checklist is automated where automatable and signed off where manual.
+*(✗: no AT automation anywhere; `docs/a11y-checklist.md` itself marks the AT runner PENDING. The WCAG automated checks (contrast/name audits) exist and run headless. Depends on T4.3's adapter — plan P.4.)*
+**T7.5 ◐ AI-native frontier.** An agent **auto-repair loop** (detect a regression → localize it via diagnostics + traces → patch → verify, unattended); the ADR-014 function-level hot-patching linker slotted in as an upgraded tier 2 (checkpoint protocol unchanged); design-import (Figma/Sketch → `.lss` + widgets) with agent reconciliation; self-describing components for agent authoring. *Accept:* the agent autonomously repairs an **injected functional regression** end-to-end with zero human edits; a design-import round-trips to a styled screen.
+*(◐: the auto-repair loop is real and gated (agent-gauntlet-2, zero human edits). The hot-patching linker and design-import do not exist.)*
+**M7-exit ◐ (2.0 release gate):** the grand gauntlet — an agent, given only the CLI + lumen-agent, **ships a complete production app** across all five platforms (desktop ×3 + web + mobile ×2): signed/notarized and installable, screen-reader-certified, localized (RTL+LTR), extended with a third-party plugin, with media + motion; it then **auto-repairs an injected regression** and re-ships — the entire pipeline green, zero human intervention, as `examples/agent-gauntlet-2/` and the 2.0 release gate.
+*(◐: `agent-gauntlet-2` proves the headless slice (RTL, WCAG audits, plugin widget, auto-repair) on one OS; "signed/notarized", "screen-reader-certified", and the five-platform legs are not exercised — see T7.1/T7.4/T3.x/T5.1 notes.)*
 
 ---
 
