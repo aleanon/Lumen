@@ -172,3 +172,158 @@ fn parse_holes(s: &str) -> Result<(String, Vec<Ident>), String> {
     }
     Ok((out, idents))
 }
+
+/// `#[lumen_test::test]` (05 §1): turn `async fn t(app: TestApp) { … }` into a
+/// synchronous `#[test]` that constructs the app under test and drives the
+/// body on the harness executor (`lumen_test::block_on`).
+///
+/// Options (comma-separated):
+/// - `size(w, h)` — window size in logical px (default `800, 600`)
+/// - `scale(f)` — HiDPI factor (default `1.0`)
+/// - `theme(light | dark | high-contrast)` — default `light`
+/// - `app(expr)` — the `App` constructor expression; defaults to
+///   `main_app()`, which must be in scope (`use my_app::main_app;` — the
+///   `lumen new` convention)
+/// - `platform(name)` — marks the test `#[ignore]` (platform runners are
+///   orchestrated externally; run explicitly with `--ignored`)
+///
+/// ```ignore
+/// #[lumen_test::test(size(390, 844), theme(dark))]
+/// async fn mobile_checkout(mut app: TestApp) {
+///     app.pump_until_idle().await;
+///     app.locator("#buy").click().await.unwrap();
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn test(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let func = parse_macro_input!(item as syn::ItemFn);
+    if func.sig.asyncness.is_none() {
+        return syn::Error::new(
+            func.sig.span(),
+            "#[lumen_test::test] requires an `async fn`",
+        )
+        .to_compile_error()
+        .into();
+    }
+    if func.sig.inputs.len() != 1 {
+        return syn::Error::new(
+            func.sig.span(),
+            "#[lumen_test::test] body takes exactly one parameter: `app: TestApp`",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    let mut width = 800.0f64;
+    let mut height = 600.0f64;
+    let mut scale = 1.0f64;
+    let mut theme = String::from("light");
+    let mut app_expr: Expr = syn::parse_quote!(main_app());
+    let mut platform: Option<String> = None;
+
+    if !attr.is_empty() {
+        let metas = parse_macro_input!(
+            attr with syn::punctuated::Punctuated::<syn::Meta, Token![,]>::parse_terminated
+        );
+        for meta in metas {
+            let syn::Meta::List(list) = meta else {
+                return syn::Error::new(
+                    meta.span(),
+                    "expected `name(…)` options: size(w, h), scale(f), theme(t), app(expr), platform(p)",
+                )
+                .to_compile_error()
+                .into();
+            };
+            let name = list
+                .path
+                .get_ident()
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            match name.as_str() {
+                "size" => {
+                    let nums: syn::punctuated::Punctuated<syn::Lit, Token![,]> =
+                        match list.parse_args_with(syn::punctuated::Punctuated::parse_terminated) {
+                            Ok(n) => n,
+                            Err(e) => return e.to_compile_error().into(),
+                        };
+                    let vals: Vec<f64> = nums.iter().filter_map(lit_f64).collect();
+                    if vals.len() != 2 {
+                        return syn::Error::new(list.span(), "size takes two numbers: size(w, h)")
+                            .to_compile_error()
+                            .into();
+                    }
+                    width = vals[0];
+                    height = vals[1];
+                }
+                "scale" => {
+                    let lit: syn::Lit = match list.parse_args() {
+                        Ok(l) => l,
+                        Err(e) => return e.to_compile_error().into(),
+                    };
+                    match lit_f64(&lit) {
+                        Some(v) => scale = v,
+                        None => {
+                            return syn::Error::new(list.span(), "scale takes a number")
+                                .to_compile_error()
+                                .into()
+                        }
+                    }
+                }
+                "theme" => theme = list.tokens.to_string().replace(' ', ""),
+                "app" => {
+                    app_expr = match list.parse_args() {
+                        Ok(e) => e,
+                        Err(e) => return e.to_compile_error().into(),
+                    }
+                }
+                "platform" => platform = Some(list.tokens.to_string()),
+                other => {
+                    return syn::Error::new(
+                        list.span(),
+                        format!("unknown option `{other}` (size/scale/theme/app/platform)"),
+                    )
+                    .to_compile_error()
+                    .into();
+                }
+            }
+        }
+    }
+
+    let name = &func.sig.ident;
+    let vis = &func.vis;
+    let theme_lit = LitStr::new(&theme, proc_macro2::Span::call_site());
+    let ignore_attr = platform.map(|p| {
+        let reason = LitStr::new(
+            &format!("platform runner required: {p}"),
+            proc_macro2::Span::call_site(),
+        );
+        quote!(#[ignore = #reason])
+    });
+
+    quote! {
+        #[test]
+        #ignore_attr
+        #vis fn #name() {
+            #func
+            ::lumen_test::block_on(async {
+                let __app = ::lumen_test::TestApp::with_config(
+                    #app_expr,
+                    ::lumen_test::Size::new(#width, #height),
+                    #scale,
+                    #theme_lit,
+                );
+                #name(__app).await;
+            });
+        }
+    }
+    .into()
+}
+
+/// A numeric literal (int or float) as `f64`.
+fn lit_f64(lit: &syn::Lit) -> Option<f64> {
+    match lit {
+        syn::Lit::Int(i) => i.base10_parse::<f64>().ok(),
+        syn::Lit::Float(f) => f.base10_parse::<f64>().ok(),
+        _ => None,
+    }
+}

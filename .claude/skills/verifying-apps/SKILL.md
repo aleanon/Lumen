@@ -37,9 +37,11 @@ block_on(async {
 });
 ```
 
-**Reality checks (as of 2026-07; plan T.1/T.2 close these):**
-- There is **no `#[lumen::test]` macro** — write `#[test]` + the crate's
-  `block_on` helper (copy a neighbour, e.g. `examples/hello/tests/m0_exit.rs`).
+**Reality checks (as of 2026-07; plan T.2 closes the rest):**
+- **`#[lumen_test::test]` exists (T.1)**: `async fn t(mut app: TestApp)`
+  with options `size(w, h)`, `scale(f)`, `theme(dark)`, `app(expr)`
+  (default: `main_app()` in scope), `platform(name)` (⇒ `#[ignore]`).
+  The manual `#[test]` + `block_on` form remains fine.
 - **Only `to_have_text` auto-retries.** Every other `expect` method
   (`to_exist`, `to_have_value`, `to_have_state`, …) is one-shot and its
   `Timeout` error just means "false right now". For anything async/animated,

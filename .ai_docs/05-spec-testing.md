@@ -5,13 +5,19 @@ Playwright-class testing for Lumen apps. Runs the real app headless on the CPU r
 ## 1. Entry points
 
 ```rust
-#[lumen::test]                       // headless, 800×600 @1x, light theme, "en-US" locale
-async fn checkout_flow(app: TestApp) { … }
+#[lumen_test::test]                  // headless, 800×600 @1x, light theme
+async fn checkout_flow(mut app: TestApp) { … }
 
-#[lumen::test(size(390, 844), scale(3.0), theme(dark), platform(ios_sim))]
-async fn mobile_checkout(app: TestApp) { … }
+#[lumen_test::test(size(390, 844), scale(3.0), theme(dark), platform(ios_sim))]
+async fn mobile_checkout(mut app: TestApp) { … }
 ```
-The macro builds the app under test from the crate's `fn main_app() -> App` (convention: examples and apps expose this; `lumen new` scaffolds it). `platform(...)` values beyond `headless` require the corresponding runner and are `#[ignore]`d otherwise.
+The macro (shipped T.1, 2026-07-09; the attribute path is
+`lumen_test::test`, not the earlier `lumen::test` — user test code depends
+on `lumen-test` directly) builds the app under test from `main_app()` in
+scope (`use my_app::main_app;` — the `lumen new` convention), or an explicit
+`app(expr)` option. `platform(...)` marks the test `#[ignore]` (platform
+runners are orchestrated externally; run with `--ignored`). Construction
+path: `TestApp::with_config(app, size, scale, theme)`.
 
 ## 2. API surface
 

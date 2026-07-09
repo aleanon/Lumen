@@ -8,7 +8,7 @@
 //! (to_exist/to_have_text), virtual clock, and exact-golden `expect_screenshot`.
 #![warn(missing_docs)]
 
-use kurbo::{Rect, Size};
+use kurbo::Rect;
 use lumen_core::events::{Event, Key, NamedKey, PointerEvent, TextInputEvent};
 use lumen_core::semantics::{resolve_one, ResolveError, SemanticsNode};
 use lumen_render::RgbaImage;
@@ -19,6 +19,12 @@ use std::rc::Rc;
 mod runtime;
 pub mod session;
 pub mod trace;
+/// Re-exported so `#[lumen_test::test]` expansions (and test code) can name
+/// the window size without importing kurbo.
+pub use kurbo::Size;
+/// The `#[lumen_test::test]` attribute (05 §1): async test body + per-test
+/// size/scale/theme/app options over the `main_app()` convention.
+pub use lumen_macros::test;
 pub use runtime::block_on;
 pub use session::Session;
 pub use trace::Tracer;
@@ -115,7 +121,16 @@ impl TestApp {
     /// Run `app` headless at `size` with theme `"light"|"dark"|"high-contrast"`
     /// (per-test config, 05 §1).
     pub fn with_options(app: App, size: Size, theme: &str) -> TestApp {
+        TestApp::with_config(app, size, 1.0, theme)
+    }
+
+    /// Full per-test config (05 §1; the `#[lumen_test::test]` construction
+    /// path): logical `size`, HiDPI `scale`, and theme.
+    pub fn with_config(app: App, size: Size, scale: f64, theme: &str) -> TestApp {
         let t = TestApp::with_size(app, size);
+        if (scale - 1.0).abs() > f64::EPSILON {
+            t.inner.borrow_mut().set_scale(scale);
+        }
         t.inner.borrow_mut().set_theme_str(theme);
         t
     }
