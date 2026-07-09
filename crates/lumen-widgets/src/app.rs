@@ -182,6 +182,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             node_computed: HashMap::new(),
             style_env: None,
             scope_spans: HashMap::new(),
+            desc_stack: Vec::new(),
             frame_ms: std::collections::VecDeque::new(),
             frames_rendered: 0,
             menu: crate::system::MenuModel::default(),
@@ -297,9 +298,12 @@ struct DepEntry {
 /// Per-rebuild style-resolution environment (A.2): the cascade sources and
 /// token table, computed once per rebuild and consumed inline by
 /// `build_node` so `.lss` layout properties reach taffy *before* layout.
+/// B.2: also carries the live [`lumen_style::MediaContext`] so `@media`
+/// blocks gate on the real window instead of applying unconditionally.
 struct StyleEnv {
     sources: [lumen_style::StyleSource; 1],
     tokens: lumen_style::Tokens,
+    media: lumen_style::MediaContext,
 }
 
 struct NodeMeta {
@@ -415,6 +419,10 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// A.3.1: per-rebuild scope→node-span map (scope key → subtree root +
     /// preorder node count). The retained-graph splice replaces these spans.
     scope_spans: HashMap<String, (NodeIndex, u32)>,
+    /// B.1: the ancestor descriptors of the element currently being lowered
+    /// (root-first), fed to `resolve_with_ancestors` so descendant/`>`
+    /// selectors match correctly. Maintained by `build_node`'s recursion.
+    desc_stack: Vec<lumen_style::NodeDesc>,
     /// C.2: rolling per-painted-frame pump durations in ms (cap 120) + total
     /// painted frames — the agent's `app.perf`. Diagnostic only (never feeds
     /// rendering); not recorded on wasm (no `Instant`).
@@ -1445,12 +1453,38 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.node_style.clear();
         self.node_computed.clear();
         self.scope_spans.clear();
+        self.desc_stack.clear();
         self.style_env = self.app_sheet.as_ref().map(|sheet| StyleEnv {
             sources: [lumen_style::StyleSource {
                 origin: lumen_style::Origin::App,
                 sheet: sheet.clone(),
             }],
             tokens: lumen_style::tokens_for(sheet, self.theme),
+            media: lumen_style::MediaContext {
+                width: self.size.width,
+                height: self.size.height,
+                scale: self.scale,
+                platform: if cfg!(target_os = "windows") {
+                    "windows"
+                } else if cfg!(target_os = "macos") {
+                    "macos"
+                } else if cfg!(target_os = "android") {
+                    "android"
+                } else if cfg!(target_os = "ios") {
+                    "ios"
+                } else {
+                    "linux"
+                }
+                .to_string(),
+                // Desktop shells synthesize mouse pointers; the mobile
+                // shells flip this to "touch" when they wire input (P.1).
+                pointer: if cfg!(any(target_os = "android", target_os = "ios")) {
+                    "touch"
+                } else {
+                    "mouse"
+                }
+                .to_string(),
+            },
         });
 
         let mut tree = Tree::new();
@@ -1806,7 +1840,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 states,
                 ty: el.role.as_str().to_string(),
             };
-            let computed = lumen_style::resolve(&env.sources, &desc);
+            // B.1: the recursion's ancestor chain makes descendant/`>`
+            // selectors real (previously only the rightmost compound was
+            // checked — `dialog button` matched every button). B.2: the live
+            // media context gates `@media` blocks on the actual window.
+            let computed = lumen_style::resolve_with_ancestors(
+                &env.sources,
+                &desc,
+                &self.desc_stack,
+                &env.media,
+            );
             let mut css = lumen_style::Style::new();
             let mut resolved = HashMap::new();
             for (prop, c) in &computed {
@@ -1849,7 +1892,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             }
             self.node_style.insert(node, css);
             self.node_computed.insert(node, resolved);
+            // B.1: this node becomes an ancestor for its children's matching
+            // (popped after the recursion below).
+            self.desc_stack.push(desc);
         }
+        let pushed_desc = self.style_env.is_some();
 
         // Text nodes get a fixed size from measurement.
         let mut style = el.style;
@@ -1905,6 +1952,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .into_iter()
             .map(|c| self.build_node(c, tree, layout, meta, built, Some(node), this_overlay))
             .collect();
+        if pushed_desc {
+            self.desc_stack.pop();
+        }
         let child_lnodes: Vec<LayoutNode> = child_built.iter().map(|(_, l)| *l).collect();
         let lnode = if child_lnodes.is_empty() {
             layout.leaf(style)

@@ -39,7 +39,10 @@ padding/margin/border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 | `color: <color>` | text color |
 | `backdrop-filter: blur(8px) saturate(1.2) refraction(2) specular(0.5)` | full glass stack (refraction/specular are Lumen extensions) |
 | `@tokens { … }` / `@theme light|dark { … }` / `$token` | full token resolution, theme-scoped first |
-| Specificity, `!important`, selector grammar (`#id .class role :state`, `>`, `:text(…)`, `:has(…)`, `:nth(n)`) | matches over the widget tree |
+| **Nested rules** `&:hovered { … }` / `&.class { … }` / `& > .part { … }` | flattened at parse into real rules with correct specificity (B.1) |
+| Descendant/child combinators (`.card .btn`, `#x > .y`) | match the **real ancestor chain** since B.1 — before that only the rightmost compound was checked, so `dialog button` hit every button |
+| `@media (width < 500) { … }` etc. | gates on the **live window** since B.2 (width/height/scale/platform/pointer); resizing re-resolves. Confirm with `ui.getStyles` after a resize |
+| Specificity, `!important`, selector grammar (`#id .class role :state`, `:text(…)`, `:has(…)`, `:nth(n)`) | cascade order per 04 §2 |
 
 Colors: `#rgb/#rrggbb/#rrggbbaa`, `rgb(r g b)` (no alpha arg), `oklch(L C H)`
 numeric only.
@@ -56,10 +59,8 @@ numeric only.
   `selection-color` (B.4). Use Rust `TextStyle`/`Label` setters instead.
 - `transition:` / `animation:` / `@keyframes` — parsed, never played (B.5).
   Motion comes from Rust: `motion::spring` + `cx.animate()`.
-- **Nested rules** `& { … }` — parsed and **dropped** (B.1). Write flat
-  rules: `button.primary:hovered { … }`, not `&:hover` nesting.
-- **`@media`** — the rules inside apply **unconditionally** regardless of
-  window size/platform (B.2). Don't use it to branch; it can only mislead.
+- `@media container(...)` — parse error until B.2b (window-level `@media`
+  works — see the works table).
 - Relative colors `oklch(from $x calc(…) …)` — parse error (B.7).
 - Widget parts (`slider .track`) — no widget exposes parts yet (B.7).
 

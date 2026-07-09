@@ -2082,6 +2082,7 @@ version = "0.0.0"
 dependencies = [
  "libloading",
  "lumen",
+ "lumen-agent",
  "lumen-core",
  "lumen-style",
  "lumen-widgets",
@@ -2200,6 +2201,7 @@ dependencies = [
  "kurbo",
  "lumen",
  "lumen-core",
+ "lumen-macros",
  "lumen-render",
  "lumen-widgets",
  "serde_json",

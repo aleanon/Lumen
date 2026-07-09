@@ -10,3 +10,4 @@ Cargo.lock.orig
 # editor / OS
 .DS_Store
 *.swp
+__pycache__/

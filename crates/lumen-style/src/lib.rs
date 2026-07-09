@@ -64,17 +64,61 @@ pub struct NodeDesc {
 }
 
 impl NodeDesc {
-    /// Whether `selector`'s rightmost compound matches this node.
-    ///
-    /// Ancestor combinators are not evaluated here (the cascade table operates
-    /// on a single node); the full ancestor walk lives in the runtime styler.
+    /// Whether `selector` matches this node with **no** ancestors — i.e.
+    /// single-compound selectors only. Prefer
+    /// [`matches_chain`](Self::matches_chain); kept for the cascade tests.
     pub fn matches(&self, selector: &Selector) -> bool {
+        self.matches_chain(selector, &[])
+    }
+
+    /// Whether `selector` matches this node given its `ancestors`
+    /// (root-first, nearest parent last) — real descendant/`>` combinator
+    /// matching, right-to-left (B.1). Before B.1 only the rightmost compound
+    /// was checked, so `dialog button` matched *any* button.
+    pub fn matches_chain(&self, selector: &Selector, ancestors: &[NodeDesc]) -> bool {
         let target = selector
             .rest
             .last()
             .map(|(_, c)| c)
             .unwrap_or(&selector.first);
-        target.parts.iter().all(|p| self.matches_part(p))
+        if !compound_matches(self, target) {
+            return false;
+        }
+        // Remaining compounds, right-to-left: rest[i].0 joins compound i to
+        // i+1, so walking down pairs each earlier compound with the
+        // combinator on its right.
+        let mut chain: Vec<(&Compound, Combinator)> = Vec::new();
+        {
+            let mut prev = &selector.first;
+            for (comb, comp) in &selector.rest {
+                chain.push((prev, *comb));
+                prev = comp;
+            }
+        }
+        let mut idx = ancestors.len(); // position just above `self`
+        for (comp, comb) in chain.into_iter().rev() {
+            match comb {
+                Combinator::Child => {
+                    if idx == 0 {
+                        return false;
+                    }
+                    idx -= 1;
+                    if !compound_matches(&ancestors[idx], comp) {
+                        return false;
+                    }
+                }
+                Combinator::Descendant => loop {
+                    if idx == 0 {
+                        return false;
+                    }
+                    idx -= 1;
+                    if compound_matches(&ancestors[idx], comp) {
+                        break;
+                    }
+                },
+            }
+        }
+        true
     }
 
     fn matches_part(&self, p: &Part) -> bool {
@@ -86,6 +130,10 @@ impl NodeDesc {
             Part::Type(s) => &self.ty == s,
         }
     }
+}
+
+fn compound_matches(node: &NodeDesc, compound: &Compound) -> bool {
+    compound.parts.iter().all(|p| node.matches_part(p))
 }
 
 /// The computed value of a property plus the cascade key that won it.
@@ -109,21 +157,39 @@ struct CascadeKey {
 
 /// Resolve the cascade for `node` over `sources` (04 §2): `!important` beats
 /// everything, then origin, then specificity `(id, class+state, type)`, then
-/// source order. Returns the winning value per property.
+/// source order. Returns the winning value per property. Ancestor-free and
+/// evaluated against the default [`MediaContext`] — see
+/// [`resolve_with_ancestors`] for the runtime's full form (B.1/B.2).
 pub fn resolve(sources: &[StyleSource], node: &NodeDesc) -> HashMap<String, Computed> {
+    resolve_with_ancestors(sources, node, &[], &MediaContext::default())
+}
+
+/// [`resolve`], with `node`'s ancestor chain (root-first) so descendant/`>`
+/// selectors match correctly (B.1), and the live [`MediaContext`] so
+/// `@media` blocks gate on the real window (B.2 — previously their rules
+/// applied unconditionally). The runtime styler threads both.
+pub fn resolve_with_ancestors(
+    sources: &[StyleSource],
+    node: &NodeDesc,
+    ancestors: &[NodeDesc],
+    ctx: &MediaContext,
+) -> HashMap<String, Computed> {
     let mut winners: HashMap<String, (CascadeKey, Computed)> = HashMap::new();
     let mut source = 0usize;
 
     for src in sources {
-        for rule in rules_of(&src.sheet) {
-            let matched = rule.selectors.iter().any(|s| node.matches(s));
+        for rule in rules_in_ctx(&src.sheet, ctx) {
+            let matched = rule
+                .selectors
+                .iter()
+                .any(|s| node.matches_chain(s, ancestors));
             if !matched {
                 continue;
             }
             let specificity = rule
                 .selectors
                 .iter()
-                .filter(|s| node.matches(s))
+                .filter(|s| node.matches_chain(s, ancestors))
                 .map(|s| s.specificity())
                 .max()
                 .unwrap_or_default();
@@ -299,18 +365,4 @@ pub fn tokens_for(sheet: &Stylesheet, theme: ThemeKind) -> Tokens {
         }
     }
     t
-}
-
-/// All top-level rules of a stylesheet (media rules are flattened in; their
-/// queries are evaluated by the runtime, not the cascade table).
-fn rules_of(sheet: &Stylesheet) -> Vec<&Rule> {
-    let mut out = Vec::new();
-    for item in &sheet.items {
-        match item {
-            Item::Rule(r) => out.push(r),
-            Item::Media(_, rules) => out.extend(rules.iter()),
-            _ => {}
-        }
-    }
-    out
 }

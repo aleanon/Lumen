@@ -23,9 +23,75 @@ pub fn parse(file: &str, src: &str) -> (Stylesheet, Vec<Diagnostic>) {
         defined: HashSet::new(),
         var_uses: Vec::new(),
     };
-    let sheet = p.stylesheet();
+    let mut sheet = p.stylesheet();
     p.validate_vars();
+    expand_nested(&mut sheet);
     (sheet, p.diags)
+}
+
+/// B.1: flatten nested `&` rules into standalone rules so the cascade and
+/// (chain-)matcher see plain selectors — `#x { &:hovered { … } }` becomes
+/// `#x:hovered { … }`, and `& > .thumb` becomes `#x > .thumb`. Specificity
+/// then falls out of the synthesized selector. Applied to every rule
+/// container (top level and `@media` blocks).
+fn expand_nested(sheet: &mut Stylesheet) {
+    fn expand_rules(rules: &mut Vec<Rule>) {
+        let mut flattened = Vec::new();
+        for rule in rules.iter_mut() {
+            for nested in rule.nested.drain(..) {
+                let selectors = rule
+                    .selectors
+                    .iter()
+                    .map(|s| {
+                        let mut s = s.clone();
+                        if nested.child {
+                            s.rest.push((
+                                crate::ast::Combinator::Child,
+                                crate::ast::Compound {
+                                    parts: nested.parts.clone(),
+                                },
+                            ));
+                        } else {
+                            let target = s.rest.last_mut().map(|(_, c)| c).unwrap_or(&mut s.first);
+                            target.parts.extend(nested.parts.iter().cloned());
+                        }
+                        s
+                    })
+                    .collect();
+                flattened.push(Rule {
+                    selectors,
+                    declarations: nested.declarations,
+                    nested: Vec::new(),
+                });
+            }
+        }
+        rules.extend(flattened);
+    }
+    let mut top = Vec::new();
+    for item in &mut sheet.items {
+        match item {
+            Item::Rule(r) => top.push(r),
+            Item::Media(_, rules) => expand_rules(rules),
+            _ => {}
+        }
+    }
+    // Top-level rules live as individual items — expand into new items.
+    let mut new_rules = Vec::new();
+    for rule in top {
+        let mut single = vec![std::mem::replace(
+            rule,
+            Rule {
+                selectors: Vec::new(),
+                declarations: Vec::new(),
+                nested: Vec::new(),
+            },
+        )];
+        expand_rules(&mut single);
+        let mut it = single.into_iter();
+        *rule = it.next().expect("original rule");
+        new_rules.extend(it);
+    }
+    sheet.items.extend(new_rules.into_iter().map(Item::Rule));
 }
 
 struct Parser {
@@ -275,6 +341,13 @@ impl Parser {
 
     fn nested_rule(&mut self) -> NestedRule {
         self.bump(); // &
+                     // B.1: `& > part+` nests a *child* compound (`slider > .thumb`).
+        let child = if self.at(&Tk::Gt) {
+            self.bump();
+            true
+        } else {
+            false
+        };
         let mut parts = Vec::new();
         while let Some(part) = self.part() {
             parts.push(part);
@@ -284,6 +357,7 @@ impl Parser {
         self.expect(Tk::RBrace, "`}`");
         NestedRule {
             parts,
+            child,
             declarations: decls,
         }
     }

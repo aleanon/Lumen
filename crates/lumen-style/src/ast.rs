@@ -75,11 +75,15 @@ pub struct Rule {
     pub nested: Vec<NestedRule>,
 }
 
-/// A nested `& part+ { … }` rule.
+/// A nested `& part+ { … }` (or `& > part+ { … }`) rule.
 #[derive(Clone, Debug)]
 pub struct NestedRule {
-    /// Parts appended to `&` (the parent).
+    /// Parts appended to `&` (the parent) — or, when `child`, the parts of a
+    /// new child compound (`& > .thumb`).
     pub parts: Vec<Part>,
+    /// `& > part+`: the parts form a child compound instead of extending the
+    /// parent's (B.1).
+    pub child: bool,
     /// Declarations.
     pub declarations: Vec<Declaration>,
 }

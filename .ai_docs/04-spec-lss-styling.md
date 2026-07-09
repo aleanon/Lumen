@@ -9,11 +9,17 @@
 > `flex-direction`, `width`, `height`, `gap`, `padding`, `margin`
 > (whole-side) — are real; the rest of the layout set (per-side, flex-*,
 > justify/align, min/max, grid tracks, position/inset, overflow) lands with
-> Phase B. Still true until B: `@media` rules apply **unconditionally**;
-> nested `&` rules parse but are **dropped**; `transition:`/`animation:`
-> are **unwired** (no keyframe playback); runtime state selectors are only
-> `focused`/`hovered` (write `:hovered`, not `:hover`). See §10 for the
-> per-property table. Authoring guidance lives in the `styling-lss` skill.
+> Phase B. **Nested `&` rules apply since B.1** (flattened at parse; `& >
+> part+` supported), and descendant/`>` combinators now match against the
+> real ancestor chain — previously only the rightmost compound was checked,
+> so `dialog button` matched every button. **`@media` gates on the live
+> window since B.2** (width/height/scale/platform/pointer from the real
+> context; resize re-resolves). Still true until the rest of B:
+> `@media container(...)` is a parse error (B.2b); `transition:`/
+> `animation:` are **unwired** (no keyframe playback, B.5); runtime state
+> selectors are only `focused`/`hovered` (write `:hovered`, not `:hover` —
+> B.6). See §10 for the per-property table. Authoring guidance lives in the
+> `styling-lss` skill.
 
 ## 1. Grammar (EBNF)
 
@@ -107,12 +113,16 @@ Plan tasks: layout → A.2, visual/typography → B.3/B.4, motion → B.5.
 | **parse-only** | remaining layout (`flex-wrap/grow/shrink/basis`, `justify-*`, `align-*`, `row/column-gap`, `grid-*` (track lists unparsed), `min/max-*`, `aspect-ratio`, `position`, `inset`, `overflow`, per-side `padding-*`/`margin-*`/`border-*`), background gradients, `shadow`, `blend-mode`, `filter`, `clip`, `transform(-origin)`, `z-index`, `visibility`, `cursor`, `font-family/style/features/variation`, `line-height`, `letter-spacing`, `text-align/overflow/wrap/decoration`, `selection-color`, `transition`, `animation`, `animation-force` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
-+ `!important` **work**; nested `&` rules **dropped** (B.1); `@media`
-**unconditional** (engine exists, unwired — B.2); `@media container(...)`
-**parse error** (B.2); relative colors `oklch(from …)` **unsupported**
-(B.7); theme-switch animation **missing** (B.5); widget parts
-(`slider .track`, `cx.part`) **missing** (B.7); cascade origins other than
-the app sheet **unreachable** (B.6); `style_parity!` covers 11 hand-picked
-properties, not set equality (B.7); `get_styles` serialization lacks `span`
-and only reaches the `stylesheet` source (B.7). This section is deleted
-when Phase B completes and the spec becomes unconditionally normative.
++ `!important` **work**; nested `&` rules **applied** (B.1 ✅ — flattened at
+parse, incl. `& > part+`); descendant/`>` combinators **match the real
+ancestor chain** (B.1 ✅ — the last-compound-only over-match is fixed);
+`@media` **gates on the live window** (B.2 ✅ — width/height/scale/
+platform/pointer; resize re-resolves); `@media container(...)` **parse
+error** (B.2b); relative colors `oklch(from …)`
+**unsupported** (B.7); theme-switch animation **missing** (B.5); widget
+parts (`slider .track`, `cx.part`) **missing** (B.7); cascade origins other
+than the app sheet **unreachable** (B.6); `style_parity!` covers 11
+hand-picked properties, not set equality (B.7); `get_styles` serialization
+lacks `span` and only reaches the `stylesheet` source (B.7). This section
+is deleted when Phase B completes and the spec becomes unconditionally
+normative.
