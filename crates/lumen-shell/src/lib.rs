@@ -153,6 +153,12 @@ fn watch_styles(path: &str, proxy: EventLoopProxy<ShellEvent>) {
 }
 
 /// Accept agent connections and bridge each request line onto the event loop.
+///
+/// C.8a: `LUMEN_AGENT_ADDR=127.0.0.1:0` binds an ephemeral port (parallel
+/// sessions never collide); the **bound** address is written to the discovery
+/// file — `$LUMEN_AGENT_ADDR_FILE`, or `target/lumen-agent.addr` — which
+/// `scripts/agent_client.py` reads automatically, and printed as a JSON ready
+/// line on stderr.
 #[cfg(feature = "agent")]
 fn serve_agent(addr: &str, proxy: EventLoopProxy<ShellEvent>) {
     let listener = match TcpListener::bind(addr) {
@@ -162,7 +168,20 @@ fn serve_agent(addr: &str, proxy: EventLoopProxy<ShellEvent>) {
             return;
         }
     };
-    eprintln!("lumen agent: listening on {addr} (newline-delimited JSON-RPC)");
+    let bound = listener
+        .local_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| addr.to_string());
+    let discovery = std::env::var("LUMEN_AGENT_ADDR_FILE")
+        .unwrap_or_else(|_| "target/lumen-agent.addr".to_string());
+    if let Some(dir) = std::path::Path::new(&discovery).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = std::fs::write(&discovery, &bound) {
+        eprintln!("lumen agent: cannot write discovery file {discovery}: {e}");
+    }
+    eprintln!("lumen agent: listening on {bound} (newline-delimited JSON-RPC)");
+    eprintln!("{{\"lumen_agent_ready\":true,\"addr\":\"{bound}\",\"discovery\":\"{discovery}\"}}");
     for stream in listener.incoming().flatten() {
         let proxy = proxy.clone();
         std::thread::spawn(move || agent_conn(stream, proxy));
@@ -247,6 +266,19 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 let resp = if let Some(h) = &mut self.headless {
                     let v = serde_json::from_str::<serde_json::Value>(&req)
                         .unwrap_or(serde_json::Value::Null);
+                    // C.8a: `app.quit` is a *shell* method (only the event
+                    // loop can exit) — reply, then shut down cleanly. No
+                    // more pkill teardown.
+                    if v.get("method").and_then(|m| m.as_str()) == Some("app.quit") {
+                        let id = v.get("id").cloned().unwrap_or(serde_json::Value::Null);
+                        let _ = reply.send(
+                            serde_json::json!({ "jsonrpc": "2.0", "id": id,
+                                                "result": { "ok": true } })
+                            .to_string(),
+                        );
+                        _el.exit();
+                        return;
+                    }
                     // C.3: route through the recording Session so the live
                     // window supports session.* (assert + exportTest).
                     self.agent_session.dispatch(h, &v).to_string()

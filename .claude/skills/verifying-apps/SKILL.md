@@ -155,16 +155,20 @@ The ones you'll actually use:
   compilable `lumen-test` source reproducing the run. Commit it as the
   regression test.
 
-### Port lifecycle
+### Port lifecycle (C.8a)
 
-- Readiness = the port accepting connections (`wait-port`). First launch
+- **Parallel-safe launch:** `just run-agent <name> 127.0.0.1:0` binds an
+  ephemeral port; the bound address lands in `target/lumen-agent.addr`
+  (override with `LUMEN_AGENT_ADDR_FILE`) and `agent_client.py` picks it
+  up automatically — no port bookkeeping.
+- Readiness = the port accepting connections (`wait-port`); the shell also
+  prints a `{"lumen_agent_ready":true, "addr":…}` line. First launch
   compiles in release — allow ~2 min cold.
-- One window per port; default `127.0.0.1:9230` (`just run-agent <name>
-  <addr>` to override when parallel).
-- **Teardown:** `pkill -x "<name>-win"` for names ≤15 chars. `pkill -f`
-  will match *your own shell* and kill it mid-script — if you must use
-  `-f`, bracket the pattern: `pkill -f "[a]ccordion-win"`. Confirm with
-  `pgrep` and that the port is closed.
+- **Teardown:** `just stop-agent <name>` — sends `app.quit` (clean event-
+  loop exit) and clears the discovery file; falls back to
+  `pkill -x "<name>-win"`. If you pkill manually, never `pkill -f` from a
+  script whose command line contains the pattern (it kills your own
+  shell) — bracket it: `pkill -f "[a]ccordion-win"`.
 
 ## Verifying *why* (the reactive layer)
 

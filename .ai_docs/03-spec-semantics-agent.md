@@ -166,14 +166,19 @@ WebSocket test path.
 
 ### 3.4 The live-window loop (operational contract)
 
-1. `just run-agent <name>` → poll the TCP port for readiness (no handshake;
-   port-0 + discovery file planned, C.8).
+1. `just run-agent <name> [addr]` — pass `127.0.0.1:0` for an ephemeral
+   port (parallel sessions never collide). The **bound** address is written
+   to the discovery file (`$LUMEN_AGENT_ADDR_FILE`, default
+   `target/lumen-agent.addr`) and printed as a JSON ready line;
+   `scripts/agent_client.py` reads the file automatically (C.8a).
 2. Observe (`ui.getTree` / screenshots / lint) → act (`input.*`) → **re-query
    to verify** (no auto-wait yet; poll until the expected state appears).
 3. Prefer structural assertions (`getTree` states, `getLayout`) over pixels;
    screenshots verify layout/appearance (note: the bundled font renders
    decorative glyphs as tofu — don't assert iconography from pixels).
-4. Teardown: `pkill -f "<name>-win"` (`app.quit` planned, C.8).
+4. Teardown: `just stop-agent [name]` — sends `app.quit` (a shell-level
+   method: replies then exits the event loop, C.8a), falling back to pkill;
+   clears the discovery file.
 
 ### 3.5 Planned (not yet implemented — do not call)
 
@@ -187,9 +192,10 @@ waiting shipped in C.1a) · `input.click` `{pos, button, count}` (C.4) ·
 `input.type {clear}` (C.4) · `input.scroll` `{dx, to}` (C.4) ·
 `ui.getTree {selector}` subtree (C.4) · `ui.screenshot` `{max_width}` (C.4)
 · MCP server + packaged client `lumen agent call` (C.5) · bearer-token auth
-(C.5) · CLI-hosted endpoint (`lumen agent serve`, C.8). *(Shipped since the
-re-ground: C.1a auto-wait + `ui.waitFor`; C.2 `app.logs` + real `app.perf`;
-C.3 live `session.*`, `node-N` selectors, readable resolver errors.)*
+(C.5) · CLI-hosted endpoint (`lumen agent serve`, C.8b). *(Shipped since
+the re-ground: C.1a auto-wait + `ui.waitFor`; C.2 `app.logs` + real
+`app.perf`; C.3 live `session.*`, `node-N` selectors, readable resolver
+errors; C.8a port-0 + discovery file + `app.quit` + `just stop-agent`.)*
 
 ## 4. Dev-loop wiring (per ADR-D2)
 

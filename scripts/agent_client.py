@@ -45,7 +45,22 @@ import socket
 import sys
 import time
 
-DEFAULT_ADDR = os.environ.get("LUMEN_AGENT_ADDR", "127.0.0.1:9230")
+def _default_addr() -> str:
+    """LUMEN_AGENT_ADDR, else the discovery file a `:0`-bound shell wrote
+    (C.8a), else the fixed default."""
+    if addr := os.environ.get("LUMEN_AGENT_ADDR"):
+        return addr
+    path = os.environ.get("LUMEN_AGENT_ADDR_FILE", "target/lumen-agent.addr")
+    try:
+        with open(path, encoding="utf-8") as f:
+            if addr := f.read().strip():
+                return addr
+    except OSError:
+        pass
+    return "127.0.0.1:9230"
+
+
+DEFAULT_ADDR = _default_addr()
 
 
 def _split(addr: str) -> tuple[str, int]:

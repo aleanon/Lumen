@@ -52,6 +52,19 @@ run-agent name addr="127.0.0.1:9230":
         cargo run -q --release -p iced-parity --example win --features lumen-shell/agent -- "$name"
     fi
 
+# Cleanly stop a `run-agent` window: ask it to quit over the protocol (falls back to pkill), and clear the discovery file.
+stop-agent name="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if python3 scripts/agent_client.py call app.quit 2>/dev/null | grep -q '"ok": true'; then
+        echo "agent window quit cleanly"
+    elif [[ -n "{{name}}" ]]; then
+        pkill -x "{{name}}-win" && echo "killed {{name}}-win" || echo "nothing to stop"
+    else
+        echo "endpoint unreachable; pass the example name: just stop-agent <name>" >&2
+    fi
+    rm -f target/lumen-agent.addr
+
 # Run an example headlessly (no window): binaries run their smoke main, gallery names render a frame to PNG, library examples run their tests. `just render list` shows the gallery. Pass `--wgpu` for a gallery name to rasterize the linear/GPU picture.
 render name *args:
     #!/usr/bin/env bash
