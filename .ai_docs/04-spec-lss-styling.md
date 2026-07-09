@@ -4,15 +4,16 @@
 
 > **⚠ Implementation status (2026-07-09, from the docs↔code audit).** This
 > spec describes the target language. The **parser** accepts essentially all
-> of it; the **runtime applies a subset**. Until remediation Phases A/B land
-> (`docs/plan-remediation-2026-07.md`): **layout properties do not reach
-> layout** (styles are computed after the layout pass — write layout in Rust
-> `LayoutStyle`, use `.lss` for colors/borders/backdrop); `@media` rules
-> apply **unconditionally**; nested `&` rules parse but are **dropped**;
-> `transition:`/`animation:` are **unwired** (no keyframe playback); runtime
-> state selectors are only `focused`/`hovered` (write `:hovered`, not
-> `:hover`). See §10 for the per-property table. Authoring guidance lives in
-> the `styling-lss` skill.
+> of it; the **runtime applies a subset**. Styles now resolve **before
+> layout** (remediation A.2), so the core layout properties — `display`,
+> `flex-direction`, `width`, `height`, `gap`, `padding`, `margin`
+> (whole-side) — are real; the rest of the layout set (per-side, flex-*,
+> justify/align, min/max, grid tracks, position/inset, overflow) lands with
+> Phase B. Still true until B: `@media` rules apply **unconditionally**;
+> nested `&` rules parse but are **dropped**; `transition:`/`animation:`
+> are **unwired** (no keyframe playback); runtime state selectors are only
+> `focused`/`hovered` (write `:hovered`, not `:hover`). See §10 for the
+> per-property table. Authoring guidance lives in the `styling-lss` skill.
 
 ## 1. Grammar (EBNF)
 
@@ -101,9 +102,9 @@ Plan tasks: layout → A.2, visual/typography → B.3/B.4, motion → B.5.
 
 | Level | Properties |
 |---|---|
-| **rendered** | `background` (solid color only), `border` (shorthand width+color), `border-radius` (single value), `backdrop-filter` (blur/saturate + beyond-spec `refraction`/`specular`), `color` (text) |
-| **applied, no effect** | `opacity`, `font-size`, `font-weight`, `display`, `flex-direction`, `width`, `height`, `gap`, `padding`, `margin` (whole-side values parse into the typed style; layout ones never reach layout, the others are unread in paint) |
-| **parse-only** | all remaining layout (`flex-wrap/grow/shrink/basis`, `justify-*`, `align-*`, `row/column-gap`, `grid-*` (track lists unparsed), `min/max-*`, `aspect-ratio`, `position`, `inset`, `overflow`, per-side `padding-*`/`margin-*`/`border-*`), background gradients, `shadow`, `blend-mode`, `filter`, `clip`, `transform(-origin)`, `z-index`, `visibility`, `cursor`, `font-family/style/features/variation`, `line-height`, `letter-spacing`, `text-align/overflow/wrap/decoration`, `selection-color`, `transition`, `animation`, `animation-force` |
+| **rendered** | `background` (solid color only), `border` (shorthand width+color), `border-radius` (single value), `backdrop-filter` (blur/saturate + beyond-spec `refraction`/`specular`), `color` (text); **layout (A.2, 2026-07-09):** `display`, `flex-direction`, `width`, `height`, `gap` (both axes), `padding` (whole-side), `margin` (whole-side) — note text-bearing nodes still derive `height` from their glyphs (the text-height rule), and state-part layout rules (`:hovered { width: … }`) relayout via the normal rebuild path |
+| **applied, no effect** | `opacity`, `font-size`, `font-weight` (parsed into the typed style; unread by paint/measure — plan B.4) |
+| **parse-only** | remaining layout (`flex-wrap/grow/shrink/basis`, `justify-*`, `align-*`, `row/column-gap`, `grid-*` (track lists unparsed), `min/max-*`, `aspect-ratio`, `position`, `inset`, `overflow`, per-side `padding-*`/`margin-*`/`border-*`), background gradients, `shadow`, `blend-mode`, `filter`, `clip`, `transform(-origin)`, `z-index`, `visibility`, `cursor`, `font-family/style/features/variation`, `line-height`, `letter-spacing`, `text-align/overflow/wrap/decoration`, `selection-color`, `transition`, `animation`, `animation-force` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 + `!important` **work**; nested `&` rules **dropped** (B.1); `@media`

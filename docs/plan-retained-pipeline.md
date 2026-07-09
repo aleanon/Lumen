@@ -45,7 +45,18 @@ stays green; `scope_memo_one_of_many` unregressed.
 still refresh through the F1-memoized rebuild). Skipping it entirely is
 A.5's restyle-only path.
 
-## A.2 — Styles before layout; `.lss` layout properties become real (L)
+## A.2 ✅ core slice done (2026-07-09) — Styles before layout; `.lss` layout properties become real (L)
+
+*Landed: resolution moved inline into `build_node` (pre-layout, per-node —
+no ancestry needed for compound selectors; dynamic classes already merged),
+with `display`/`flex-direction`/`width`/`height`/`gap`/`padding`/`margin`
+merged into `LayoutStyle` (element < .lss). The old post-layout
+`compute_styles` pass is deleted; `emit_pass`/`get_styles` consume the same
+maps unchanged. Guarded by tests/lss_layout.rs (incl. the text-height rule
+and the `:hovered` layout-rule relayout); goldens byte-identical (no in-repo
+sheet used layout props). Remaining property coverage (per-side, flex-*,
+justify/align, min/max, grid tracks, position/inset, overflow) folds into
+Phase B.3/B.4 as planned.*
 
 **Change:** split `compute_styles` into (a) *pre-layout* resolution of
 each node's rule set from (role, id, classes, states, sheet) — merging

@@ -180,6 +180,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             theme: lumen_style::ThemeKind::Light,
             node_style: HashMap::new(),
             node_computed: HashMap::new(),
+            style_env: None,
             menu: crate::system::MenuModel::default(),
             invoked_menu: Vec::new(),
             system_requests: Vec::new(),
@@ -290,6 +291,14 @@ struct DepEntry {
     update: &'static str,
 }
 
+/// Per-rebuild style-resolution environment (A.2): the cascade sources and
+/// token table, computed once per rebuild and consumed inline by
+/// `build_node` so `.lss` layout properties reach taffy *before* layout.
+struct StyleEnv {
+    sources: [lumen_style::StyleSource; 1],
+    tokens: lumen_style::Tokens,
+}
+
 struct NodeMeta {
     id: Option<StableId>,
     role: Role,
@@ -398,6 +407,8 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     theme: lumen_style::ThemeKind,
     node_style: HashMap<NodeIndex, lumen_style::Style>,
     node_computed: HashMap<NodeIndex, HashMap<String, lumen_style::Computed>>,
+    /// A.2: per-rebuild cascade env (None when no stylesheet is attached).
+    style_env: Option<StyleEnv>,
     input: InputQueue,
     pointer: PointerState,
     // Animation/timer requests from the latest build (02 §8, time-driven UI).
@@ -1385,6 +1396,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             }
         }
 
+        // A.2: styles resolve *before* layout, inline in `build_node`, so
+        // `.lss` layout properties reach taffy. Build the cascade env once
+        // per rebuild; clear the per-node results (NodeIndex values are
+        // generational — a reused index must not inherit a stale style).
+        self.node_style.clear();
+        self.node_computed.clear();
+        self.style_env = self.app_sheet.as_ref().map(|sheet| StyleEnv {
+            sources: [lumen_style::StyleSource {
+                origin: lumen_style::Origin::App,
+                sheet: sheet.clone(),
+            }],
+            tokens: lumen_style::tokens_for(sheet, self.theme),
+        });
+
         let mut tree = Tree::new();
         let mut layout = LayoutTree::new();
         let mut meta = HashMap::new();
@@ -1409,7 +1434,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
         self.tree = tree;
         self.meta = meta;
-        self.compute_styles();
         self.last_damage = self.paint();
         self.sem_root = Some(self.build_semantics(self.tree.root()));
         self.rebuild_dep_index();
@@ -1437,58 +1461,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             add(&m.deps.class, "class", "rebuild");
         }
         self.dep_index = idx;
-    }
-
-    /// Resolve the `.lss` cascade for every node, storing both the typed `Style`
-    /// (applied to paint) and the raw computed values (for `get_styles`).
-    fn compute_styles(&mut self) {
-        self.node_style.clear();
-        self.node_computed.clear();
-        let Some(sheet) = &self.app_sheet else {
-            return;
-        };
-        let sources = [lumen_style::StyleSource {
-            origin: lumen_style::Origin::App,
-            sheet: sheet.clone(),
-        }];
-        let tokens = lumen_style::tokens_for(sheet, self.theme);
-        for node in self.tree.document_order() {
-            let Some(m) = self.meta.get(&node) else {
-                continue;
-            };
-            let mut states = Vec::new();
-            let f = self.tree.flags(node);
-            if f.contains(NodeFlags::FOCUSED) {
-                states.push("focused".to_string());
-            }
-            if f.contains(NodeFlags::HOVERED) {
-                states.push("hovered".to_string());
-            }
-            let desc = lumen_style::NodeDesc {
-                id: m.id.as_ref().map(|i| i.as_str().to_string()),
-                classes: m.classes.clone(),
-                states,
-                ty: m.role.as_str().to_string(),
-            };
-            let computed = lumen_style::resolve(&sources, &desc);
-            let mut style = lumen_style::Style::new();
-            let mut resolved = HashMap::new();
-            for (prop, c) in &computed {
-                lumen_style::apply(&mut style, prop, &c.value, &tokens);
-                // Store the token-resolved value so `get_styles` returns the
-                // computed (substituted) form (04 §7).
-                resolved.insert(
-                    prop.clone(),
-                    lumen_style::Computed {
-                        value: lumen_style::resolve_token(&c.value, &tokens),
-                        important: c.important,
-                        origin: c.origin,
-                    },
-                );
-            }
-            self.node_style.insert(node, style);
-            self.node_computed.insert(node, resolved);
-        }
     }
 
     /// Set/replace the app stylesheet at runtime (tier-1 hot reload). A broken
@@ -1742,6 +1714,77 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         tree.set_flags(node, flags);
         if this_overlay {
             tree.set_z(node, OVERLAY_Z);
+        }
+
+        // A.2: resolve this node's `.lss` rules *now*, before anything
+        // consumes `el.style` (text wrap, custom measure, taffy), so layout
+        // properties from the stylesheet are real. Per-node resolution needs
+        // no ancestry (compound selectors), dynamic classes were merged into
+        // `el.classes` above, and the visual states are known from the flags
+        // just computed. Paint properties land in `node_style`/
+        // `node_computed` exactly as the old post-layout pass produced them
+        // (`emit_pass`/`get_styles` are unchanged consumers).
+        //
+        // NOTE for A.3.2 (retained scopes): this mutates the *owned* element;
+        // once memo hits become shared `Rc` subtrees the merge must move to a
+        // per-node copy instead.
+        if let Some(env) = &self.style_env {
+            let mut states = Vec::new();
+            if flags.contains(NodeFlags::FOCUSED) {
+                states.push("focused".to_string());
+            }
+            if flags.contains(NodeFlags::HOVERED) {
+                states.push("hovered".to_string());
+            }
+            let desc = lumen_style::NodeDesc {
+                id: el.id.as_ref().map(|i| i.as_str().to_string()),
+                classes: el.classes.clone(),
+                states,
+                ty: el.role.as_str().to_string(),
+            };
+            let computed = lumen_style::resolve(&env.sources, &desc);
+            let mut css = lumen_style::Style::new();
+            let mut resolved = HashMap::new();
+            for (prop, c) in &computed {
+                lumen_style::apply(&mut css, prop, &c.value, &env.tokens);
+                // Store the token-resolved value so `get_styles` returns the
+                // computed (substituted) form (04 §7).
+                resolved.insert(
+                    prop.clone(),
+                    lumen_style::Computed {
+                        value: lumen_style::resolve_token(&c.value, &env.tokens),
+                        important: c.important,
+                        origin: c.origin,
+                    },
+                );
+            }
+            // Layout overrides: only the fields the sheet actually set win
+            // over the element's `LayoutStyle` (element < .lss, matching the
+            // cascade's origin order once B.6 adds more origins).
+            if let Some(d) = css.display {
+                el.style.display = d;
+            }
+            if let Some(f) = css.flex_direction {
+                el.style.flex_direction = f;
+            }
+            if let Some(w) = css.width {
+                el.style.width = w;
+            }
+            if let Some(h) = css.height {
+                el.style.height = h;
+            }
+            if let Some(g) = css.gap {
+                el.style.row_gap = g;
+                el.style.column_gap = g;
+            }
+            if let Some(p) = css.padding {
+                el.style.padding = p;
+            }
+            if let Some(m) = css.margin {
+                el.style.margin = m;
+            }
+            self.node_style.insert(node, css);
+            self.node_computed.insert(node, resolved);
         }
 
         // Text nodes get a fixed size from measurement.
