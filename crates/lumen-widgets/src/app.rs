@@ -1901,6 +1901,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             if let Some(m) = css.margin {
                 el.style.margin = m;
             }
+            // B.4: typography reaches the text stack — the measured and the
+            // painted TextStyle are the same object (content moves into
+            // NodeMeta), so one override covers both passes.
+            if css.font_size.is_some() || css.font_weight.is_some() || css.line_height.is_some() {
+                if let NodeContent::Text(_, ts) = &mut el.content {
+                    if let Some(fs) = css.font_size {
+                        ts.font_size = fs;
+                    }
+                    if let Some(w) = css.font_weight {
+                        ts.weight = w as f32;
+                    }
+                    if let Some(lh) = css.line_height {
+                        ts.line_height = Some(lh);
+                    }
+                }
+            }
             self.node_style.insert(node, css);
             self.node_computed.insert(node, resolved);
             // B.1: this node becomes an ancestor for its children's matching

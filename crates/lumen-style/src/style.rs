@@ -46,6 +46,8 @@ pub struct Style {
     pub font_size: Option<f32>,
     /// `font-weight`.
     pub font_weight: Option<u16>,
+    /// `line-height` (multiple of font size; B.4).
+    pub line_height: Option<f32>,
     /// `backdrop-filter: blur(...)` radius in px (glass).
     pub backdrop_blur: Option<f32>,
     /// `backdrop-filter: saturate(...)` multiplier (`1.0` = none).
@@ -138,6 +140,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "opacity" => style.opacity = as_number(&v).map(|n| n as f32),
         "font-size" => style.font_size = as_px(&v),
         "font-weight" => style.font_weight = as_number(&v).map(|n| n as u16),
+        "line-height" => style.line_height = as_number(&v).map(|n| n as f32),
         "backdrop-filter" => apply_backdrop(style, &v),
         "border" => apply_border(style, &v),
         "border-width" => style.border_width = as_px(&v),

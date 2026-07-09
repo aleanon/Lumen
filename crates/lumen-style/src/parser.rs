@@ -102,7 +102,7 @@ fn expected_value_type(property: &str) -> Option<&'static str> {
         "background" | "color" | "border-color" => "color",
         "width" | "height" | "gap" | "padding" | "margin" | "border-radius" | "font-size"
         | "border-width" => "length",
-        "opacity" | "font-weight" => "number",
+        "opacity" | "font-weight" | "line-height" => "number",
         "display" | "flex-direction" => "keyword",
         _ => return None,
     })
