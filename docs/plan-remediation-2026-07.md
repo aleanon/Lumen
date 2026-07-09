@@ -282,9 +282,12 @@ new widget follows writing-widgets (test triple + example + live smoke).
   [G perf#4, D#38]
 - **R.3 (M)** CPU path: cull DrawCmds against damage rect pre-raster; wire
   `cull_visible` into paint. [G perf#3, D#38 adj.]
-- **R.4 (S)** Release profile `strip = true`, `panic = "abort"`;
-  `size_gate.sh` fails on budget (with the T.4 subset font the <5 MB
-  target is real); add to CI. [G resources#1, D#40]
+- **R.4 (S)** Release profile `strip = true` — **`panic = "abort"` is
+  excluded** (discovered at implementation: E0701/`error_boundary`
+  containment requires `catch_unwind`; abort would kill the process on any
+  contained build panic). `size_gate.sh` fails on budget once the T.4
+  subset font makes <5 MB reachable; add to CI then. *strip landed
+  2026-07-09.* [G resources#1, D#40]
 - **R.5 (M)** Cache hygiene: LRU/half-eviction for shape/run/glyph/shadow
   caches; byte-caps for image-valued caches; lazy/capped task pool
   (min(cores,4), spawn-on-first-job). [G perf#5, resources#4/5]

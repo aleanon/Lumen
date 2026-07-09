@@ -148,3 +148,9 @@ criterion = "0.5"
 # reproducible and small for the <5 MB hello-world target.
 lto = "thin"
 codegen-units = 1
+# R.4: strip symbols (saves ~1 MB; the real size lever is the T.4 font
+# subset). `panic = "abort"` is deliberately NOT set: the error-boundary
+# contract (E0701 top-level containment in app.rs::rebuild and subtree
+# `error_boundary` in boundary.rs) requires unwinding via catch_unwind —
+# abort would turn any contained build panic into a process kill.
+strip = true
