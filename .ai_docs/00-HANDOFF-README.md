@@ -15,6 +15,16 @@ You are an autonomous coding agent tasked with building **Lumen**, an AI-first, 
 
 Reading order: 00 → 06 (skim) → 02 → 03 → then 04/05 as their tasks come up. 01 is context.
 
+> **Normativity qualifier (2026-07-09).** Docs 02–05 were re-grounded
+> against the implementation after the docs↔code audit
+> (`docs/review-docs-vs-code-2026-07.md`): sections describe what *exists*;
+> anything not yet built is explicitly marked **planned** with its task in
+> `docs/plan-remediation-2026-07.md` (the current work queue, alongside 06).
+> 06's checkboxes now use ◐/✗ for partial/absent. When implementing, trust a
+> *planned* marker over the surrounding prose; when a doc and the code
+> disagree, the code is the bug in behavior, the doc is the bug in claim —
+> fix per the doc-currency rule in `AGENT.md`.
+
 ## Operating rules
 
 1. **Contracts are law.** The public APIs, schemas, grammars, and wire protocols in docs 02–05 are normative. Do not rename, restructure, or "improve" them while implementing. If a contract is genuinely broken (won't compile, internally contradictory, unsound), fix it minimally, and record the change in `07-decision-log.md` under "Agent amendments" with rationale, in the same commit.

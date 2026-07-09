@@ -4,6 +4,17 @@
 (the paint/damage seam this sits above) and to the reactive store in
 `lumen-core/src/state.rs`.*
 
+> **Status refresh (2026-07-09, post-audit).** The F2 retained-node-graph
+> descope (below) is **revived** as remediation Phase A
+> (`docs/plan-remediation-2026-07.md`): A.2 moves style computation before
+> layout, A.3 retains `Tree`/`meta`/semantics/dep-index across pumps and
+> splices re-run scopes, A.4 wires `relayout_subtree` into the live pump —
+> superseding the "incremental layout SKIPPED" decision once A.3's retained
+> tree exists. Also scheduled there: A.1 stops hover/focus/pressed from
+> calling `clear_view_caches()` (today pointer motion wipes all F1 memos —
+> the audit's top perf/resource finding), and A.5 adds per-node style
+> memoization. The F0 coherence oracle gates every step.
+
 > **Status (2026-07-03).**
 > **F0 ✅ done** — `Headless::rebuild_fresh` (oracle) + `assert_view_coherent` +
 > `Runtime::is_quiescent` and a `pump` fixpoint `debug_assert` (holds across the

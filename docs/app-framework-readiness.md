@@ -1,6 +1,9 @@
 # Lumen — App-Framework Readiness: Gap Analysis & Plan
 
-*Status: analysis as of 2026-06-18. Companion to `.ai_docs/06-task-graph.md`.*
+*Status: **historical** — analysis as of 2026-06-18, progress header last
+touched 2026-06-28. Live per-item status is `docs/backlog.md`; the current
+work queue is `docs/plan-remediation-2026-07.md`. Kept for the original
+gap analysis (§1–§3) and the E-phase type-design rationale.*
 
 > **Progress:** **all scope-deferred items implemented** — A1 (renderer
 > abstraction + GPU backend), B2, B3, C1, D1, E1 (Element→enum), E2 (Widget

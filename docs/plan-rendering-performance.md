@@ -18,8 +18,9 @@ at scale" polish line). This plan is the work that runs **behind** that seam.*
 > nearest+bilinear, glass `backdrop-filter`, text-as-image), draws in display-list
 > order, honors HiDPI, and drives the live window (R1.1). Scoped out (no
 > producer): non-source-over blends and GPU `DrawCmd::Shader` (`ShaderWidget`
-> pre-rasterizes to an image). Deferred (perf): zero-copy render-to-surface (the
-> live-window agent needs a per-frame readback). **R2 ✅ done. R3 ✅ COMPLETE** —
+> pre-rasterizes to an image). Deferred-then-landed: zero-copy
+> render-to-surface now ships (direct-to-surface present, one device, no
+> per-frame readback). **R2 ✅ done. R3 ✅ COMPLETE** —
 > a GPU glyph atlas now backs text: the text layer hands positioned glyphs +
 > coverage bitmaps across the boundary (`DrawCmd::GlyphRun`), a shelf allocator
 > packs them into an R8 atlas, the `Wgpu` backend draws instanced glyph quads,
@@ -28,6 +29,15 @@ at scale" polish line). This plan is the work that runs **behind** that seam.*
 > `GlyphRun` as the golden reference. **R4 parked (2026-06-28)** — feasible with
 > no taffy fork (multi-`TaffyTree` two-phase split), but low priority since lists
 > are virtualized; tracked in `backlog.md`.
+>
+> **Status refresh (2026-07-09, post-audit).** The R5 glyph-run-cache *slice*
+> is live (origin-relative run cache, ~50× DL-emission win); full R5 fragment
+> splicing is not built. Still open on the GPU path, now scheduled in
+> `docs/plan-remediation-2026-07.md`: damage scissor (damage computed then
+> ignored — R.1), the R1.3 lyon tessellation cache (promised above, never
+> built — R.2), persistent uniform/instance buffers + image/ramp texture
+> caches (R.2), CPU dirty-rect cull (R.3). **R4 stays parked per ADR-R1**
+> with binding revisit triggers recorded in the remediation plan.
 >
 > <details><summary>(historical detail)</summary>
 >
