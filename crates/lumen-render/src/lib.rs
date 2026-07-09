@@ -32,6 +32,7 @@ pub mod gpu;
 // drives; gated with the GPU backend that consumes it.
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 pub mod atlas;
+pub mod diff;
 pub mod image;
 pub mod media;
 pub mod scene;

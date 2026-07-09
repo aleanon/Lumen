@@ -66,8 +66,12 @@ message isn't enough.
 
 - CPU renderer only, **bit-exact**. Stored under `tests/golden/cpu/`.
 - Record/update: `LUMEN_UPDATE_GOLDENS=1 cargo test -p <crate>`.
-- On mismatch you get `<name>.actual.png` next to the golden — `Read` both
-  and eyeball. (**No `.diff.png` yet** — plan T.3.)
+- On mismatch you get `<name>.actual.png` **and `<name>.diff.png`** (red =
+  differing pixels over a dimmed base — T.3): `Read` golden/actual/diff to
+  diagnose.
+- Perceptual (ΔE Oklab) compares: `expect_screenshot_within(name,
+  Tolerance::PARITY|AA)` — for GPU-derived frames or intentional AA noise;
+  same artifacts on failure.
 - The live GPU path intentionally diverges on AA/blended pixels
   (linear-light blending) — never compare a live screenshot against a CPU
   golden byte-wise.

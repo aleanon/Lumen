@@ -101,36 +101,11 @@ pub struct Scene {
 
 // --- tolerance + diff -------------------------------------------------------
 
-/// A cross-backend comparison tolerance: a perceptual per-pixel ceiling plus a
-/// cap on the fraction of pixels allowed to exceed it.
-#[derive(Clone, Copy, Debug)]
-pub struct Tolerance {
-    /// Max allowed per-pixel ΔE (Oklab).
-    pub max_delta_e: f32,
-    /// Max allowed fraction of pixels exceeding `max_delta_e` (e.g. AA edges).
-    pub max_frac_over: f64,
-}
-
-impl Tolerance {
-    /// Parity for **edge-free** content (axis-aligned solid rects, nearest
-    /// images): `delta_e_oklab` is *unscaled* Euclidean Oklab distance (range
-    /// ~0–1.5, JND ≈ 0.02), so the ceiling is tight — at most 0.5% of pixels may
-    /// exceed ΔE 0.04.
-    pub const PARITY: Tolerance = Tolerance {
-        max_delta_e: 0.04,
-        max_frac_over: 0.005,
-    };
-
-    /// Parity for **anti-aliased** content (rounded corners, paths, gradients):
-    /// CPU (tiny-skia analytic coverage) and GPU (SDF/shader AA) differ along
-    /// the ~1px edge seam, so a larger share of pixels may exceed the ceiling.
-    /// The ceiling itself stays tight, so a *wrong* color/shape/position (which
-    /// moves many interior pixels) still fails.
-    pub const AA: Tolerance = Tolerance {
-        max_delta_e: 0.04,
-        max_frac_over: 0.04,
-    };
-}
+// Tolerance/DiffReport/frame_diff/count_over moved to the library
+// (`lumen_render::diff`, T.3) so lumen-test goldens share the
+// implementation; re-exported here for the harness tests.
+#[allow(unused_imports)] // each harness test uses a different subset
+pub use lumen_render::diff::{count_over, frame_diff, DiffReport, Tolerance};
 
 /// Whether a scene's GPU output must match the CPU reference *exactly* (within
 /// `PARITY`). The GPU blends in **linear** light (sRGB target) while the CPU
@@ -154,64 +129,6 @@ pub fn tolerance(cap: Cap) -> Tolerance {
         },
         _ => Tolerance::AA,
     }
-}
-
-/// A per-pixel comparison report over two equal-sized frames.
-#[derive(Clone, Copy, Debug)]
-pub struct DiffReport {
-    /// Total pixels compared.
-    pub total: usize,
-    /// Pixels differing in any channel (byte-exact sense).
-    pub differing: usize,
-    /// Largest single-channel absolute difference (0–255).
-    pub max_channel_delta: u8,
-    /// Largest per-pixel ΔE (Oklab).
-    pub max_delta_e: f32,
-}
-
-/// Compare two equal-sized frames pixel by pixel.
-pub fn frame_diff(a: &RgbaImage, b: &RgbaImage) -> DiffReport {
-    assert_eq!(
-        (a.width(), a.height()),
-        (b.width(), b.height()),
-        "frame_diff requires equal dimensions"
-    );
-    let mut r = DiffReport {
-        total: (a.width() * a.height()) as usize,
-        differing: 0,
-        max_channel_delta: 0,
-        max_delta_e: 0.0,
-    };
-    for (pa, pb) in a.pixels().chunks_exact(4).zip(b.pixels().chunks_exact(4)) {
-        let mut any = false;
-        for k in 0..4 {
-            let d = pa[k].abs_diff(pb[k]);
-            if d != 0 {
-                any = true;
-            }
-            r.max_channel_delta = r.max_channel_delta.max(d);
-        }
-        if any {
-            r.differing += 1;
-        }
-        let de = Color::srgb8(pa[0], pa[1], pa[2], pa[3])
-            .delta_e_oklab(Color::srgb8(pb[0], pb[1], pb[2], pb[3]));
-        r.max_delta_e = r.max_delta_e.max(de);
-    }
-    r
-}
-
-/// Count pixels whose ΔE (Oklab) exceeds `ceiling`.
-pub fn count_over(a: &RgbaImage, b: &RgbaImage, ceiling: f32) -> usize {
-    a.pixels()
-        .chunks_exact(4)
-        .zip(b.pixels().chunks_exact(4))
-        .filter(|(pa, pb)| {
-            Color::srgb8(pa[0], pa[1], pa[2], pa[3])
-                .delta_e_oklab(Color::srgb8(pb[0], pb[1], pb[2], pb[3]))
-                > ceiling
-        })
-        .count()
 }
 
 /// Assert two frames match within `tol` (perceptual). The check is "at most

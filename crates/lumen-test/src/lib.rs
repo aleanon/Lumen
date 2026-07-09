@@ -173,7 +173,62 @@ impl TestApp {
         if img != expected {
             let actual = path.with_extension("actual.png");
             std::fs::write(&actual, img.to_png()).unwrap();
-            panic!("screenshot golden mismatch for {name}; wrote {actual:?}");
+            // T.3: a visual diff (differing pixels red over a dimmed base)
+            // next to the golden + actual — Read all three to diagnose.
+            let diff = path.with_extension("diff.png");
+            if (img.width(), img.height()) == (expected.width(), expected.height()) {
+                std::fs::write(
+                    &diff,
+                    lumen_render::diff::diff_image(&expected, &img).to_png(),
+                )
+                .unwrap();
+            }
+            panic!("screenshot golden mismatch for {name}; wrote {actual:?} and {diff:?}");
+        }
+    }
+
+    /// Perceptual golden compare (05 §4, the GPU-renderer path): pass iff at
+    /// most `tol.max_frac_over` of pixels exceed `tol.max_delta_e` (ΔE
+    /// Oklab). Same record/`.actual.png`/`.diff.png` workflow as
+    /// [`expect_screenshot`](Self::expect_screenshot); use
+    /// `Tolerance::PARITY`/`::AA` from `lumen_render::diff`.
+    pub async fn expect_screenshot_within(
+        &mut self,
+        name: &str,
+        tol: lumen_render::diff::Tolerance,
+    ) {
+        let img = self.inner.borrow_mut().screenshot();
+        let path = self.golden_dir.join(format!("{name}.png"));
+        if std::env::var_os("LUMEN_UPDATE_GOLDENS").is_some() {
+            std::fs::create_dir_all(&self.golden_dir).unwrap();
+            std::fs::write(&path, img.to_png()).unwrap();
+            return;
+        }
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|_| panic!("missing golden {path:?}; run with LUMEN_UPDATE_GOLDENS=1"));
+        let expected = RgbaImage::from_png(&bytes).unwrap();
+        assert_eq!(
+            (img.width(), img.height()),
+            (expected.width(), expected.height()),
+            "screenshot size mismatch for {name}"
+        );
+        let (ok, frac) = lumen_render::diff::frames_close(&expected, &img, tol);
+        if !ok {
+            let actual = path.with_extension("actual.png");
+            std::fs::write(&actual, img.to_png()).unwrap();
+            let diff = path.with_extension("diff.png");
+            std::fs::write(
+                &diff,
+                lumen_render::diff::diff_image(&expected, &img).to_png(),
+            )
+            .unwrap();
+            panic!(
+                "perceptual golden mismatch for {name}: {:.3}% of pixels exceed \
+                 ΔE {} (budget {:.3}%); wrote {actual:?} and {diff:?}",
+                frac * 100.0,
+                tol.max_delta_e,
+                tol.max_frac_over * 100.0
+            );
         }
     }
 

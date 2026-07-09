@@ -69,7 +69,8 @@ Failures return structured errors with the closest-match suggestions and a tree 
 ## 4. Golden screenshots
 - Stored at `tests/golden/<renderer>/<test_name>[.<tag>].png` (`renderer` = `cpu` or `gpu-<platform>`).
 - CPU comparisons are **exact** (bit-identical; the CPU renderer is deterministic by contract 02 §7). GPU comparisons use perceptual diff: per-pixel ΔE in Oklab ≤ 2.0 and ≤ 0.1% of pixels differing; thresholds overridable per assertion.
-- On mismatch: write `<name>.actual.png` and `<name>.diff.png` next to the golden and fail with their paths. `LUMEN_UPDATE_GOLDENS=1 cargo test` re-records; CI never sets it.
+- On mismatch: write `<name>.actual.png` and `<name>.diff.png` (differing pixels red over a dimmed base — T.3) next to the golden and fail with their paths. `LUMEN_UPDATE_GOLDENS=1 cargo test` re-records; CI never sets it.
+- Perceptual compares use `TestApp::expect_screenshot_within(name, tol)` with `lumen_render::diff::Tolerance` (`PARITY`: ΔE 0.04 / 0.5% budget; `AA`: ΔE 0.04 / 4% seam budget) — the same implementation the R0 GPU-parity harness uses (T.3).
 - Determinism requirements for tests: virtual clock auto-pauses animations at `pump_until_idle` unless the test advances time explicitly; system fonts are never used — the test harness bundles Noto Sans/Noto Sans CJK/Noto Color Emoji and forces them.
 
 ## 5. Traces
