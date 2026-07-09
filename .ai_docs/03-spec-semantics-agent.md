@@ -104,7 +104,8 @@ no auth (bearer tokens planned with non-loopback binds, C.5).
 | `ui.screenshot` | `{ selector, scale?: f64 = 4, overlay?: bool = true }` | zoomed crop of one element; overlay draws the box (blue) and ink (red) outlines — a defect magnifier |
 | `ui.lint` | `{}` | `{ findings: [{code, message}] }` (layout/contrast audits: W0103/W0104/W0105/W0301, WCAG) |
 | `app.diagnostics` | `{}` | `{ diagnostics: [Diagnostic] }` (02 §9) |
-| `app.perf` | `{}` | **stub** — hardcoded zeros + `node_count`; real `FrameStats` values planned (C.2). Wall-clock around actions instead |
+| `app.perf` | `{}` | `{ frame_ms_p50, frame_ms_p95, frames_rendered, node_count }` — rolling stats over the last ≤120 painted pumps (C.2) |
+| `app.logs` | `{ since?: seq }` | `{ entries: [{seq, level, message}] }` — the runtime's diagnostic ring (handler `rt.log(level, msg)`, E0701 panics, stylesheet rejections); page with `since` = last seq + 1 (C.2) |
 | `ui.probe` | `{ x, y }` | `{ color: [r,g,b,a] }` at physical px |
 | `ui.probeRegion` | `{ x, y, w, h }` | `{ uniform: [r,g,b,a] \| null }` |
 | `ui.getDeps` | `{ selector }` | signals the node depends on, per-prop |
@@ -176,8 +177,8 @@ through `Session` is planned (C.3).
 
 ### 3.5 Planned (not yet implemented — do not call)
 
-Each item carries its remediation-plan task. `app.logs` (C.2) · `state.get`
-(C.4) · `events.subscribe` + `event.*` notifications (C.4) · `input.drag`
+Each item carries its remediation-plan task. `state.get` (C.4) ·
+`events.subscribe` + `event.*` notifications (C.4) · `input.drag`
 node-to-node (C.4) · `input.hover` (C.4) · `input.gesture` (C.4) ·
 `app.setValue` (C.4) · `app.command` / `cx.register_command` (C.4) ·
 `session.start`/`session.stop` (C.4) · `reload.apply` (C.4) · auto-wait for
@@ -185,10 +186,10 @@ clock-driven **animation settling** (C.1b; existence/actionability/async
 waiting shipped in C.1a) · `input.click` `{pos, button, count}` (C.4) ·
 `input.type {clear}` (C.4) · `input.scroll` `{dx, to}` (C.4) ·
 `ui.getTree {selector}` subtree (C.4) · `ui.screenshot` `{max_width}` (C.4)
-· runtime `node-N` ids as selectors (C.3) · real `app.perf` from
-`FrameStats` (C.2) · MCP server + packaged client `lumen agent call` (C.5)
-· bearer-token auth (C.5) · CLI-hosted endpoint (`lumen agent serve`,
-C.8).
+· runtime `node-N` ids as selectors (C.3) · MCP server + packaged client
+`lumen agent call` (C.5) · bearer-token auth (C.5) · CLI-hosted endpoint
+(`lumen agent serve`, C.8). *(Shipped since the re-ground: C.1a auto-wait +
+`ui.waitFor`; C.2 `app.logs` + real `app.perf`.)*
 
 ## 4. Dev-loop wiring (per ADR-D2)
 

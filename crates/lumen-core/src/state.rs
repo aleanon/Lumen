@@ -275,6 +275,22 @@ pub struct Runtime {
     /// `&Runtime`) — text widgets cut/copy/paste through it. The desktop shell
     /// syncs it with the OS clipboard.
     clipboard: Rc<RefCell<String>>,
+    /// Diagnostic log ring (C.2): `(next_seq, entries)`, capped at 1000.
+    /// Reachable from handlers and builds (a side-channel that never feeds
+    /// rendering); the agent reads it via `app.logs`.
+    logs: Rc<RefCell<(u64, std::collections::VecDeque<LogEntry>)>>,
+}
+
+/// A diagnostic log entry (C.2) — agent-visible via the protocol's
+/// `app.logs {since}`.
+#[derive(Clone, Debug)]
+pub struct LogEntry {
+    /// Monotonic per-runtime sequence number.
+    pub seq: u64,
+    /// `"info" | "warn" | "error"`.
+    pub level: &'static str,
+    /// The message text.
+    pub message: String,
 }
 
 impl Default for Runtime {
@@ -304,7 +320,37 @@ impl Runtime {
             inner: Rc::new(RefCell::new(Inner::default())),
             deferred: Rc::new(crate::tasks::DeferredChannel::new()),
             clipboard: Rc::new(RefCell::new(String::new())),
+            logs: Rc::new(RefCell::new((0, std::collections::VecDeque::new()))),
         }
+    }
+
+    /// Append a diagnostic log entry (C.2). Callable from handlers and builds
+    /// — a side-channel that never feeds rendering, so build purity holds.
+    /// Ring-buffered: the oldest entry drops past 1000.
+    pub fn log(&self, level: &'static str, message: impl Into<String>) {
+        let mut l = self.logs.borrow_mut();
+        let seq = l.0;
+        l.0 += 1;
+        if l.1.len() >= 1000 {
+            l.1.pop_front();
+        }
+        l.1.push_back(LogEntry {
+            seq,
+            level,
+            message: message.into(),
+        });
+    }
+
+    /// Entries with `seq >= since`, oldest first (C.2; the agent's
+    /// `app.logs {since}` — page by passing the last seen seq + 1).
+    pub fn logs_since(&self, since: u64) -> Vec<LogEntry> {
+        self.logs
+            .borrow()
+            .1
+            .iter()
+            .filter(|e| e.seq >= since)
+            .cloned()
+            .collect()
     }
 
     /// The deferred-op channel (data layer). Internal accessor for `tasks`.

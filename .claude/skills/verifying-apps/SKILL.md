@@ -129,8 +129,11 @@ The ones you'll actually use:
 - **Dotted ids are unselectable.** `#faq.returns` parses as id `faq` +
   class `returns`. Ids must be `[a-z0-9-]`. If `tree` shows a dotted id,
   that's an app bug — fix the id, don't work around it.
-- **`app.perf` returns zeros** (stub until plan C.2). Measure by
-  wall-clocking around actions instead.
+- **`app.perf` is real since C.2**: `{frame_ms_p50, frame_ms_p95,
+  frames_rendered, node_count}` over the last ≤120 painted frames.
+  `app.logs {since?}` returns the diagnostic ring (handler
+  `rt.log(level, msg)` entries, E0701 panics, stylesheet rejections) —
+  page with `since` = last seq + 1.
 - **Tofu doctrine.** The bundled font lacks decorative glyphs (▼▶ arrows,
   most symbols) — they render as boxes while semantics report the intended
   character, and `ui.lint` does **not** flag it. So: verify *behaviour*

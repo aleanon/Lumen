@@ -373,10 +373,28 @@ fn handle<R: Renderer, E: Spawner>(
                 .map(|c| json!([c[0], c[1], c[2], c[3]]));
             Ok(json!({ "uniform": uniform }))
         }
-        "app.perf" => Ok(json!({
-            "frame_ms_p50": 0.0, "frame_ms_p95": 0.0,
-            "node_count": app.semantics_doc().root.elided().children.len(),
-        })),
+        "app.perf" => {
+            // C.2: real values from the runtime's rolling painted-frame times.
+            let (p50, p95, frames) = app.perf_stats();
+            Ok(json!({
+                "frame_ms_p50": p50,
+                "frame_ms_p95": p95,
+                "frames_rendered": frames,
+                "node_count": app.semantics_doc().root.elided().children.len(),
+            }))
+        }
+        "app.logs" => {
+            // C.2: the runtime's diagnostic log ring. Page with `since` =
+            // last seen seq + 1.
+            let since = params.get("since").and_then(|v| v.as_u64()).unwrap_or(0);
+            let entries: Vec<Value> = app
+                .runtime()
+                .logs_since(since)
+                .into_iter()
+                .map(|e| json!({ "seq": e.seq, "level": e.level, "message": e.message }))
+                .collect();
+            Ok(json!({ "entries": entries }))
+        }
         "ui.waitFor" => {
             // C.1a: block until a node matching `selector` exists — and
             // optionally carries `state` / has label-or-value equal to

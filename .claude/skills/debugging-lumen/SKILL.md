@@ -39,7 +39,9 @@ Run against the live window (`just run-agent <name>` +
 `scripts/agent_client.py`) or headless equivalents:
 
 1. **`app.diagnostics`** — structured errors first (E0101 parse, E0701
-   panic, W0401 i18n…).
+   panic, W0401 i18n…) — then **`app.logs`** (C.2): the runtime's ring of
+   handler `rt.log` entries, contained panics, and stylesheet rejections
+   (survives after a diagnostic clears; page with `since`).
 2. **`ui.lint`** — layout/contrast audits (W0103/W0104/W0105 + WCAG).
 3. **`agent_client.py tree`** — one line per node: role, id, label,
    states, actions, bounds. Most "invisible/unclickable/wrong place" bugs

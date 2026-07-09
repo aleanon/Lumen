@@ -182,6 +182,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             node_computed: HashMap::new(),
             style_env: None,
             scope_spans: HashMap::new(),
+            frame_ms: std::collections::VecDeque::new(),
+            frames_rendered: 0,
             menu: crate::system::MenuModel::default(),
             invoked_menu: Vec::new(),
             system_requests: Vec::new(),
@@ -413,6 +415,12 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// A.3.1: per-rebuild scope→node-span map (scope key → subtree root +
     /// preorder node count). The retained-graph splice replaces these spans.
     scope_spans: HashMap<String, (NodeIndex, u32)>,
+    /// C.2: rolling per-painted-frame pump durations in ms (cap 120) + total
+    /// painted frames — the agent's `app.perf`. Diagnostic only (never feeds
+    /// rendering); not recorded on wasm (no `Instant`).
+    frame_ms: std::collections::VecDeque<f32>,
+    /// C.2: total painted frames since launch.
+    frames_rendered: u64,
     input: InputQueue,
     pointer: PointerState,
     // Animation/timer requests from the latest build (02 §8, time-driven UI).
@@ -483,6 +491,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// unless nothing that affects the frame changed, in which case the rebuild is
     /// skipped entirely (idle/non-effecting frames cost ~µs instead of ~ms).
     pub fn pump(&mut self) -> FrameStats {
+        // C.2: time painted pumps for `app.perf`. Diagnostic-only wall time —
+        // it never feeds rendering, so the pure-function contract holds.
+        #[cfg(not(target_arch = "wasm32"))]
+        let pump_t0 = std::time::Instant::now();
         // Apply any background-task results first (on the UI thread), so the build
         // sees fresh state. Keeps `pump` a pure function of (state, queued
         // events + deferred ops, clock). Deferred results write signals → bump the
@@ -572,11 +584,34 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             self.rt.is_quiescent(),
             "pump left the reactive graph non-quiescent"
         );
-        FrameStats {
+        let stats = FrameStats {
             node_count: self.tree.len(),
             painted: self.last_damage != Damage::None,
             damage: self.last_damage,
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if stats.painted {
+            let ms = pump_t0.elapsed().as_secs_f32() * 1000.0;
+            if self.frame_ms.len() >= 120 {
+                self.frame_ms.pop_front();
+            }
+            self.frame_ms.push_back(ms);
+            self.frames_rendered += 1;
         }
+        stats
+    }
+
+    /// C.2 (`app.perf`): rolling painted-frame time percentiles
+    /// `(p50_ms, p95_ms)` over the last ≤120 painted pumps, plus the total
+    /// painted-frame count. Zeros before anything painted (and on wasm).
+    pub fn perf_stats(&self) -> (f64, f64, u64) {
+        let mut v: Vec<f32> = self.frame_ms.iter().copied().collect();
+        if v.is_empty() {
+            return (0.0, 0.0, self.frames_rendered);
+        }
+        v.sort_by(f32::total_cmp);
+        let pct = |p: f64| v[((v.len() - 1) as f64 * p).round() as usize] as f64;
+        (pct(0.50), pct(0.95), self.frames_rendered)
     }
 
     /// Enqueue an event (OS or synthesized — same path).
@@ -1339,6 +1374,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             Ok(()) => self.build_panic = None,
             Err(payload) => {
                 let msg = panic_msg(&payload);
+                // C.2: panics reach the agent's `app.logs` too, not just
+                // `app.diagnostics` — logs survive after the diagnostic clears.
+                self.rt.log("error", format!("E0701 build panicked: {msg}"));
                 self.build_panic = Some(lumen_core::Diagnostic::new(
                     lumen_core::codes::E0701,
                     format!("build panicked (frame contained): {msg}"),
@@ -1481,6 +1519,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     pub fn set_stylesheet(&mut self, src: &str) -> ReloadResult {
         let (sheet, diags) = lumen_style::parse("app.lss", src);
         if lumen_style::has_errors(&diags) {
+            // C.2: reload rejections reach `app.logs` (the previous sheet
+            // stays live, so the only other trace is stderr).
+            self.rt.log(
+                "warn",
+                format!("stylesheet rejected ({} diagnostics)", diags.len()),
+            );
             ReloadResult::Failed(diags)
         } else {
             self.app_sheet = Some(sheet);
