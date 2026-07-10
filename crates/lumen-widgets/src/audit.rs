@@ -92,15 +92,72 @@ fn zero_size(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
     }
 }
 
+/// Duplicate-`StableId` audit (`W0001`, 02 §2): ids must be unique within
+/// the window — selectors resolve the first match, so a duplicate makes the
+/// other nodes unreachable to tests, the agent, and a11y relations.
+fn check_duplicate_ids(root: &SemanticsNode) -> Vec<Diagnostic> {
+    fn walk(n: &SemanticsNode, seen: &mut std::collections::HashMap<String, u32>) {
+        if let Some(id) = &n.id {
+            *seen.entry(id.as_str().to_string()).or_default() += 1;
+        }
+        for c in &n.children {
+            walk(c, seen);
+        }
+    }
+    let mut seen = std::collections::HashMap::new();
+    walk(root, &mut seen);
+    let mut dups: Vec<_> = seen.into_iter().filter(|(_, n)| *n > 1).collect();
+    dups.sort(); // deterministic output
+    dups.into_iter()
+        .map(|(id, count)| {
+            Diagnostic::new(
+                codes::W0001,
+                format!(
+                    "duplicate StableId `#{id}` on {count} nodes — selectors resolve \
+                     the first match, so the rest are unreachable; make ids unique"
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Unnamed-focusable audit (`W0301`, 03 §1): every focusable leaf must carry
+/// a non-empty label or value — otherwise it is invisible to a11y and
+/// unaddressable by name for tests and the agent.
+fn check_unnamed_focusable(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
+    let focusable = n.actions.iter().any(|a| matches!(a, Action::Focus));
+    if focusable
+        && n.children.is_empty()
+        && n.label.trim().is_empty()
+        && n.value.as_deref().unwrap_or("").trim().is_empty()
+    {
+        out.push(Diagnostic::new(
+            codes::W0301,
+            format!(
+                "focusable {} leaf (node-{}) has no label or value — name it \
+                 so a11y and selectors can reach it",
+                n.role.as_str(),
+                n.node
+            ),
+        ));
+    }
+    for c in &n.children {
+        check_unnamed_focusable(c, out);
+    }
+}
+
 /// The absolute visual-invariant lint: layout/render correctness checks that
 /// should always hold regardless of design — overflow (W0103), clipping (W0104),
-/// and zero-area interactive nodes (W0105). Unlike goldens (which catch
-/// *changes* vs a baseline), these catch *first-time* defects. Touch-target size
-/// and contrast are advisory (design-dependent) and stay separate.
+/// zero-area interactive nodes (W0105), duplicate ids (W0001), and unnamed
+/// focusables (W0301). Unlike goldens (which catch *changes* vs a baseline),
+/// these catch *first-time* defects. Touch-target size and contrast are
+/// advisory (design-dependent) and stay separate.
 pub fn lint(root: &SemanticsNode) -> Vec<Diagnostic> {
     let mut out = check_overflow(root);
     out.extend(check_clipping(root));
     out.extend(check_zero_size(root));
+    out.extend(check_duplicate_ids(root));
+    check_unnamed_focusable(root, &mut out);
     out
 }
 

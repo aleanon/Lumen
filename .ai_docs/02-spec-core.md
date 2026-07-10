@@ -195,12 +195,11 @@ impl Headless {
 ## 9. Diagnostics
 All warnings/errors are `Diagnostic { code: &'static str, severity, message, span: Option<SourceSpan>, node: Option<StableId> }`, serialized to JSON on the agent protocol and printed human-readably on stderr. Codes are stable API: `E####` errors, `W####` warnings; maintain a registry table in `lumen-core/diagnostics.md`. Initial assignments: W0001 duplicate StableId, W0002 dropped state field, E0101 .lss parse error, E0102 unknown style property (with did-you-mean), W0103 layout overflow, E0201 shader compile error, W0301 missing semantics on focusable leaf.
 
-*Status:* emitted today — W0002, E0101, E0102, E0104, W0103/W0104
-(ink-clipping)/W0105 (zero-area interactive) via the audit lint, E0201,
-W0401 (i18n missing key), E0701 (contained panic). **Defined but never
-emitted:** W0001 (duplicate-id detection unimplemented — plan W.4), W0301
-(the audit lint checks it without emitting the code — plan W.4), E0103
-(style type mismatches silent — plan B.7).
+*Status:* every registered code is emitted — W0002, E0101, E0102, E0103
+(type mismatches, B.7a), E0104, W0103/W0104/W0105 + **W0001**
+(duplicate StableId, W.4a) + **W0301** (unnamed focusable leaf, W.4a) via
+the audit lint, E0201, W0401 (i18n missing key), E0701 (contained panic).
+The defined-but-dead bucket from the 2026-07 audit is empty.
 
 ## 10. Built-in widget set
 **M0 primitives (10):** Text, Image, Row, Column, Stack, Scroll, Button, TextFieldBasic (single-style, pre-IME), Checkbox, Slider.

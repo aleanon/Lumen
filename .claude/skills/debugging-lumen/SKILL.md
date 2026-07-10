@@ -62,14 +62,14 @@ Run against the live window (`just run-agent <name>` +
    if incremental ≠ rebuild-fresh, it's a memoization/invalidation bug in
    the framework path, not your app.
 
-## 3. Diagnostics that fire vs. don't (don't wait for dead codes)
+## 3. Diagnostics — every registered code fires (since B.7a/W.4a)
 
-- **Fire:** E0101, E0102 (did-you-mean), E0104, W0002 (state evolution),
-  W0103/W0104/W0105 (via lint), E0201 (shader), W0401 (i18n), E0701
-  (contained panic).
-- **Never fire (defined but dead — plan W.4/B.7):** W0001 duplicate id,
-  W0301 unnamed focusable *as a diagnostic* (the lint checks it), E0103
-  style type mismatch. Absence of these codes proves nothing.
+E0101, E0102 (did-you-mean), **E0103** (style type mismatch — rejects the
+sheet), E0104, W0002 (state evolution), and via `ui.lint`/
+`app.diagnostics`: W0103 overflow, W0104 ink-clipping, W0105 zero-area
+interactive, **W0001** duplicate StableId, **W0301** unnamed focusable
+leaf; plus E0201 (shader), W0401 (i18n), E0701 (contained panic). A clean
+lint now really means clean.
 
 ## 4. Minimal repro discipline
 

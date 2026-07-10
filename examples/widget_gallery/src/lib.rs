@@ -198,6 +198,8 @@ fn build(cx: &mut BuildCx) -> Element {
                 .id("draft")
                 .on_submit(move |rt, text| items.update(rt, |v| v.push(text.to_string())));
             t.element_mut().style.flex_grow = 1.0;
+            // W0301: an empty input still needs an accessible name.
+            t.element_mut().label = "New to-do".to_string();
             t.into()
         },
         Button::new("Add")

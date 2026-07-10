@@ -33,3 +33,32 @@ fn clipped_text_is_caught_by_lint() {
         h.lint()
     );
 }
+
+/// W.4a: duplicate ids are W0001, unnamed focusable leaves are W0301 —
+/// both previously defined-but-dead (the 2026-07 audit's D#7).
+#[test]
+fn duplicate_ids_and_unnamed_focusables_lint() {
+    use lumen_widgets::{col, widgets};
+    let mut h = App::new(|_cx| {
+        let mut unnamed = widgets::button("", |_| {}).id("ok-1");
+        unnamed.label = String::new();
+        col![
+            widgets::text("hi").id("dup"),
+            widgets::text("ho").id("dup"),
+            unnamed,
+        ]
+    })
+    .run_headless(kurbo::Size::new(300.0, 200.0));
+    h.pump();
+    let diags = h.lint();
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == "W0001" && d.message.contains("#dup")),
+        "duplicate id reported: {diags:?}"
+    );
+    assert!(
+        diags.iter().any(|d| d.code == "W0301"),
+        "unnamed focusable reported: {diags:?}"
+    );
+}
