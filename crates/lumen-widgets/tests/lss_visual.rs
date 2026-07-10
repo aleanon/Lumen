@@ -59,3 +59,31 @@ fn lss_shadow_paints_behind_the_box() {
     );
     h.assert_view_coherent();
 }
+
+#[test]
+fn lss_visibility_hidden_removes_paint_hits_and_semantics_but_keeps_space() {
+    let sheet = "#gone { visibility: hidden; }";
+    let mut h = App::new(|_cx| col![box_with("gone"), box_with("below")])
+        .stylesheet(sheet)
+        .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+
+    // Layout space kept: the second box does NOT move up to y=0.
+    let below = h.node_bounds_by_id("below").unwrap();
+    assert!(
+        below.y0 > 10.0,
+        "hidden box keeps its layout space: {below:?}"
+    );
+
+    // Not painted: the hidden box's area shows the window background.
+    let gone = h.node_bounds_by_id("gone").unwrap();
+    let shot = h.screenshot();
+    let p = shot.pixel(gone.center().x as u32, gone.center().y as u32);
+    let bg = shot.pixel(295, 195);
+    assert_eq!(p, bg, "hidden box paints nothing: {p:?} vs bg {bg:?}");
+
+    // Not in semantics.
+    let sem = h.semantics_json().to_string();
+    assert!(!sem.contains("gone"), "hidden subtree leaves semantics");
+    assert!(sem.contains("below"), "visible sibling stays");
+}

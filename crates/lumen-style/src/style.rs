@@ -73,6 +73,9 @@ pub struct Style {
     pub backdrop_refraction: Option<f32>,
     /// `backdrop-filter: specular(...)` rim-highlight intensity.
     pub backdrop_specular: Option<f32>,
+    /// `visibility` (B.3): `Some(false)` = hidden — the subtree keeps its
+    /// layout space but is removed from paint, hit-testing, and semantics.
+    pub visibility: Option<bool>,
     /// `shadow` (B.3): single drop shadow. `inset` and comma lists are not
     /// supported yet (an `inset` keyword disables the declaration).
     pub shadow: Option<StyleShadow>,
@@ -191,6 +194,11 @@ impl Style {
         self.shadow = Some(sh);
         self
     }
+    /// Set `visibility` (`false` = hidden).
+    pub fn visibility(mut self, visible: bool) -> Self {
+        self.visibility = Some(visible);
+        self
+    }
 }
 
 /// The `.lss` properties `apply` actually consumes — the runtime's applied
@@ -215,6 +223,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "line-height",
     "backdrop-filter",
     "shadow",
+    "visibility",
     "border",
     "border-width",
     "border-color",
@@ -241,6 +250,13 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "line-height" => style.line_height = as_number(&v).map(|n| n as f32),
         "backdrop-filter" => apply_backdrop(style, &v),
         "shadow" => style.shadow = as_shadow(&v),
+        "visibility" => {
+            style.visibility = match &v {
+                Value::Keyword(k) if k == "visible" => Some(true),
+                Value::Keyword(k) if k == "hidden" => Some(false),
+                _ => None,
+            }
+        }
         "border" => apply_border(style, &v),
         "border-width" => style.border_width = as_px(&v),
         "border-color" => style.border_color = as_color(&v),

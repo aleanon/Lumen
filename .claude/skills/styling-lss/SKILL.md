@@ -40,6 +40,7 @@ padding/margin/border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 | `backdrop-filter: blur(8px) saturate(1.2) refraction(2) specular(0.5)` | full glass stack (refraction/specular are Lumen extensions) |
 | `opacity: 0.5` | subtree compositing layer (B.3a) |
 | `font-size`, `font-weight` (100–900, synthesized bold), `line-height` (multiple) | reach measure **and** paint (B.4a) — text nodes only |
+| `visibility: hidden` | removes the subtree from paint, hit-testing, AND semantics (agents don't see it); layout space is kept (B.3) |
 | `shadow: <dx> <dy> [blur] [spread] <color>` | single outer shadow (B.3); `inset`/comma lists unsupported — `inset` disables the declaration |
 | `@media container(width > 200px)` | tests the nearest `Element::container()` ancestor's laid-out size (not the window); only width/height; false with no container ancestor (B.2b) |
 | widget parts: `slider .track`, `slider .thumb`, `progress .fill` | parts are classes on the internals, scoped by the ancestor chain; custom widgets expose parts with `Element::part("thumb")` (B.7) |
@@ -57,7 +58,7 @@ numeric only.
 
 - **All layout properties** (A.2) — see the one rule.
 - Background **gradients**, `blend-mode`, `filter`, `clip`,
-  `transform`, `z-index`, `visibility`, `cursor` (B.3).
+  `transform`, `z-index`, `cursor` (B.3).
 - Remaining typography: `font-family/style/features/variation`,
   `letter-spacing`, `text-align/overflow/wrap/decoration`,
   `selection-color` (B.4). Use Rust `TextStyle`/`Label` setters instead

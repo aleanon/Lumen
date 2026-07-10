@@ -187,6 +187,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             container_prev: Vec::new(),
             container_stack: Vec::new(),
             container_repass: false,
+            hidden_count: 0,
             frame_ms: std::collections::VecDeque::new(),
             frames_rendered: 0,
             menu: crate::system::MenuModel::default(),
@@ -487,6 +488,9 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     container_prev: Vec<(f64, f64)>,
     container_stack: Vec<Option<(f64, f64)>>,
     container_repass: bool,
+    /// B.3 `visibility:hidden` — depth of enclosing hidden subtrees during
+    /// build; > 0 clears VISIBLE/HIT_TESTABLE on every node built inside.
+    hidden_count: usize,
     /// C.2: rolling per-painted-frame pump durations in ms (cap 120) + total
     /// painted frames — the agent's `app.perf`. Diagnostic only (never feeds
     /// rendering); not recorded on wasm (no `Instant`).
@@ -1552,6 +1556,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.desc_stack.clear();
         self.container_nodes.clear();
         self.container_stack.clear();
+        self.hidden_count = 0;
         self.style_env = self.app_sheet.as_ref().map(|sheet| StyleEnv {
             sources: [lumen_style::StyleSource {
                 origin: lumen_style::Origin::App,
@@ -1952,6 +1957,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // NOTE for A.3.2 (retained scopes): this mutates the *owned* element;
         // once memo hits become shared `Rc` subtrees the merge must move to a
         // per-node copy instead.
+        let mut pushed_hidden = false;
         if let Some(env) = &self.style_env {
             // B.6a: the full state vocabulary — interaction states carry
             // their CSS-familiar aliases (spec examples write `:hover`), and
@@ -2049,6 +2055,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     }
                 }
             }
+            // B.3 visibility: a hidden node (or one inside a hidden
+            // subtree) keeps its layout space but leaves hit-testing (flags)
+            // and, via the paint partition, rendering + semantics.
+            if css.visibility == Some(false) {
+                self.hidden_count += 1;
+                pushed_hidden = true;
+            }
+            if self.hidden_count > 0 {
+                tree.set_flags(node, NodeFlags::empty());
+            }
             self.node_style.insert(node, css);
             self.node_computed.insert(node, resolved);
             // B.1: this node becomes an ancestor for its children's matching
@@ -2128,6 +2144,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         if pushed_container {
             self.container_stack.pop();
         }
+        if pushed_hidden {
+            self.hidden_count -= 1;
+        }
         let child_lnodes: Vec<LayoutNode> = child_built.iter().map(|(_, l)| *l).collect();
         let lnode = if child_lnodes.is_empty() {
             layout.leaf(style)
@@ -2196,6 +2215,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let mut main_order: Vec<NodeIndex> = Vec::new();
         let mut overlay_order: Vec<NodeIndex> = Vec::new();
         let mut overlay_depths: Vec<u32> = Vec::new();
+        let mut hidden_depths: Vec<u32> = Vec::new();
         for node in order {
             let d = if Some(node) == root {
                 0
@@ -2205,6 +2225,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             depth.insert(node, d);
             while overlay_depths.last().is_some_and(|&od| d <= od) {
                 overlay_depths.pop();
+            }
+            // B.3 visibility: a hidden subtree paints nothing (layout space
+            // is kept — the partition just drops its nodes from both passes).
+            while hidden_depths.last().is_some_and(|&hd| d <= hd) {
+                hidden_depths.pop();
+            }
+            if !hidden_depths.is_empty() {
+                continue;
+            }
+            if self
+                .node_style
+                .get(&node)
+                .and_then(|s| s.visibility)
+                .is_some_and(|v| !v)
+            {
+                hidden_depths.push(d);
+                continue;
             }
             let is_root = self.meta.get(&node).is_some_and(|m| m.overlay);
             let inside = !overlay_depths.is_empty() || is_root;
@@ -2797,7 +2834,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 });
         let mut child = self.tree.first_child(node);
         while child.is_some() {
-            s.children.push(self.build_semantics(child));
+            // B.3 visibility:hidden — hidden subtrees leave the semantic tree
+            // too (what the agent sees matches what the user sees).
+            if self.tree.flags(child).contains(NodeFlags::VISIBLE) {
+                s.children.push(self.build_semantics(child));
+            }
             child = self.tree.next_sibling(child);
         }
         s
