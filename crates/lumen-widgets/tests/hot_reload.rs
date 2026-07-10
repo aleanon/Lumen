@@ -50,3 +50,17 @@ fn get_styles_unknown_selector_is_null() {
     h.pump();
     assert!(h.get_styles("#nope").is_null());
 }
+
+/// B.7b (04 §7): `get_styles` carries the winning declaration's source span
+/// — an agent can jump from a computed value to the `.lss` line that set it.
+#[test]
+fn get_styles_reports_the_winning_span() {
+    let mut h = App::new(|_| widgets::button("Hi", |_| {}).id("b"))
+        .stylesheet("/* comment */\nbutton { background: #ff0000ff; }")
+        .run_headless(Size::new(200.0, 80.0));
+    h.pump();
+    let styles = h.get_styles("#b");
+    let span = &styles["background"]["span"];
+    assert_eq!(span["line"], serde_json::json!(2), "{styles}");
+    assert!(span["col"].as_u64().unwrap() >= 1, "{styles}");
+}

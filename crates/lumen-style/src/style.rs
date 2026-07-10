@@ -313,6 +313,21 @@ pub fn computed_json(value: &Value, origin: Origin) -> Json {
     json!({ "value": canonical(value), "source": source_str(origin) })
 }
 
+/// [`computed_json`] with the winning declaration's source span (B.7b,
+/// 04 §7) — `{line, col}` into the stylesheet the app loaded.
+#[cfg(feature = "snapshot")]
+pub fn computed_json_spanned(
+    value: &Value,
+    origin: Origin,
+    span: Option<crate::ast::Span>,
+) -> Json {
+    let mut j = computed_json(value, origin);
+    if let Some(sp) = span {
+        j["span"] = json!({ "line": sp.line, "col": sp.col });
+    }
+    j
+}
+
 #[cfg(feature = "snapshot")]
 fn source_str(origin: Origin) -> &'static str {
     match origin {

@@ -25,7 +25,7 @@ pub use parser::{has_errors, parse};
 pub use properties::KNOWN_PROPERTIES;
 pub use style::{apply, resolve_token, Style, Tokens};
 #[cfg(feature = "snapshot")]
-pub use style::{canonical, computed_json};
+pub use style::{canonical, computed_json, computed_json_spanned};
 
 use std::collections::HashMap;
 
@@ -145,6 +145,9 @@ pub struct Computed {
     pub important: bool,
     /// The origin it came from.
     pub origin: Origin,
+    /// Source location of the winning declaration (B.7b, 04 §7) — `None`
+    /// for origins without source text (e.g. future inline styles).
+    pub span: Option<crate::ast::Span>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -211,6 +214,7 @@ pub fn resolve_with_ancestors(
                                 value: decl.value.clone(),
                                 important: decl.important,
                                 origin: src.origin,
+                                span: Some(decl.span),
                             },
                         ),
                     );
@@ -322,6 +326,7 @@ pub fn resolve_media(
                                 value: decl.value.clone(),
                                 important: decl.important,
                                 origin: src.origin,
+                                span: Some(decl.span),
                             },
                         ),
                     );

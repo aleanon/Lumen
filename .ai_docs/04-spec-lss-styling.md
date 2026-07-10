@@ -125,7 +125,7 @@ error** (B.2b); relative colors `oklch(from …)`
 **unsupported** (B.7); theme-switch animation **missing** (B.5); widget
 parts (`slider .track`, `cx.part`) **missing** (B.7); cascade origins other
 than the app sheet **unreachable** (B.6); `style_parity!` covers 11
-hand-picked properties, not set equality (B.7); `get_styles` serialization
-lacks `span` and only reaches the `stylesheet` source (B.7). This section
-is deleted when Phase B completes and the spec becomes unconditionally
-normative.
+hand-picked properties, not set equality (B.7); `get_styles` **carries the
+winning declaration's `span`** (`{line, col}` — B.7b ✅) but still only
+reaches the `stylesheet` source (origins — B.6b). This section is deleted
+when Phase B completes and the spec becomes unconditionally normative.

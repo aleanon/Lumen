@@ -1636,7 +1636,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let mut map = serde_json::Map::new();
         if let Some(computed) = self.node_computed.get(&node) {
             for (prop, c) in computed {
-                map.insert(prop.clone(), lumen_style::computed_json(&c.value, c.origin));
+                map.insert(
+                    prop.clone(),
+                    lumen_style::computed_json_spanned(&c.value, c.origin, c.span),
+                );
             }
         }
         serde_json::Value::Object(map)
@@ -1905,6 +1908,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                         value: lumen_style::resolve_token(&c.value, &env.tokens),
                         important: c.important,
                         origin: c.origin,
+                        span: c.span,
                     },
                 );
             }
