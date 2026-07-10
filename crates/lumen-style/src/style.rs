@@ -34,6 +34,17 @@ pub struct StyleShadow {
     pub color: Color,
 }
 
+/// A parsed `.lss` gradient (B.3) — box-relative; the runtime maps it onto
+/// the renderer's absolute-point `Brush` once the node's bounds are known.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StyleGradient {
+    /// `linear-gradient(<angle>, …)` CSS angle in degrees (0 = to top,
+    /// 90 = to right; default 180 = to bottom), or `None` for radial.
+    pub angle_deg: Option<f32>,
+    /// Color stops with offsets in `[0, 1]`.
+    pub stops: Vec<(f32, Color)>,
+}
+
 /// The typed computed style. Every field is optional (unset ⇒ inherit/default).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Style {
@@ -53,6 +64,8 @@ pub struct Style {
     pub margin: Option<Edges>,
     /// `background` color.
     pub background: Option<Color>,
+    /// `background: linear-gradient(…)|radial-gradient(…)` (B.3).
+    pub background_gradient: Option<StyleGradient>,
     /// `color` (text).
     pub color: Option<Color>,
     /// `border-radius` (uniform; with a multi-value declaration this holds
@@ -203,6 +216,12 @@ impl Style {
         self.visibility = Some(visible);
         self
     }
+    /// Set a gradient `background` (the typed mirror of
+    /// `linear-gradient(…)`/`radial-gradient(…)`).
+    pub fn background_gradient(mut self, g: StyleGradient) -> Self {
+        self.background_gradient = Some(g);
+        self
+    }
     /// Set per-corner `border-radius` (`[tl, tr, br, bl]`, px).
     pub fn radius_corners(mut self, c: [f32; 4]) -> Self {
         self.border_radius_corners = Some(c);
@@ -251,7 +270,14 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "gap" => style.gap = as_dim(&v),
         "padding" => style.padding = as_dim(&v).map(Edges::all),
         "margin" => style.margin = as_dim(&v).map(Edges::all),
-        "background" => style.background = as_color(&v),
+        "background" => match &v {
+            Value::Function(name, args)
+                if name == "linear-gradient" || name == "radial-gradient" =>
+            {
+                style.background_gradient = as_gradient(name, args)
+            }
+            other => style.background = as_color(other),
+        },
         "color" => style.color = as_color(&v),
         "border-radius" => match &v {
             // 2–4 values expand CSS-style; `border_radius` keeps the
@@ -288,6 +314,46 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "border-color" => style.border_color = as_color(&v),
         _ => {}
     }
+}
+
+/// Parse `linear-gradient([<angle>deg,] <stop>…)` / `radial-gradient(<stop>…)`
+/// where a stop is `<color> [<pct>]`. Stops without positions distribute
+/// evenly; needs ≥ 2 colors.
+fn as_gradient(name: &str, args: &[Value]) -> Option<StyleGradient> {
+    let a = flat_args(args);
+    let mut angle_deg = if name == "linear-gradient" {
+        Some(180.0f32) // CSS default: to bottom
+    } else {
+        None
+    };
+    let mut stops: Vec<(Option<f32>, Color)> = Vec::new();
+    for it in a {
+        match it {
+            Value::Number(n, Unit::Deg) if name == "linear-gradient" && stops.is_empty() => {
+                angle_deg = Some(*n as f32);
+            }
+            Value::Number(n, Unit::Percent) => {
+                if let Some(last) = stops.last_mut() {
+                    last.0 = Some(*n as f32 / 100.0);
+                }
+            }
+            other => {
+                if let Some(c) = as_color(other) {
+                    stops.push((None, c));
+                }
+            }
+        }
+    }
+    if stops.len() < 2 {
+        return None;
+    }
+    let n = stops.len();
+    let stops = stops
+        .into_iter()
+        .enumerate()
+        .map(|(i, (off, c))| (off.unwrap_or(i as f32 / (n - 1) as f32), c))
+        .collect();
+    Some(StyleGradient { angle_deg, stops })
 }
 
 /// Parse `shadow: <dx> <dy> [blur] [spread] <color>` (04 §3). Offsets and

@@ -23,7 +23,9 @@ pub use ast::{
 };
 pub use parser::{has_errors, parse};
 pub use properties::KNOWN_PROPERTIES;
-pub use style::{apply, resolve_token, Style, StyleShadow, Tokens, APPLIED_PROPERTIES};
+pub use style::{
+    apply, resolve_token, Style, StyleGradient, StyleShadow, Tokens, APPLIED_PROPERTIES,
+};
 #[cfg(feature = "snapshot")]
 pub use style::{canonical, computed_json, computed_json_spanned};
 

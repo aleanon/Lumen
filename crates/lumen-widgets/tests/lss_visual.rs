@@ -116,3 +116,33 @@ fn lss_multi_value_border_radius_rounds_per_corner() {
     );
     h.assert_view_coherent();
 }
+
+#[test]
+fn lss_linear_gradient_background_renders() {
+    // 90deg = to the right: left edge red, right edge blue.
+    let sheet = "#grad { background: linear-gradient(90deg, #ff0000, #0000ff); }";
+    let mut h = App::new(|_cx| {
+        let mut e = box_with("grad");
+        e.style.width = Dim::px(200.0);
+        e.style.height = Dim::px(40.0);
+        col![e]
+    })
+    .stylesheet(sheet)
+    .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+
+    let b = h.node_bounds_by_id("grad").unwrap();
+    let shot = h.screenshot();
+    let y = b.center().y as u32;
+    let left = shot.pixel(b.x0 as u32 + 3, y);
+    let right = shot.pixel(b.x1 as u32 - 4, y);
+    assert!(
+        left[0] > 180 && left[2] < 90,
+        "left edge is red-dominant: {left:?}"
+    );
+    assert!(
+        right[2] > 180 && right[0] < 90,
+        "right edge is blue-dominant: {right:?}"
+    );
+    h.assert_view_coherent();
+}

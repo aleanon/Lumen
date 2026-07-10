@@ -2466,10 +2466,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             let border = css_border.or(m.border).or(focus_border);
             // Emit the box rect for a fill *or* a border (an outline-only box has
             // a transparent fill); nodes with neither stay rect-free as before.
-            if bg.is_some() || border.is_some() {
+            // B.3: `.lss` gradient backgrounds — box-relative geometry maps
+            // onto the renderer's absolute-point brush here, where bounds are
+            // known. A gradient beats the solid color (hover tint skips it).
+            let gradient = css
+                .and_then(|s| s.background_gradient.as_ref())
+                .map(|g| gradient_brush(g, bounds));
+            if bg.is_some() || border.is_some() || gradient.is_some() {
                 dl.push(DrawCmd::Rect {
                     rect: bounds,
-                    brush: Brush::Solid(bg.unwrap_or(Color::srgb8(0, 0, 0, 0))),
+                    brush: gradient.unwrap_or(Brush::Solid(bg.unwrap_or(Color::srgb8(0, 0, 0, 0)))),
                     radii,
                     border,
                 });
@@ -2870,6 +2876,41 @@ fn panic_msg(payload: &Box<dyn std::any::Any + Send>) -> String {
 
 /// A hover-state version of a control colour: lighten a dark fill, darken a
 /// light one (perceptually, in Oklab). Subtle but visible.
+/// Map a box-relative `.lss` gradient onto the renderer brush for `bounds`
+/// (B.3). Linear: CSS angle (0 = to top, 90 = to right), line through the
+/// center sized by the box's projection onto the axis. Radial: centered,
+/// farthest-corner radius.
+fn gradient_brush(g: &lumen_style::StyleGradient, bounds: Rect) -> Brush {
+    let stops: Vec<lumen_render::GradientStop> = g
+        .stops
+        .iter()
+        .map(|(o, c)| lumen_render::GradientStop {
+            offset: *o,
+            color: *c,
+        })
+        .collect();
+    let c = bounds.center();
+    match g.angle_deg {
+        Some(deg) => {
+            let a = (deg as f64).to_radians();
+            let (dx, dy) = (a.sin(), -a.cos());
+            let half = (bounds.width() * dx.abs() + bounds.height() * dy.abs()) / 2.0;
+            Brush::LinearGradient {
+                start: kurbo::Point::new(c.x - dx * half, c.y - dy * half),
+                end: kurbo::Point::new(c.x + dx * half, c.y + dy * half),
+                stops,
+                spread: lumen_render::SpreadMode::Pad,
+            }
+        }
+        None => Brush::RadialGradient {
+            center: c,
+            radius: ((bounds.width() / 2.0).powi(2) + (bounds.height() / 2.0).powi(2)).sqrt(),
+            stops,
+            spread: lumen_render::SpreadMode::Pad,
+        },
+    }
+}
+
 fn hover_tint(c: Color) -> Color {
     let lum = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
     let target = if lum < 0.5 {
