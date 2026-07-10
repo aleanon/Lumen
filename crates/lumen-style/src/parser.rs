@@ -601,6 +601,16 @@ impl Parser {
                 self.bump();
                 Some(Value::Str(s))
             }
+            Tk::NumBadUnit(n, suffix) => {
+                let span = self.span();
+                self.bump();
+                self.err_at(
+                    codes::E0103,
+                    format!("unknown unit `{suffix}` (expected px, %, ms, s, deg, or fr)"),
+                    span,
+                );
+                Some(Value::Number(n, Unit::None))
+            }
             // calc() operators surface as keyword atoms; `eval_calc` in
             // style.rs interprets them (B.7 relative colors).
             Tk::Plus => {

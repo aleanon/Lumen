@@ -177,6 +177,8 @@ pub enum Unit {
     S,
     /// Degrees.
     Deg,
+    /// Fractional grid-track unit (`1fr`, 04 §3).
+    Fr,
 }
 
 /// A media query feature comparison.

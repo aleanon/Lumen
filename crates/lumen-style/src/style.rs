@@ -405,6 +405,7 @@ pub fn canonical(value: &Value) -> Json {
         Value::Number(n, Unit::Ms) => json!({ "ms": n }),
         Value::Number(n, Unit::S) => json!({ "ms": n * 1000.0 }),
         Value::Number(n, Unit::Deg) => json!({ "deg": n }),
+        Value::Number(n, Unit::Fr) => json!({ "fr": n }),
         Value::Color(c) => json!(c.to_hex()),
         Value::Keyword(k) => json!(k),
         Value::Str(s) => json!(s),

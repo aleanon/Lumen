@@ -101,7 +101,8 @@ implemented. **E0103 fires since B.7a** for type mismatches on the applied
 property set (color/length/number/keyword expectations; `$token`,
 function, and list values pass through) — the sheet is rejected
 atomically. `border-width`/`border-color` are in the known-property list
-(B.7a). Unknown units are still silently treated as unitless (plan B.7).
+(B.7a). Unknown units are `E0103` with a span since B.7 (known units:
+`px % ms s deg fr`; bare numbers stay legal where a length is expected).
 
 ## 10. Implementation status by property (2026-07-09)
 

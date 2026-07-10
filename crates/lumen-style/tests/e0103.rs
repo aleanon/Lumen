@@ -41,3 +41,29 @@ fn valid_indirect_and_shorthand_values_pass() {
         );
     }
 }
+
+#[test]
+fn unknown_units_emit_e0103_with_span() {
+    // B.7: previously `12abc` was silently treated as unitless.
+    let (_, diags) = parse("t.lss", "#x { width: 12abc;\n     height: 3vw; }");
+    let bad: Vec<_> = diags.iter().filter(|d| d.code == "E0103").collect();
+    assert_eq!(bad.len(), 2, "one E0103 per unknown unit: {diags:?}");
+    assert!(bad[0].message.contains("abc") && bad[1].message.contains("vw"));
+    assert!(has_errors(&diags), "unknown units must reject the sheet");
+}
+
+#[test]
+fn known_units_including_fr_pass() {
+    for good in [
+        "#x { width: 50%; }",
+        "#x { transition: background 120ms ease; }",
+        "#x { transform: rotate(90deg); }",
+        "#x { grid-template-columns: 1fr 200px auto; }",
+    ] {
+        let (_, diags) = parse("t.lss", good);
+        assert!(
+            !diags.iter().any(|d| d.code == "E0103"),
+            "{good} must not E0103: {diags:?}"
+        );
+    }
+}

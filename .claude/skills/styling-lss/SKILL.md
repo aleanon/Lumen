@@ -117,8 +117,9 @@ planned (B.5). Test both themes: `TestApp::with_options(size, theme)`.
   (applied property set; `$token`/function/list values pass through).
 - `border-width:`/`border-color:` are legitimate known properties now
   (B.7a — the spurious E0102 is gone).
-- Unknown units are treated as unitless without warning — `12padding` won't
-  complain.
+- Unknown units are `E0103` with a span (B.7) — `12abc` rejects the sheet.
+  Known units: `px % ms s deg fr`; bare numbers still mean px where a
+  length is expected.
 
 ## References
 

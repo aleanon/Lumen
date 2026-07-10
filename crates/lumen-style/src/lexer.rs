@@ -18,6 +18,8 @@ pub enum Tk {
     Str(String),
     /// A number with a unit.
     Num(f64, Unit),
+    /// A number with an *unrecognized* unit suffix — E0103 in the parser.
+    NumBadUnit(f64, String),
     /// `.`.
     Dot,
     /// `:`.
@@ -318,7 +320,10 @@ impl Lexer<'_> {
             "ms" => Unit::Ms,
             "s" => Unit::S,
             "deg" => Unit::Deg,
-            _ => Unit::None, // unknown unit; treated as unitless
+            "fr" => Unit::Fr,
+            // Unknown unit: surface as its own token so the parser can emit
+            // E0103 at this span (B.7 — previously silently unitless).
+            _ => return Tk::NumBadUnit(n, suffix),
         };
         Tk::Num(n, unit)
     }
