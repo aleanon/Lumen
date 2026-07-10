@@ -18,9 +18,8 @@
 > since B.6a**: interaction states with CSS-familiar aliases
 > (`:hovered`/`:hover`, `:focused`/`:focus`, `:pressed`/`:active`) plus
 > every semantic widget state (`:checked`, `:disabled`, `:expanded`, …).
-> Still true until the rest of B: `@media container(...)` is a parse error
-> (B.2b); `transition:`/`animation:` are **unwired** (no keyframe playback,
-> B.5). See §10 for the per-property table. Authoring guidance lives in the
+> Still true until the rest of B: `transition:`/`animation:` are **unwired**
+> (no keyframe playback, B.5). See §10 for the per-property table. Authoring guidance lives in the
 > `styling-lss` skill.
 
 ## 1. Grammar (EBNF)
@@ -82,7 +81,9 @@ Built-in widgets expose internal parts as classes documented per widget (02 §10
 *Status (B.7):* shipped parts — `slider .track`, `slider .thumb`, `progress .fill`; other built-ins gain parts as they're documented in 02 §10. `Element::part` is public for custom widgets.
 
 ## 6. Media queries
-`width/height` test the **window** by default; `@media container(...)` tests the nearest ancestor marked `.container()`. `platform: windows|macos|linux|android|ios`, `pointer: mouse|touch`, `scale` = DPI factor.
+`width/height` test the **window** by default; `@media container(...)` tests the nearest ancestor marked `.container()` (an `Element::container()` builder; only `width`/`height` are valid inside `container(…)`, and with no container ancestor the query is false). `platform: windows|macos|linux|android|ios`, `pointer: mouse|touch`, `scale` = DPI factor.
+
+*Status (B.2b):* shipped. The container size is its laid-out size: styles resolve against the previous layout's measurement, then one bounded re-pass per rebuild re-resolves if the fresh layout moved it — so a threshold crossing lands within the same pump; a change caused *by* the re-pass itself waits for the next pump (oscillation guard).
 
 ## 7. Computed-value serialization (for `ui.getStyles`)
 Every property serializes to JSON as `{ "value": <canonical>, "source": "theme|stylesheet|inline|default", "span": {file,line,col}? }`. Canonical forms: lengths as `{px: f64}`, colors as `#rrggbbaa`, enums as strings. This is API: tests assert against it.
@@ -123,8 +124,10 @@ Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 parse, incl. `& > part+`); descendant/`>` combinators **match the real
 ancestor chain** (B.1 ✅ — the last-compound-only over-match is fixed);
 `@media` **gates on the live window** (B.2 ✅ — width/height/scale/
-platform/pointer; resize re-resolves); `@media container(...)` **parse
-error** (B.2b); relative colors `oklch(from <color|$token> L C H)` **work**
+platform/pointer; resize re-resolves); `@media container(...)` **works**
+(B.2b ✅ — tests the nearest `.container()` ancestor's laid-out size;
+measured post-layout with one bounded re-pass per rebuild, so a size change
+is visible within the same pump); relative colors `oklch(from <color|$token> L C H)` **work**
 (B.7 ✅ — channel keywords `l`/`c`/`h` + `calc(…)` over `+ - *`,
 left-to-right, spaces required around operators; alpha inherited from the
 base; `$token`s now resolve inside function args and shorthand lists too);

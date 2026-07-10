@@ -190,6 +190,9 @@ pub struct MediaQuery {
     pub op: MediaOp,
     /// Comparison value.
     pub value: Value,
+    /// `@media container(…)` — test the nearest `.container()` ancestor's
+    /// size instead of the window (B.2b, 04 §6).
+    pub container: bool,
 }
 
 /// A media-query comparison operator.

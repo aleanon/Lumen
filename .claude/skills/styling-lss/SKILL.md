@@ -40,6 +40,7 @@ padding/margin/border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 | `backdrop-filter: blur(8px) saturate(1.2) refraction(2) specular(0.5)` | full glass stack (refraction/specular are Lumen extensions) |
 | `opacity: 0.5` | subtree compositing layer (B.3a) |
 | `font-size`, `font-weight` (100–900, synthesized bold), `line-height` (multiple) | reach measure **and** paint (B.4a) — text nodes only |
+| `@media container(width > 200px)` | tests the nearest `Element::container()` ancestor's laid-out size (not the window); only width/height; false with no container ancestor (B.2b) |
 | widget parts: `slider .track`, `slider .thumb`, `progress .fill` | parts are classes on the internals, scoped by the ancestor chain; custom widgets expose parts with `Element::part("thumb")` (B.7) |
 | relative colors `oklch(from <color or $token> L C H)` | channel keywords `l`/`c`/`h` + `calc(l + 0.06)` (`+ - *`, left-to-right, spaces around operators); alpha from the base; `$token`s resolve inside function args/shorthand lists (B.7) |
 | `@tokens { … }` / `@theme light|dark { … }` / `$token` | full token resolution, theme-scoped first |
@@ -62,8 +63,6 @@ numeric only.
   (`font-size`/`font-weight`/`line-height` work — see the works table).
 - `transition:` / `animation:` / `@keyframes` — parsed, never played (B.5).
   Motion comes from Rust: `motion::spring` + `cx.animate()`.
-- `@media container(...)` — parse error until B.2b (window-level `@media`
-  works — see the works table).
 
 ## State selectors (full vocabulary since B.6a)
 

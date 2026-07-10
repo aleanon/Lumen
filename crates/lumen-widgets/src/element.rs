@@ -182,6 +182,10 @@ pub struct Element {
     /// and escaping ancestor clips — a portal/overlay (dropdown menus, popovers,
     /// tooltips). Layout/hit-testing are unchanged; only paint order moves.
     pub overlay: bool,
+    /// `@media container(…)` reference (B.2b, 04 §6): descendants' container
+    /// queries test this element's laid-out size. Set with
+    /// [`container`](Self::container).
+    pub container: bool,
     /// Optional drop shadow behind the box.
     pub shadow: Option<Shadow>,
     /// If this element is the root a [`BuildCx::scope`] returned, the stable keys
@@ -236,6 +240,7 @@ impl Default for Element {
             on_dismiss: None,
             clip: false,
             overlay: false,
+            container: false,
             shadow: None,
             scope_deps: None,
             scope_key: None,
@@ -335,6 +340,15 @@ impl Element {
     /// Add a class.
     pub fn class(mut self, c: impl Into<String>) -> Self {
         self.classes.push(c.into());
+        self
+    }
+    /// Mark this element as the reference for descendants' `@media
+    /// container(…)` queries (04 §6). The size tested is this element's
+    /// laid-out size — measured after layout, with one bounded re-pass per
+    /// rebuild, so a size change is visible to queries within the same pump
+    /// (a further mid-pass change waits for the next one).
+    pub fn container(mut self) -> Self {
+        self.container = true;
         self
     }
     /// Expose this element as a named widget part (04 §5) — `slider .thumb`

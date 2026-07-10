@@ -284,6 +284,15 @@ impl Parser {
         self.bump(); // @media
         let mut queries = Vec::new();
         loop {
+            // B.2b: `container(width > 400px)` — same comparison grammar,
+            // evaluated against the nearest `.container()` ancestor.
+            let mut container = false;
+            if let Tk::Ident(s) = self.cur() {
+                if s == "container" {
+                    container = true;
+                    self.bump();
+                }
+            }
             self.expect(Tk::LParen, "`(`");
             let feature = self.ident_or_err("media feature");
             let op = match self.cur() {
@@ -300,7 +309,12 @@ impl Parser {
             self.bump();
             let value = self.value();
             self.expect(Tk::RParen, "`)`");
-            queries.push(MediaQuery { feature, op, value });
+            queries.push(MediaQuery {
+                feature,
+                op,
+                value,
+                container,
+            });
             if let Tk::Ident(s) = self.cur() {
                 if s == "and" {
                     self.bump();

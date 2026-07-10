@@ -183,6 +183,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             style_env: None,
             scope_spans: HashMap::new(),
             desc_stack: Vec::new(),
+            container_nodes: Vec::new(),
+            container_prev: Vec::new(),
+            container_stack: Vec::new(),
+            container_repass: false,
             frame_ms: std::collections::VecDeque::new(),
             frames_rendered: 0,
             menu: crate::system::MenuModel::default(),
@@ -473,6 +477,16 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// (root-first), fed to `resolve_with_ancestors` so descendant/`>`
     /// selectors match correctly. Maintained by `build_node`'s recursion.
     desc_stack: Vec<lumen_style::NodeDesc>,
+    /// B.2b: container-query support. `container_nodes` — the `.container()`
+    /// nodes of the current tree in build order; `container_prev` — their
+    /// sizes from the last layout (what the build resolves against);
+    /// `container_stack` — build-time stack of the nearest enclosing
+    /// container's size (`None` = not yet measured); `container_repass` —
+    /// re-entrancy guard for the bounded post-layout re-pass.
+    container_nodes: Vec<NodeIndex>,
+    container_prev: Vec<(f64, f64)>,
+    container_stack: Vec<Option<(f64, f64)>>,
+    container_repass: bool,
     /// C.2: rolling per-painted-frame pump durations in ms (cap 120) + total
     /// painted frames — the agent's `app.perf`. Diagnostic only (never feeds
     /// rendering); not recorded on wasm (no `Instant`).
@@ -1536,6 +1550,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.node_computed.clear();
         self.scope_spans.clear();
         self.desc_stack.clear();
+        self.container_nodes.clear();
+        self.container_stack.clear();
         self.style_env = self.app_sheet.as_ref().map(|sheet| StyleEnv {
             sources: [lumen_style::StyleSource {
                 origin: lumen_style::Origin::App,
@@ -1566,6 +1582,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     "mouse"
                 }
                 .to_string(),
+                // B.2b: per-node — set from `container_stack` at resolve time.
+                container: None,
             },
         });
 
@@ -1589,6 +1607,29 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         for (node, lnode) in &built {
             tree.set_bounds(*node, layout.bounds(*lnode));
+        }
+
+        // B.2b: container queries resolved against the *previous* layout's
+        // container sizes; if this layout measured them differently, one
+        // bounded re-pass lets queries see the fresh sizes within this pump
+        // (a change caused *by* the re-pass itself waits for the next one —
+        // prevents oscillation).
+        let sizes: Vec<(f64, f64)> = self
+            .container_nodes
+            .iter()
+            .map(|n| {
+                let b = tree.bounds(*n);
+                (b.width(), b.height())
+            })
+            .collect();
+        if sizes != self.container_prev {
+            self.container_prev = sizes;
+            if !self.container_repass {
+                self.container_repass = true;
+                self.rebuild_inner();
+                self.container_repass = false;
+                return;
+            }
         }
 
         self.tree = tree;
@@ -1940,12 +1981,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // selectors real (previously only the rightmost compound was
             // checked — `dialog button` matched every button). B.2: the live
             // media context gates `@media` blocks on the actual window.
-            let computed = lumen_style::resolve_with_ancestors(
-                &env.sources,
-                &desc,
-                &self.desc_stack,
-                &env.media,
-            );
+            // B.2b: inside a `.container()`, container queries test that
+            // ancestor's size (from the last layout) instead of the window.
+            let media = match self.container_stack.last().copied().flatten() {
+                Some(size) => std::borrow::Cow::Owned(lumen_style::MediaContext {
+                    container: Some(size),
+                    ..env.media.clone()
+                }),
+                None => std::borrow::Cow::Borrowed(&env.media),
+            };
+            let computed =
+                lumen_style::resolve_with_ancestors(&env.sources, &desc, &self.desc_stack, &media);
             let mut css = lumen_style::Style::new();
             let mut resolved = HashMap::new();
             for (prop, c) in &computed {
@@ -2010,6 +2056,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             self.desc_stack.push(desc);
         }
         let pushed_desc = self.style_env.is_some();
+        // B.2b: this node's own styles resolved against the *enclosing*
+        // container (CSS semantics); its descendants query this one. Size
+        // comes from the previous layout by build order (`None` until
+        // measured — queries fail closed for that pass).
+        let pushed_container = el.container;
+        if pushed_container {
+            let seq = self.container_nodes.len();
+            self.container_nodes.push(node);
+            self.container_stack
+                .push(self.container_prev.get(seq).copied());
+        }
 
         // Text nodes get a fixed size from measurement.
         let mut style = el.style;
@@ -2067,6 +2124,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .collect();
         if pushed_desc {
             self.desc_stack.pop();
+        }
+        if pushed_container {
+            self.container_stack.pop();
         }
         let child_lnodes: Vec<LayoutNode> = child_built.iter().map(|(_, l)| *l).collect();
         let lnode = if child_lnodes.is_empty() {

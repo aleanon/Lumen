@@ -238,6 +238,9 @@ pub struct MediaContext {
     pub platform: String,
     /// Pointer: `mouse|touch`.
     pub pointer: String,
+    /// Size of the nearest `.container()` ancestor, when resolving inside
+    /// one (B.2b) — `None` outside any container (container queries fail).
+    pub container: Option<(f64, f64)>,
 }
 
 impl Default for MediaContext {
@@ -248,6 +251,7 @@ impl Default for MediaContext {
             scale: 1.0,
             platform: "linux".into(),
             pointer: "mouse".into(),
+            container: None,
         }
     }
 }
@@ -259,6 +263,28 @@ pub fn eval_query(q: &ast::MediaQuery, ctx: &MediaContext) -> bool {
         Value::Number(n, _) => Some(*n),
         _ => None,
     };
+    // B.2b: container queries test the nearest `.container()` ancestor's
+    // size; with no container in scope the query is false.
+    if q.container {
+        let Some((cw, ch)) = ctx.container else {
+            return false;
+        };
+        let lhs = match q.feature.as_str() {
+            "width" => cw,
+            "height" => ch,
+            _ => return false,
+        };
+        let Some(rhs) = num(&q.value) else {
+            return false;
+        };
+        return match q.op {
+            Eq => lhs == rhs,
+            Lt => lhs < rhs,
+            Gt => lhs > rhs,
+            Le => lhs <= rhs,
+            Ge => lhs >= rhs,
+        };
+    }
     match q.feature.as_str() {
         "width" | "height" | "scale" => {
             let lhs = match q.feature.as_str() {
