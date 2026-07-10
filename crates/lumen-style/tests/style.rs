@@ -90,6 +90,18 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         .clip(lumen_style::StyleClip::Rounded));
     style_parity!(covered, "blend-mode", "multiply", |s: Style| s
         .blend_mode(lumen_style::StyleBlend::Multiply));
+    for (i, side) in ["top", "right", "bottom", "left"].iter().enumerate() {
+        let prop = format!("border-{side}");
+        let mut from_lss = Style::new();
+        apply(
+            &mut from_lss,
+            &prop,
+            &val(&prop, "2px #ff0000ff"),
+            &Tokens::new(),
+        );
+        assert_eq!(from_lss, Style::new().border_side(i, 2.0, red()), "{prop}");
+    }
+    covered.extend(["border-top", "border-right", "border-bottom", "border-left"]);
     style_parity!(covered, "shadow", "0 2px 8px #00000033", |s: Style| s
         .shadow(lumen_style::StyleShadow {
             dx: 0.0,
@@ -124,7 +136,9 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "visibility" => "hidden",
         "clip" => "rounded",
         "blend-mode" => "multiply",
-        "border" => "2px #ff0000ff",
+        "border" | "border-top" | "border-right" | "border-bottom" | "border-left" => {
+            "2px #ff0000ff"
+        }
         _ => "8px", // the lengths
     };
     for &p in lumen_style::APPLIED_PROPERTIES {

@@ -252,3 +252,25 @@ fn lss_blend_mode_multiply_composites() {
         "yellow multiply cyan = green: {p:?}"
     );
 }
+
+#[test]
+fn lss_per_side_border_strips_paint_on_the_declared_edge() {
+    let sheet = "#sb { background: #0000ffff; border-top: 6px #ff0000; }";
+    let mut h = App::new(|_cx| {
+        let mut e = box_with("sb");
+        e.style.height = Dim::px(40.0);
+        col![e]
+    })
+    .stylesheet(sheet)
+    .run_headless(Size::new(300.0, 100.0));
+    h.pump();
+
+    let b = h.node_bounds_by_id("sb").unwrap();
+    let shot = h.screenshot();
+    let top = shot.pixel(b.center().x as u32, b.y0 as u32 + 2);
+    let mid = shot.pixel(b.center().x as u32, b.center().y as u32);
+    let bottom = shot.pixel(b.center().x as u32, b.y1 as u32 - 3);
+    assert!(top[0] > 200 && top[2] < 60, "top edge red: {top:?}");
+    assert!(mid[2] > 200, "middle stays blue: {mid:?}");
+    assert!(bottom[2] > 200, "bottom edge stays blue: {bottom:?}");
+}

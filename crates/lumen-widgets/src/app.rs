@@ -2528,6 +2528,26 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     border,
                 });
             }
+            // B.3: per-side borders — straight strips on top of the box
+            // fill (border-radius is ignored for per-side borders, v1).
+            if let Some(sides) = css.map(|s| s.border_sides) {
+                for (i, sb) in sides.iter().enumerate() {
+                    let Some(sb) = sb else { continue };
+                    let w = sb.width as f64;
+                    let r = match i {
+                        0 => Rect::new(bounds.x0, bounds.y0, bounds.x1, bounds.y0 + w),
+                        1 => Rect::new(bounds.x1 - w, bounds.y0, bounds.x1, bounds.y1),
+                        2 => Rect::new(bounds.x0, bounds.y1 - w, bounds.x1, bounds.y1),
+                        _ => Rect::new(bounds.x0, bounds.y0, bounds.x0 + w, bounds.y1),
+                    };
+                    dl.push(DrawCmd::Rect {
+                        rect: r,
+                        brush: Brush::Solid(sb.color),
+                        radii: CornerRadii::all(0.0),
+                        border: None,
+                    });
+                }
+            }
             // Immediate-mode canvas: draw in node-local coords offset to bounds.
             if let NodeContent::Canvas(draw) = &m.content {
                 let mut frame = lumen_render::canvas::Frame::new(kurbo::Affine::translate((

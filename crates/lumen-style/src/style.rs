@@ -34,6 +34,15 @@ pub struct StyleShadow {
     pub color: Color,
 }
 
+/// One per-side border (B.3): `border-(top|right|bottom|left): <w> <color>`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StyleSideBorder {
+    /// Stroke width (px).
+    pub width: f32,
+    /// Stroke color.
+    pub color: Color,
+}
+
 /// `blend-mode:` values (B.3) — mirrors the renderer's blend set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StyleBlend {
@@ -135,6 +144,10 @@ pub struct Style {
     /// `shadow` (B.3): single drop shadow. `inset` and comma lists are not
     /// supported yet (an `inset` keyword disables the declaration).
     pub shadow: Option<StyleShadow>,
+    /// Per-side `border-(top|right|bottom|left)` (B.3) —
+    /// `[top, right, bottom, left]`; painted as straight strips on top of
+    /// the box (border-radius is ignored for per-side borders).
+    pub border_sides: [Option<StyleSideBorder>; 4],
     /// `border-width` in px (uniform). Also set by the `border` shorthand.
     pub border_width: Option<f32>,
     /// `border-color`. Also set by the `border` shorthand.
@@ -261,6 +274,11 @@ impl Style {
         self.shadow = Some(sh);
         self
     }
+    /// Set one border side (`0..=3` = top/right/bottom/left).
+    pub fn border_side(mut self, side: usize, width: f32, color: Color) -> Self {
+        self.border_sides[side] = Some(StyleSideBorder { width, color });
+        self
+    }
     /// Set `blend-mode`.
     pub fn blend_mode(mut self, b: StyleBlend) -> Self {
         self.blend_mode = Some(b);
@@ -324,6 +342,10 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "clip",
     "visibility",
     "border",
+    "border-top",
+    "border-right",
+    "border-bottom",
+    "border-left",
     "border-width",
     "border-color",
 ];
@@ -410,6 +432,10 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
             }
         }
         "border" => apply_border(style, &v),
+        "border-top" => style.border_sides[0] = as_side_border(&v),
+        "border-right" => style.border_sides[1] = as_side_border(&v),
+        "border-bottom" => style.border_sides[2] = as_side_border(&v),
+        "border-left" => style.border_sides[3] = as_side_border(&v),
         "border-width" => style.border_width = as_px(&v),
         "border-color" => style.border_color = as_color(&v),
         _ => {}
@@ -491,6 +517,31 @@ fn as_shadow(v: &Value) -> Option<StyleShadow> {
         blur: nums.get(2).copied().unwrap_or(0.0),
         spread: nums.get(3).copied().unwrap_or(0.0),
         color,
+    })
+}
+
+/// Parse a per-side border: `<width> <color>` (either order, keywords like
+/// `solid` ignored — matching the shorthand). Defaults: 1px, opaque black.
+fn as_side_border(v: &Value) -> Option<StyleSideBorder> {
+    let items: Vec<&Value> = match v {
+        Value::List(items) => items.iter().collect(),
+        other => vec![other],
+    };
+    let mut width = None;
+    let mut color = None;
+    for it in items {
+        if let Some(px) = as_px(it) {
+            width = Some(px);
+        } else if let Some(c) = as_color(it) {
+            color = Some(c);
+        }
+    }
+    if width.is_none() && color.is_none() {
+        return None;
+    }
+    Some(StyleSideBorder {
+        width: width.unwrap_or(1.0),
+        color: color.unwrap_or(Color::srgb8(0, 0, 0, 0xff)),
     })
 }
 
