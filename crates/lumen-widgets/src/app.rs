@@ -2293,6 +2293,18 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 .and_then(|s| s.border_radius)
                 .map(|r| r as f64)
                 .unwrap_or(m.corner_radius);
+            // B.3: 2–4-value `border-radius` — per-corner radii for the
+            // fill/border/clip/backdrop shapes (the shadow sprite keeps the
+            // uniform top-left fallback).
+            let radii = css
+                .and_then(|s| s.border_radius_corners)
+                .map(|c| CornerRadii {
+                    tl: c[0] as f64,
+                    tr: c[1] as f64,
+                    br: c[2] as f64,
+                    bl: c[3] as f64,
+                })
+                .unwrap_or(CornerRadii::all(radius));
             // B.3: `.lss` opacity < 1 wraps the node's subtree in a
             // compositing layer — tracked on the same depth-keyed stack as
             // the clip layer, so it pops when the subtree ends.
@@ -2312,7 +2324,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 dl.push(DrawCmd::PushLayer {
                     clip: Some(RoundedRect {
                         rect: bounds,
-                        radii: CornerRadii::all(radius),
+                        radii,
                     }),
                     opacity: 1.0,
                     transform: kurbo::Affine::IDENTITY,
@@ -2427,7 +2439,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             if blur > 0.0 || refraction > 0.0 || specular > 0.0 || saturate != 1.0 {
                 dl.push(DrawCmd::BackdropFilter {
                     rect: bounds,
-                    radii: CornerRadii::all(radius),
+                    radii,
                     blur,
                     saturate,
                     refraction,
@@ -2458,7 +2470,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 dl.push(DrawCmd::Rect {
                     rect: bounds,
                     brush: Brush::Solid(bg.unwrap_or(Color::srgb8(0, 0, 0, 0))),
-                    radii: CornerRadii::all(radius),
+                    radii,
                     border,
                 });
             }

@@ -87,3 +87,32 @@ fn lss_visibility_hidden_removes_paint_hits_and_semantics_but_keeps_space() {
     assert!(!sem.contains("gone"), "hidden subtree leaves semantics");
     assert!(sem.contains("below"), "visible sibling stays");
 }
+
+#[test]
+fn lss_multi_value_border_radius_rounds_per_corner() {
+    // Only the bottom-left corner is rounded (40px): its corner pixel is
+    // outside the shape while the top-left corner pixel stays filled.
+    let sheet = "#rr { background: #ff0000ff; border-radius: 0 0 0 40px; }";
+    let mut h = App::new(|_cx| {
+        let mut e = box_with("rr");
+        e.style.height = Dim::px(80.0);
+        col![e]
+    })
+    .stylesheet(sheet)
+    .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+
+    let b = h.node_bounds_by_id("rr").unwrap();
+    let shot = h.screenshot();
+    let tl = shot.pixel(b.x0 as u32 + 2, b.y0 as u32 + 2);
+    let bl = shot.pixel(b.x0 as u32 + 2, b.y1 as u32 - 3);
+    assert!(
+        tl[0] > 200 && tl[1] < 60,
+        "square top-left corner is filled red: {tl:?}"
+    );
+    assert!(
+        bl[1] > 150,
+        "40px bottom-left corner is cut (window background shows): {bl:?}"
+    );
+    h.assert_view_coherent();
+}

@@ -35,7 +35,7 @@ padding/margin/border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 |---|---|
 | `background: <color>` | solid colors only — **no gradients** (gradients exist in Rust via `Frame`/element APIs) |
 | `border: 1px solid <color>` | shorthand only; per-side `border-top` etc. are no-ops |
-| `border-radius: 6px` | single value only; `4px 8px …` lists rejected |
+| `border-radius: 6px` (or 2–4 values) | CSS expansion to `[tl tr br bl]` per corner (B.3); the shadow shape uses the top-left value |
 | `color: <color>` | text color |
 | `backdrop-filter: blur(8px) saturate(1.2) refraction(2) specular(0.5)` | full glass stack (refraction/specular are Lumen extensions) |
 | `opacity: 0.5` | subtree compositing layer (B.3a) |

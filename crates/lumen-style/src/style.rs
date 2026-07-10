@@ -55,8 +55,12 @@ pub struct Style {
     pub background: Option<Color>,
     /// `color` (text).
     pub color: Option<Color>,
-    /// `border-radius` (uniform).
+    /// `border-radius` (uniform; with a multi-value declaration this holds
+    /// the top-left radius as the uniform fallback).
     pub border_radius: Option<f32>,
+    /// `border-radius` with 2–4 values (B.3), expanded CSS-style to
+    /// `[tl, tr, br, bl]`. `None` for single-value declarations.
+    pub border_radius_corners: Option<[f32; 4]>,
     /// `opacity`.
     pub opacity: Option<f32>,
     /// `font-size`.
@@ -199,6 +203,12 @@ impl Style {
         self.visibility = Some(visible);
         self
     }
+    /// Set per-corner `border-radius` (`[tl, tr, br, bl]`, px).
+    pub fn radius_corners(mut self, c: [f32; 4]) -> Self {
+        self.border_radius_corners = Some(c);
+        self.border_radius = Some(c[0]);
+        self
+    }
 }
 
 /// The `.lss` properties `apply` actually consumes — the runtime's applied
@@ -243,7 +253,23 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "margin" => style.margin = as_dim(&v).map(Edges::all),
         "background" => style.background = as_color(&v),
         "color" => style.color = as_color(&v),
-        "border-radius" => style.border_radius = as_px(&v),
+        "border-radius" => match &v {
+            // 2–4 values expand CSS-style; `border_radius` keeps the
+            // top-left as the uniform fallback (shadow shape uses it).
+            Value::List(items) => {
+                let px: Vec<f32> = items.iter().filter_map(as_px).collect();
+                let c = match px.as_slice() {
+                    [a] => Some([*a, *a, *a, *a]),
+                    [a, b] => Some([*a, *b, *a, *b]),
+                    [a, b, c] => Some([*a, *b, *c, *b]),
+                    [a, b, c, d] => Some([*a, *b, *c, *d]),
+                    _ => None,
+                };
+                style.border_radius_corners = c;
+                style.border_radius = c.map(|c| c[0]);
+            }
+            one => style.border_radius = as_px(one),
+        },
         "opacity" => style.opacity = as_number(&v).map(|n| n as f32),
         "font-size" => style.font_size = as_px(&v),
         "font-weight" => style.font_weight = as_number(&v).map(|n| n as u16),
