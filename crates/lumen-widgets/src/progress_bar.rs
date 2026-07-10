@@ -27,7 +27,8 @@ impl ProgressBar {
                 ..LayoutStyle::default()
             },
             ..Element::default()
-        };
+        }
+        .part("fill");
         let el = Element {
             role: Role::Progress,
             value: Some(format!("{:.0}%", frac * 100.0)),

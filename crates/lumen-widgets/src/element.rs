@@ -337,6 +337,14 @@ impl Element {
         self.classes.push(c.into());
         self
     }
+    /// Expose this element as a named widget part (04 §5) — `slider .thumb`
+    /// style hooks. Parts are classes; scoping comes from the ancestor chain
+    /// (`slider .thumb` only matches inside a slider since B.1), so this is
+    /// `class()` with documented intent. Shipped form of the spec's
+    /// `cx.part("thumb")`.
+    pub fn part(self, name: impl Into<String>) -> Self {
+        self.class(name)
+    }
     /// Set the background fill.
     pub fn background(mut self, color: Color) -> Self {
         self.background = Some(color);

@@ -77,7 +77,9 @@ button.primary { background: $primary; color: $bg; border-radius: $radius;
 `$name` resolves theme-scoped first, then `@tokens`. Theme switching re-resolves tokens and animates color properties over 150 ms by default.
 
 ## 5. Widget parts
-Built-in widgets expose internal parts as classes documented per widget (02 §10): `slider { } slider .track { } slider .thumb { }`. Custom widgets expose parts by calling `cx.part("thumb")` on the child element.
+Built-in widgets expose internal parts as classes documented per widget (02 §10): `slider { } slider .track { } slider .thumb { }`. Custom widgets expose parts by calling `.part("thumb")` on the child `Element` (the shipped form of the draft's `cx.part(…)` — parts are classes; the ancestor-chain matching from B.1 scopes them to the enclosing widget type).
+
+*Status (B.7):* shipped parts — `slider .track`, `slider .thumb`, `progress .fill`; other built-ins gain parts as they're documented in 02 §10. `Element::part` is public for custom widgets.
 
 ## 6. Media queries
 `width/height` test the **window** by default; `@media container(...)` tests the nearest ancestor marked `.container()`. `platform: windows|macos|linux|android|ios`, `pointer: mouse|touch`, `scale` = DPI factor.
@@ -127,7 +129,8 @@ error** (B.2b); relative colors `oklch(from <color|$token> L C H)` **work**
 left-to-right, spaces required around operators; alpha inherited from the
 base; `$token`s now resolve inside function args and shorthand lists too);
 theme-switch animation **missing** (B.5); widget
-parts (`slider .track`, `cx.part`) **missing** (B.7); cascade origins other
+parts **work** (B.7 ✅ — `slider .track`/`.thumb`, `progress .fill`;
+`Element::part` for custom widgets); cascade origins other
 than the app sheet **unreachable** (B.6); `style_parity!` covers 11
 hand-picked properties, not set equality (B.7); `get_styles` **carries the
 winning declaration's `span`** (`{line, col}` — B.7b ✅) but still only

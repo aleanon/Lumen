@@ -39,7 +39,8 @@ impl Slider {
                 ..LayoutStyle::default()
             },
             ..Element::default()
-        };
+        }
+        .part("track");
         // Centre the thumb on the value's position along the *full* track so it
         // sits directly under the pointer while dragging (clamped to the ends),
         // rather than lagging behind (which `frac * (W - THUMB)` would do).
@@ -59,7 +60,8 @@ impl Slider {
                 ..LayoutStyle::default()
             },
             ..Element::default()
-        };
+        }
+        .part("thumb");
 
         let el = Element {
             role: Role::Slider,
