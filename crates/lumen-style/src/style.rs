@@ -17,6 +17,23 @@ use std::collections::HashMap;
 /// A resolved token table (`@tokens` + the active `@theme`), name → value.
 pub type Tokens = HashMap<String, Value>;
 
+/// A parsed `shadow:` declaration — `<dx> <dy> [blur] [spread] <color>`
+/// (px offsets/radii; the color's alpha sets the strength). The runtime maps
+/// this onto the widget `Shadow` at paint time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StyleShadow {
+    /// Horizontal offset (px).
+    pub dx: f32,
+    /// Vertical offset (px).
+    pub dy: f32,
+    /// Blur radius (px).
+    pub blur: f32,
+    /// Spread (px).
+    pub spread: f32,
+    /// Shadow color.
+    pub color: Color,
+}
+
 /// The typed computed style. Every field is optional (unset ⇒ inherit/default).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Style {
@@ -56,6 +73,9 @@ pub struct Style {
     pub backdrop_refraction: Option<f32>,
     /// `backdrop-filter: specular(...)` rim-highlight intensity.
     pub backdrop_specular: Option<f32>,
+    /// `shadow` (B.3): single drop shadow. `inset` and comma lists are not
+    /// supported yet (an `inset` keyword disables the declaration).
+    pub shadow: Option<StyleShadow>,
     /// `border-width` in px (uniform). Also set by the `border` shorthand.
     pub border_width: Option<f32>,
     /// `border-color`. Also set by the `border` shorthand.
@@ -166,6 +186,11 @@ impl Style {
         self.backdrop_saturate = Some(mult);
         self
     }
+    /// Set `shadow` (`<dx> <dy> [blur] [spread] <color>`).
+    pub fn shadow(mut self, sh: StyleShadow) -> Self {
+        self.shadow = Some(sh);
+        self
+    }
 }
 
 /// The `.lss` properties `apply` actually consumes — the runtime's applied
@@ -189,6 +214,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "font-weight",
     "line-height",
     "backdrop-filter",
+    "shadow",
     "border",
     "border-width",
     "border-color",
@@ -214,11 +240,50 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "font-weight" => style.font_weight = as_number(&v).map(|n| n as u16),
         "line-height" => style.line_height = as_number(&v).map(|n| n as f32),
         "backdrop-filter" => apply_backdrop(style, &v),
+        "shadow" => style.shadow = as_shadow(&v),
         "border" => apply_border(style, &v),
         "border-width" => style.border_width = as_px(&v),
         "border-color" => style.border_color = as_color(&v),
         _ => {}
     }
+}
+
+/// Parse `shadow: <dx> <dy> [blur] [spread] <color>` (04 §3). Offsets and
+/// radii are px numbers in order; the color ends the shadow (so a comma list
+/// degrades to its first shadow). `inset` is unsupported — its presence
+/// disables the declaration rather than painting an outer shadow wrongly.
+fn as_shadow(v: &Value) -> Option<StyleShadow> {
+    let items: Vec<&Value> = match v {
+        Value::List(items) => items.iter().collect(),
+        other => vec![other],
+    };
+    let mut nums: Vec<f32> = Vec::new();
+    let mut color = None;
+    for it in items {
+        if matches!(it, Value::Keyword(k) if k == "inset") {
+            return None;
+        }
+        if let Some(c) = as_color(it) {
+            color = Some(c);
+            break;
+        }
+        if let Some(px) = as_px(it) {
+            if nums.len() < 4 {
+                nums.push(px);
+            }
+        }
+    }
+    let color = color?;
+    if nums.len() < 2 {
+        return None;
+    }
+    Some(StyleShadow {
+        dx: nums[0],
+        dy: nums[1],
+        blur: nums.get(2).copied().unwrap_or(0.0),
+        spread: nums.get(3).copied().unwrap_or(0.0),
+        color,
+    })
 }
 
 /// Parse the `border: <width> <color>` shorthand (either order) into the typed

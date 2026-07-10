@@ -2287,7 +2287,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // Gaussian-blurred (the shared blur primitive). The sprite is static
             // for a given box, so cache it and blit each frame rather than
             // re-blurring (a large per-frame blur would dominate frame time).
-            if let Some(sh) = m.shadow {
+            // B.3: `.lss` shadow overrides the widget's hardcoded one, like
+            // background/radius above.
+            let shadow = css
+                .and_then(|s| s.shadow)
+                .map(|ss| crate::element::Shadow {
+                    dx: ss.dx as f64,
+                    dy: ss.dy as f64,
+                    blur: ss.blur as f64,
+                    spread: ss.spread as f64,
+                    color: ss.color,
+                })
+                .or(m.shadow);
+            if let Some(sh) = shadow {
                 let w = bounds.width();
                 let h = bounds.height();
                 let margin = (sh.spread.max(0.0) + sh.blur).ceil() + 2.0;

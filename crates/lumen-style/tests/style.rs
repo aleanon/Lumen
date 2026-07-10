@@ -64,6 +64,14 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         "blur(4px) saturate(1.8)",
         |s: Style| { s.backdrop_blur(4.0).backdrop_saturate(1.8) }
     );
+    style_parity!(covered, "shadow", "0 2px 8px #00000033", |s: Style| s
+        .shadow(lumen_style::StyleShadow {
+            dx: 0.0,
+            dy: 2.0,
+            blur: 8.0,
+            spread: 0.0,
+            color: Color::from_hex("#00000033").unwrap(),
+        }));
 
     // Set equality (04 §8): the parity table above covers exactly the
     // runtime's applied set — a new `apply` arm without a typed setter (or
@@ -86,6 +94,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "font-weight" => "600",
         "line-height" => "1.5",
         "backdrop-filter" => "blur(4px)",
+        "shadow" => "0 2px 8px #00000033",
         "border" => "2px #ff0000ff",
         _ => "8px", // the lengths
     };

@@ -37,3 +37,25 @@ fn lss_opacity_composites_the_subtree() {
     );
     h.assert_view_coherent();
 }
+
+#[test]
+fn lss_shadow_paints_behind_the_box() {
+    // A hard (zero-blur) red shadow offset 8px right+down: the pixel just
+    // outside the box's bottom-right corner is shadow-only.
+    let sheet = "#sh { background: #0000ffff; shadow: 8px 8px 0 #ff0000ff; }";
+    let mut h = App::new(|_cx| col![box_with("sh")])
+        .stylesheet(sheet)
+        .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+
+    let b = h.node_bounds_by_id("sh").unwrap();
+    let shot = h.screenshot();
+    let inside = shot.pixel(b.center().x as u32, b.center().y as u32);
+    let shadow = shot.pixel(b.x1 as u32 + 4, b.y1 as u32 + 4);
+    assert!(inside[2] > 200, "box itself is blue: {inside:?}");
+    assert!(
+        shadow[0] > 200 && shadow[2] < 60,
+        "offset corner shows the red shadow: {shadow:?}"
+    );
+    h.assert_view_coherent();
+}
