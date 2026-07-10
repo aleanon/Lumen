@@ -62,10 +62,18 @@ pub trait LeafWidget: 'static {
 `.background(…)`, `.style(LayoutStyle)`, `.element[_mut]()`. Event handlers
 are the typed `Element` fields `on_click` / `on_key` / `on_wheel` /
 `on_drag` / `on_text` / `on_drop` / `on_dismiss` / `on_caret_set` (exact
-signatures in the `writing-widgets` skill). *Planned:* `.key(impl Hash)`
-(today: the `widgets::keyed()` helper, plan W.3), a generic
-`.on(EventKind, handler)` (W.3), `.style(Style)` taking the typed 04 §8
-style (W.3, pairs with the Phase-B cascade work).
+signatures in the `writing-widgets` skill); custom leaves additionally get
+the `LeafWidget::event` hook (W.0).
+
+*Scope decisions (W.3, 2026-07-10):* the earlier-specced `.key(impl Hash)`
+element modifier is **superseded** by `widgets::keyed()` / `cx.scope(key,
+…)` — identity is established *where the subtree is built* (that is what
+makes memoization and list-GC possible), so a post-hoc tag on a built
+element cannot provide it. A generic `.on(EventKind, handler)` is likewise
+**superseded** by the typed `on_*` fields plus the leaf `event()` hook —
+a stringly-generic registration adds no capability over the typed surface.
+*Still planned:* `.style(Style)` taking the typed 04 §8 style (pairs with
+the Phase-B cascade-origin work, B.6b).
 
 **Components** are functions; memoization is signal-based via `cx.scope`
 (a scope whose recorded signal reads are current returns its cached
@@ -95,8 +103,8 @@ impl BuildCx {
     /// Async data keyed by (name, deps): re-fetches when deps change.
     pub fn resource<T: State>(&mut self, name: &str, deps: …, fetch: …) -> Resource<T>;
 }
-// `memo`/`effect` live on `Runtime` (spec-shaped), reachable via
-// `cx.runtime()`; convenience forwards on BuildCx are planned (plan W.3).
+// `cx.memo` / `cx.effect` (W.3): scope-key-prefixed forwards to the
+// spec-shaped `Runtime::memo`/`Runtime::effect`.
 // NOTE: `Runtime::resource(name, fut)` (the future-taking form) currently
 // polls once with a noop waker — do NOT hand it a real async future; use
 // the (name, deps, fetch) form / `resource_blocking` on the thread pool.

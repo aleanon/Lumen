@@ -583,6 +583,25 @@ impl<'a> BuildCx<'a> {
         }
     }
 
+    /// Derived value (02 §4, W.3): recomputed when its reads change,
+    /// notifying subscribers only when the value actually changes
+    /// (`PartialEq`). Keyed like a signal — the enclosing `cx.scope`
+    /// prefixes `name`.
+    pub fn memo<T: PartialEq + lumen_core::state::State>(
+        &self,
+        name: &str,
+        f: impl Fn(&lumen_core::state::ReadScope) -> T + 'static,
+    ) -> lumen_core::state::Memo<T> {
+        self.rt.memo(&self.scoped_key(name), f)
+    }
+
+    /// Register (or replace) an effect (02 §4, W.3): re-runs whenever any
+    /// signal it read changes; runs once immediately to establish
+    /// subscriptions. Keyed like a signal.
+    pub fn effect(&self, name: &str, f: impl Fn(&lumen_core::state::ReadScope) + 'static) {
+        self.rt.effect(&self.scoped_key(name), f)
+    }
+
     /// `name` prefixed by the enclosing scope's identity path (identity for
     /// signals + nested scopes).
     fn scoped_key(&self, name: &str) -> String {
