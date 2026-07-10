@@ -2348,11 +2348,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             }
             // overflow:hidden — open a clip layer for this node's subtree (its own
             // fill + descendants paint into it, masked to its rounded bounds).
-            if m.clip {
+            // B.3: `.lss` clip overrides the element flag — `none` disables,
+            // `bounds` squares off the corners, `rounded` follows the radius.
+            let clip_mode = css.and_then(|s| s.clip);
+            let clip_on = clip_mode
+                .map(|c| c != lumen_style::StyleClip::None)
+                .unwrap_or(m.clip);
+            if clip_on {
+                let clip_radii = match clip_mode {
+                    Some(lumen_style::StyleClip::Bounds) => CornerRadii::all(0.0),
+                    _ => radii,
+                };
                 dl.push(DrawCmd::PushLayer {
                     clip: Some(RoundedRect {
                         rect: bounds,
-                        radii,
+                        radii: clip_radii,
                     }),
                     opacity: 1.0,
                     transform: kurbo::Affine::IDENTITY,

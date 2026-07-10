@@ -86,6 +86,8 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
     ]);
     style_parity!(covered, "visibility", "hidden", |s: Style| s
         .visibility(false));
+    style_parity!(covered, "clip", "rounded", |s: Style| s
+        .clip(lumen_style::StyleClip::Rounded));
     style_parity!(covered, "shadow", "0 2px 8px #00000033", |s: Style| s
         .shadow(lumen_style::StyleShadow {
             dx: 0.0,
@@ -118,6 +120,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "backdrop-filter" => "blur(4px)",
         "shadow" => "0 2px 8px #00000033",
         "visibility" => "hidden",
+        "clip" => "rounded",
         "border" => "2px #ff0000ff",
         _ => "8px", // the lengths
     };

@@ -164,3 +164,52 @@ fn lss_per_side_longhands_reach_layout() {
     );
     assert!(pushed.y0 >= 10.0, "margin-top offsets y: {pushed:?}");
 }
+
+#[test]
+fn lss_clip_bounds_masks_the_subtree() {
+    // A child hanging 40px past its parent's right edge: clipped under
+    // `clip: bounds`, visible without it.
+    let build = || {
+        // Absolute-position the child so flex shrinking can't absorb the
+        // 40px overhang past the parent's right edge.
+        let child = Element {
+            background: Some(lumen_core::Color::srgb8(0xff, 0, 0, 0xff)),
+            style: lumen_layout::LayoutStyle {
+                position: lumen_layout::Position::Absolute,
+                inset: lumen_layout::Edges {
+                    left: Dim::px(80.0),
+                    top: Dim::px(0.0),
+                    ..lumen_layout::Edges::AUTO
+                },
+                width: Dim::px(60.0),
+                height: Dim::px(20.0),
+                ..lumen_layout::LayoutStyle::default()
+            },
+            ..Element::default()
+        };
+        let parent = Element {
+            style: lumen_layout::LayoutStyle {
+                width: Dim::px(100.0),
+                height: Dim::px(20.0),
+                ..lumen_layout::LayoutStyle::default()
+            },
+            children: vec![child],
+            ..Element::default()
+        };
+        col![parent.id("box")]
+    };
+    for (sheet, clipped) in [("#box { clip: bounds; }", true), ("", false)] {
+        let mut h = App::new(move |_cx| build())
+            .stylesheet(sheet)
+            .run_headless(Size::new(300.0, 100.0));
+        h.pump();
+        let b = h.node_bounds_by_id("box").unwrap();
+        let shot = h.screenshot();
+        let outside = shot.pixel(b.x1 as u32 + 20, b.center().y as u32);
+        assert_eq!(
+            outside[0] > 200 && outside[1] < 60,
+            !clipped,
+            "sheet {sheet:?}: overhang pixel {outside:?}"
+        );
+    }
+}

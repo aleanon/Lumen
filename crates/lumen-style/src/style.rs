@@ -34,6 +34,17 @@ pub struct StyleShadow {
     pub color: Color,
 }
 
+/// `clip:` values (B.3, 04 §3): whether/how a node clips its subtree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleClip {
+    /// No clipping (default).
+    None,
+    /// Clip to the square bounds.
+    Bounds,
+    /// Clip to the rounded bounds (the node's border-radius).
+    Rounded,
+}
+
 /// A parsed `.lss` gradient (B.3) — box-relative; the runtime maps it onto
 /// the renderer's absolute-point `Brush` once the node's bounds are known.
 #[derive(Clone, Debug, PartialEq)]
@@ -96,6 +107,9 @@ pub struct Style {
     pub backdrop_refraction: Option<f32>,
     /// `backdrop-filter: specular(...)` rim-highlight intensity.
     pub backdrop_specular: Option<f32>,
+    /// `clip` (B.3): overrides the element's clip flag; `Bounds` ignores the
+    /// border-radius, `Rounded` uses it.
+    pub clip: Option<StyleClip>,
     /// `visibility` (B.3): `Some(false)` = hidden — the subtree keeps its
     /// layout space but is removed from paint, hit-testing, and semantics.
     pub visibility: Option<bool>,
@@ -228,6 +242,11 @@ impl Style {
         self.shadow = Some(sh);
         self
     }
+    /// Set `clip`.
+    pub fn clip(mut self, c: StyleClip) -> Self {
+        self.clip = Some(c);
+        self
+    }
     /// Set `visibility` (`false` = hidden).
     pub fn visibility(mut self, visible: bool) -> Self {
         self.visibility = Some(visible);
@@ -277,6 +296,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "line-height",
     "backdrop-filter",
     "shadow",
+    "clip",
     "visibility",
     "border",
     "border-width",
@@ -335,6 +355,14 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "line-height" => style.line_height = as_number(&v).map(|n| n as f32),
         "backdrop-filter" => apply_backdrop(style, &v),
         "shadow" => style.shadow = as_shadow(&v),
+        "clip" => {
+            style.clip = match &v {
+                Value::Keyword(k) if k == "none" => Some(StyleClip::None),
+                Value::Keyword(k) if k == "bounds" => Some(StyleClip::Bounds),
+                Value::Keyword(k) if k == "rounded" => Some(StyleClip::Rounded),
+                _ => None,
+            }
+        }
         "visibility" => {
             style.visibility = match &v {
                 Value::Keyword(k) if k == "visible" => Some(true),
