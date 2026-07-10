@@ -121,8 +121,11 @@ parse, incl. `& > part+`); descendant/`>` combinators **match the real
 ancestor chain** (B.1 ✅ — the last-compound-only over-match is fixed);
 `@media` **gates on the live window** (B.2 ✅ — width/height/scale/
 platform/pointer; resize re-resolves); `@media container(...)` **parse
-error** (B.2b); relative colors `oklch(from …)`
-**unsupported** (B.7); theme-switch animation **missing** (B.5); widget
+error** (B.2b); relative colors `oklch(from <color|$token> L C H)` **work**
+(B.7 ✅ — channel keywords `l`/`c`/`h` + `calc(…)` over `+ - *`,
+left-to-right, spaces required around operators; alpha inherited from the
+base; `$token`s now resolve inside function args and shorthand lists too);
+theme-switch animation **missing** (B.5); widget
 parts (`slider .track`, `cx.part`) **missing** (B.7); cascade origins other
 than the app sheet **unreachable** (B.6); `style_parity!` covers 11
 hand-picked properties, not set equality (B.7); `get_styles` **carries the

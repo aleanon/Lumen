@@ -138,6 +138,17 @@ impl Color {
         let h = h_deg.to_radians();
         Color::from_oklab(l, c * h.cos(), c * h.sin())
     }
+
+    /// Decompose into OkLCh `(L, C, h_deg)` — the inverse of
+    /// [`from_oklch`](Color::from_oklch); hue normalized to `[0, 360)`. Alpha
+    /// is not part of OkLCh; read it from `self.a`. Basis of `.lss` relative
+    /// colors (`oklch(from … )`, 04 §4).
+    pub fn to_oklch(self) -> (f32, f32, f32) {
+        let (l, a, b) = linear_to_oklab(self.r, self.g, self.b);
+        let c = (a * a + b * b).sqrt();
+        let h = b.atan2(a).to_degrees();
+        (l, c, if h < 0.0 { h + 360.0 } else { h })
+    }
 }
 
 /// Linear sRGB → Oklab (Björn Ottosson's matrices).

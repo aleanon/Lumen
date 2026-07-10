@@ -40,6 +40,7 @@ padding/margin/border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 | `backdrop-filter: blur(8px) saturate(1.2) refraction(2) specular(0.5)` | full glass stack (refraction/specular are Lumen extensions) |
 | `opacity: 0.5` | subtree compositing layer (B.3a) |
 | `font-size`, `font-weight` (100–900, synthesized bold), `line-height` (multiple) | reach measure **and** paint (B.4a) — text nodes only |
+| relative colors `oklch(from <color or $token> L C H)` | channel keywords `l`/`c`/`h` + `calc(l + 0.06)` (`+ - *`, left-to-right, spaces around operators); alpha from the base; `$token`s resolve inside function args/shorthand lists (B.7) |
 | `@tokens { … }` / `@theme light|dark { … }` / `$token` | full token resolution, theme-scoped first |
 | **Nested rules** `&:hovered { … }` / `&.class { … }` / `& > .part { … }` | flattened at parse into real rules with correct specificity (B.1) |
 | Descendant/child combinators (`.card .btn`, `#x > .y`) | match the **real ancestor chain** since B.1 — before that only the rightmost compound was checked, so `dialog button` hit every button |
@@ -54,14 +55,14 @@ numeric only.
 - **All layout properties** (A.2) — see the one rule.
 - Background **gradients**, `shadow`, `blend-mode`, `filter`, `clip`,
   `transform`, `z-index`, `visibility`, `cursor` (B.3).
-- All typography: `font-family/style/features/variation`, `line-height`,
+- Remaining typography: `font-family/style/features/variation`,
   `letter-spacing`, `text-align/overflow/wrap/decoration`,
-  `selection-color` (B.4). Use Rust `TextStyle`/`Label` setters instead.
+  `selection-color` (B.4). Use Rust `TextStyle`/`Label` setters instead
+  (`font-size`/`font-weight`/`line-height` work — see the works table).
 - `transition:` / `animation:` / `@keyframes` — parsed, never played (B.5).
   Motion comes from Rust: `motion::spring` + `cx.animate()`.
 - `@media container(...)` — parse error until B.2b (window-level `@media`
   works — see the works table).
-- Relative colors `oklch(from $x calc(…) …)` — parse error (B.7).
 - Widget parts (`slider .track`) — no widget exposes parts yet (B.7).
 
 ## State selectors (full vocabulary since B.6a)

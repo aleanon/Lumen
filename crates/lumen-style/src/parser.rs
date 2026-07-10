@@ -601,6 +601,20 @@ impl Parser {
                 self.bump();
                 Some(Value::Str(s))
             }
+            // calc() operators surface as keyword atoms; `eval_calc` in
+            // style.rs interprets them (B.7 relative colors).
+            Tk::Plus => {
+                self.bump();
+                Some(Value::Keyword("+".into()))
+            }
+            Tk::Minus => {
+                self.bump();
+                Some(Value::Keyword("-".into()))
+            }
+            Tk::Star => {
+                self.bump();
+                Some(Value::Keyword("*".into()))
+            }
             Tk::Ident(name) if !name.is_empty() => {
                 self.bump();
                 if self.at(&Tk::LParen) {

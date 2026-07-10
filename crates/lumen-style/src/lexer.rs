@@ -48,6 +48,11 @@ pub enum Tk {
     Bang,
     /// `*`.
     Star,
+    /// `+` (calc operator, B.7 relative colors).
+    Plus,
+    /// A bare `-` (calc operator; `-` glued to a digit still lexes as a
+    /// negative number).
+    Minus,
     /// `%` not attached to a number (rare).
     Percent,
     /// End of input.
@@ -235,6 +240,14 @@ impl Lexer<'_> {
             }
             b'0'..=b'9' => self.read_number(),
             b'-' if self.peek2().is_ascii_digit() || self.peek2() == b'.' => self.read_number(),
+            b'+' => {
+                self.bump();
+                Tk::Plus
+            }
+            b'-' => {
+                self.bump();
+                Tk::Minus
+            }
             c if is_ident_start(c) => Tk::Ident(self.read_ident()),
             _ => {
                 self.bump();

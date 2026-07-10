@@ -223,6 +223,15 @@ pub fn resolve_token(v: &Value, tokens: &Tokens) -> Value {
             .get(name)
             .cloned()
             .unwrap_or(Value::Var(name.clone())),
+        // Deep resolution (B.7): `$token`s nested in shorthands
+        // (`border: 1px solid $border`) and function arguments
+        // (`oklch(from $primary …)`) resolve too — still one level per
+        // reference, matching the top-level rule.
+        Value::List(items) => Value::List(items.iter().map(|i| resolve_token(i, tokens)).collect()),
+        Value::Function(name, args) => Value::Function(
+            name.clone(),
+            args.iter().map(|a| resolve_token(a, tokens)).collect(),
+        ),
         other => other.clone(),
     }
 }
@@ -232,6 +241,17 @@ fn as_color(v: &Value) -> Option<Color> {
         Value::Color(c) => Some(*c),
         Value::Function(name, args) if name == "oklch" => {
             let a = flat_args(args);
+            // Relative form (04 §4, B.7): `oklch(from <color> L C H)` where
+            // each channel is a number, the keyword `l`/`c`/`h` (the base's
+            // channel), or `calc(…)` over those.
+            if matches!(a.first(), Some(Value::Keyword(k)) if k == "from") {
+                let base = as_color(a.get(1)?)?;
+                let (bl, bc, bh) = base.to_oklch();
+                let ch = |i: usize| channel_value(a.get(i).copied()?, bl, bc, bh);
+                let mut out = Color::from_oklch(ch(2)? as f32, ch(3)? as f32, ch(4)? as f32);
+                out.a = base.a;
+                return Some(out);
+            }
             let n = |i: usize| as_number(a.get(i).copied()?).map(|x| x as f32);
             Some(Color::from_oklch(n(0)?, n(1)?, n(2)?))
         }
@@ -242,6 +262,44 @@ fn as_color(v: &Value) -> Option<Color> {
         }
         _ => None,
     }
+}
+
+/// One relative-color channel: a literal number, the base channel keyword
+/// (`l`/`c`/`h`), or `calc(…)` over those.
+fn channel_value(v: &Value, bl: f32, bc: f32, bh: f32) -> Option<f64> {
+    match v {
+        Value::Number(n, _) => Some(*n),
+        Value::Keyword(k) => match k.as_str() {
+            "l" => Some(bl as f64),
+            "c" => Some(bc as f64),
+            "h" => Some(bh as f64),
+            _ => None,
+        },
+        Value::Function(name, args) if name == "calc" => eval_calc(&flat_args(args), bl, bc, bh),
+        _ => None,
+    }
+}
+
+/// Evaluate a `calc(…)` atom sequence left-to-right over `+`/`-`/`*` (no
+/// precedence — matches the simple channel arithmetic 04 §4 shows; operators
+/// need surrounding spaces, as in CSS).
+fn eval_calc(atoms: &[&Value], bl: f32, bc: f32, bh: f32) -> Option<f64> {
+    let mut acc = channel_value(atoms.first()?, bl, bc, bh)?;
+    let mut i = 1;
+    while i < atoms.len() {
+        let Value::Keyword(op) = atoms[i] else {
+            return None;
+        };
+        let rhs = channel_value(atoms.get(i + 1).copied()?, bl, bc, bh)?;
+        match op.as_str() {
+            "+" => acc += rhs,
+            "-" => acc -= rhs,
+            "*" => acc *= rhs,
+            _ => return None,
+        }
+        i += 2;
+    }
+    Some(acc)
 }
 
 /// Flatten a single space/comma list argument into its items (CSS color
