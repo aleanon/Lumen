@@ -627,6 +627,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.input.push(ev);
     }
 
+    /// W.0: the node a custom leaf's `event()` would be offered `ev` at —
+    /// the hit-test target for pointer events, the focused node for
+    /// keyboard/text. `None` for events leaves don't receive directly.
+    fn leaf_event_target(&self, ev: &Event) -> Option<NodeIndex> {
+        match ev {
+            Event::PointerDown(pe) | Event::PointerUp(pe) | Event::PointerMove(pe) => {
+                self.tree.hit_test(pe.pos)
+            }
+            Event::Wheel(we) => self.tree.hit_test(we.pos),
+            Event::KeyDown(_) | Event::KeyUp(_) | Event::TextInput(_) => self.focused_node(),
+            _ => None,
+        }
+    }
+
     /// Resize the render surface. Updates the size used for layout *and*
     /// rasterization, then re-lays-out and repaints so hit-test bounds and the
     /// rendered frame both track the new dimensions. The desktop shell calls
@@ -971,6 +985,24 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     // --- event routing ------------------------------------------------------
 
     fn route(&mut self, ev: Event) {
+        // W.0 (ADR-W1): a custom leaf at the event's target gets first
+        // refusal — pointer events at the hit-test target, key/text at the
+        // focused node. `Handled` consumes the event: no Element-level
+        // handlers, no default routing.
+        if let Some(node) = self.leaf_event_target(&ev) {
+            if let Some(m) = self.meta.get(&node) {
+                if let NodeContent::Custom(w) = &m.content {
+                    let w = w.clone();
+                    let bounds = self.tree.bounds(node);
+                    if matches!(
+                        w.event(&ev, bounds, &self.rt),
+                        lumen_core::events::EventStatus::Handled
+                    ) {
+                        return;
+                    }
+                }
+            }
+        }
         match ev {
             Event::PointerDown(pe) => {
                 // Bubble from the hit target up its ancestors, firing the

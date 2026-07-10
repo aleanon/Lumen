@@ -152,6 +152,14 @@ Sliders/scrollbars read the drag fraction; pixel drags (resize, pan) read `pos`.
 For reactive props without a rebuild, prefer the `text!` / `bind!` macros and
 `Prop<T>`/`Dynamic<T>` (F3).
 
+**Custom leaves** (`impl LeafWidget` + `widgets::leaf(...)`) additionally get
+`fn event(&self, &Event, bounds, &Runtime) -> EventStatus` (W.0): first
+refusal on events at the leaf — pointer events at the hit-test target,
+key/text when focused. Return `Handled` to consume (the element's `on_*`
+handlers are skipped); write state through `rt` (the widget value is rebuilt
+every frame, so `&self` + signals is the discipline). See
+`tests/leaf_event.rs` for the pattern.
+
 **Conditional structure inside a widget = plain conditional `children`.** Show a
 subtree only when open? Push it or don't: `children: if is { vec![body] } else {
 vec![] }` (see `check_box.rs`'s `tick()`). Do **not** reach for `cx.scope`/`For`

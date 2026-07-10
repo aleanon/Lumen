@@ -83,6 +83,21 @@ pub trait LeafWidget {
     fn paint(&self, frame: &mut lumen_render::canvas::Frame, size: kurbo::Size);
     /// Accessible (role, name). Drives semantics, test locators, and the agent.
     fn semantics(&self) -> (Role, String);
+    /// React to an event delivered to this leaf (W.0, ADR-W1). `bounds` is
+    /// the node's window-space rect (interpret pointer positions against
+    /// it); state writes go through `rt` — the widget value itself is
+    /// rebuilt every frame, so `&self` is deliberate (ADR-013: durable
+    /// state lives in signals). Return [`EventStatus::Handled`] to consume
+    /// the event: the Element-level `on_*` handlers and default routing are
+    /// skipped for it. Default: [`EventStatus::Ignored`].
+    fn event(
+        &self,
+        _event: &lumen_core::events::Event,
+        _bounds: kurbo::Rect,
+        _rt: &Runtime,
+    ) -> lumen_core::events::EventStatus {
+        lumen_core::events::EventStatus::Ignored
+    }
 }
 
 /// A node's leaf content — mutually exclusive by construction (E1): a node is a

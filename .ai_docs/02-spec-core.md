@@ -46,9 +46,14 @@ pub trait LeafWidget: 'static {
     fn paint(&self, …);
     /// MANDATORY — how the agent and a11y see the leaf.
     fn semantics(&self, node: &mut SemanticsNode);
-    // fn event(&mut self, …) -> EventStatus   — planned (plan W.0): custom
-    // leaves currently have no event hook; interactivity comes from the
-    // Element-level `on_*` handlers.
+    /// W.0 (shipped 2026-07-10): first refusal on events at this leaf —
+    /// pointer events at the hit-test target, key/text at the focused
+    /// node. `&self` is deliberate (ADR-013: durable state lives in
+    /// signals, written through `rt`); `Handled` consumes the event
+    /// (Element-level `on_*` handlers and default routing are skipped).
+    fn event(&self, event: &Event, bounds: Rect, rt: &Runtime) -> EventStatus {
+        EventStatus::Ignored
+    }
 }
 ```
 
