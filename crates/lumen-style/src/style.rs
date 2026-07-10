@@ -62,6 +62,12 @@ pub struct Style {
     pub padding: Option<Edges>,
     /// `margin` (all sides).
     pub margin: Option<Edges>,
+    /// Per-side `padding-(top|right|bottom|left)` (B.3 longhands) —
+    /// `[top, right, bottom, left]`, each independently optional; overrides
+    /// the whole-side `padding` component-wise.
+    pub padding_sides: [Option<f32>; 4],
+    /// Per-side `margin-(top|right|bottom|left)` — as `padding_sides`.
+    pub margin_sides: [Option<f32>; 4],
     /// `background` color.
     pub background: Option<Color>,
     /// `background: linear-gradient(…)|radial-gradient(…)` (B.3).
@@ -175,6 +181,17 @@ impl Style {
         self.margin = Some(Edges::all(Dim::px(px)));
         self
     }
+    /// Set one padding side (`0..=3` = top/right/bottom/left, px) — the
+    /// typed mirror of the `padding-(top|…)` longhands.
+    pub fn padding_side(mut self, side: usize, px: f32) -> Self {
+        self.padding_sides[side] = Some(px);
+        self
+    }
+    /// Set one margin side (`0..=3` = top/right/bottom/left, px).
+    pub fn margin_side(mut self, side: usize, px: f32) -> Self {
+        self.margin_sides[side] = Some(px);
+        self
+    }
     /// Set `line-height` (multiple of font size).
     pub fn line_height(mut self, mult: f32) -> Self {
         self.line_height = Some(mult);
@@ -243,6 +260,14 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "gap",
     "padding",
     "margin",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
     "background",
     "color",
     "border-radius",
@@ -270,6 +295,14 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "gap" => style.gap = as_dim(&v),
         "padding" => style.padding = as_dim(&v).map(Edges::all),
         "margin" => style.margin = as_dim(&v).map(Edges::all),
+        "padding-top" => style.padding_sides[0] = as_px(&v),
+        "padding-right" => style.padding_sides[1] = as_px(&v),
+        "padding-bottom" => style.padding_sides[2] = as_px(&v),
+        "padding-left" => style.padding_sides[3] = as_px(&v),
+        "margin-top" => style.margin_sides[0] = as_px(&v),
+        "margin-right" => style.margin_sides[1] = as_px(&v),
+        "margin-bottom" => style.margin_sides[2] = as_px(&v),
+        "margin-left" => style.margin_sides[3] = as_px(&v),
         "background" => match &v {
             Value::Function(name, args)
                 if name == "linear-gradient" || name == "radial-gradient" =>

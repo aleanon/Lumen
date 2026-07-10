@@ -146,3 +146,21 @@ fn lss_linear_gradient_background_renders() {
     );
     h.assert_view_coherent();
 }
+
+#[test]
+fn lss_per_side_longhands_reach_layout() {
+    // The longhand shifts only the declared side; the sibling stays put.
+    let sheet = "#pushed { margin-left: 30px; margin-top: 10px; }";
+    let mut h = App::new(|_cx| col![box_with("pushed"), box_with("plain")])
+        .stylesheet(sheet)
+        .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+
+    let pushed = h.node_bounds_by_id("pushed").unwrap();
+    let plain = h.node_bounds_by_id("plain").unwrap();
+    assert!(
+        (pushed.x0 - (plain.x0 + 30.0)).abs() < 1.0,
+        "margin-left offsets x: pushed {pushed:?} vs plain {plain:?}"
+    );
+    assert!(pushed.y0 >= 10.0, "margin-top offsets y: {pushed:?}");
+}

@@ -2039,6 +2039,34 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             if let Some(m) = css.margin {
                 el.style.margin = m;
             }
+            // B.3 longhands: per-side values override component-wise (after
+            // the whole-side shorthand, matching CSS source-order intuition).
+            let [pt, pr, pb, pl] = css.padding_sides;
+            if let Some(v) = pt {
+                el.style.padding.top = Dim::px(v);
+            }
+            if let Some(v) = pr {
+                el.style.padding.right = Dim::px(v);
+            }
+            if let Some(v) = pb {
+                el.style.padding.bottom = Dim::px(v);
+            }
+            if let Some(v) = pl {
+                el.style.padding.left = Dim::px(v);
+            }
+            let [mt, mr, mb, ml] = css.margin_sides;
+            if let Some(v) = mt {
+                el.style.margin.top = Dim::px(v);
+            }
+            if let Some(v) = mr {
+                el.style.margin.right = Dim::px(v);
+            }
+            if let Some(v) = mb {
+                el.style.margin.bottom = Dim::px(v);
+            }
+            if let Some(v) = ml {
+                el.style.margin.left = Dim::px(v);
+            }
             // B.4: typography reaches the text stack — the measured and the
             // painted TextStyle are the same object (content moves into
             // NodeMeta), so one override covers both passes.

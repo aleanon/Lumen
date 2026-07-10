@@ -64,6 +64,26 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         "blur(4px) saturate(1.8)",
         |s: Style| { s.backdrop_blur(4.0).backdrop_saturate(1.8) }
     );
+    for (i, side) in ["top", "right", "bottom", "left"].iter().enumerate() {
+        let prop = format!("padding-{side}");
+        let mut from_lss = Style::new();
+        apply(&mut from_lss, &prop, &val(&prop, "8px"), &Tokens::new());
+        assert_eq!(from_lss, Style::new().padding_side(i, 8.0), "{prop}");
+        let prop = format!("margin-{side}");
+        let mut from_lss = Style::new();
+        apply(&mut from_lss, &prop, &val(&prop, "8px"), &Tokens::new());
+        assert_eq!(from_lss, Style::new().margin_side(i, 8.0), "{prop}");
+    }
+    covered.extend([
+        "padding-top",
+        "padding-right",
+        "padding-bottom",
+        "padding-left",
+        "margin-top",
+        "margin-right",
+        "margin-bottom",
+        "margin-left",
+    ]);
     style_parity!(covered, "visibility", "hidden", |s: Style| s
         .visibility(false));
     style_parity!(covered, "shadow", "0 2px 8px #00000033", |s: Style| s

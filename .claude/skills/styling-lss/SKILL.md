@@ -16,16 +16,18 @@ doc-currency rule; regenerated as remediation Phase B lands).
 > **Core box layout works in `.lss` (since A.2); everything else layout
 > stays in Rust until Phase B.**
 
-Styles resolve *before* layout now, so these seven work from `.lss`:
+Styles resolve *before* layout now, so these work from `.lss`:
 `display`, `flex-direction`, `width`, `height`, `gap` (both axes),
-`padding` and `margin` (whole-side). `.lss` wins over the element's
+`padding` and `margin` — whole-side *and* per-side longhands
+(`padding-top` … `margin-left`, overriding the shorthand component-wise,
+B.3). `.lss` wins over the element's
 `LayoutStyle` per-property. Two caveats: **text-bearing nodes still derive
 `height` from their glyphs** (the text-height rule — size a box, put the
 text in a child), and a state-part layout rule (`#x:hovered { width: … }`)
 relayouts through the normal rebuild path on pointer motion.
 
 Still Rust-only (parse-only in `.lss` until Phase B): per-side
-padding/margin/border, `flex-grow/shrink/basis/wrap`, `justify-*`/
+border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 `align-*`, `min/max-*`, `aspect-ratio`, `grid-*` tracks,
 `Position::Absolute` + `inset`, `overflow`.
 
