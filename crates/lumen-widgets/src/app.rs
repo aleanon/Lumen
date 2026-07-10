@@ -2206,7 +2206,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     let img = solid.blurred(sh.blur.round().max(0.0) as u32);
                     const CAP: usize = 64;
                     if self.shadow_cache.len() >= CAP {
-                        self.shadow_cache.clear();
+                        // R.5: half-retention — sprites are expensive blurs.
+                        let mut keep = self.shadow_cache.len() / 2;
+                        self.shadow_cache.retain(|_, _| {
+                            let k = keep > 0;
+                            keep = keep.saturating_sub(1);
+                            k
+                        });
                     }
                     self.shadow_cache.insert(key, img.clone());
                     img

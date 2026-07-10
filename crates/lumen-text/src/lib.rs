@@ -333,7 +333,15 @@ impl TextEngine {
         if !self.shape_cache.contains_key(&key) {
             let block = self.layout(text, base.clone(), &[], max_width, align);
             if self.shape_cache.len() >= SHAPE_CACHE_CAP {
-                self.shape_cache.clear();
+                // R.5: drop ~half instead of everything — a cap crossing
+                // costs one half-refill, not a full re-shape stall. Iteration
+                // order is arbitrary but caches are output-transparent.
+                let mut keep = self.shape_cache.len() / 2;
+                self.shape_cache.retain(|_, _| {
+                    let k = keep > 0;
+                    keep = keep.saturating_sub(1);
+                    k
+                });
             }
             self.shape_cache.insert(key.clone(), block);
         }
@@ -374,7 +382,15 @@ impl TextEngine {
                 }
             };
             if self.run_cache.len() >= RUN_CACHE_CAP {
-                self.run_cache.clear();
+                // R.5: drop ~half instead of everything — a cap crossing
+                // costs one half-refill, not a full re-shape stall. Iteration
+                // order is arbitrary but caches are output-transparent.
+                let mut keep = self.run_cache.len() / 2;
+                self.run_cache.retain(|_, _| {
+                    let k = keep > 0;
+                    keep = keep.saturating_sub(1);
+                    k
+                });
             }
             self.run_cache.insert(key.clone(), cached);
         }
@@ -734,7 +750,13 @@ impl TextBlock {
                     GLYPH_CACHE.with(|c| {
                         let mut cache = c.borrow_mut();
                         if cache.len() >= GLYPH_CACHE_CAP && !cache.contains_key(&key) {
-                            cache.clear();
+                            // R.5: half-retention, not a full re-raster stall.
+                            let mut keep = cache.len() / 2;
+                            cache.retain(|_, _| {
+                                let k = keep > 0;
+                                keep = keep.saturating_sub(1);
+                                k
+                            });
                         }
                         let entry = cache.entry(key).or_insert_with(|| {
                             GLYPH_RASTERS.with(|n| n.set(n.get() + 1));
@@ -913,6 +935,31 @@ mod glyph_cache_tests {
             first.pixels(),
             cached.pixels(),
             "the cached glyph path must be byte-identical"
+        );
+    }
+}
+
+#[cfg(test)]
+mod eviction_tests {
+    use super::*;
+
+    /// R.5: crossing the shape-cache cap retains ~half the entries instead
+    /// of clearing — the hot working set partially survives, so a crossing
+    /// costs one half-refill rather than a full re-shape stall.
+    #[test]
+    fn shape_cache_overflow_keeps_half() {
+        let mut engine = TextEngine::new();
+        let style = TextStyle::default();
+        for i in 0..SHAPE_CACHE_CAP {
+            engine.shaped(&format!("s{i}"), &style, None, TextAlign::Start);
+        }
+        assert_eq!(engine.shape_cache.len(), SHAPE_CACHE_CAP);
+        // The insert that crosses the cap halves the cache first.
+        engine.shaped("overflow", &style, None, TextAlign::Start);
+        let len = engine.shape_cache.len();
+        assert!(
+            len > SHAPE_CACHE_CAP / 4 && len <= SHAPE_CACHE_CAP / 2 + 1,
+            "half retained, got {len} of {SHAPE_CACHE_CAP}"
         );
     }
 }
