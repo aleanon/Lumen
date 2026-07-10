@@ -221,6 +221,56 @@ pub struct AppSnapshot {
     focused: Option<StableId>,
 }
 
+/// Checkpoint protocol (02 §4, ADR-011) — the tier-2/3 hot-reload contract,
+/// formalized over the snapshot machinery (W.4b). `quiesce` parks the app at
+/// a safe point (reactive graph at fixpoint), `serialize_state` captures the
+/// store + host extras (focus), `restore_state` adopts a snapshot into the
+/// **running** instance (existing signals restored in place, re-created ones
+/// adopt on rebuild; returns `W0002` drop diagnostics), and `resume` repaints
+/// from the restored state. Snapshot builds only.
+#[cfg(feature = "snapshot")]
+pub trait Checkpoint {
+    /// Park at a safe point: drain scheduled reactive work to a fixpoint.
+    fn quiesce(&mut self);
+    /// Capture the entire store plus host extras (focus).
+    fn serialize_state(&self) -> AppSnapshot;
+    /// Adopt `snap` into the running instance, returning `W0002` diagnostics
+    /// for snapshot values that no longer have a matching signal.
+    fn restore_state(&mut self, snap: AppSnapshot) -> Vec<lumen_core::Diagnostic>;
+    /// Resume presentation: repaint from the restored state.
+    fn resume(&mut self);
+}
+
+#[cfg(feature = "snapshot")]
+impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Checkpoint for Headless<R, E> {
+    fn quiesce(&mut self) {
+        // pump() flushes writes and asserts the graph is quiescent on exit.
+        self.pump();
+    }
+
+    fn serialize_state(&self) -> AppSnapshot {
+        self.snapshot()
+    }
+
+    fn restore_state(&mut self, snap: AppSnapshot) -> Vec<lumen_core::Diagnostic> {
+        self.rt.load_pending(snap.state);
+        // Existing slots adopt in place (schedules their subscribers) …
+        let mut diags = self.rt.adopt_pending_live();
+        // … focus is host state, re-applied directly …
+        self.focused_id = snap.focused;
+        // … and a forced rebuild lets conditionally-created signals adopt the
+        // rest before leftovers become W0002 drops.
+        self.force_rebuild = true;
+        self.pump();
+        diags.extend(self.rt.finish_restore());
+        diags
+    }
+
+    fn resume(&mut self) {
+        self.force_full_repaint();
+    }
+}
+
 /// Parse a stylesheet, returning it only if error-free.
 fn parse_sheet(src: &str) -> Option<lumen_style::Stylesheet> {
     let (sheet, diags) = lumen_style::parse("app.lss", src);

@@ -59,6 +59,16 @@ trait StoredValue: 'static {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     #[cfg(feature = "snapshot")]
     fn to_json(&self) -> serde_json::Value;
+    /// Replace the value in place from a snapshot JSON value (live restore —
+    /// the blanket impl knows the concrete `T`, so the type-erased slot can
+    /// deserialize). Lenient like creation-time adoption: missing fields
+    /// default, dropped fields become `W0002` diagnostics.
+    #[cfg(feature = "snapshot")]
+    fn restore_json(
+        &mut self,
+        key: &str,
+        json: &serde_json::Value,
+    ) -> Result<Vec<Diagnostic>, Diagnostic>;
 }
 impl<T: State> StoredValue for T {
     fn as_any(&self) -> &dyn Any {
@@ -70,6 +80,16 @@ impl<T: State> StoredValue for T {
     #[cfg(feature = "snapshot")]
     fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+    }
+    #[cfg(feature = "snapshot")]
+    fn restore_json(
+        &mut self,
+        key: &str,
+        json: &serde_json::Value,
+    ) -> Result<Vec<Diagnostic>, Diagnostic> {
+        let (t, diags) = deser_lenient::<T>(key, json)?;
+        *self = t;
+        Ok(diags)
     }
 }
 
@@ -657,6 +677,49 @@ impl Runtime {
             ));
         }
         b.pending.clear();
+        diags
+    }
+
+    /// Adopt staged snapshot values into **existing** slots, in place (the
+    /// live-restore half of the Checkpoint protocol — creation-time adoption
+    /// in [`Runtime::signal`] only covers slots created *after*
+    /// [`Runtime::load_pending`]). Each adopted value schedules its
+    /// subscribers exactly like a normal write; keys with no live slot stay
+    /// pending for signals the next rebuild re-creates.
+    #[cfg(feature = "snapshot")]
+    pub fn adopt_pending_live(&self) -> Vec<Diagnostic> {
+        let mut diags = Vec::new();
+        let adopted = {
+            let mut borrow = self.inner.borrow_mut();
+            let b = &mut *borrow;
+            let mut any = false;
+            for (id, slot) in b.slots.iter_mut() {
+                let key = &b.id_to_key[id.0 as usize];
+                let Some(json) = b.pending.remove(key) else {
+                    continue;
+                };
+                match slot.value.restore_json(key, &json) {
+                    Ok(d) => diags.extend(d),
+                    Err(d) => {
+                        diags.push(d);
+                        continue;
+                    }
+                }
+                let ver = b.write_gen.wrapping_add(1);
+                b.write_gen = ver;
+                slot.version = ver;
+                for s in slot.subs.iter().copied().collect::<Vec<_>>() {
+                    if b.dirty_set.insert(s) {
+                        b.dirty.push(s);
+                    }
+                }
+                any = true;
+            }
+            any
+        };
+        if adopted {
+            self.flush();
+        }
         diags
     }
 

@@ -120,17 +120,22 @@ Rules (enforced by the type system where possible, by review otherwise):
 
 ```rust
 /// Checkpoint protocol — required for hot reload tiers 2–3 and future linker project.
+/// Snapshot builds only. Implemented by `Headless` (W.4b).
 pub trait Checkpoint {
-    fn quiesce(&mut self);                       // park event loop at a safe point
-    fn serialize_state(&self) -> StateSnapshot;  // entire store + window/session extras
-    fn restore_state(&mut self, snap: StateSnapshot) -> Vec<Diagnostic>;
+    fn quiesce(&mut self);                     // park at a safe point (graph at fixpoint)
+    fn serialize_state(&self) -> AppSnapshot;  // entire store + host extras (focus)
+    fn restore_state(&mut self, snap: AppSnapshot) -> Vec<Diagnostic>;
     fn resume(&mut self);
 }
 ```
 
-*(Status: the trait is planned — plan W.4. The capability exists as ad-hoc
-fns: `Runtime::{snapshot, load_pending, finish_restore, is_quiescent}` +
-`AppSnapshot`/`App::run_headless_restored`, used by the tier-3 tests.)*
+*(Status: shipped 2026-07-10 (plan W.4b) with `AppSnapshot` as the snapshot
+type — the spec's "store + window/session extras". `restore_state` works on a
+**running** instance: existing signals adopt in place
+(`Runtime::adopt_pending_live`, scheduling subscribers like a normal write),
+signals re-created by the forced rebuild adopt from the staged snapshot, and
+leftovers surface as `W0002`. The fresh-boot path remains
+`App::run_headless_restored`.)*
 
 ## 5. Hot-data SoA (internal layout, observable invariants)
 

@@ -109,7 +109,7 @@ RangeSlider, FilePicker, pie/line charts (line chart lives in
 | `undo` | `History<T>::{push undo redo can_undo can_redo present}` | pair with a signal holding the present |
 | `system` | `MenuModel`, `WindowDesc`, `SystemRequest`, runtime clipboard | **headless model only** — no OS wiring yet (plan P.3); agent sees it via `ui.getMenu`/`app.systemRequests` |
 | `tasks` | `cx.resource(name, deps, fetch)`, `resource_blocking`, `Spawner` (Inline/Manual/ThreadPool), `Sink` | see Step 7 |
-| snapshot | `AppSnapshot`, `App::run_headless_restored` | whole-app state save/restore |
+| snapshot | `AppSnapshot`, `Checkpoint` (quiesce/serialize/restore/resume — works on a running instance), `App::run_headless_restored` | whole-app state save/restore |
 
 ## Step 6 — stable-id discipline (what makes the app verifiable)
 
