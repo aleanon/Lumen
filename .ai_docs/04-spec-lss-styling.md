@@ -131,8 +131,10 @@ base; `$token`s now resolve inside function args and shorthand lists too);
 theme-switch animation **missing** (B.5); widget
 parts **work** (B.7 ✅ — `slider .track`/`.thumb`, `progress .fill`;
 `Element::part` for custom widgets); cascade origins other
-than the app sheet **unreachable** (B.6); `style_parity!` covers 11
-hand-picked properties, not set equality (B.7); `get_styles` **carries the
+than the app sheet **unreachable** (B.6); `style_parity!` asserts **set
+equality** over `APPLIED_PROPERTIES` in both directions (B.7 ✅ — every
+applied property has exactly one typed setter, every other known property
+is provably inert); `get_styles` **carries the
 winning declaration's `span`** (`{line, col}` — B.7b ✅) but still only
 reaches the `stylesheet` source (origins — B.6b). This section is deleted
 when Phase B completes and the spec becomes unconditionally normative.

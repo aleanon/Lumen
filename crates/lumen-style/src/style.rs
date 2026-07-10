@@ -120,7 +120,79 @@ impl Style {
         self.display = Some(d);
         self
     }
+    /// Set `flex-direction`.
+    pub fn flex_direction(mut self, d: FlexDirection) -> Self {
+        self.flex_direction = Some(d);
+        self
+    }
+    /// Set `height` (px).
+    pub fn height(mut self, px: f32) -> Self {
+        self.height = Some(Dim::px(px));
+        self
+    }
+    /// Set `margin` (all sides, px).
+    pub fn margin(mut self, px: f32) -> Self {
+        self.margin = Some(Edges::all(Dim::px(px)));
+        self
+    }
+    /// Set `line-height` (multiple of font size).
+    pub fn line_height(mut self, mult: f32) -> Self {
+        self.line_height = Some(mult);
+        self
+    }
+    /// Set the `border` shorthand (`border: <width> <color>`).
+    pub fn border(mut self, width_px: f32, color: Color) -> Self {
+        self.border_width = Some(width_px);
+        self.border_color = Some(color);
+        self
+    }
+    /// Set `border-width` (px).
+    pub fn border_width(mut self, px: f32) -> Self {
+        self.border_width = Some(px);
+        self
+    }
+    /// Set `border-color`.
+    pub fn border_color(mut self, c: Color) -> Self {
+        self.border_color = Some(c);
+        self
+    }
+    /// Set `backdrop-filter: blur(<px>)`.
+    pub fn backdrop_blur(mut self, px: f32) -> Self {
+        self.backdrop_blur = Some(px);
+        self
+    }
+    /// Set `backdrop-filter: saturate(<mult>)`.
+    pub fn backdrop_saturate(mut self, mult: f32) -> Self {
+        self.backdrop_saturate = Some(mult);
+        self
+    }
 }
+
+/// The `.lss` properties `apply` actually consumes — the runtime's applied
+/// set, in `apply` arm order. The parity test asserts (a) each entry really
+/// changes a `Style`, (b) no other known property does, and (c) the typed
+/// mirror covers exactly this set — so this const, `apply`, and the setters
+/// cannot drift apart silently (04 §8).
+pub const APPLIED_PROPERTIES: &[&str] = &[
+    "display",
+    "flex-direction",
+    "width",
+    "height",
+    "gap",
+    "padding",
+    "margin",
+    "background",
+    "color",
+    "border-radius",
+    "opacity",
+    "font-size",
+    "font-weight",
+    "line-height",
+    "backdrop-filter",
+    "border",
+    "border-width",
+    "border-color",
+];
 
 /// Apply one `.lss` declaration to `style`, resolving `$tokens`. Unknown
 /// properties are ignored here (the parser already flagged them E0102).

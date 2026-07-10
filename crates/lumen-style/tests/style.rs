@@ -16,31 +16,110 @@ fn val(prop: &str, v: &str) -> Value {
     }
 }
 
-/// Assert the `.lss` value and the typed setter produce the same `Style`.
+/// Assert the `.lss` value and the typed setter produce the same `Style`,
+/// recording the property in `$covered` for the set-equality check (B.7).
 macro_rules! style_parity {
-    ($prop:literal, $lss:literal, $typed:expr) => {{
+    ($covered:ident, $prop:literal, $lss:literal, $typed:expr) => {{
         let mut from_lss = Style::new();
         apply(&mut from_lss, $prop, &val($prop, $lss), &Tokens::new());
         let from_typed: Style = $typed(Style::new());
         assert_eq!(from_lss, from_typed, "parity for {}: {}", $prop, $lss);
+        $covered.push($prop);
     }};
 }
 
 #[test]
-fn lss_matches_typed_mirror() {
+fn lss_matches_typed_mirror_over_the_whole_applied_set() {
     use lumen_core::Color;
-    style_parity!("background", "#1a73e8ff", |s: Style| s
+    use lumen_layout::FlexDirection;
+    let red = || Color::from_hex("#ff0000ff").unwrap();
+    let mut covered: Vec<&str> = Vec::new();
+    style_parity!(covered, "background", "#1a73e8ff", |s: Style| s
         .background(Color::from_hex("#1a73e8ff").unwrap()));
-    style_parity!("color", "#ffffffff", |s: Style| s
+    style_parity!(covered, "color", "#ffffffff", |s: Style| s
         .color(Color::from_hex("#ffffffff").unwrap()));
-    style_parity!("padding", "8px", |s: Style| s.padding(8.0));
-    style_parity!("border-radius", "6px", |s: Style| s.radius(6.0));
-    style_parity!("opacity", "0.45", |s: Style| s.opacity(0.45));
-    style_parity!("font-size", "16px", |s: Style| s.font_size(16.0));
-    style_parity!("font-weight", "600", |s: Style| s.font_weight(600));
-    style_parity!("width", "100px", |s: Style| s.width(100.0));
-    style_parity!("gap", "8px", |s: Style| s.gap(8.0));
-    style_parity!("display", "flex", |s: Style| s.display(Display::Flex));
+    style_parity!(covered, "padding", "8px", |s: Style| s.padding(8.0));
+    style_parity!(covered, "border-radius", "6px", |s: Style| s.radius(6.0));
+    style_parity!(covered, "opacity", "0.45", |s: Style| s.opacity(0.45));
+    style_parity!(covered, "font-size", "16px", |s: Style| s.font_size(16.0));
+    style_parity!(covered, "font-weight", "600", |s: Style| s.font_weight(600));
+    style_parity!(covered, "width", "100px", |s: Style| s.width(100.0));
+    style_parity!(covered, "gap", "8px", |s: Style| s.gap(8.0));
+    style_parity!(covered, "display", "flex", |s: Style| s
+        .display(Display::Flex));
+    style_parity!(covered, "flex-direction", "column", |s: Style| s
+        .flex_direction(FlexDirection::Column));
+    style_parity!(covered, "height", "40px", |s: Style| s.height(40.0));
+    style_parity!(covered, "margin", "12px", |s: Style| s.margin(12.0));
+    style_parity!(covered, "line-height", "1.5", |s: Style| s.line_height(1.5));
+    style_parity!(covered, "border", "2px #ff0000ff", |s: Style| s
+        .border(2.0, red()));
+    style_parity!(covered, "border-width", "3px", |s: Style| s
+        .border_width(3.0));
+    style_parity!(covered, "border-color", "#ff0000ff", |s: Style| s
+        .border_color(red()));
+    style_parity!(
+        covered,
+        "backdrop-filter",
+        "blur(4px) saturate(1.8)",
+        |s: Style| { s.backdrop_blur(4.0).backdrop_saturate(1.8) }
+    );
+
+    // Set equality (04 §8): the parity table above covers exactly the
+    // runtime's applied set — a new `apply` arm without a typed setter (or
+    // vice versa) fails here, not silently.
+    let mut want: Vec<&str> = lumen_style::APPLIED_PROPERTIES.to_vec();
+    want.sort_unstable();
+    covered.sort_unstable();
+    assert_eq!(covered, want, "parity table != APPLIED_PROPERTIES");
+}
+
+#[test]
+fn applied_properties_change_a_style_and_only_they_do() {
+    // Representative value per applied property.
+    let repr = |p: &str| match p {
+        "display" => "flex",
+        "flex-direction" => "column",
+        "background" | "color" | "border-color" => "#ff0000ff",
+        "border-radius" => "6px",
+        "opacity" => "0.5",
+        "font-weight" => "600",
+        "line-height" => "1.5",
+        "backdrop-filter" => "blur(4px)",
+        "border" => "2px #ff0000ff",
+        _ => "8px", // the lengths
+    };
+    for &p in lumen_style::APPLIED_PROPERTIES {
+        let mut s = Style::new();
+        apply(&mut s, p, &val(p, repr(p)), &Tokens::new());
+        assert_ne!(
+            s,
+            Style::new(),
+            "`{p}` is listed as applied but apply() ignored it"
+        );
+    }
+    // Every other known property must be inert (parse-only) — an arm added
+    // to apply() without updating APPLIED_PROPERTIES fails here.
+    for &p in lumen_style::KNOWN_PROPERTIES {
+        if lumen_style::APPLIED_PROPERTIES.contains(&p) {
+            continue;
+        }
+        let mut s = Style::new();
+        for v in ["8px", "flex", "#ff0000ff", "0.5"] {
+            let src = format!("x {{ {p}: {v}; }}");
+            let (sheet, _) = lumen_style::parse("t.lss", &src);
+            if let Item::Rule(r) = &sheet.items[0] {
+                if let Some(d) = r.declarations.first() {
+                    apply(&mut s, p, &d.value, &Tokens::new());
+                }
+            }
+        }
+        assert_eq!(
+            s,
+            Style::new(),
+            "`{p}` changed Style but is not in APPLIED_PROPERTIES"
+        );
+    }
 }
 
 #[test]
