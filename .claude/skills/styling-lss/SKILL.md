@@ -43,6 +43,7 @@ border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 | `opacity: 0.5` | subtree compositing layer (B.3a) |
 | `font-size`, `font-weight` (100–900, synthesized bold), `line-height` (multiple) | reach measure **and** paint (B.4a) — text nodes only |
 | `background: linear-gradient(90deg, #a, #b)` / `radial-gradient(#a, #b)` | CSS angles (default to-bottom), optional `%` stop positions, Oklab interpolation; radial = centered, farthest-corner (B.3) |
+| `blend-mode: multiply\|screen\|overlay\|darken\|lighten` | subtree compositing layer, shared with `opacity` (B.3) |
 | `clip: none\|bounds\|rounded` | overrides the element's `.clip(bool)`; `bounds` = square corners, `rounded` = follow border-radius (B.3) |
 | `visibility: hidden` | removes the subtree from paint, hit-testing, AND semantics (agents don't see it); layout space is kept (B.3) |
 | `shadow: <dx> <dy> [blur] [spread] <color>` | single outer shadow (B.3); `inset`/comma lists unsupported — `inset` disables the declaration |
@@ -61,7 +62,7 @@ numeric only.
 ## Silent no-ops — do NOT use (until the noted plan task lands)
 
 - **All layout properties** (A.2) — see the one rule.
-- `blend-mode`, `filter`,
+- `filter`,
   `transform`, `z-index`, `cursor` (B.3).
 - Remaining typography: `font-family/style/features/variation`,
   `letter-spacing`, `text-align/overflow/wrap/decoration`,

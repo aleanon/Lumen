@@ -2337,12 +2337,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // compositing layer — tracked on the same depth-keyed stack as
             // the clip layer, so it pops when the subtree ends.
             let opacity = css.and_then(|s| s.opacity).unwrap_or(1.0);
-            if opacity < 1.0 {
+            // B.3: `.lss` blend-mode shares the compositing layer with opacity
+            // — one PushLayer carries both when either is non-default.
+            let blend = match css.and_then(|s| s.blend_mode) {
+                Some(lumen_style::StyleBlend::Multiply) => BlendMode::Multiply,
+                Some(lumen_style::StyleBlend::Screen) => BlendMode::Screen,
+                Some(lumen_style::StyleBlend::Overlay) => BlendMode::Overlay,
+                Some(lumen_style::StyleBlend::Darken) => BlendMode::Darken,
+                Some(lumen_style::StyleBlend::Lighten) => BlendMode::Lighten,
+                Some(lumen_style::StyleBlend::Normal) | None => BlendMode::SourceOver,
+            };
+            if opacity < 1.0 || blend != BlendMode::SourceOver {
                 dl.push(DrawCmd::PushLayer {
                     clip: None,
                     opacity: opacity.clamp(0.0, 1.0),
                     transform: kurbo::Affine::IDENTITY,
-                    blend: BlendMode::SourceOver,
+                    blend,
                 });
                 clip_stack.push(d);
             }

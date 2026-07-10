@@ -213,3 +213,42 @@ fn lss_clip_bounds_masks_the_subtree() {
         );
     }
 }
+
+#[test]
+fn lss_blend_mode_multiply_composites() {
+    // Yellow multiplied over cyan → green (only the shared channel survives).
+    let sheet =
+        "#under { background: #00ffff; } #over { background: #ffff00; blend-mode: multiply; }";
+    let mut h = App::new(|_cx| {
+        let over = Element {
+            style: lumen_layout::LayoutStyle {
+                position: lumen_layout::Position::Absolute,
+                inset: lumen_layout::Edges {
+                    left: Dim::px(0.0),
+                    top: Dim::px(0.0),
+                    ..lumen_layout::Edges::AUTO
+                },
+                width: Dim::px(100.0),
+                height: Dim::px(40.0),
+                ..lumen_layout::LayoutStyle::default()
+            },
+            ..Element::default()
+        };
+        let mut under = Element::default();
+        under.style.width = Dim::px(100.0);
+        under.style.height = Dim::px(40.0);
+        under.children = vec![over.id("over")];
+        col![under.id("under")]
+    })
+    .stylesheet(sheet)
+    .run_headless(Size::new(200.0, 100.0));
+    h.pump();
+
+    let b = h.node_bounds_by_id("under").unwrap();
+    let shot = h.screenshot();
+    let p = shot.pixel(b.center().x as u32, b.center().y as u32);
+    assert!(
+        p[1] > 200 && p[0] < 60 && p[2] < 60,
+        "yellow multiply cyan = green: {p:?}"
+    );
+}

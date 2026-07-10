@@ -34,6 +34,23 @@ pub struct StyleShadow {
     pub color: Color,
 }
 
+/// `blend-mode:` values (B.3) — mirrors the renderer's blend set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StyleBlend {
+    /// `normal` (source-over).
+    Normal,
+    /// `multiply`.
+    Multiply,
+    /// `screen`.
+    Screen,
+    /// `overlay`.
+    Overlay,
+    /// `darken`.
+    Darken,
+    /// `lighten`.
+    Lighten,
+}
+
 /// `clip:` values (B.3, 04 §3): whether/how a node clips its subtree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StyleClip {
@@ -107,6 +124,8 @@ pub struct Style {
     pub backdrop_refraction: Option<f32>,
     /// `backdrop-filter: specular(...)` rim-highlight intensity.
     pub backdrop_specular: Option<f32>,
+    /// `blend-mode` (B.3): composites the subtree onto the backdrop.
+    pub blend_mode: Option<StyleBlend>,
     /// `clip` (B.3): overrides the element's clip flag; `Bounds` ignores the
     /// border-radius, `Rounded` uses it.
     pub clip: Option<StyleClip>,
@@ -242,6 +261,11 @@ impl Style {
         self.shadow = Some(sh);
         self
     }
+    /// Set `blend-mode`.
+    pub fn blend_mode(mut self, b: StyleBlend) -> Self {
+        self.blend_mode = Some(b);
+        self
+    }
     /// Set `clip`.
     pub fn clip(mut self, c: StyleClip) -> Self {
         self.clip = Some(c);
@@ -296,6 +320,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "line-height",
     "backdrop-filter",
     "shadow",
+    "blend-mode",
     "clip",
     "visibility",
     "border",
@@ -355,6 +380,20 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "line-height" => style.line_height = as_number(&v).map(|n| n as f32),
         "backdrop-filter" => apply_backdrop(style, &v),
         "shadow" => style.shadow = as_shadow(&v),
+        "blend-mode" => {
+            style.blend_mode = match &v {
+                Value::Keyword(k) => match k.as_str() {
+                    "normal" => Some(StyleBlend::Normal),
+                    "multiply" => Some(StyleBlend::Multiply),
+                    "screen" => Some(StyleBlend::Screen),
+                    "overlay" => Some(StyleBlend::Overlay),
+                    "darken" => Some(StyleBlend::Darken),
+                    "lighten" => Some(StyleBlend::Lighten),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
         "clip" => {
             style.clip = match &v {
                 Value::Keyword(k) if k == "none" => Some(StyleClip::None),
