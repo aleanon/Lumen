@@ -169,6 +169,14 @@ re-approved via R0 diff; `scope_memo_one_of_many` improves again.
   shadow lists (fix comma grouping) , opacity (exists→paint), 1–4-value
   radius, per-side borders, transform(+origin), filter, blend-mode, clip,
   z-index, visibility, cursor. [D#15]
+  *(Amendment 2026-07-10: landed — opacity (B.3a), single shadow (B.3b;
+  comma lists degrade to the first shadow, `inset` disables), visibility
+  incl. semantics (B.3c), 1–4-value radius (B.3d), linear/radial gradients
+  (B.3e), per-side padding/margin longhands (B.3f), clip (B.3g),
+  blend-mode (B.3h), per-side borders as strips (B.3i). Parked pending
+  renderer/shell machinery, revisit with R.1–R.3: `filter` (PushLayer
+  field + GPU shader), `transform`/`z-index` (hit-test + paint-order
+  design), `cursor` (winit shell). These stay documented parse-only.)*
 - **B.4 (L)** Typography to the text stack: font-family/style/features/
   variation, font-size/weight (measure pass), line-height, letter-spacing,
   text-align/overflow/wrap/decoration, selection-color. [D#15]
