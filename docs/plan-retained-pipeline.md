@@ -132,9 +132,13 @@ coherent` — relayout result ≡ fresh compute, added to
 
 ## A.5 — Only-affected restyle + per-node style memo (M, after A.2)
 
-- Memoize rule resolution by (role, id, classes, states, sheet-gen):
-  most nodes share a handful of keys → O(distinct keys) per rebuild.
-  *(A.5b — still open.)*
+- **A.5b ✅ (2026-07-10)** Rule resolution memoized by hash of (desc:
+  id/classes/states/ty + ancestor-chain/container/overlay context) →
+  `Rc<(Style, computed map)>`; sheet/theme swaps and force-rebuilds clear
+  it (`set_stylesheet`/`set_theme` clear the memo but keep the scope
+  caches — cached Elements are pre-styling). Hits/misses surface via
+  `style_memo_stats()`; 24 identical buttons resolve one cascade
+  (tests/copy_forward.rs).
 - **A.5a ✅ (2026-07-10)** State flips (hover/focus/pressed) are a
   **restyle-only** path: `pump` diffs the visual snapshot, re-flags the
   old/new target nodes, re-resolves styles for their *subtrees*

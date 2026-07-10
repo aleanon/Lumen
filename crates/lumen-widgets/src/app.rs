@@ -199,6 +199,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             impure_seen: 0,
             nodes_rebuilt: 0,
             nodes_copied: 0,
+            style_memo: HashMap::new(),
+            style_memo_hits: 0,
+            style_memo_misses: 0,
             desc_stack: Vec::new(),
             container_nodes: Vec::new(),
             container_prev: Vec::new(),
@@ -525,6 +528,13 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     impure_seen: u32,
     nodes_rebuilt: u32,
     nodes_copied: u32,
+    /// A.5b: memoized style resolution — (node desc + ancestor context) →
+    /// resolved pair. Most nodes share a handful of keys, so a rebuild does
+    /// O(distinct keys) cascades instead of O(nodes). Cleared with the view
+    /// caches (stylesheet/theme/resize force-rebuilds).
+    style_memo: HashMap<u64, std::rc::Rc<StylePair>>,
+    style_memo_hits: u64,
+    style_memo_misses: u64,
     /// B.1: the ancestor descriptors of the element currently being lowered
     /// (root-first), fed to `resolve_with_ancestors` so descendant/`>`
     /// selectors match correctly. Maintained by `build_node`'s recursion.
@@ -611,6 +621,10 @@ type VisualState = (
     Option<StableId>,
     Option<(NodeIndex, Option<StableId>)>,
 );
+
+/// A resolved style pair: the typed style + the computed-value map
+/// (`get_styles` form). The unit the A.5b resolution memo caches.
+type StylePair = (lumen_style::Style, HashMap<String, lumen_style::Computed>);
 
 /// A node's re-resolved style pair, pending commit (A.5 two-pass restyle).
 type PendingStyle = (
@@ -756,6 +770,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             self.frames_rendered += 1;
         }
         stats
+    }
+
+    /// A.5b introspection: cumulative style-resolution memo `(hits, misses)`
+    /// — most nodes share a handful of (desc, ancestors) keys, so hits should
+    /// dwarf misses on any real UI.
+    pub fn style_memo_stats(&self) -> (u64, u64) {
+        (self.style_memo_hits, self.style_memo_misses)
     }
 
     /// C.2 (`app.perf`): rolling painted-frame time percentiles
@@ -1477,6 +1498,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// the version-based memo can't see them.
     fn clear_view_caches(&mut self) {
         self.scope_cache.borrow_mut().clear();
+        // A.5b: the resolution memo is keyed on (desc, ancestors, container)
+        // only — sheet/theme/media changes arrive via force-rebuild, so they
+        // invalidate here.
+        self.style_memo.clear();
     }
 
     /// F5 GC: drop cached scope subtrees + scope-local signals whose key was not
@@ -2123,6 +2148,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             ReloadResult::Failed(diags)
         } else {
             self.app_sheet = Some(sheet);
+            // A.5b: resolution results embed the sheet — invalidate the memo
+            // (scope caches stay: cached Elements are pre-styling).
+            self.style_memo.clear();
             self.rebuild();
             ReloadResult::Ok
         }
@@ -2131,6 +2159,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// Switch the active theme and re-resolve styles.
     pub fn set_theme(&mut self, theme: lumen_style::ThemeKind) {
         self.theme = theme;
+        // A.5b: token tables are theme-scoped — resolution memo out.
+        self.style_memo.clear();
         self.rebuild();
     }
 
@@ -2467,24 +2497,49 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 }),
                 None => std::borrow::Cow::Borrowed(&env.media),
             };
-            let computed =
-                lumen_style::resolve_with_ancestors(&env.sources, &desc, &self.desc_stack, &media);
-            let mut css = lumen_style::Style::new();
-            let mut resolved = HashMap::new();
-            for (prop, c) in &computed {
-                lumen_style::apply(&mut css, prop, &c.value, &env.tokens);
-                // Store the token-resolved value so `get_styles` returns the
-                // computed (substituted) form (04 §7).
-                resolved.insert(
-                    prop.clone(),
-                    lumen_style::Computed {
-                        value: lumen_style::resolve_token(&c.value, &env.tokens),
-                        important: c.important,
-                        origin: c.origin,
-                        span: c.span,
-                    },
+            // A.5b: resolution is a pure function of (desc, ancestor chain,
+            // container size) for a fixed sheet/theme/media — memoize it.
+            let style_key = {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                desc.id.hash(&mut h);
+                desc.classes.hash(&mut h);
+                desc.states.hash(&mut h);
+                desc.ty.hash(&mut h);
+                self.span_ctx_hash(this_overlay).hash(&mut h);
+                h.finish()
+            };
+            let (css, resolved) = if let Some(pair) = self.style_memo.get(&style_key) {
+                self.style_memo_hits += 1;
+                (**pair).clone()
+            } else {
+                self.style_memo_misses += 1;
+                let computed = lumen_style::resolve_with_ancestors(
+                    &env.sources,
+                    &desc,
+                    &self.desc_stack,
+                    &media,
                 );
-            }
+                let mut css = lumen_style::Style::new();
+                let mut resolved = HashMap::new();
+                for (prop, c) in &computed {
+                    lumen_style::apply(&mut css, prop, &c.value, &env.tokens);
+                    // Store the token-resolved value so `get_styles` returns
+                    // the computed (substituted) form (04 §7).
+                    resolved.insert(
+                        prop.clone(),
+                        lumen_style::Computed {
+                            value: lumen_style::resolve_token(&c.value, &env.tokens),
+                            important: c.important,
+                            origin: c.origin,
+                            span: c.span,
+                        },
+                    );
+                }
+                self.style_memo
+                    .insert(style_key, std::rc::Rc::new((css.clone(), resolved.clone())));
+                (css, resolved)
+            };
             // Layout overrides: only the fields the sheet actually set win
             // over the element's `LayoutStyle` (element < .lss, matching the
             // cascade's origin order once B.6 adds more origins).
