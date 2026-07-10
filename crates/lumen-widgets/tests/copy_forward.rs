@@ -138,3 +138,98 @@ fn pointer_motion_still_reuses_memoized_scopes() {
     assert_eq!(runs.get(), baseline, "hover re-ran a memoized scope");
     h.assert_view_coherent();
 }
+
+#[test]
+fn hover_takes_the_restyle_only_path() {
+    // A.5: pointer motion is restyle + repaint — no rebuild, no lowering.
+    let mut h = App::new(|cx| {
+        col![
+            cx.scope("s", |_cx| widgets::text("cached")),
+            widgets::button("Hover", |_| {}).id("b")
+        ]
+    })
+    .stylesheet(
+        "button { background: #00ff00ff; } \
+         button:hovered { background: #ff0000ff; }",
+    )
+    .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+
+    let p = center(h.node_bounds_by_id("b").unwrap());
+    h.inject(Event::PointerMove(PointerEvent::at(p)));
+    let stats = h.pump();
+    assert_eq!(
+        h.last_change()["kind"],
+        "restyle",
+        "hover is a restyle, not a rebuild: {:?}",
+        h.last_change()
+    );
+    assert_eq!(stats.nodes_rebuilt, 0, "no lowering on hover: {stats:?}");
+    let bg = h.get_styles("#b")["background"]["value"]
+        .as_str()
+        .map(str::to_string);
+    assert_eq!(bg.as_deref(), Some("#ff0000ff"), ":hovered style applied");
+    h.assert_view_coherent();
+}
+
+#[test]
+fn hover_layout_rule_falls_back_to_a_rebuild() {
+    // A.2's risk note: `:hovered { width: … }` must relayout for real.
+    let mut h = App::new(|cx| {
+        col![
+            cx.scope("s", |_cx| widgets::text("cached")),
+            widgets::button("Hover", |_| {}).id("b")
+        ]
+    })
+    .stylesheet("button:hovered { width: 220px; }")
+    .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    let w0 = h.node_bounds_by_id("b").unwrap().width();
+
+    let p = center(h.node_bounds_by_id("b").unwrap());
+    h.inject(Event::PointerMove(PointerEvent::at(p)));
+    h.pump();
+    let w1 = h.node_bounds_by_id("b").unwrap().width();
+    assert_eq!(
+        h.last_change()["kind"],
+        "rebuild",
+        "layout-affecting state rule escalates: {:?}",
+        h.last_change()
+    );
+    assert!(
+        (w1 - 220.0).abs() < 1.0 && w1 > w0,
+        "hover width applied through a real relayout: {w0} -> {w1}"
+    );
+    h.assert_view_coherent();
+}
+
+#[test]
+fn descendant_state_combinator_restyles_below_the_flipped_node() {
+    // `.card:hovered button { … }` — hovering the card restyles a DESCENDANT.
+    let mut h = App::new(|cx| {
+        let inner = col![widgets::button("Go", |_| {}).id("go")];
+        let mut card = col![inner];
+        card = card.class("card").id("card");
+        // A background makes the card hit-testable, so it can be hovered.
+        card.background = Some(lumen_core::Color::srgb8(0xee, 0xee, 0xee, 0xff));
+        card.style.width = lumen_layout::Dim::px(150.0);
+        card.style.height = lumen_layout::Dim::px(80.0);
+        col![card, cx.scope("s", |_cx| widgets::text("cached"))]
+    })
+    .stylesheet(".card:hovered button { background: #ff0000ff; }")
+    .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+
+    let p = center(h.node_bounds_by_id("card").unwrap());
+    h.inject(Event::PointerMove(PointerEvent::at(p)));
+    h.pump();
+    let bg = h.get_styles("#go")["background"]["value"]
+        .as_str()
+        .map(str::to_string);
+    assert_eq!(
+        bg.as_deref(),
+        Some("#ff0000ff"),
+        "descendant restyled when the ancestor's state flipped"
+    );
+    h.assert_view_coherent();
+}

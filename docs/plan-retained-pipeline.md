@@ -134,10 +134,17 @@ coherent` — relayout result ≡ fresh compute, added to
 
 - Memoize rule resolution by (role, id, classes, states, sheet-gen):
   most nodes share a handful of keys → O(distinct keys) per rebuild.
-- State flips (hover/focus/pressed) become a **restyle-only** path: no
-  scope re-runs (A.1), no relayout (unless A.2 state-part layout rules
-  exist on the node), just re-resolve styles for the flipped nodes +
-  repaint their damage. This finally makes pointer motion O(2 nodes).
+  *(A.5b — still open.)*
+- **A.5a ✅ (2026-07-10)** State flips (hover/focus/pressed) are a
+  **restyle-only** path: `pump` diffs the visual snapshot, re-flags the
+  old/new target nodes, re-resolves styles for their *subtrees*
+  (descendant state combinators like `.card:hovered button` reach below
+  the flipped node), rebuilds semantics, repaints the damage —
+  `ui.lastChange` reports `restyle`, `FrameStats.nodes_rebuilt == 0`.
+  Escalates to a full rebuild when a re-resolved style changes a
+  layout/typography-affecting property (`:hovered { width: … }` — the
+  A.2 risk note), verified by tests/copy_forward.rs. Pointer motion is
+  now O(affected subtree), not O(tree).
 
 **Accept:** hover storm over the gallery: `ui.lastChange` reports
 restyle/patch (not rebuild) per move; style-resolution counter shows

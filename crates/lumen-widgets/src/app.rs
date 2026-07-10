@@ -604,6 +604,21 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     last_change: ChangeReport,
 }
 
+/// The pre-routing snapshot of input-driven visual state
+/// (hover/focus/pressed) — what [`Headless::restyle_visual`] diffs against.
+type VisualState = (
+    Option<StableId>,
+    Option<StableId>,
+    Option<(NodeIndex, Option<StableId>)>,
+);
+
+/// A node's re-resolved style pair, pending commit (A.5 two-pass restyle).
+type PendingStyle = (
+    NodeIndex,
+    lumen_style::Style,
+    HashMap<String, lumen_style::Computed>,
+);
+
 /// What a `pump` did, for change attribution (F4.3).
 #[derive(Clone, Default)]
 struct ChangeReport {
@@ -667,11 +682,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // rebuild/relayout. `structural_reads` is every build-time read except
         // isolated paint-only bindings.
         let structural_current = self.structural_reads.is_current(&self.rt);
-        let needs_rebuild = self.force_rebuild
-            || visual_changed
-            || time_driven
-            || (write_changed && !structural_current);
-        if needs_rebuild {
+        let needs_rebuild =
+            self.force_rebuild || time_driven || (write_changed && !structural_current);
+        // A.5: a pump where ONLY visual state (hover/focus/pressed) changed
+        // takes the restyle-only path — flags + affected subtree styles +
+        // repaint, no closure runs, no lowering, no relayout. Falls back to a
+        // full rebuild when a state rule touches layout/typography (the A.2
+        // risk note) so layout stays correct.
+        let restyle_only = visual_changed && !needs_rebuild;
+        if needs_rebuild || (restyle_only && !self.restyle_visual(&visual_before)) {
             // Scope memoization keys off signal versions only, so a rebuild
             // driven by a forced invalidation (resize/scale/stylesheet/theme —
             // inputs a build can observe through `cx`) must not reuse stale
@@ -695,6 +714,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // forward; signal/time rebuilds may.
             self.allow_copy_forward = !visual_changed;
             self.rebuild(); // baselines force_rebuild + last_build_gen
+        } else if restyle_only {
+            // restyle_visual already updated flags/styles/semantics/paint.
         } else if write_changed
             && self
                 .bg_bindings
@@ -1506,6 +1527,188 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// the raster to exactly the changed region — no rebuild, no relayout, no
     /// scope re-run. The retained tree stays a pure function of the store
     /// (guarded by `assert_view_coherent`).
+    /// A.5 restyle-only visual path: hover/focus/pressed flipped but no
+    /// signal/clock/forced change. Re-flags the old and new target nodes,
+    /// re-resolves `.lss` styles for their subtrees (descendant combinators
+    /// like `.card:hovered button` reach below the flipped node), rebuilds
+    /// semantics, and repaints the damage. Returns `false` — caller must do
+    /// a full rebuild — if any re-resolved style changes a layout- or
+    /// typography-affecting property (state layout rules relayout for real).
+    fn restyle_visual(&mut self, before: &VisualState) -> bool {
+        // The nodes whose interaction state flipped: old + new of each kind.
+        let mut ids: Vec<StableId> = Vec::new();
+        let mut push = |id: &Option<StableId>| {
+            if let Some(id) = id {
+                if !ids.contains(id) {
+                    ids.push(id.clone());
+                }
+            }
+        };
+        push(&before.0);
+        push(&self.hovered_id);
+        push(&before.1);
+        push(&self.focused_id);
+        push(&before.2.as_ref().and_then(|(_, id)| id.clone()));
+        push(&self.pressed.as_ref().and_then(|(_, id)| id.clone()));
+        let nodes: Vec<NodeIndex> = ids.iter().filter_map(|id| self.node_by_id(id)).collect();
+
+        // Refresh the interaction flags (same rule as build_node/copy_node).
+        for &node in &nodes {
+            let Some(m) = self.meta.get(&node) else {
+                continue;
+            };
+            let mut flags = self.tree.flags(node);
+            flags.remove(NodeFlags::FOCUSED | NodeFlags::HOVERED | NodeFlags::PRESSED);
+            if m.id.is_some() && m.id == self.focused_id {
+                flags |= NodeFlags::FOCUSED;
+            }
+            if m.id.is_some() && m.id == self.hovered_id {
+                flags |= NodeFlags::HOVERED;
+            }
+            if m.id.is_some() && self.pressed.as_ref().is_some_and(|(_, id)| *id == m.id) {
+                flags |= NodeFlags::PRESSED;
+            }
+            self.tree.set_flags(node, flags);
+        }
+
+        if self.style_env.is_some() {
+            // Two-pass: resolve every affected subtree first, commit only if
+            // nothing layout-affecting changed (else the caller rebuilds).
+            let mut pending: Vec<PendingStyle> = Vec::new();
+            for &node in &nodes {
+                let mut ancestors = self.ancestor_descs(node);
+                if !self.restyle_subtree(node, &mut ancestors, &mut pending) {
+                    return false;
+                }
+            }
+            for (node, css, resolved) in pending {
+                self.node_style.insert(node, css);
+                self.node_computed.insert(node, resolved);
+            }
+        }
+
+        self.sem_root = Some(self.build_semantics(self.tree.root()));
+        self.last_damage = self.paint();
+        self.last_change = ChangeReport {
+            kind: "restyle",
+            nodes: nodes.iter().map(|n| n.index()).collect(),
+        };
+        true
+    }
+
+    /// The [`lumen_style::NodeDesc`] for `node`, from its retained meta and
+    /// the *current* interaction ids — the restyle-path equivalent of the
+    /// desc `build_node` constructs while lowering.
+    fn node_desc(&self, node: NodeIndex) -> Option<lumen_style::NodeDesc> {
+        let m = self.meta.get(&node)?;
+        let mut states = Vec::new();
+        if m.id.is_some() && m.id == self.focused_id {
+            states.push("focused".to_string());
+            states.push("focus".to_string());
+        }
+        if m.id.is_some() && m.id == self.hovered_id {
+            states.push("hovered".to_string());
+            states.push("hover".to_string());
+        }
+        if m.id.is_some() && self.pressed.as_ref().is_some_and(|(_, id)| *id == m.id) {
+            states.push("pressed".to_string());
+            states.push("active".to_string());
+        }
+        states.extend(m.states.iter().map(|s| s.as_str().to_string()));
+        Some(lumen_style::NodeDesc {
+            id: m.id.as_ref().map(|i| i.as_str().to_string()),
+            classes: m.classes.clone(),
+            states,
+            ty: m.role.as_str().to_string(),
+        })
+    }
+
+    /// Root-first ancestor descs for `node` (excluding `node` itself).
+    fn ancestor_descs(&self, node: NodeIndex) -> Vec<lumen_style::NodeDesc> {
+        let mut chain = Vec::new();
+        let mut cur = node;
+        loop {
+            if cur == self.tree.root() {
+                break;
+            }
+            cur = self.tree.parent(cur);
+            if let Some(d) = self.node_desc(cur) {
+                chain.push(d);
+            }
+            if cur == self.tree.root() {
+                break;
+            }
+        }
+        chain.reverse();
+        chain
+    }
+
+    /// Resolve styles for `node` and its subtree against `ancestors`
+    /// (mutated as the walk descends), collecting results into `pending`.
+    /// Returns `false` if a re-resolved style differs in a layout- or
+    /// typography-affecting property from the retained one.
+    fn restyle_subtree(
+        &self,
+        node: NodeIndex,
+        ancestors: &mut Vec<lumen_style::NodeDesc>,
+        pending: &mut Vec<PendingStyle>,
+    ) -> bool {
+        let Some(env) = &self.style_env else {
+            return true;
+        };
+        let Some(desc) = self.node_desc(node) else {
+            return true;
+        };
+        // Container queries: nearest `.container()` ancestor's current size.
+        let media = 'm: {
+            for c in self.container_nodes.iter().rev() {
+                let mut cur = node;
+                while cur != self.tree.root() {
+                    cur = self.tree.parent(cur);
+                    if cur == *c {
+                        let b = self.tree.bounds(*c);
+                        break 'm std::borrow::Cow::Owned(lumen_style::MediaContext {
+                            container: Some((b.width(), b.height())),
+                            ..env.media.clone()
+                        });
+                    }
+                }
+            }
+            std::borrow::Cow::Borrowed(&env.media)
+        };
+        let computed = lumen_style::resolve_with_ancestors(&env.sources, &desc, ancestors, &media);
+        let mut css = lumen_style::Style::new();
+        let mut resolved = HashMap::new();
+        for (prop, c) in &computed {
+            lumen_style::apply(&mut css, prop, &c.value, &env.tokens);
+            resolved.insert(
+                prop.clone(),
+                lumen_style::Computed {
+                    value: lumen_style::resolve_token(&c.value, &env.tokens),
+                    important: c.important,
+                    origin: c.origin,
+                    span: c.span,
+                },
+            );
+        }
+        let old = self.node_style.get(&node);
+        if layout_affecting_differ(old, &css) {
+            return false;
+        }
+        pending.push((node, css, resolved));
+        ancestors.push(desc);
+        let mut c = self.tree.first_child(node);
+        while c.is_some() {
+            if !self.restyle_subtree(c, ancestors, pending) {
+                ancestors.pop();
+                return false;
+            }
+            c = self.tree.next_sibling(c);
+        }
+        ancestors.pop();
+        true
+    }
+
     fn patch_bg_bindings(&mut self) {
         let rt = self.rt.clone();
         let stale: Vec<usize> = self
@@ -3222,6 +3425,27 @@ fn panic_msg(payload: &Box<dyn std::any::Any + Send>) -> String {
 
 /// A hover-state version of a control colour: lighten a dark fill, darken a
 /// light one (perceptually, in Oklab). Subtle but visible.
+/// Whether two computed styles differ in any property that feeds layout or
+/// text measurement (A.5) — if so, a visual-state restyle must escalate to a
+/// full rebuild so the new geometry is real.
+fn layout_affecting_differ(old: Option<&lumen_style::Style>, new: &lumen_style::Style) -> bool {
+    let d = lumen_style::Style::new();
+    let old = old.unwrap_or(&d);
+    old.display != new.display
+        || old.flex_direction != new.flex_direction
+        || old.width != new.width
+        || old.height != new.height
+        || old.gap != new.gap
+        || old.padding != new.padding
+        || old.margin != new.margin
+        || old.padding_sides != new.padding_sides
+        || old.margin_sides != new.margin_sides
+        || old.font_size != new.font_size
+        || old.font_weight != new.font_weight
+        || old.line_height != new.line_height
+        || old.visibility != new.visibility
+}
+
 /// Map a box-relative `.lss` gradient onto the renderer brush for `bounds`
 /// (B.3). Linear: CSS angle (0 = to top, 90 = to right), line through the
 /// center sized by the box's projection onto the axis. Radial: centered,
