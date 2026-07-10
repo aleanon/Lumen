@@ -40,6 +40,12 @@ pub struct FrameStats {
     /// What changed this frame (R2): `None` (idle), `Region` (only a rectangle
     /// repainted), or `Full`. The shell can upload just the changed region.
     pub damage: Damage,
+    /// Nodes lowered fresh by the last rebuild (A.3.2) — the O(changed) meter.
+    /// `0` when the pump was idle or patch-only.
+    pub nodes_rebuilt: u32,
+    /// Nodes whose retained work was copied forward from the previous build
+    /// instead of being re-lowered (A.3.2 memo-hit spans).
+    pub nodes_copied: u32,
 }
 
 /// An application: a root build closure, an optional stylesheet, and the frame
@@ -182,6 +188,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             node_computed: HashMap::new(),
             style_env: None,
             scope_spans: HashMap::new(),
+            prev_spans: HashMap::new(),
+            prev_tree: Tree::new(),
+            prev_meta: HashMap::new(),
+            prev_node_style: HashMap::new(),
+            prev_node_computed: HashMap::new(),
+            node_layout_style: HashMap::new(),
+            prev_layout_style: HashMap::new(),
+            allow_copy_forward: false,
+            impure_seen: 0,
+            nodes_rebuilt: 0,
+            nodes_copied: 0,
             desc_stack: Vec::new(),
             container_nodes: Vec::new(),
             container_prev: Vec::new(),
@@ -361,6 +378,19 @@ struct StyleEnv {
     media: lumen_style::MediaContext,
 }
 
+/// A `cx.scope`'s recorded node span (A.3.1) plus the soundness context for
+/// copy-forward (A.3.2): the hash covers everything *outside* the scope that
+/// its per-node work depended on (ancestor selector chain, container size,
+/// overlay/hidden state); `impure` marks spans whose lowering has per-node
+/// side work (dyn bindings, custom measure) that must re-run every build.
+#[derive(Clone, Copy)]
+struct SpanRec {
+    root: NodeIndex,
+    count: u32,
+    ctx_hash: u64,
+    impure: bool,
+}
+
 struct NodeMeta {
     id: Option<StableId>,
     role: Role,
@@ -473,7 +503,28 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     style_env: Option<StyleEnv>,
     /// A.3.1: per-rebuild scope→node-span map (scope key → subtree root +
     /// preorder node count). The retained-graph splice replaces these spans.
-    scope_spans: HashMap<String, (NodeIndex, u32)>,
+    scope_spans: HashMap<String, SpanRec>,
+    /// Last build's spans/tree/per-node work (A.3.2 copy-forward). A memo-hit
+    /// scope whose recorded context hash matches copies its span's retained
+    /// work (meta, styles, layout styles, flags) instead of re-lowering.
+    prev_spans: HashMap<String, SpanRec>,
+    prev_tree: Tree,
+    prev_meta: HashMap<NodeIndex, NodeMeta>,
+    prev_node_style: HashMap<NodeIndex, lumen_style::Style>,
+    prev_node_computed: HashMap<NodeIndex, HashMap<String, lumen_style::Computed>>,
+    /// Final (post-css-merge) layout style per node — what copy-forward feeds
+    /// taffy without re-deriving it from the element.
+    node_layout_style: HashMap<NodeIndex, LayoutStyle>,
+    prev_layout_style: HashMap<NodeIndex, LayoutStyle>,
+    /// Whether this rebuild may copy spans forward (false on visual-state
+    /// rebuilds: hover/focus/pressed styling must re-resolve).
+    allow_copy_forward: bool,
+    /// Count of elements this build encountered carrying non-memoizable
+    /// per-node work (dyn bindings, custom/canvas content) — spans containing
+    /// any are never copied forward.
+    impure_seen: u32,
+    nodes_rebuilt: u32,
+    nodes_copied: u32,
     /// B.1: the ancestor descriptors of the element currently being lowered
     /// (root-first), fed to `resolve_with_ancestors` so descendant/`>`
     /// selectors match correctly. Maintained by `build_node`'s recursion.
@@ -571,6 +622,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // it never feeds rendering, so the pure-function contract holds.
         #[cfg(not(target_arch = "wasm32"))]
         let pump_t0 = std::time::Instant::now();
+        // A.3.2 meters reflect *this* pump: idle/patch-only pumps report 0.
+        self.nodes_rebuilt = 0;
+        self.nodes_copied = 0;
         // Apply any background-task results first (on the UI thread), so the build
         // sees fresh state. Keeps `pump` a pure function of (state, queued
         // events + deferred ops, clock). Deferred results write signals → bump the
@@ -636,6 +690,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             if self.force_rebuild {
                 self.clear_view_caches();
             }
+            // A.3.2: visual-state rebuilds must re-resolve `.lss` state parts
+            // (`:hovered` etc.) for every node, so they never copy spans
+            // forward; signal/time rebuilds may.
+            self.allow_copy_forward = !visual_changed;
             self.rebuild(); // baselines force_rebuild + last_build_gen
         } else if write_changed
             && self
@@ -664,6 +722,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             node_count: self.tree.len(),
             painted: self.last_damage != Damage::None,
             damage: self.last_damage,
+            nodes_rebuilt: self.nodes_rebuilt,
+            nodes_copied: self.nodes_copied,
         };
         #[cfg(not(target_arch = "wasm32"))]
         if stats.painted {
@@ -1550,9 +1610,18 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // `.lss` layout properties reach taffy. Build the cascade env once
         // per rebuild; clear the per-node results (NodeIndex values are
         // generational — a reused index must not inherit a stale style).
-        self.node_style.clear();
-        self.node_computed.clear();
-        self.scope_spans.clear();
+        // A.3.2: last build's tree + per-node work become the copy-forward
+        // source; this build's maps start empty and are filled by lowering
+        // or by moving entries across from `prev_*`.
+        self.prev_spans = std::mem::take(&mut self.scope_spans);
+        self.prev_meta = std::mem::take(&mut self.meta);
+        self.prev_node_style = std::mem::take(&mut self.node_style);
+        self.prev_node_computed = std::mem::take(&mut self.node_computed);
+        self.prev_layout_style = std::mem::take(&mut self.node_layout_style);
+        self.prev_tree = std::mem::replace(&mut self.tree, Tree::new());
+        self.impure_seen = 0;
+        self.nodes_rebuilt = 0;
+        self.nodes_copied = 0;
         self.desc_stack.clear();
         self.container_nodes.clear();
         self.container_stack.clear();
@@ -1668,12 +1737,173 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.dep_index = idx;
     }
 
+    /// Hash of everything *outside* a scope that its nodes' retained work
+    /// depends on (A.3.2): the ancestor selector chain (descendant/child
+    /// combinators + inherited hidden state), the enclosing container size
+    /// (container queries), and overlay membership. Copy-forward is sound
+    /// only when this matches the value recorded when the span was lowered.
+    fn span_ctx_hash(&self, in_overlay: bool) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for d in &self.desc_stack {
+            d.id.hash(&mut h);
+            d.classes.hash(&mut h);
+            d.states.hash(&mut h);
+            d.ty.hash(&mut h);
+        }
+        if let Some(c) = self.container_stack.last().copied().flatten() {
+            c.0.to_bits().hash(&mut h);
+            c.1.to_bits().hash(&mut h);
+        }
+        in_overlay.hash(&mut h);
+        (self.hidden_count > 0).hash(&mut h);
+        h.finish()
+    }
+
+    /// Copy a memo-hit scope's span forward from the previous build (A.3.2):
+    /// re-insert its nodes under `parent` with the retained meta, styles, and
+    /// layout styles moved (not cloned) across, flags refreshed against the
+    /// current focus/hover/pressed ids, and taffy nodes rebuilt from the
+    /// retained layout styles. Returns `None` (caller falls back to a full
+    /// lower) if any retained entry is missing.
+    #[allow(clippy::too_many_arguments)]
+    fn copy_span(
+        &mut self,
+        key: &str,
+        span: SpanRec,
+        hash: u64,
+        tree: &mut Tree,
+        layout: &mut LayoutTree,
+        meta: &mut HashMap<NodeIndex, NodeMeta>,
+        built: &mut Vec<(NodeIndex, LayoutNode)>,
+        parent: Option<NodeIndex>,
+    ) -> Option<(NodeIndex, LayoutNode)> {
+        // Pre-validate: every node in the span must still have its retained
+        // work (a nested scope inside this span may have been copied out
+        // already — spans are disjoint per build, so that cannot happen, but
+        // a bail here keeps this robust rather than half-mutated).
+        let mut prev_nodes = Vec::with_capacity(span.count as usize);
+        let mut stack = vec![span.root];
+        while let Some(n) = stack.pop() {
+            if !self.prev_meta.contains_key(&n) || !self.prev_layout_style.contains_key(&n) {
+                return None;
+            }
+            prev_nodes.push(n);
+            let mut c = self.prev_tree.first_child(n);
+            while c.is_some() {
+                stack.push(c);
+                c = self.prev_tree.next_sibling(c);
+            }
+        }
+        if prev_nodes.len() != span.count as usize {
+            return None;
+        }
+        // Nested scopes inside this span keep working on the next build:
+        // remap their span records onto the copied nodes as we go.
+        let nested: Vec<(String, SpanRec)> = self
+            .prev_spans
+            .iter()
+            .filter(|(k, r)| *k != key && prev_nodes.contains(&r.root))
+            .map(|(k, r)| (k.clone(), *r))
+            .collect();
+        let mut root_map: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+        let (node, lnode) =
+            self.copy_node(span.root, parent, tree, layout, meta, built, &mut root_map);
+        self.scope_spans.insert(
+            key.to_string(),
+            SpanRec {
+                root: node,
+                count: span.count,
+                ctx_hash: hash,
+                impure: false,
+            },
+        );
+        for (k, r) in nested {
+            if let Some(new_root) = root_map.get(&r.root) {
+                self.scope_spans.insert(
+                    k,
+                    SpanRec {
+                        root: *new_root,
+                        ..r
+                    },
+                );
+            }
+        }
+        Some((node, lnode))
+    }
+
+    /// Recursive worker for [`copy_span`]: one previous-build node → one new
+    /// node, retained work moved across, children in order.
+    #[allow(clippy::too_many_arguments)]
+    fn copy_node(
+        &mut self,
+        prev: NodeIndex,
+        parent: Option<NodeIndex>,
+        tree: &mut Tree,
+        layout: &mut LayoutTree,
+        meta: &mut HashMap<NodeIndex, NodeMeta>,
+        built: &mut Vec<(NodeIndex, LayoutNode)>,
+        root_map: &mut HashMap<NodeIndex, NodeIndex>,
+    ) -> (NodeIndex, LayoutNode) {
+        let node = match parent {
+            None => tree.insert_root(),
+            Some(p) => tree.insert_child(p),
+        };
+        root_map.insert(prev, node);
+        let m = self
+            .prev_meta
+            .remove(&prev)
+            .expect("validated by copy_span");
+        // Interactive-state flags are host state, not retained work — refresh
+        // them against the *current* ids (the same rule build_node applies).
+        let mut flags = self.prev_tree.flags(prev);
+        flags.remove(NodeFlags::FOCUSED | NodeFlags::HOVERED | NodeFlags::PRESSED);
+        if m.id.is_some() && m.id == self.focused_id {
+            flags |= NodeFlags::FOCUSED;
+        }
+        if m.id.is_some() && m.id == self.hovered_id {
+            flags |= NodeFlags::HOVERED;
+        }
+        if m.id.is_some() && self.pressed.as_ref().is_some_and(|(_, id)| *id == m.id) {
+            flags |= NodeFlags::PRESSED;
+        }
+        tree.set_flags(node, flags);
+        tree.set_z(node, self.prev_tree.z(prev));
+        if let Some(st) = self.prev_node_style.remove(&prev) {
+            self.node_style.insert(node, st);
+        }
+        if let Some(cp) = self.prev_node_computed.remove(&prev) {
+            self.node_computed.insert(node, cp);
+        }
+        let lstyle = self
+            .prev_layout_style
+            .remove(&prev)
+            .expect("validated by copy_span");
+        meta.insert(node, m);
+        let mut child_lnodes = Vec::new();
+        let mut c = self.prev_tree.first_child(prev);
+        while c.is_some() {
+            let (_, l) = self.copy_node(c, Some(node), tree, layout, meta, built, root_map);
+            child_lnodes.push(l);
+            c = self.prev_tree.next_sibling(c);
+        }
+        self.node_layout_style.insert(node, lstyle.clone());
+        let lnode = if child_lnodes.is_empty() {
+            layout.leaf(lstyle)
+        } else {
+            layout.container(lstyle, &child_lnodes)
+        };
+        built.push((node, lnode));
+        self.nodes_copied += 1;
+        (node, lnode)
+    }
+
     /// The node span a [`BuildCx::scope`](crate::BuildCx::scope) produced this
     /// build: its subtree-root node and preorder node count (A.3.1). `key` is
     /// the full scope key (the `id` passed to `scope`, prefixed by enclosing
     /// scopes). Introspection for the retained-pipeline work and tests.
     pub fn scope_span(&self, key: &str) -> Option<(NodeIndex, u32)> {
-        self.scope_spans.get(key).copied()
+        self.scope_spans.get(key).map(|r| (r.root, r.count))
     }
 
     /// Set/replace the app stylesheet at runtime (tier-1 hot reload). A broken
@@ -1857,7 +2087,45 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // lowered — the anchor the retained-graph splice (A.3.3) replaces.
         // Taken before the children are consumed (partial-move below).
         let span_start = tree.len();
+        // A.3.2: a memo-hit stub — either copy the scope's span forward from
+        // the previous build (sound iff the recorded outside-context hash
+        // matches and the span had no per-node side work), or materialize an
+        // owned clone of the cached subtree and lower it normally.
+        if let Some(rc) = el.shared.take() {
+            let key = el.scope_key.clone().expect("shared stub carries its key");
+            let hash = self.span_ctx_hash(in_overlay);
+            if self.allow_copy_forward {
+                if let Some(span) = self.prev_spans.get(&key).copied() {
+                    if !span.impure && span.ctx_hash == hash {
+                        if let Some(res) =
+                            self.copy_span(&key, span, hash, tree, layout, meta, built, parent)
+                        {
+                            return res;
+                        }
+                    }
+                }
+            }
+            let mut owned = (*rc).clone();
+            owned.scope_key = Some(key);
+            el = owned;
+        }
         let span_key = el.scope_key.take();
+        let span_hash = span_key
+            .as_ref()
+            .map(|_| self.span_ctx_hash(in_overlay))
+            .unwrap_or(0);
+        let impure_at = self.impure_seen;
+        if el.dyn_text.is_some()
+            || el.dyn_bg.is_some()
+            || el.dyn_classes.is_some()
+            || matches!(
+                el.content,
+                NodeContent::Custom(..) | NodeContent::Canvas(..)
+            )
+        {
+            self.impure_seen += 1;
+        }
+        self.nodes_rebuilt += 1;
         let node = match parent {
             None => tree.insert_root(),
             Some(p) => tree.insert_child(p),
@@ -2176,6 +2444,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             self.hidden_count -= 1;
         }
         let child_lnodes: Vec<LayoutNode> = child_built.iter().map(|(_, l)| *l).collect();
+        // A.3.2: retain the final (post-css) layout style so a copied-forward
+        // span can rebuild its taffy nodes without re-deriving it.
+        self.node_layout_style.insert(node, style.clone());
         let lnode = if child_lnodes.is_empty() {
             layout.leaf(style)
         } else {
@@ -2220,8 +2491,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         );
         built.push((node, lnode));
         if let Some(key) = span_key {
-            self.scope_spans
-                .insert(key, (node, (tree.len() - span_start) as u32));
+            self.scope_spans.insert(
+                key,
+                SpanRec {
+                    root: node,
+                    count: (tree.len() - span_start) as u32,
+                    ctx_hash: span_hash,
+                    impure: self.impure_seen > impure_at,
+                },
+            );
         }
         (node, lnode)
     }

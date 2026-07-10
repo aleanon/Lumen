@@ -84,11 +84,22 @@ their subtrees, leaving untouched siblings' nodes, style resolutions,
 semantics, and dep entries intact.
 
 Steps (each oracle-gated, landable separately):
-1. **A.3.1** Scope boundaries become tree anchors: record node-range per
+1. **A.3.1 ✅** Scope boundaries become tree anchors: record node-range per
    scope during `build_node` (scope id → contiguous node span + parent).
-2. **A.3.2** Memo hits return `Rc<Element>`/`Cow` — stop the deep clone;
-   `build_node` learns to *skip* re-lowering an unchanged scope subtree
-   (reuse its retained nodes) instead of re-walking the cloned Element.
+2. **A.3.2 ✅ (2026-07-10, as copy-forward)** Memo hits hand `build_node` an
+   `Rc` stub (no deep clone; the cache stores `Rc<Element>`); when sound,
+   the scope's span is **copied forward** from the previous build — meta,
+   node/computed styles, and final layout styles *moved* across (zero
+   clones), flags refreshed against current focus/hover/pressed, taffy
+   nodes rebuilt from the retained layout styles, nested span records
+   remapped. Soundness gates: a per-span context hash (ancestor selector
+   chain + container size + overlay/hidden state) must match; spans with
+   per-node side work (dyn bindings, custom/canvas content) are `impure`
+   and always re-lower; visual-state rebuilds disable copy-forward
+   entirely (`:hovered` parts must re-resolve). Fallback is an owned clone
+   of the cached subtree lowered normally. Meters:
+   `FrameStats::{nodes_rebuilt, nodes_copied}`. Guarded by
+   tests/copy_forward.rs + the whole-suite coherence oracle.
 3. **A.3.3** Splice: a re-run scope lowers into fresh nodes that replace
    its span (generational NodeIndex reuse); parent links/z/document order
    fixed up; `meta`/semantics/dep-index updated for the span only.

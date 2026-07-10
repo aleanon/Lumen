@@ -197,6 +197,12 @@ pub struct Element {
     /// scope's node span — the anchor the retained-graph splice will replace.
     /// Set by `scope`; not authored.
     pub scope_key: Option<String>,
+    /// A memo-hit stub (A.3.2): the real subtree lives behind this `Rc` (the
+    /// scope cache's copy). `build_node` copies the scope's retained per-node
+    /// work forward when sound, else materializes an owned clone and lowers
+    /// it normally. Never authored; set by `BuildCx::scope` on a cache hit.
+    #[doc(hidden)]
+    pub shared: Option<std::rc::Rc<Element>>,
     /// A reactive binding for this node's text content (F3, option B). When set,
     /// the build evaluates it to produce the string; the `text!` macro emits it.
     pub dyn_text: Option<Dynamic<String>>,
@@ -244,6 +250,7 @@ impl Default for Element {
             shadow: None,
             scope_deps: None,
             scope_key: None,
+            shared: None,
             dyn_text: None,
             dyn_bg: None,
             dyn_classes: None,
@@ -480,7 +487,11 @@ pub enum TaskRequest {
 /// instead of re-running the scope closure.
 pub(crate) struct CachedScope {
     reads: lumen_core::state::ReadSet,
-    element: Element,
+    /// Shared, immutable cached subtree (A.3.2) — hits hand out a stub
+    /// holding this `Rc` instead of deep-cloning the tree; `build_node`
+    /// either copies the scope's retained per-node work forward or (fallback)
+    /// materializes an owned clone to lower normally.
+    element: std::rc::Rc<Element>,
 }
 
 /// Per-app store of memoized scope subtrees, keyed by scope identity path. Owned
@@ -581,7 +592,7 @@ impl<'a> BuildCx<'a> {
                 key,
                 CachedScope {
                     reads,
-                    element: element.clone(),
+                    element: std::rc::Rc::new(element.clone()),
                 },
             );
         } else {
@@ -599,7 +610,13 @@ impl<'a> BuildCx<'a> {
         let cached = cache.get(key)?;
         if cached.reads.is_current(self.rt) {
             self.rt.replay_reads(&cached.reads);
-            Some(cached.element.clone())
+            // A.3.2: hand out a lightweight stub — an `Rc` bump, not a deep
+            // clone. `build_node` resolves it (copy-forward or materialize).
+            Some(Element {
+                scope_key: Some(key.to_string()),
+                shared: Some(std::rc::Rc::clone(&cached.element)),
+                ..Element::default()
+            })
         } else {
             None
         }
