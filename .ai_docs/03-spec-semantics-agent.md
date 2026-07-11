@@ -136,12 +136,19 @@ selector resolves to exactly one *actionable* node (non-empty bounds, not
 explicit `ui.waitSettled` call (C.1b ✅), not part of per-action auto-wait. Results: `{ ok: true, node: "node-42" }` or a JSON-RPC
 error (`-32601` unknown method; `-32000` with `Timeout(…)` /
 `NotFound { nearest }` / `Ambiguous { candidates }`; structured error codes
-planned, C.4).
+planned, C.4). `events.subscribe` (push notifications) remains open —
+it needs a push-transport design over the request/response loop (C.7).
 
 | Method | Params | Notes |
 |---|---|---|
 | `ui.waitFor` | `{ selector, state?, text?, timeout_ms? }` | blocks until the node exists (and carries `state` / label-or-value equals `text`); the explicit wait primitive |
 | `ui.waitSettled` | `{ timeout_ms? }` | C.1b: advances the clock by wall time between 10 ms polls until no `animate()` (continuous) request and no future `wake_at` remain and the reactive graph is quiescent; returns `{ settled, waited_ms }`. A bare `now_ms()` read doesn't count (nothing scheduled to wait for); a forever-animation times out readably |
+| `input.drag` | `{ from, to, steps? }` | C.4b: node-to-node pointer drag — down at `from`'s center, interpolated moves (default 8), up at `to`'s center |
+| `input.gesture` | `{ selector, kind, dx?, dy?, scale? }` | C.4b: `tap\|double_tap\|long_press\|pan\|pinch` — injects the recognized `GestureEvent` the touch pipeline would produce |
+| `app.setValue` | `{ selector, value }` | C.4b: semantic text replacement (focus → select-all → commit); sliders/steppers: use `input.drag` |
+| `app.command` | `{ name }` | C.4b: invoke a `cx.register_command` handler by name — geometry-free; unknown names list what is registered |
+| `reload.apply` | `{ source }` | C.4b: tier-1 stylesheet hot reload over the wire — same atomic accept/reject as the file watcher; rejection returns the diagnostics |
+| `session.start` / `session.stop` | `{}` | C.4b: bracket recording for `session.exportTest` (recording is on by default; `start` clears prior steps) |
 
 | Method | Params | Notes |
 |---|---|---|

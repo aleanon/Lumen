@@ -482,6 +482,10 @@ pub struct FrameRequests {
     /// Background-work spawn requests this build emitted (the data layer). The
     /// runtime dispatches them after the build, on its executor (see `tasks`).
     pub tasks: Vec<TaskRequest>,
+    /// C.4b: named app commands registered this build
+    /// ([`BuildCx::register_command`]) — the `app.command` agent verb and
+    /// future command-palette UI invoke them by name.
+    pub commands: Vec<(String, Handler)>,
 }
 
 /// A request to run background work, recorded during build and dispatched by the
@@ -520,6 +524,8 @@ pub struct BuildCx<'a> {
     continuous: Cell<bool>,
     read_clock: Cell<bool>,
     pub(crate) tasks: RefCell<Vec<TaskRequest>>,
+    /// C.4b: named commands registered this build.
+    commands: RefCell<Vec<(String, Handler)>>,
     /// Memoized subtrees (F1), persisted on `Headless` across builds.
     scope_cache: &'a RefCell<ScopeCache>,
     /// Scope keys accessed this build (F5 GC): after the build, cached scopes +
@@ -551,6 +557,7 @@ impl<'a> BuildCx<'a> {
             continuous: Cell::new(false),
             read_clock: Cell::new(false),
             tasks: RefCell::new(Vec::new()),
+            commands: RefCell::new(Vec::new()),
             scope_cache,
             scope_live,
             prefix: RefCell::new(String::new()),
@@ -635,6 +642,16 @@ impl<'a> BuildCx<'a> {
         }
     }
 
+    /// Register a named app command (C.4b, 02 §4): a `Fn(&Runtime)` the
+    /// agent (`app.command {name}`) — and future command-palette UI — can
+    /// invoke without geometry. Re-registered per build like handlers;
+    /// last registration of a name wins.
+    pub fn register_command(&mut self, name: &str, f: impl Fn(&Runtime) + 'static) {
+        self.commands
+            .borrow_mut()
+            .push((name.to_string(), std::rc::Rc::new(f)));
+    }
+
     /// Derived value (02 §4, W.3): recomputed when its reads change,
     /// notifying subscribers only when the value actually changes
     /// (`PartialEq`). Keyed like a signal — the enclosing `cx.scope`
@@ -716,6 +733,7 @@ impl<'a> BuildCx<'a> {
             read_clock: self.read_clock.get(),
             wakes: self.requests.into_inner(),
             tasks: self.tasks.into_inner(),
+            commands: self.commands.into_inner(),
         }
     }
 }

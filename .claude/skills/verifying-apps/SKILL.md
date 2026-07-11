@@ -132,6 +132,12 @@ The ones you'll actually use:
 | `input.click/hover/type/key/scroll {selector,…}` | click takes `button`/`count` (double-click); type takes `clear: true` (full editors); scroll takes `dx`+`dy` (C.4a) |
 | `state.get {key?}` / `ui.getTree {selector}` / `ui.screenshot {max_width}` | store snapshot; subtree-only reply; downscaled frame for vision budgets (C.4a) |
 | `input.invokeAction {selector, action}` | geometry-free — use when overlap/transform makes clicks flaky |
+| `input.drag {from, to, steps?}` | node-to-node pointer drag (sliders, reorder, panes) (C.4b) |
+| `input.gesture {selector, kind, …}` | tap/double_tap/long_press/pan/pinch as recognized gestures (C.4b) |
+| `app.setValue {selector, value}` | semantic text replacement — text controls only; sliders via drag (C.4b) |
+| `app.command {name}` | invoke a `cx.register_command` handler, no geometry (C.4b) |
+| `reload.apply {source}` | live stylesheet swap, atomic accept/reject + diagnostics (C.4b) |
+| `session.start` / `session.stop` | bracket what `session.exportTest` emits (C.4b) |
 
 ### Live-window traps (each one has burned an agent)
 

@@ -202,6 +202,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             style_memo: HashMap::new(),
             style_memo_hits: 0,
             style_memo_misses: 0,
+            commands: HashMap::new(),
             desc_stack: Vec::new(),
             container_nodes: Vec::new(),
             container_prev: Vec::new(),
@@ -538,6 +539,9 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     style_memo: HashMap<u64, std::rc::Rc<StylePair>>,
     style_memo_hits: u64,
     style_memo_misses: u64,
+    /// C.4b: named app commands from the last build
+    /// (`cx.register_command`) — `run_command` invokes by name.
+    commands: HashMap<String, crate::element::Handler>,
     /// B.1: the ancestor descriptors of the element currently being lowered
     /// (root-first), fed to `resolve_with_ancestors` so descendant/`>`
     /// selectors match correctly. Maintained by `build_node`'s recursion.
@@ -773,6 +777,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             self.frames_rendered += 1;
         }
         stats
+    }
+
+    /// C.4b: invoke a named app command registered by the last build
+    /// (`cx.register_command`). Returns `false` (and the registered names)
+    /// via `Err` when unknown; runs + pumps on success.
+    pub fn run_command(&mut self, name: &str) -> Result<(), Vec<String>> {
+        let Some(h) = self.commands.get(name).cloned() else {
+            let mut names: Vec<String> = self.commands.keys().cloned().collect();
+            names.sort();
+            return Err(names);
+        };
+        h(&self.rt);
+        self.pump();
+        Ok(())
     }
 
     /// A.5b introspection: cumulative style-resolution memo `(hits, misses)`
@@ -1831,6 +1849,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         };
         // F5 GC: sweep cached scopes + scope-local signals absent this build.
         self.sweep_dead_scopes();
+        // C.4b: last registration of a command name wins; the map is
+        // rebuilt per build like handlers.
+        self.commands = requests.commands.iter().cloned().collect::<HashMap<_, _>>();
         self.requests = requests;
         self.structural_reads = root_reads;
         self.bg_bindings.clear();

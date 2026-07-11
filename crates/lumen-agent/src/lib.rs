@@ -77,12 +77,18 @@ enum Step {
 #[derive(Default)]
 pub struct Session {
     steps: Vec<Step>,
+    /// C.4b: `session.start`/`session.stop` gate recording (on by default,
+    /// preserving the always-record behavior `exportTest` shipped with).
+    recording: bool,
 }
 
 impl Session {
-    /// A new, empty session.
+    /// A new, empty session (recording).
     pub fn new() -> Session {
-        Session::default()
+        Session {
+            steps: Vec::new(),
+            recording: true,
+        }
     }
 
     /// Number of recorded steps.
@@ -117,7 +123,7 @@ impl Session {
         }
 
         let resp = dispatch(app, req);
-        if resp.get("result").is_some() {
+        if self.recording && resp.get("result").is_some() {
             self.record(method, &params);
         }
         resp
@@ -155,6 +161,16 @@ impl Session {
             "session.assertText" => Some(self.assert_text(app, params)),
             "session.assertState" => Some(self.assert_state(app, params)),
             "session.exportTest" => Some(self.export(params)),
+            // C.4b: bracket the steps that become the exported test.
+            "session.start" => {
+                self.steps.clear();
+                self.recording = true;
+                Some(Ok(json!({ "recording": true })))
+            }
+            "session.stop" => {
+                self.recording = false;
+                Some(Ok(json!({ "recording": false, "steps": self.steps.len() })))
+            }
             _ => None,
         }
     }
@@ -611,6 +627,135 @@ fn handle<R: Renderer, E: Spawner>(
             }));
             app.pump();
             Ok(json!({ "ok": true }))
+        }
+        "input.drag" => {
+            // C.4b: node-to-node pointer drag — down at `from`'s center,
+            // interpolated moves, up at `to`'s center (sliders, panes,
+            // drag-reorder lists all consume the same synthesis).
+            let from = params
+                .get("from")
+                .and_then(|v| v.as_str())
+                .ok_or((-32602, "missing `from`".to_string()))?;
+            let to = params
+                .get("to")
+                .and_then(|v| v.as_str())
+                .ok_or((-32602, "missing `to`".to_string()))?;
+            let a = resolve(app, from)?;
+            let b = resolve(app, to)?;
+            let steps = params
+                .get("steps")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(8)
+                .clamp(2, 64);
+            let (p0, p1) = (center(a.bounds), center(b.bounds));
+            app.inject(Event::PointerDown(PointerEvent::at(p0)));
+            for i in 1..=steps {
+                let t = i as f64 / steps as f64;
+                app.inject(Event::PointerMove(PointerEvent::at(Point::new(
+                    p0.x + (p1.x - p0.x) * t,
+                    p0.y + (p1.y - p0.y) * t,
+                ))));
+            }
+            app.inject(Event::PointerUp(PointerEvent::at(p1)));
+            app.pump();
+            Ok(json!({ "ok": true }))
+        }
+        "input.gesture" => {
+            // C.4b: touch-style gestures over the existing synthesis
+            // (lumen-core recognizes these same events from raw touches).
+            use lumen_core::events::{GestureEvent, GestureKind};
+            let node = resolve_action(app, params)?;
+            let pos = center(node.bounds);
+            let kind = params
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .ok_or((-32602, "missing `kind`".to_string()))?;
+            let dx = params.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let dy = params.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let (g, pointers) = match kind {
+                "tap" => (GestureKind::Tap, 1),
+                "double_tap" => (GestureKind::DoubleTap, 1),
+                "long_press" => (GestureKind::LongPress, 1),
+                "pan" => (
+                    GestureKind::Pan {
+                        delta: kurbo::Vec2::new(dx, dy),
+                        velocity: kurbo::Vec2::ZERO,
+                    },
+                    1,
+                ),
+                "pinch" => (
+                    GestureKind::Pinch {
+                        scale: params.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0),
+                        velocity: 0.0,
+                    },
+                    2,
+                ),
+                other => {
+                    return Err((
+                        -32602,
+                        format!(
+                            "unknown gesture `{other}`                              (tap|double_tap|long_press|pan|pinch)"
+                        ),
+                    ))
+                }
+            };
+            app.inject(Event::Gesture(GestureEvent {
+                kind: g,
+                pos,
+                pointers,
+            }));
+            app.pump();
+            Ok(json!({ "ok": true }))
+        }
+        "app.setValue" => {
+            // C.4b: set a text control's value semantically — focus, select
+            // all, commit the replacement. Sliders/steppers: use input.drag
+            // or invokeAction (their value isn't a text commit).
+            let node = resolve_action(app, params)?;
+            let value = params
+                .get("value")
+                .and_then(|v| v.as_str())
+                .ok_or((-32602, "missing `value`".to_string()))?;
+            let p = center(node.bounds);
+            app.inject(Event::PointerDown(PointerEvent::at(p)));
+            app.inject(Event::PointerUp(PointerEvent::at(p)));
+            app.inject(Event::KeyDown(KeyEvent {
+                key: Key::Character("a".into()),
+                modifiers: Modifiers::CTRL,
+                repeat: false,
+            }));
+            app.inject(Event::TextInput(TextInputEvent { text: value.into() }));
+            app.pump();
+            Ok(json!({ "ok": true }))
+        }
+        "app.command" => {
+            // C.4b: geometry-free command invocation (cx.register_command).
+            let name = params
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or((-32602, "missing `name`".to_string()))?;
+            match app.run_command(name) {
+                Ok(()) => Ok(json!({ "ok": true, "command": name })),
+                Err(available) => Err((
+                    -32000,
+                    format!("unknown command `{name}` (registered: {available:?})"),
+                )),
+            }
+        }
+        "reload.apply" => {
+            // C.4b: tier-1 hot reload over the wire — the same atomic
+            // accept/reject as the file watcher.
+            let source = params
+                .get("source")
+                .and_then(|v| v.as_str())
+                .ok_or((-32602, "missing `source`".to_string()))?;
+            match app.set_stylesheet(source) {
+                lumen_widgets::ReloadResult::Ok => Ok(json!({ "applied": true })),
+                lumen_widgets::ReloadResult::Failed(diags) => Ok(json!({
+                    "applied": false,
+                    "diagnostics": diags,
+                })),
+            }
         }
         // --- desktop system integration (T5.2) ------------------------------
         "input.drop" => {

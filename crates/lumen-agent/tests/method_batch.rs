@@ -101,3 +101,153 @@ fn type_clear_replaces_while_default_appends() {
     let v = call(&mut h, "ui.getTree", json!({ "selector": "#f" }));
     assert_eq!(v["result"]["root"]["value"], json!("xyz"), "{v}");
 }
+
+// --- C.4b -------------------------------------------------------------
+
+#[test]
+fn set_value_replaces_a_text_controls_content() {
+    let mut h = App::new(build).run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    let r = call(
+        &mut h,
+        "app.setValue",
+        json!({ "selector": "#f", "value": "replaced" }),
+    );
+    assert_eq!(r["result"]["ok"], true, "{r}");
+    let tree = call(&mut h, "ui.getTree", json!({ "selector": "#f" }));
+    assert!(
+        tree.to_string().contains("replaced") && !tree.to_string().contains("ab\""),
+        "{tree}"
+    );
+}
+
+#[test]
+fn drag_moves_a_slider() {
+    let mut h = App::new(|cx: &mut BuildCx| {
+        widgets::column(vec![
+            lumen_widgets::Slider::new(cx, "v", 0.0, 100.0)
+                .id("s")
+                .into(),
+            widgets::button("target", |_| {}).id("end"),
+        ])
+    })
+    .run_headless(Size::new(400.0, 200.0));
+    h.pump();
+    let before = call(&mut h, "ui.getTree", json!({ "selector": "#s" }));
+    let r = call(
+        &mut h,
+        "input.drag",
+        json!({ "from": "#s", "to": "#end", "steps": 6 }),
+    );
+    assert_eq!(r["result"]["ok"], true, "{r}");
+    let after = call(&mut h, "ui.getTree", json!({ "selector": "#s" }));
+    assert_ne!(
+        before["result"]["root"]["value"], after["result"]["root"]["value"],
+        "drag changed the slider value: {before} -> {after}"
+    );
+}
+
+#[test]
+fn gesture_contract_ok_and_unknown_kind() {
+    let mut h = App::new(build).run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    for kind in ["tap", "double_tap", "long_press", "pan", "pinch"] {
+        let r = call(
+            &mut h,
+            "input.gesture",
+            json!({ "selector": "#b", "kind": kind, "dx": 5.0, "scale": 1.5 }),
+        );
+        assert_eq!(r["result"]["ok"], true, "{kind}: {r}");
+    }
+    let bad = call(
+        &mut h,
+        "input.gesture",
+        json!({ "selector": "#b", "kind": "wiggle" }),
+    );
+    assert!(
+        bad["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("unknown gesture"),
+        "{bad}"
+    );
+}
+
+#[test]
+fn app_command_invokes_registered_commands() {
+    let mut h = App::new(|cx: &mut BuildCx| {
+        let n = cx.signal("count", || 0i64);
+        cx.register_command("increment", move |rt| n.update(rt, |v| *v += 1));
+        widgets::column(vec![widgets::text("app").id("t")])
+    })
+    .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    let r = call(&mut h, "app.command", json!({ "name": "increment" }));
+    assert_eq!(r["result"]["ok"], true, "{r}");
+    let v = call(&mut h, "state.get", json!({ "key": "count" }));
+    assert_eq!(v["result"]["value"], json!(1), "{v}");
+
+    let bad = call(&mut h, "app.command", json!({ "name": "nope" }));
+    assert!(
+        bad["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("increment"),
+        "unknown-command error lists what exists: {bad}"
+    );
+}
+
+#[test]
+fn reload_apply_swaps_the_sheet_atomically() {
+    let mut h = App::new(build)
+        .stylesheet("#b { background: #0000ffff; }")
+        .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    let r = call(
+        &mut h,
+        "reload.apply",
+        json!({ "source": "#b { background: #ff0000ff; }" }),
+    );
+    assert_eq!(r["result"]["applied"], true, "{r}");
+    let styles = call(&mut h, "ui.getStyles", json!({ "selector": "#b" }));
+    assert_eq!(
+        styles["result"]["background"]["value"], "#ff0000ff",
+        "{styles}"
+    );
+    let broken = call(&mut h, "reload.apply", json!({ "source": "#b { nope" }));
+    assert_eq!(broken["result"]["applied"], false, "{broken}");
+    let styles = call(&mut h, "ui.getStyles", json!({ "selector": "#b" }));
+    assert_eq!(
+        styles["result"]["background"]["value"], "#ff0000ff",
+        "previous sheet stays live: {styles}"
+    );
+}
+
+#[test]
+fn session_start_stop_bracket_the_recording() {
+    let mut h = App::new(build).run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    let mut s = lumen_agent::Session::new();
+    let mut call_s = |h: &mut lumen_widgets::Headless, m: &str, p: serde_json::Value| {
+        s.dispatch(
+            h,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": m, "params": p }),
+        )
+    };
+    // Recorded by default…
+    call_s(&mut h, "input.click", json!({ "selector": "#b" }));
+    // …restart discards it; only the bracketed step remains.
+    call_s(&mut h, "session.start", json!({}));
+    call_s(&mut h, "input.click", json!({ "selector": "#t" }));
+    let stop = call_s(&mut h, "session.stop", json!({}));
+    assert_eq!(stop["result"]["steps"], json!(1), "{stop}");
+    call_s(&mut h, "input.click", json!({ "selector": "#b" })); // not recorded
+    let export = call_s(
+        &mut h,
+        "session.exportTest",
+        json!({ "appExpr": "build()" }),
+    );
+    let code = export["result"]["source"].as_str().unwrap_or_default();
+    assert!(code.contains("#t"), "bracketed step exported: {code}");
+    assert!(!code.contains("\"#b\""), "outside steps dropped: {code}");
+}
