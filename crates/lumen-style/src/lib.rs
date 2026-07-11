@@ -24,7 +24,7 @@ pub use ast::{
 pub use parser::{has_errors, parse};
 pub use properties::KNOWN_PROPERTIES;
 pub use style::{
-    apply, resolve_token, Style, StyleBlend, StyleClip, StyleGradient, StyleShadow,
+    apply, resolve_token, AnimationSpec, Style, StyleBlend, StyleClip, StyleGradient, StyleShadow,
     StyleSideBorder, Tokens, Transition, APPLIED_PROPERTIES,
 };
 #[cfg(feature = "snapshot")]

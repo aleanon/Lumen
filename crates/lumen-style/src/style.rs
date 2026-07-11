@@ -74,6 +74,24 @@ pub struct Transition {
     pub delay_ms: f32,
 }
 
+/// One `animation:` declaration (B.5b, 04 §3): which `@keyframes` timeline
+/// plays, for how long, how often.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnimationSpec {
+    /// The `@keyframes` name.
+    pub name: String,
+    /// Duration of one iteration (ms).
+    pub duration_ms: f32,
+    /// Easing applied within each keyframe segment.
+    pub easing: crate::anim::Easing,
+    /// Start delay (ms).
+    pub delay_ms: f32,
+    /// Iteration count; `None` = infinite.
+    pub count: Option<f32>,
+    /// Reverse direction on every other iteration.
+    pub alternate: bool,
+}
+
 /// `clip:` values (B.3, 04 §3): whether/how a node clips its subtree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StyleClip {
@@ -149,6 +167,10 @@ pub struct Style {
     pub backdrop_specular: Option<f32>,
     /// `blend-mode` (B.3): composites the subtree onto the backdrop.
     pub blend_mode: Option<StyleBlend>,
+    /// `animation:` (B.5b) — a `@keyframes` timeline to play on this node.
+    pub animation: Option<AnimationSpec>,
+    /// `animation-force: true` (B.5b): keep playing under reduced motion.
+    pub animation_force: bool,
     /// `transition:` declarations (B.5) — the runtime animates the paint
     /// tier of these (background/color/opacity/border-radius v1) between
     /// computed values on nodes with stable ids.
@@ -297,6 +319,16 @@ impl Style {
         self.border_sides[side] = Some(StyleSideBorder { width, color });
         self
     }
+    /// Set the `animation:` timeline (B.5b).
+    pub fn animation(mut self, a: AnimationSpec) -> Self {
+        self.animation = Some(a);
+        self
+    }
+    /// Set `animation-force`.
+    pub fn animation_force(mut self, on: bool) -> Self {
+        self.animation_force = on;
+        self
+    }
     /// Add a `transition:` declaration (B.5).
     pub fn transition(mut self, t: Transition) -> Self {
         self.transitions.push(t);
@@ -363,6 +395,8 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "shadow",
     "blend-mode",
     "transition",
+    "animation",
+    "animation-force",
     "clip",
     "visibility",
     "border",
@@ -427,6 +461,8 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "backdrop-filter" => apply_backdrop(style, &v),
         "shadow" => style.shadow = as_shadow(&v),
         "transition" => style.transitions = parse_transitions(&v),
+        "animation" => style.animation = parse_animation(&v),
+        "animation-force" => style.animation_force = matches!(&v, Value::Keyword(k) if k == "true"),
         "blend-mode" => {
             style.blend_mode = match &v {
                 Value::Keyword(k) => match k.as_str() {
@@ -683,6 +719,68 @@ fn as_color(v: &Value) -> Option<Color> {
         }
         _ => None,
     }
+}
+
+/// Parse `animation: <name> <dur> [easing] [delay] [count|infinite]
+/// [alternate]` (B.5b). The first keyword is the `@keyframes` name; a bare
+/// unitless number is the iteration count.
+fn parse_animation(v: &Value) -> Option<AnimationSpec> {
+    let items: Vec<&Value> = match v {
+        Value::List(items) => items.iter().collect(),
+        other => vec![other],
+    };
+    let mut spec: Option<AnimationSpec> = None;
+    let mut durations_seen = 0u8;
+    for it in items {
+        match it {
+            Value::Keyword(k) if spec.is_none() => {
+                spec = Some(AnimationSpec {
+                    name: k.clone(),
+                    duration_ms: 0.0,
+                    easing: crate::anim::Easing::Ease,
+                    delay_ms: 0.0,
+                    count: Some(1.0),
+                    alternate: false,
+                });
+            }
+            Value::Number(n, Unit::Ms) | Value::Number(n, Unit::S) => {
+                let ms = if matches!(it, Value::Number(_, Unit::S)) {
+                    *n * 1000.0
+                } else {
+                    *n
+                };
+                if let Some(sp) = &mut spec {
+                    if durations_seen == 0 {
+                        sp.duration_ms = ms as f32;
+                    } else {
+                        sp.delay_ms = ms as f32;
+                    }
+                    durations_seen += 1;
+                }
+            }
+            Value::Number(n, Unit::None) => {
+                if let Some(sp) = &mut spec {
+                    sp.count = Some(*n as f32);
+                }
+            }
+            Value::Keyword(k) => {
+                if let Some(sp) = &mut spec {
+                    match k.as_str() {
+                        "infinite" => sp.count = None,
+                        "alternate" => sp.alternate = true,
+                        "linear" => sp.easing = crate::anim::Easing::Linear,
+                        "ease" => sp.easing = crate::anim::Easing::Ease,
+                        "ease-in" => sp.easing = crate::anim::Easing::EaseIn,
+                        "ease-out" => sp.easing = crate::anim::Easing::EaseOut,
+                        "ease-in-out" => sp.easing = crate::anim::Easing::EaseInOut,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    spec.filter(|sp| sp.duration_ms > 0.0)
 }
 
 /// Parse `transition: <prop|all> <dur> [<easing>] [<delay>][, …]` (B.5).

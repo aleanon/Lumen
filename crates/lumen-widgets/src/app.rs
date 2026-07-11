@@ -205,6 +205,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             commands: HashMap::new(),
             prop_anims: HashMap::new(),
             reduced_motion: false,
+            key_anims: HashMap::new(),
+            theme_anim_until: 0.0,
             desc_stack: Vec::new(),
             container_nodes: Vec::new(),
             container_prev: Vec::new(),
@@ -382,6 +384,18 @@ struct StyleEnv {
     sources: [lumen_style::StyleSource; 1],
     tokens: lumen_style::Tokens,
     media: lumen_style::MediaContext,
+    /// B.5b: `@keyframes` timelines, each stop pre-applied into the paint
+    /// tier once per rebuild (name → sorted `(pct, values)` stops).
+    keyframes: HashMap<String, Vec<(f32, KeyStop)>>,
+}
+
+/// One evaluated `@keyframes` stop's paint-tier values (B.5b).
+#[derive(Clone, Copy, Default)]
+struct KeyStop {
+    background: Option<Color>,
+    color: Option<Color>,
+    opacity: Option<f32>,
+    border_radius: Option<f32>,
 }
 
 /// A `cx.scope`'s recorded node span (A.3.1) plus the soundness context for
@@ -547,6 +561,11 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     prop_anims: HashMap<(StableId, &'static str), PropAnim>,
     /// B.5: OS reduced-motion (04 §3) — durations clamp to 0.
     reduced_motion: bool,
+    /// B.5b: running `animation:` timelines — id → (start_ms, finished).
+    key_anims: HashMap<StableId, (f64, bool)>,
+    /// B.5b: theme-switch animation window — until this clock time, color
+    /// properties get an implicit 150 ms transition (04 §4).
+    theme_anim_until: f64,
     /// C.4b: named app commands from the last build
     /// (`cx.register_command`) — `run_command` invokes by name.
     commands: HashMap<String, crate::element::Handler>,
@@ -644,6 +663,39 @@ impl AnimVal {
             (_, b) => b,
         }
     }
+}
+
+/// Sample a keyframe timeline at `phase` for one property (B.5b): find the
+/// bracketing stops that define it and blend with the segment-local eased t.
+fn sample_stops(
+    stops: &[(f32, KeyStop)],
+    phase: f32,
+    easing: lumen_style::Easing,
+    get: impl Fn(&KeyStop) -> Option<AnimVal>,
+) -> Option<AnimVal> {
+    let defined: Vec<(f32, AnimVal)> = stops
+        .iter()
+        .filter_map(|(p, st)| get(st).map(|v| (*p, v)))
+        .collect();
+    if defined.is_empty() {
+        return None;
+    }
+    if phase <= defined[0].0 {
+        return Some(defined[0].1);
+    }
+    for w in defined.windows(2) {
+        let (p0, v0) = w[0];
+        let (p1, v1) = w[1];
+        if phase <= p1 {
+            let t = if p1 > p0 {
+                (phase - p0) / (p1 - p0)
+            } else {
+                1.0
+            };
+            return Some(AnimVal::blend(v0, v1, easing.apply(t)));
+        }
+    }
+    Some(defined.last().unwrap().1)
 }
 
 /// A running `transition:` for one (node id, property) pair (B.5).
@@ -865,12 +917,32 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// see the animated frame. First sighting of a node adopts the target
     /// without animating (no mount flash).
     fn apply_transitions(&mut self, id: &Option<StableId>, css: &mut lumen_style::Style) {
-        if css.transitions.is_empty() {
+        // B.5b: during a theme switch, color properties get an implicit
+        // 150 ms transition (04 §4) unless the node declares its own.
+        let theme_window = self.clock_ms < self.theme_anim_until;
+        if css.transitions.is_empty() && !theme_window {
             return;
         }
         let Some(id) = id.clone() else { return };
         let now = self.clock_ms;
-        let specs = css.transitions.clone();
+        let specs = if css.transitions.is_empty() {
+            vec![
+                lumen_style::Transition {
+                    property: "background".into(),
+                    duration_ms: 150.0,
+                    easing: lumen_style::Easing::Ease,
+                    delay_ms: 0.0,
+                },
+                lumen_style::Transition {
+                    property: "color".into(),
+                    duration_ms: 150.0,
+                    easing: lumen_style::Easing::Ease,
+                    delay_ms: 0.0,
+                },
+            ]
+        } else {
+            css.transitions.clone()
+        };
         for tr in &specs {
             const PAINT_PROPS: [&str; 4] = ["background", "color", "opacity", "border-radius"];
             let props: Vec<&'static str> = if tr.property == "all" {
@@ -931,9 +1003,84 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
     }
 
-    /// B.5: whether any transition is still mid-flight at the current clock.
+    /// B.5b: play the node's `animation:` timeline — sample the evaluated
+    /// `@keyframes` stops at the current phase (iteration count, alternate,
+    /// per-segment easing) and override the paint-tier css values. Fills
+    /// forwards on completion (friendlier than CSS's default snap-back, and
+    /// avoids an end flash; documented in 04).
+    fn apply_keyframes(&mut self, id: &Option<StableId>, css: &mut lumen_style::Style) {
+        let Some(spec) = css.animation.clone() else {
+            return;
+        };
+        let Some(id) = id.clone() else { return };
+        if self.reduced_motion && !css.animation_force {
+            return;
+        }
+        let Some(stops) = self
+            .style_env
+            .as_ref()
+            .and_then(|e| e.keyframes.get(&spec.name))
+            .cloned()
+        else {
+            return;
+        };
+        if stops.is_empty() {
+            return;
+        }
+        let now = self.clock_ms;
+        let entry = self.key_anims.entry(id).or_insert((now, false));
+        let e = now - entry.0 - spec.delay_ms as f64;
+        if e < 0.0 {
+            return;
+        }
+        let iter = e / spec.duration_ms.max(1.0) as f64;
+        let mut phase = iter.fract() as f32;
+        let mut finished = false;
+        if let Some(count) = spec.count {
+            if iter >= count as f64 {
+                finished = true;
+                phase = 1.0;
+            }
+        }
+        if spec.alternate && (iter as u64) % 2 == 1 && !finished {
+            phase = 1.0 - phase;
+        }
+        entry.1 = finished;
+
+        let sample_color = |get: fn(&KeyStop) -> Option<Color>| -> Option<Color> {
+            sample_stops(&stops, phase, spec.easing, |st| get(st).map(AnimVal::Color)).map(|v| {
+                match v {
+                    AnimVal::Color(c) => c,
+                    AnimVal::Num(_) => unreachable!(),
+                }
+            })
+        };
+        let sample_num = |get: fn(&KeyStop) -> Option<f32>| -> Option<f32> {
+            sample_stops(&stops, phase, spec.easing, |st| get(st).map(AnimVal::Num)).map(
+                |v| match v {
+                    AnimVal::Num(n) => n,
+                    AnimVal::Color(_) => unreachable!(),
+                },
+            )
+        };
+        if let Some(c) = sample_color(|st| st.background) {
+            css.background = Some(c);
+        }
+        if let Some(c) = sample_color(|st| st.color) {
+            css.color = Some(c);
+        }
+        if let Some(v) = sample_num(|st| st.opacity) {
+            css.opacity = Some(v);
+        }
+        if let Some(v) = sample_num(|st| st.border_radius) {
+            css.border_radius = Some(v);
+        }
+    }
+
+    /// B.5: whether any transition or keyframe timeline is still running.
     fn anims_active(&self) -> bool {
         self.prop_anims.values().any(|a| !a.committed)
+            || self.key_anims.values().any(|(_, done)| !done)
     }
 
     /// B.5: clamp all transition durations to zero (the OS reduced-motion
@@ -941,6 +1088,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// and apps can set it directly.
     pub fn set_reduced_motion(&mut self, on: bool) {
         self.reduced_motion = on;
+        if on {
+            // Stop anything mid-flight and re-resolve to base values —
+            // toggling the OS setting takes effect immediately.
+            self.prop_anims.clear();
+            self.key_anims.clear();
+            self.theme_anim_until = 0.0;
+            self.force_rebuild = true;
+            self.pump();
+        }
     }
 
     /// A.5b introspection: cumulative style-resolution memo `(hits, misses)`
@@ -1822,6 +1978,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // animate — run the same retarget/blend on the restyle path.
                 let id = self.meta.get(&node).and_then(|m| m.id.clone());
                 self.apply_transitions(&id, &mut css);
+                self.apply_keyframes(&id, &mut css);
                 self.node_style.insert(node, css);
                 self.node_computed.insert(node, resolved);
             }
@@ -2110,6 +2267,41 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // B.2b: per-node — set from `container_stack` at resolve time.
                 container: None,
             },
+            keyframes: {
+                let tokens = lumen_style::tokens_for(sheet, self.theme);
+                let mut map = HashMap::new();
+                for item in &sheet.items {
+                    if let lumen_style::Item::Keyframes(kf) = item {
+                        let mut stops: Vec<(f32, KeyStop)> = kf
+                            .stops
+                            .iter()
+                            .map(|(pct, decls)| {
+                                let mut scratch = lumen_style::Style::new();
+                                for d in decls {
+                                    lumen_style::apply(
+                                        &mut scratch,
+                                        &d.property,
+                                        &d.value,
+                                        &tokens,
+                                    );
+                                }
+                                (
+                                    *pct / 100.0,
+                                    KeyStop {
+                                        background: scratch.background,
+                                        color: scratch.color,
+                                        opacity: scratch.opacity,
+                                        border_radius: scratch.border_radius,
+                                    },
+                                )
+                            })
+                            .collect();
+                        stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+                        map.insert(kf.name.clone(), stops);
+                    }
+                }
+                map
+            },
         });
 
         let mut tree = Tree::new();
@@ -2164,6 +2356,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             let live: std::collections::HashSet<StableId> =
                 self.meta.values().filter_map(|m| m.id.clone()).collect();
             self.prop_anims.retain(|(id, _), _| live.contains(id));
+        }
+        if !self.key_anims.is_empty() {
+            let live: std::collections::HashSet<StableId> =
+                self.meta.values().filter_map(|m| m.id.clone()).collect();
+            self.key_anims.retain(|id, _| live.contains(id));
         }
         self.last_damage = self.paint();
         self.sem_root = Some(self.build_semantics(self.tree.root()));
@@ -2387,6 +2584,39 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
     /// Switch the active theme and re-resolve styles.
     pub fn set_theme(&mut self, theme: lumen_style::ThemeKind) {
+        // B.5b: seed the animation engine with every id-bearing node's
+        // current colors so the 150 ms theme animation blends from the old
+        // theme instead of snapping (nodes without css colors snap).
+        if !self.reduced_motion {
+            let seeds: Vec<(StableId, &'static str, AnimVal)> = self
+                .meta
+                .iter()
+                .filter_map(|(node, m)| m.id.clone().map(|id| (node, id)))
+                .flat_map(|(node, id)| {
+                    let st = self.node_style.get(node);
+                    let mut v = Vec::new();
+                    if let Some(c) = st.and_then(|s| s.background) {
+                        v.push((id.clone(), "background", AnimVal::Color(c)));
+                    }
+                    if let Some(c) = st.and_then(|s| s.color) {
+                        v.push((id.clone(), "color", AnimVal::Color(c)));
+                    }
+                    v
+                })
+                .collect();
+            for (id, prop, val) in seeds {
+                self.prop_anims.entry((id, prop)).or_insert(PropAnim {
+                    from: val,
+                    to: val,
+                    start_ms: self.clock_ms,
+                    duration_ms: 0.0,
+                    delay_ms: 0.0,
+                    easing: lumen_style::Easing::Ease,
+                    committed: true,
+                });
+            }
+            self.theme_anim_until = self.clock_ms + 150.0;
+        }
         self.theme = theme;
         // A.5b: token tables are theme-scoped — resolution memo out.
         self.style_memo.clear();
@@ -2778,8 +3008,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 merge_inline_style(&mut css, &mut resolved, inline);
             }
             // B.5: substitute mid-flight transition blends (and start/retarget
-            // segments) before anything consumes the style.
+            // segments) before anything consumes the style; then play any
+            // `animation:` timeline on top.
             self.apply_transitions(&el.id, &mut css);
+            self.apply_keyframes(&el.id, &mut css);
             apply_css_to_element(&mut el, &css);
             // B.3 visibility: a hidden node (or one inside a hidden
             // subtree) keeps its layout space but leaves hit-testing (flags)

@@ -70,8 +70,11 @@ numeric only.
   `letter-spacing`, `text-align/overflow/wrap/decoration`,
   `selection-color` (B.4). Use Rust `TextStyle`/`Label` setters instead
   (`font-size`/`font-weight`/`line-height` work — see the works table).
-- `animation:` / `@keyframes` — parsed, never played (B.5b). Rust motion
-  (`motion::spring` + `cx.animate()`) covers keyframe-ish needs.
+- `animation: <name> <dur> [easing] [delay] [count|infinite] [alternate]`
+  **plays** `@keyframes` timelines (B.5b) — paint tier only
+  (background/color/opacity/border-radius), needs a stable id, fills
+  forwards on completion. `animation-force: true` overrides reduced
+  motion. Theme switches auto-animate colors over 150 ms.
 - `transition:` **plays** (B.5a): `transition: background 120ms ease[, …]`
   on a node **with a stable id** animates background/color/opacity/
   border-radius between computed values (class flips, `:hovered`, theme

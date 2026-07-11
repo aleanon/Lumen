@@ -90,6 +90,18 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         .clip(lumen_style::StyleClip::Rounded));
     style_parity!(covered, "blend-mode", "multiply", |s: Style| s
         .blend_mode(lumen_style::StyleBlend::Multiply));
+    style_parity!(covered, "animation", "fadein 100ms linear", |s: Style| {
+        s.animation(lumen_style::AnimationSpec {
+            name: "fadein".into(),
+            duration_ms: 100.0,
+            easing: lumen_style::Easing::Linear,
+            delay_ms: 0.0,
+            count: Some(1.0),
+            alternate: false,
+        })
+    });
+    style_parity!(covered, "animation-force", "true", |s: Style| s
+        .animation_force(true));
     style_parity!(
         covered,
         "transition",
@@ -150,6 +162,8 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "clip" => "rounded",
         "blend-mode" => "multiply",
         "transition" => "background 120ms linear",
+        "animation" => "fadein 100ms linear",
+        "animation-force" => "true",
         "border" | "border-top" | "border-right" | "border-bottom" | "border-left" => {
             "2px #ff0000ff"
         }

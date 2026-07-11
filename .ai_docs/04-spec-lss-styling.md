@@ -18,8 +18,8 @@
 > since B.6a**: interaction states with CSS-familiar aliases
 > (`:hovered`/`:hover`, `:focused`/`:focus`, `:pressed`/`:active`) plus
 > every semantic widget state (`:checked`, `:disabled`, `:expanded`, …).
-> Still true: `animation:`/`@keyframes` are **unwired** (parse-only —
-> see the B.5 amendment in the plan; `transition:` **plays since B.5a**). See §10 for the per-property table. Authoring guidance lives in the
+> Motion is **wired** (B.5): `transition:` plays since B.5a and
+> `animation:`/`@keyframes` play since B.5b (paint tier; see §10). See §10 for the per-property table. Authoring guidance lives in the
 > `styling-lss` skill.
 
 ## 1. Grammar (EBNF)
@@ -128,7 +128,7 @@ Plan tasks: layout → A.2, visual/typography → B.3/B.4, motion → B.5.
 |---|---|
 | **rendered** | `background` (solid color, `linear-gradient(<angle>deg, stops…)` — CSS angles, optional `%` positions, Oklab interpolation — and `radial-gradient(stops…)` centered/farthest-corner; conic still unexposed), `border` (shorthand width+color), `border-radius` (1–4 values, CSS expansion `[tl tr br bl]` — the shadow sprite uses the uniform top-left fallback), `shadow` (B.3 — single outer shadow `<dx> <dy> [blur] [spread] <color>`; `inset`/comma lists still unsupported and an `inset` keyword disables the declaration), `visibility` (B.3 — `hidden` removes the subtree from paint, hit-testing, and semantics while keeping its layout space), `clip` (B.3 — `none|bounds|rounded`, overriding the element clip flag; `bounds` squares the corners), `blend-mode` (B.3 — `normal|multiply|screen|overlay|darken|lighten`, subtree compositing layer shared with `opacity`), per-side `border-(top|right|bottom|left)` (B.3 — `<w> <color>` strips on top of the fill; border-radius ignored for per-side strokes), `backdrop-filter` (blur/saturate + beyond-spec `refraction`/`specular`), `color` (text); **layout (A.2, 2026-07-09):** `display`, `flex-direction`, `width`, `height`, `gap` (both axes), `padding`/`margin` (whole-side + per-side longhands `padding-top` … `margin-left`, component-wise override) — note text-bearing nodes still derive `height` from their glyphs (the text-height rule), and state-part layout rules (`:hovered { width: … }`) relayout via the normal rebuild path |
 | **applied, no effect** | *(empty since B.4a)* — `font-size`, `font-weight` (synthesized bold on the single face), and `line-height` reach the text stack (measure **and** paint); `opacity` renders since B.3a (subtree compositing layer) |
-| **parse-only** | remaining layout (`flex-wrap/grow/shrink/basis`, `justify-*`, `align-*`, `row/column-gap`, `grid-*` (track lists unparsed), `min/max-*`, `aspect-ratio`, `position`, `inset`, `overflow`, ), `filter`, `transform(-origin)`, `z-index`, `cursor`, `font-family/style/features/variation`, `line-height`, `letter-spacing`, `text-align/overflow/wrap/decoration`, `selection-color`, `animation`, `animation-force` |
+| **parse-only** | remaining layout (`flex-wrap/grow/shrink/basis`, `justify-*`, `align-*`, `row/column-gap`, `grid-*` (track lists unparsed), `min/max-*`, `aspect-ratio`, `position`, `inset`, `overflow`, ), `filter`, `transform(-origin)`, `z-index`, `cursor`, `font-family/style/features/variation`, `line-height`, `letter-spacing`, `text-align/overflow/wrap/decoration`, `selection-color` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 + `!important` **work**; nested `&` rules **applied** (B.1 ✅ — flattened at
@@ -147,8 +147,14 @@ border-radius interpolate between computed values on nodes with stable
 ids, id-keyed so identity survives rebuilds; smooth retarget on
 interruption; `delay` honored; reduced motion (`set_reduced_motion`)
 snaps; layout-property transitions are documented no-ops; both the
-rebuild and the A.5 hover-restyle paths animate); `@keyframes` playback +
-the automatic 150 ms theme-switch animation remain **open** (B.5b); widget
+rebuild and the A.5 hover-restyle paths animate); `@keyframes`/`animation:` **play**
+(B.5b ✅ — paint tier sampled per phase with per-segment easing; iteration
+count/`infinite`/`alternate`/delay honored; **fills forwards** on
+completion — a deliberate deviation from CSS's default snap-back;
+`animation-force: true` keeps playing under reduced motion); theme
+switching **animates colors over 150 ms** (B.5b ✅ — implicit
+background/color transition seeded from the old theme's computed values on
+id-bearing css-styled nodes; suppressed by reduced motion); widget
 parts **work** (B.7 ✅ — `slider .track`/`.thumb`, `progress .fill`;
 `Element::part` for custom widgets); cascade origins: **inline works** (B.6b ✅ — `.css(Style)`, see §8);
 `Origin::Default` (framework sheet) still unreachable; `style_parity!` asserts **set

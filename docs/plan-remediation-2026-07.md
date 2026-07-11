@@ -184,8 +184,10 @@ re-approved via R0 diff; `scope_memo_one_of_many` improves again.
   via an id-keyed PropAnim engine in the runtime (not the Scheduler):
   paint-tier props, smooth retargeting, delay, reduced-motion snap, wired
   through both rebuild and the A.5 restyle path. Identity is StableId — the
-  A.3.3 dependency dissolved. B.5b (keyframes evaluator, `animation:`,
-  automatic theme-switch 150 ms, `animation-force`) remains open.)*
+  A.3.3 dependency dissolved. B.5b shipped same-day: keyframes evaluator
+  (`animation:` with count/infinite/alternate/delay, per-segment easing,
+  fill-forwards), automatic 150 ms theme-switch color animation seeded
+  from old computed values, `animation-force`. B.5 complete.)*
   Motion wiring: `transition:` → Scheduler; keyframe evaluator
   (`@keyframes` playback); theme-switch 150 ms color animation; OS
   reduced-motion → `Scheduler.reduced_motion`; `animation-force`. [D#14,17]

@@ -109,3 +109,73 @@ fn hover_transition_animates_through_the_restyle_path() {
     assert!(end[0] > 200, "hover target reached: {end:?}");
     h.assert_view_coherent();
 }
+
+#[test]
+fn keyframes_animation_plays_and_fills_forward() {
+    let sheet = "@keyframes fadein { 0% { opacity: 0.0; } 100% { opacity: 1.0; } } \
+                 #b { background: #0000ffff; animation: fadein 100ms linear; }";
+    let mut h = App::new(|_cx| col![box_el(false)])
+        .stylesheet(sheet)
+        .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    assert!(h.is_time_driven(), "animation running");
+
+    h.advance_clock(50.0);
+    h.pump();
+    let mid = probe(&mut h);
+    // Half-opacity blue over white: blue channel stays high, red/green rise.
+    assert!(
+        mid[0] > 60 && mid[0] < 220,
+        "mid-fade composites with the backdrop: {mid:?}"
+    );
+
+    h.advance_clock(60.0);
+    h.pump();
+    let end = probe(&mut h);
+    assert!(
+        end[2] > 200 && end[0] < 60,
+        "fill-forwards at full opacity: {end:?}"
+    );
+    assert!(!h.is_time_driven(), "finished animation settles");
+    h.assert_view_coherent();
+}
+
+#[test]
+fn theme_switch_animates_colors_over_150ms() {
+    let sheet = "@theme light { bg: #0000ff; } @theme dark { bg: #ff0000; } \
+                 #b { background: $bg; }";
+    let mut h = App::new(|_cx| col![box_el(false)])
+        .stylesheet(sheet)
+        .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    let p0 = probe(&mut h);
+    assert!(p0[2] > 200, "light theme blue: {p0:?}");
+
+    h.set_theme(lumen_style::ThemeKind::Dark);
+    h.advance_clock(75.0);
+    h.pump();
+    let mid = probe(&mut h);
+    assert!(
+        mid[0] > 40 && mid[0] < 235 && mid[2] > 20,
+        "mid theme blend: {mid:?}"
+    );
+    h.advance_clock(100.0);
+    h.pump();
+    let end = probe(&mut h);
+    assert!(end[0] > 200 && end[2] < 60, "dark theme red: {end:?}");
+    h.assert_view_coherent();
+}
+
+#[test]
+fn reduced_motion_skips_keyframes_unless_forced() {
+    let sheet = "@keyframes fadein { 0% { opacity: 0.0; } 100% { opacity: 1.0; } } \
+                 #b { background: #0000ffff; animation: fadein 100ms linear; }";
+    let mut h = App::new(|_cx| col![box_el(false)])
+        .stylesheet(sheet)
+        .run_headless(Size::new(300.0, 200.0));
+    h.set_reduced_motion(true);
+    h.pump();
+    assert!(!h.is_time_driven(), "reduced motion: no animation");
+    let p = probe(&mut h);
+    assert!(p[2] > 200 && p[0] < 60, "base style, fully opaque: {p:?}");
+}
