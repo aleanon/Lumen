@@ -14,9 +14,12 @@ publish = false
 # AppSnapshot restore, `semantics_json`, `get_styles`, and the `design` import.
 # Forwards to lumen-core / lumen-style; a lean GPU app builds with
 # `--no-default-features --features wgpu` and drops `serde_json` app-wide.
-default = ["wgpu", "snapshot"]
+# `pan-unicode` (default-on): the full 15 MB embedded face (CJK/RTL/Indic);
+# lean builds embed the ~350 KB Latin+symbols subset (T.4).
+default = ["wgpu", "snapshot", "pan-unicode"]
 wgpu = ["lumen-render/wgpu"]
 snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot"]
+pan-unicode = ["lumen-text/pan-unicode"]
 
 [dependencies]
 lumen-core = { workspace = true }

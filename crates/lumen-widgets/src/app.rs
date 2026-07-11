@@ -1089,8 +1089,36 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// interactive) over the current tree — see [`audit::lint`](crate::audit::lint).
     /// Unlike goldens, catches first-time layout/render defects; usable in tests
     /// and via the agent (`ui.lint`).
-    pub fn lint(&self) -> Vec<lumen_core::Diagnostic> {
-        crate::audit::lint(&self.semantics_doc().root)
+    pub fn lint(&mut self) -> Vec<lumen_core::Diagnostic> {
+        let mut out = crate::audit::lint(&self.semantics_doc().root);
+        // T.4 tofu: any text node whose shaped block contains `.notdef`
+        // glyphs (chars no registered face covers). Shaping hits the cache,
+        // so this is a cheap walk on an already-rendered tree.
+        let texts: Vec<(String, lumen_text::TextStyle, Option<f32>)> = self
+            .meta
+            .values()
+            .filter_map(|m| match &m.content {
+                NodeContent::Text(t, ts) if !t.is_empty() => {
+                    Some((t.clone(), ts.clone(), m.wrap_width))
+                }
+                _ => None,
+            })
+            .collect();
+        for (t, ts, wrap) in texts {
+            let missing = self
+                .text
+                .layout(&t, ts, &[], wrap, lumen_text::TextAlign::Start)
+                .missing_glyphs();
+            if missing > 0 {
+                out.push(lumen_core::Diagnostic::new(
+                    lumen_core::diagnostics::codes::W0402,
+                    format!(
+                        "tofu: {missing} glyph(s) in {t:?} not covered by any                          registered font — register a wider face                          (`App::font(bytes)`) or enable `pan-unicode`"
+                    ),
+                ));
+            }
+        }
+        out
     }
 
     // --- desktop system integration (T5.2) ---------------------------------

@@ -18,6 +18,15 @@ serde = { workspace = true }
 parley = { workspace = true }
 swash = { workspace = true }
 
+[features]
+# T.4: the default embedded face is the full pan-Unicode Go Noto Kurrent
+# (~15 MB — CJK/RTL/Indic goldens and the i18n examples rely on it). The
+# lean build (--no-default-features, the shipped profile) embeds the
+# ~350 KB Latin+symbols subset instead; register a full face at runtime
+# with `App::font(bytes)` when a lean app needs wider coverage.
+default = ["pan-unicode"]
+pan-unicode = []
+
 [dev-dependencies]
 # Editor serde round-trip test (matches the Signal<T> JSON storage format).
 serde_json = { workspace = true }

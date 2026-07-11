@@ -130,6 +130,10 @@ pub mod codes {
     pub const W0301: &str = "W0301";
     /// Missing translation for a message key in the active locale (T5.3).
     pub const W0401: &str = "W0401";
+    /// Tofu: a shaped text block contains `.notdef` glyphs — characters no
+    /// registered font covers (T.4; the lean Latin-subset build surfaces
+    /// uncovered scripts here instead of silently drawing boxes).
+    pub const W0402: &str = "W0402";
     /// A build/layout/paint panic was contained; the previous frame was kept
     /// and the app stayed alive (T7.3 error boundary, top level).
     pub const E0701: &str = "E0701";

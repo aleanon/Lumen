@@ -6,7 +6,7 @@ use kurbo::Size;
 
 #[test]
 fn gallery_is_lint_clean() {
-    let h = widget_gallery::main_app().run_headless(Size::new(620.0, 980.0));
+    let mut h = widget_gallery::main_app().run_headless(Size::new(620.0, 980.0));
     let findings = h.lint();
     assert!(
         findings.is_empty(),

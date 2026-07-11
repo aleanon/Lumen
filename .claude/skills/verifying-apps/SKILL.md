@@ -164,12 +164,15 @@ The ones you'll actually use:
   `app.logs {since?}` returns the diagnostic ring (handler
   `rt.log(level, msg)` entries, E0701 panics, stylesheet rejections) —
   page with `since` = last seq + 1.
-- **Tofu doctrine.** The bundled font lacks decorative glyphs (▼▶ arrows,
-  most symbols) — they render as boxes while semantics report the intended
-  character, and `ui.lint` does **not** flag it. So: verify *behaviour*
-  from the tree, verify *layout* from pixels, and never assert iconography
-  from either without checking the other. If the UI needs an icon, draw it
-  as a shape (`widgets::canvas`).
+- **Tofu doctrine (rewritten with T.4).** Symbols now *render*: a DejaVu
+  symbols fallback (arrows, geometric shapes, stars, checkmarks — the
+  U+2000–2BFF blocks) ships in every build, and `ui.lint` flags any
+  remaining uncovered glyph as **W0402** with the offending text. The lean
+  (`--no-default-features`) build embeds a Latin+symbols subset — wider
+  scripts are W0402 there until the app registers a face
+  (`App::font(bytes)`) or enables `pan-unicode`. Still true: verify
+  *behaviour* from the tree and *layout* from pixels — but iconography can
+  now be asserted from pixels, and a W0402-clean lint means no boxes.
 - **Record→export works live since C.3**: the shell routes through a
   recording `Session` — after exploring, `session.assertText`/
   `assertState` then `session.exportTest {fnName, appExpr}` returns a

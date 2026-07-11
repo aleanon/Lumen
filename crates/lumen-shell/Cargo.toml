@@ -10,7 +10,11 @@ publish = false
 [dependencies]
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }
-lumen-widgets = { workspace = true }
+# Direct path dep, defaults off (cargo ignores `default-features = false` on
+# workspace-inherited deps): the shell forwards feature choices instead of
+# forcing them, so the facade's lean profile (T.4) actually reaches
+# lumen-widgets. The facade / direct consumers pick the tiers.
+lumen-widgets = { path = "../lumen-widgets", default-features = false, features = ["wgpu"] }
 kurbo = { workspace = true }
 # Desktop windowing + GPU surface presentation (ADR-001).
 winit = { workspace = true }
@@ -27,4 +31,9 @@ notify = { workspace = true }
 [features]
 # Compile in the live-window agent RPC server. Off by default: a normal build has
 # no dormant TCP endpoint / LUMEN_AGENT_ADDR handling and doesn't link lumen-agent.
-agent = ["dep:lumen-agent", "dep:serde_json"]
+agent = ["dep:lumen-agent", "dep:serde_json", "lumen-widgets/snapshot"]
+# Forwarded tiers (T.4): consumers (the facade) decide; nothing default here
+# so the lean profile can drop them.
+wgpu = ["lumen-widgets/wgpu"]
+snapshot = ["lumen-widgets/snapshot"]
+pan-unicode = ["lumen-widgets/pan-unicode"]

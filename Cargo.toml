@@ -90,7 +90,9 @@ lumen-core = { path = "crates/lumen-core", default-features = false }
 lumen-macros = { path = "crates/lumen-macros" }
 lumen-layout = { path = "crates/lumen-layout" }
 lumen-render = { path = "crates/lumen-render" }
-lumen-text = { path = "crates/lumen-text" }
+# default-features=false so a lean build's font choice isn't overridden by
+# feature unification; lumen-widgets' default turns pan-unicode back on.
+lumen-text = { path = "crates/lumen-text", default-features = false }
 lumen-style = { path = "crates/lumen-style", default-features = false }
 lumen-widgets = { path = "crates/lumen-widgets" }
 lumen-shell = { path = "crates/lumen-shell" }

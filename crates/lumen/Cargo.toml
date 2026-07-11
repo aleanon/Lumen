@@ -12,8 +12,16 @@ publish = false
 # facade's ShaderWidget re-export. (Web/mobile drop wgpu via target-gating in
 # lumen-render regardless; the CPU-only renderer build is `lumen-render
 # --no-default-features`.)
-default = ["wgpu"]
-wgpu = ["lumen-widgets/wgpu", "lumen-render/wgpu"]
+default = ["wgpu", "snapshot", "pan-unicode"]
+wgpu = ["lumen-widgets/wgpu", "lumen-render/wgpu", "lumen-shell/wgpu"]
+# The serializable/introspectable surfaces (AppSnapshot, get_styles, agent
+# JSON) — default-on; the lean shipped profile drops it (02 §4 doctrine).
+snapshot = ["lumen-widgets/snapshot", "lumen-shell/snapshot"]
+# T.4: the full 15 MB pan-Unicode embedded face — default-on. A lean app
+# depends on the facade with `default-features = false, features = ["wgpu"]`
+# and embeds the ~350 KB Latin+symbols subset instead (hello: 22 MB → ~7 MB),
+# registering a wider face at runtime (`App::font`) if it needs one.
+pan-unicode = ["lumen-widgets/pan-unicode", "lumen-shell/pan-unicode"]
 # The live-window agent endpoint (JSON-RPC on LUMEN_AGENT_ADDR) — default-off,
 # forwarded to the desktop shell. Scaffolded apps use it via `just run-agent`.
 agent = ["lumen-shell/agent"]
@@ -23,7 +31,10 @@ lumen-core = { workspace = true }
 lumen-render = { workspace = true }
 lumen-layout = { workspace = true }
 lumen-text = { workspace = true }
-lumen-widgets = { workspace = true }
+# Direct path dep (not workspace-inherited): `default-features = false` on a
+# `workspace = true` dep is silently ignored by cargo, which would make the
+# lean profile impossible — the facade's own defaults re-enable everything.
+lumen-widgets = { path = "../lumen-widgets", default-features = false }
 
 # The desktop window shell (winit) is desktop-only; mobile + web targets use
 # their own shells (lumen-shell-android / -ios / -web), so excluding it here

@@ -22,7 +22,20 @@ use swash::FontRef;
 
 /// Bundled pan-Unicode Noto font (Latin/CJK/Arabic/Hebrew). No system fonts
 /// (ADR-005). Color emoji is out of M0 scope; see the decision log.
+// T.4: the default face. Pan-Unicode under the default `pan-unicode`
+// feature (CJK/RTL/Indic coverage for the goldens + i18n examples); the
+// lean build embeds the ~350 KB Latin+symbols subset (chevrons, arrows,
+// checkmarks — everything the built-in widgets draw) and apps register a
+// wider face at runtime if they need one.
+#[cfg(feature = "pan-unicode")]
 const FONT: &[u8] = include_bytes!("../fonts/GoNotoKurrent-Regular.ttf");
+#[cfg(not(feature = "pan-unicode"))]
+const FONT: &[u8] = include_bytes!("../fonts/GoNotoKurrent-Latin.ttf");
+// T.4: symbols fallback — Go Noto Kurrent has no geometric shapes / arrows /
+// stars (the accordion chevron was tofu!), so a ~170 KB DejaVu Sans subset
+// (U+2000–2BFF symbol blocks; license in fonts/LICENSE-DejaVu) rides along
+// in every build and registers as a fallback face.
+const SYMBOLS_FONT: &[u8] = include_bytes!("../fonts/DejaVuSans-Symbols.ttf");
 
 pub mod editor;
 pub mod richtext;
@@ -282,6 +295,25 @@ impl TextEngine {
             .and_then(|(id, _)| collection.family_name(*id))
             .unwrap_or("Noto")
             .to_string();
+        // T.4: register the symbols fallback and append it to the script
+        // fallback chains so chars the main face lacks (chevrons, arrows,
+        // stars) shape through it instead of `.notdef`. `system_fonts:
+        // false` means the chains start empty — without this, fallback
+        // never engages and symbols render as tofu.
+        let sym_blob = parley::fontique::Blob::new(std::sync::Arc::new(SYMBOLS_FONT));
+        let sym = collection.register_fonts(sym_blob, None);
+        if let Some((sym_id, _)) = sym.first() {
+            use parley::fontique::Script;
+            for script in [
+                Script::COMMON, // symbols/punctuation runs resolve as Zyyy
+                Script::from_bytes(*b"Latn"),
+            ] {
+                collection.append_fallbacks(
+                    parley::fontique::FallbackKey::new(script, None),
+                    std::iter::once(*sym_id),
+                );
+            }
+        }
         TextEngine {
             font_cx: FontContext {
                 collection,
@@ -554,6 +586,28 @@ impl TextBlock {
     /// The measured width in logical px (stable across runs).
     pub fn width(&self) -> f32 {
         self.layout.width()
+    }
+
+    /// T.4 tofu detection: how many glyphs in this block mapped to `.notdef`
+    /// (glyph id 0) — characters no registered face covers. The audit lint
+    /// (`W0401`) reports blocks where this is non-zero; the lean (Latin
+    /// subset) build makes uncovered scripts show up here instead of
+    /// silently rendering boxes.
+    pub fn missing_glyphs(&self) -> usize {
+        let mut n = 0;
+        for line in self.layout.lines() {
+            for item in line.items() {
+                let parley::layout::PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                    continue;
+                };
+                for glyph in glyph_run.positioned_glyphs() {
+                    if glyph.id == 0 {
+                        n += 1;
+                    }
+                }
+            }
+        }
+        n
     }
 
     /// The measured height in logical px.

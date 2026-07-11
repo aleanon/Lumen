@@ -22,7 +22,9 @@ pub use lumen_core::semantics;
 
 /// The application and headless runtime (02 §8).
 #[doc(inline)]
-pub use lumen_widgets::{app::FrameStats, App, AppSnapshot, BuildCx, Element, Handler, Headless};
+pub use lumen_widgets::{app::FrameStats, App, BuildCx, Element, Handler, Headless};
+#[cfg(feature = "snapshot")]
+pub use lumen_widgets::{AppSnapshot, Checkpoint};
 
 /// Pick the renderer from `--wgpu`/`--tiny-skia`/`LUMEN_RENDERER` (else `None`).
 #[doc(inline)]

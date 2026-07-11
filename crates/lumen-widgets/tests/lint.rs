@@ -8,7 +8,7 @@ use lumen_widgets::{App, Button, Element, Label};
 
 #[test]
 fn a_normal_ui_has_no_lint_findings() {
-    let h = App::new(|_| {
+    let mut h = App::new(|_| {
         Element::column(vec![
             Label::new("Hello, gypq — descenders and Ástërisks").into(),
             Element::row(vec![Button::new("OK").into(), Button::new("Cancel").into()]),
@@ -25,7 +25,7 @@ fn a_normal_ui_has_no_lint_findings() {
 
 #[test]
 fn clipped_text_is_caught_by_lint() {
-    let h = App::new(|_| Label::new("gypq jQ").line_height(1.0).into())
+    let mut h = App::new(|_| Label::new("gypq jQ").line_height(1.0).into())
         .run_headless(Size::new(240.0, 80.0));
     assert!(
         h.lint().iter().any(|d| d.code == codes::W0104),
@@ -60,5 +60,45 @@ fn duplicate_ids_and_unnamed_focusables_lint() {
     assert!(
         diags.iter().any(|d| d.code == "W0301"),
         "unnamed focusable reported: {diags:?}"
+    );
+}
+
+#[test]
+fn tofu_lint_flags_uncovered_glyphs() {
+    // Private-use codepoints are unmapped in any face — guaranteed tofu.
+    let mut h = lumen_widgets::App::new(|_cx| {
+        lumen_widgets::col![
+            lumen_widgets::widgets::text("normal latin text").id("ok"),
+            lumen_widgets::widgets::text("bad \u{E312} glyph").id("bad")
+        ]
+    })
+    .run_headless(kurbo::Size::new(300.0, 200.0));
+    h.pump();
+    let findings = h.lint();
+    let tofu: Vec<_> = findings.iter().filter(|d| d.code == "W0402").collect();
+    assert_eq!(tofu.len(), 1, "exactly the PUA text flagged: {findings:?}");
+    assert!(
+        tofu[0].message.to_lowercase().contains("e312"),
+        "{}",
+        tofu[0].message
+    );
+}
+
+#[test]
+fn widget_symbols_are_covered_no_tofu() {
+    // The chevrons/arrows/checkmarks the built-in widgets draw must be
+    // covered even by the lean subset (same test both builds).
+    let mut h = lumen_widgets::App::new(|_cx| {
+        lumen_widgets::col![lumen_widgets::widgets::text(
+            "▸ ▾ ▶ ▼ → ↔ ⇒ ✓ ★ ☆ ◉ ○ ⚠ ≤ ≥ ≈ − – — • …"
+        )
+        .id("sym")]
+    })
+    .run_headless(kurbo::Size::new(400.0, 200.0));
+    h.pump();
+    let findings = h.lint();
+    assert!(
+        !findings.iter().any(|d| d.code == "W0402"),
+        "widget symbol set fully covered: {findings:?}"
     );
 }
