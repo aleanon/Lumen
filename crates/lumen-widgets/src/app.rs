@@ -3266,6 +3266,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             };
             // `.lss` overrides the widget's hardcoded background/radius.
             let css = self.node_style.get(&node);
+            // R.3: a node fully outside the canvas emits nothing (scrolled-
+            // away content skips DL emission and raster). Nodes carrying
+            // layer effects still run so descendants compose correctly.
+            let offscreen = bounds.x1 <= 0.0
+                || bounds.y1 <= 0.0
+                || bounds.x0 >= self.size.width
+                || bounds.y0 >= self.size.height;
+            if offscreen
+                && !m.clip
+                && css.is_none_or(|s| {
+                    s.clip.is_none() && s.opacity.unwrap_or(1.0) >= 1.0 && s.blend_mode.is_none()
+                })
+            {
+                continue;
+            }
             let mut bg = css.and_then(|s| s.background).or(m.background);
             // Hover feedback: lighten a dark control / darken a light one while
             // the pointer is over a clickable node. Automatic for every button.

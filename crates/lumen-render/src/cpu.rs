@@ -65,6 +65,43 @@ pub fn render_damage(
     background: Color,
     dirty: Rect,
 ) -> RgbaImage {
+    // R.3: cull commands that cannot touch the dirty rect before
+    // rasterizing. Structure commands (layers, backdrop filters, shaders)
+    // always survive — layer push/pop must stay balanced, and a backdrop
+    // filter reads composed neighbors. Every per-pixel blend is local, so
+    // dropping fully-outside content commands is sound; the one non-local
+    // op (backdrop blur) is handled by inflating the cull rect by its
+    // worst-case reach (3 box passes ≈ 3 × blur radius). The R0
+    // `damage_equivalence` corpus enforces `render_damage == full crop`.
+    let reach = list
+        .cmds
+        .iter()
+        .map(|c| match c {
+            DrawCmd::BackdropFilter { blur, .. } => *blur as f64 * 3.0,
+            _ => 0.0,
+        })
+        .fold(0.0f64, f64::max);
+    let cull = dirty.inflate(reach, reach);
+    let culled = DisplayList {
+        cmds: list
+            .cmds
+            .iter()
+            .filter(|c| match c {
+                DrawCmd::PushLayer { .. }
+                | DrawCmd::PopLayer
+                | DrawCmd::BackdropFilter { .. }
+                | DrawCmd::Shader { .. } => true,
+                other => other.paint_bounds().is_none_or(|b| {
+                    b.x1 >= cull.x0 && b.x0 <= cull.x1 && b.y1 >= cull.y0 && b.y0 <= cull.y1
+                }),
+            })
+            .cloned()
+            .collect(),
+        images: list.images.clone(),
+        runs: list.runs.clone(),
+        glyph_images: list.glyph_images.clone(),
+    };
+    let list = &culled;
     let full = render(list, width, height, background);
     let x = dirty.x0.floor().max(0.0) as u32;
     let y = dirty.y0.floor().max(0.0) as u32;
