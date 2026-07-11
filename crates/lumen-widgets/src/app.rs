@@ -994,6 +994,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.clock_ms
     }
 
+    /// C.1b: whether the last build declared future time-driven work — an
+    /// `animate()` (continuous) request or a `wake_at` still ahead of the
+    /// clock. `false` = settled: no scheduled frame will differ until some
+    /// other input changes. A bare `now_ms()` read does **not** count: such
+    /// a frame is a function of time but schedules nothing, so there is no
+    /// event to wait for.
+    pub fn is_time_driven(&self) -> bool {
+        self.requests.continuous || self.requests.wakes.iter().any(|w| *w > self.clock_ms)
+    }
+
     /// The reactive runtime backing this app (state store + scheduler). Lets
     /// tests/tools read `write_gen`/`is_quiescent` and drive signals directly.
     pub fn runtime(&self) -> &Runtime {

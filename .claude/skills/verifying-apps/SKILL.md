@@ -129,13 +129,16 @@ The ones you'll actually use:
 
 ### Live-window traps (each one has burned an agent)
 
-- **Auto-wait covers existence, not settling.** Since C.1a, selector
-  actions wait (10 ms polls, `timeout_ms` param, default 5 s) for the node
-  to exist, be non-zero-sized, not disabled — including nodes that appear
-  from async results. `ui.waitFor {selector, state?, text?}` is the
-  explicit wait. **Clock-driven animations are NOT waited on** (C.1b
-  pending): after acting, verify the *final* state via `ui.waitFor` or
-  `wait_until` rather than asserting on the action's reply.
+- **Auto-wait covers existence; settling is a separate call.** Since
+  C.1a, selector actions wait (10 ms polls, `timeout_ms` param, default
+  5 s) for the node to exist, be non-zero-sized, not disabled — including
+  nodes that appear from async results. `ui.waitFor {selector, state?,
+  text?}` is the explicit wait. **Animations settle via `ui.waitSettled
+  {timeout_ms?}`** (C.1b): it advances the clock and returns once nothing
+  is `animate()`-continuous and no future `wake_at` is pending (a bare
+  `now_ms()` read doesn't count — that schedules nothing to wait for). A
+  forever-spinner therefore times out, readably; verify final state via
+  `ui.waitFor` after `ui.waitSettled`.
 - **`node-N` ids ARE selectors since C.3** — act on exactly the node
   `ui.getTree`/`ui.waitFor` returned. They're per-rebuild runtime ids
   though: re-query after structural changes; prefer a stable `#id` in

@@ -415,6 +415,45 @@ fn handle<R: Renderer, E: Spawner>(
                 .collect();
             Ok(json!({ "entries": entries }))
         }
+        "ui.waitSettled" => {
+            // C.1b: block until the UI stops being time-driven — no
+            // `animate()` (continuous) request, no future `wake_at` — and
+            // the reactive graph is quiescent. The virtual clock advances by
+            // wall time between 10 ms polls so animations actually play out
+            // (headless hosting has no other clock source; under a live
+            // shell the extra advance is one bounded catch-up, the same as
+            // the sleep-resume path). A bare `now_ms()` read does not count
+            // as unsettled — a frame that is a function of time but
+            // schedules nothing can't be waited on (use `wake_at`).
+            let timeout_ms = params
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(5000);
+            let start = std::time::Instant::now();
+            let deadline = start + std::time::Duration::from_millis(timeout_ms);
+            let mut last = start;
+            loop {
+                let now = std::time::Instant::now();
+                app.advance_clock(((now - last).as_secs_f64() * 1000.0).min(100.0));
+                last = now;
+                app.pump();
+                if !app.is_time_driven() && app.runtime().is_quiescent() {
+                    break Ok(json!({
+                        "settled": true,
+                        "waited_ms": start.elapsed().as_millis() as u64,
+                    }));
+                }
+                if std::time::Instant::now() >= deadline {
+                    break Err((
+                        -32000,
+                        format!(
+                            "Timeout({timeout_ms}ms): UI still time-driven                              (animating or holding a future wake_at)"
+                        ),
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
         "ui.waitFor" => {
             // C.1a: block until a node matching `selector` exists — and
             // optionally carries `state` / has label-or-value equal to
@@ -857,6 +896,14 @@ pub fn mcp_manifest() -> Value {
             tool("input_type", "Focus a node and type text."),
             tool("input_key", "Press a key chord."),
             tool("input_scroll", "Scroll a node."),
+            tool(
+                "ui_waitFor",
+                "Wait until a selector exists (optionally with a state or text).",
+            ),
+            tool(
+                "ui_waitSettled",
+                "Wait until animations settle (no continuous/wake_at requests pending).",
+            ),
             tool("app_diagnostics", "Current diagnostics."),
         ]
     })

@@ -132,9 +132,8 @@ reproducible as a test. **Auto-wait (C.1a, 2026-07-09):** every selector
 action polls at 10 ms — pumping so deferred task results apply — until the
 selector resolves to exactly one *actionable* node (non-empty bounds, not
 `disabled`) or `timeout_ms` elapses (param on any action; default 5000).
-`Ambiguous` fails immediately with candidates. Not yet waited on:
-clock-driven animation settling (C.1b — poll `ui.getTree`/use `ui.waitFor`
-around animations). Results: `{ ok: true, node: "node-42" }` or a JSON-RPC
+`Ambiguous` fails immediately with candidates. Animation settling is the
+explicit `ui.waitSettled` call (C.1b ✅), not part of per-action auto-wait. Results: `{ ok: true, node: "node-42" }` or a JSON-RPC
 error (`-32601` unknown method; `-32000` with `Timeout(…)` /
 `NotFound { nearest }` / `Ambiguous { candidates }`; structured error codes
 planned, C.4).
@@ -142,6 +141,7 @@ planned, C.4).
 | Method | Params | Notes |
 |---|---|---|
 | `ui.waitFor` | `{ selector, state?, text?, timeout_ms? }` | blocks until the node exists (and carries `state` / label-or-value equals `text`); the explicit wait primitive |
+| `ui.waitSettled` | `{ timeout_ms? }` | C.1b: advances the clock by wall time between 10 ms polls until no `animate()` (continuous) request and no future `wake_at` remain and the reactive graph is quiescent; returns `{ settled, waited_ms }`. A bare `now_ms()` read doesn't count (nothing scheduled to wait for); a forever-animation times out readably |
 
 | Method | Params | Notes |
 |---|---|---|
