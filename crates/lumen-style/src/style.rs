@@ -60,6 +60,20 @@ pub enum StyleBlend {
     Lighten,
 }
 
+/// One `transition:` declaration (B.5, 04 §3): which property animates,
+/// how long, with what easing, after what delay.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Transition {
+    /// The transitioned property (`"background"`, `"opacity"`, … or `"all"`).
+    pub property: String,
+    /// Duration in ms.
+    pub duration_ms: f32,
+    /// Easing curve.
+    pub easing: crate::anim::Easing,
+    /// Start delay in ms.
+    pub delay_ms: f32,
+}
+
 /// `clip:` values (B.3, 04 §3): whether/how a node clips its subtree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StyleClip {
@@ -135,6 +149,10 @@ pub struct Style {
     pub backdrop_specular: Option<f32>,
     /// `blend-mode` (B.3): composites the subtree onto the backdrop.
     pub blend_mode: Option<StyleBlend>,
+    /// `transition:` declarations (B.5) — the runtime animates the paint
+    /// tier of these (background/color/opacity/border-radius v1) between
+    /// computed values on nodes with stable ids.
+    pub transitions: Vec<Transition>,
     /// `clip` (B.3): overrides the element's clip flag; `Bounds` ignores the
     /// border-radius, `Rounded` uses it.
     pub clip: Option<StyleClip>,
@@ -279,6 +297,11 @@ impl Style {
         self.border_sides[side] = Some(StyleSideBorder { width, color });
         self
     }
+    /// Add a `transition:` declaration (B.5).
+    pub fn transition(mut self, t: Transition) -> Self {
+        self.transitions.push(t);
+        self
+    }
     /// Set `blend-mode`.
     pub fn blend_mode(mut self, b: StyleBlend) -> Self {
         self.blend_mode = Some(b);
@@ -339,6 +362,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "backdrop-filter",
     "shadow",
     "blend-mode",
+    "transition",
     "clip",
     "visibility",
     "border",
@@ -402,6 +426,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "line-height" => style.line_height = as_number(&v).map(|n| n as f32),
         "backdrop-filter" => apply_backdrop(style, &v),
         "shadow" => style.shadow = as_shadow(&v),
+        "transition" => style.transitions = parse_transitions(&v),
         "blend-mode" => {
             style.blend_mode = match &v {
                 Value::Keyword(k) => match k.as_str() {
@@ -658,6 +683,74 @@ fn as_color(v: &Value) -> Option<Color> {
         }
         _ => None,
     }
+}
+
+/// Parse `transition: <prop|all> <dur> [<easing>] [<delay>][, …]` (B.5).
+/// The comma-flattened atom list is re-grouped at each keyword that starts a
+/// new declaration (a known property name or `all`).
+fn parse_transitions(v: &Value) -> Vec<Transition> {
+    let items: Vec<&Value> = match v {
+        Value::List(items) => items.iter().collect(),
+        other => vec![other],
+    };
+    let mut out = Vec::new();
+    let mut cur: Option<Transition> = None;
+    let mut durations_seen = 0u8;
+    for it in items {
+        match it {
+            Value::Keyword(k)
+                if k == "all" || crate::properties::KNOWN_PROPERTIES.contains(&k.as_str()) =>
+            {
+                if let Some(t) = cur.take() {
+                    out.push(t);
+                }
+                durations_seen = 0;
+                cur = Some(Transition {
+                    property: k.clone(),
+                    duration_ms: 0.0,
+                    easing: crate::anim::Easing::Ease,
+                    delay_ms: 0.0,
+                });
+            }
+            Value::Number(n, Unit::Ms) => {
+                if let Some(t) = &mut cur {
+                    if durations_seen == 0 {
+                        t.duration_ms = *n as f32;
+                    } else {
+                        t.delay_ms = *n as f32;
+                    }
+                    durations_seen += 1;
+                }
+            }
+            Value::Number(n, Unit::S) => {
+                if let Some(t) = &mut cur {
+                    if durations_seen == 0 {
+                        t.duration_ms = (*n * 1000.0) as f32;
+                    } else {
+                        t.delay_ms = (*n * 1000.0) as f32;
+                    }
+                    durations_seen += 1;
+                }
+            }
+            Value::Keyword(k) => {
+                if let Some(t) = &mut cur {
+                    t.easing = match k.as_str() {
+                        "linear" => crate::anim::Easing::Linear,
+                        "ease" => crate::anim::Easing::Ease,
+                        "ease-in" => crate::anim::Easing::EaseIn,
+                        "ease-out" => crate::anim::Easing::EaseOut,
+                        "ease-in-out" => crate::anim::Easing::EaseInOut,
+                        _ => t.easing,
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(t) = cur.take() {
+        out.push(t);
+    }
+    out
 }
 
 /// One relative-color channel: a literal number, the base channel keyword

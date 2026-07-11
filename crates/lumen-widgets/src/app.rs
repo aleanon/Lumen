@@ -203,6 +203,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             style_memo_hits: 0,
             style_memo_misses: 0,
             commands: HashMap::new(),
+            prop_anims: HashMap::new(),
+            reduced_motion: false,
             desc_stack: Vec::new(),
             container_nodes: Vec::new(),
             container_prev: Vec::new(),
@@ -539,6 +541,12 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     style_memo: HashMap<u64, std::rc::Rc<StylePair>>,
     style_memo_hits: u64,
     style_memo_misses: u64,
+    /// B.5: running `transition:` animations keyed by (stable id, property).
+    /// Identity is id-based — transitions only animate on nodes with stable
+    /// ids (others snap); GC'd when the id leaves the tree.
+    prop_anims: HashMap<(StableId, &'static str), PropAnim>,
+    /// B.5: OS reduced-motion (04 §3) — durations clamp to 0.
+    reduced_motion: bool,
     /// C.4b: named app commands from the last build
     /// (`cx.register_command`) — `run_command` invokes by name.
     commands: HashMap<String, crate::element::Handler>,
@@ -621,6 +629,54 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     last_change: ChangeReport,
 }
 
+/// One animated property value (B.5): color or scalar.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum AnimVal {
+    Color(Color),
+    Num(f32),
+}
+
+impl AnimVal {
+    fn blend(a: AnimVal, b: AnimVal, t: f32) -> AnimVal {
+        match (a, b) {
+            (AnimVal::Color(x), AnimVal::Color(y)) => AnimVal::Color(x.lerp_oklab(y, t)),
+            (AnimVal::Num(x), AnimVal::Num(y)) => AnimVal::Num(x + (y - x) * t),
+            (_, b) => b,
+        }
+    }
+}
+
+/// A running `transition:` for one (node id, property) pair (B.5).
+#[derive(Clone, Debug)]
+struct PropAnim {
+    from: AnimVal,
+    to: AnimVal,
+    start_ms: f64,
+    duration_ms: f32,
+    delay_ms: f32,
+    easing: lumen_style::Easing,
+    /// The final value has been resolved into a build. An anim stays
+    /// "active" until then, so the pump schedules the one last rebuild
+    /// that lands exactly on the target.
+    committed: bool,
+}
+
+impl PropAnim {
+    fn progress(&self, now: f64) -> f32 {
+        if self.duration_ms <= 0.0 {
+            return 1.0;
+        }
+        (((now - self.start_ms) as f32 - self.delay_ms) / self.duration_ms).clamp(0.0, 1.0)
+    }
+    fn value_at(&self, now: f64) -> AnimVal {
+        let t = self.progress(now);
+        AnimVal::blend(self.from, self.to, self.easing.apply(t))
+    }
+    fn done(&self, now: f64) -> bool {
+        self.progress(now) >= 1.0
+    }
+}
+
 /// The pre-routing snapshot of input-driven visual state
 /// (hover/focus/pressed) — what [`Headless::restyle_visual`] diffs against.
 type VisualState = (
@@ -700,7 +756,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         ) != visual_before;
         // Time-driven iff the last build read the clock (or asked to animate) AND
         // the clock has advanced since that build — then the frame would differ.
-        let time_driven = (self.requests.read_clock || self.requests.continuous)
+        let anims_running = self.anims_active();
+        let time_driven = (self.requests.read_clock || self.requests.continuous || anims_running)
             && self.clock_ms != self.last_build_clock;
         let write_changed = self.rt.write_gen() != self.last_build_gen;
         // F3.4: a structural signal changed ⇒ rebuild; a change confined to
@@ -715,7 +772,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // repaint, no closure runs, no lowering, no relayout. Falls back to a
         // full rebuild when a state rule touches layout/typography (the A.2
         // risk note) so layout stays correct.
-        let restyle_only = visual_changed && !needs_rebuild;
+        let restyle_only = visual_changed && !needs_rebuild && !full_rebuild_forced();
         if needs_rebuild || (restyle_only && !self.restyle_visual(&visual_before)) {
             // Scope memoization keys off signal versions only, so a rebuild
             // driven by a forced invalidation (resize/scale/stylesheet/theme —
@@ -737,8 +794,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             }
             // A.3.2: visual-state rebuilds must re-resolve `.lss` state parts
             // (`:hovered` etc.) for every node, so they never copy spans
-            // forward; signal/time rebuilds may.
-            self.allow_copy_forward = !visual_changed;
+            // forward; signal/time rebuilds may. A.3.5: LUMEN_FULL_REBUILD=1
+            // is the bisect hatch — naive full rebuilds, no retained reuse.
+            self.allow_copy_forward = !visual_changed && !anims_running && !full_rebuild_forced();
             self.rebuild(); // baselines force_rebuild + last_build_gen
         } else if restyle_only {
             // restyle_visual already updated flags/styles/semantics/paint.
@@ -796,6 +854,93 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         h(&self.rt);
         self.pump();
         Ok(())
+    }
+
+    /// B.5: drive `transition:` declarations for one node. For each
+    /// transitioned paint property (background/color/opacity/border-radius
+    /// v1; layout properties are documented no-ops), compare the freshly
+    /// resolved target with the running animation's target: a change starts
+    /// a new segment *from the current blended value* (smooth interruption),
+    /// and the css value is substituted with the blend so paint and probes
+    /// see the animated frame. First sighting of a node adopts the target
+    /// without animating (no mount flash).
+    fn apply_transitions(&mut self, id: &Option<StableId>, css: &mut lumen_style::Style) {
+        if css.transitions.is_empty() {
+            return;
+        }
+        let Some(id) = id.clone() else { return };
+        let now = self.clock_ms;
+        let specs = css.transitions.clone();
+        for tr in &specs {
+            const PAINT_PROPS: [&str; 4] = ["background", "color", "opacity", "border-radius"];
+            let props: Vec<&'static str> = if tr.property == "all" {
+                PAINT_PROPS.to_vec()
+            } else {
+                PAINT_PROPS
+                    .iter()
+                    .copied()
+                    .filter(|p| *p == tr.property)
+                    .collect()
+            };
+            for prop in props {
+                let target = match prop {
+                    "background" => css.background.map(AnimVal::Color),
+                    "color" => css.color.map(AnimVal::Color),
+                    "opacity" => css.opacity.map(AnimVal::Num),
+                    "border-radius" => css.border_radius.map(AnimVal::Num),
+                    _ => None,
+                };
+                let Some(target) = target else { continue };
+                let key = (id.clone(), prop);
+                let entry = self.prop_anims.entry(key).or_insert_with(|| PropAnim {
+                    from: target,
+                    to: target,
+                    start_ms: now,
+                    duration_ms: 0.0,
+                    delay_ms: 0.0,
+                    easing: tr.easing,
+                    committed: true,
+                });
+                if entry.to != target {
+                    let cur = entry.value_at(now);
+                    *entry = PropAnim {
+                        from: cur,
+                        to: target,
+                        start_ms: now,
+                        duration_ms: if self.reduced_motion {
+                            0.0
+                        } else {
+                            tr.duration_ms
+                        },
+                        delay_ms: tr.delay_ms,
+                        easing: tr.easing,
+                        committed: false,
+                    };
+                }
+                if entry.done(now) {
+                    entry.committed = true;
+                }
+                match (prop, entry.value_at(now)) {
+                    ("background", AnimVal::Color(c)) => css.background = Some(c),
+                    ("color", AnimVal::Color(c)) => css.color = Some(c),
+                    ("opacity", AnimVal::Num(v)) => css.opacity = Some(v),
+                    ("border-radius", AnimVal::Num(v)) => css.border_radius = Some(v),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// B.5: whether any transition is still mid-flight at the current clock.
+    fn anims_active(&self) -> bool {
+        self.prop_anims.values().any(|a| !a.committed)
+    }
+
+    /// B.5: clamp all transition durations to zero (the OS reduced-motion
+    /// signal, 04 §3). The shell wires the real OS setting (P-phase); tests
+    /// and apps can set it directly.
+    pub fn set_reduced_motion(&mut self, on: bool) {
+        self.reduced_motion = on;
     }
 
     /// A.5b introspection: cumulative style-resolution memo `(hits, misses)`
@@ -1027,7 +1172,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// a frame is a function of time but schedules nothing, so there is no
     /// event to wait for.
     pub fn is_time_driven(&self) -> bool {
-        self.requests.continuous || self.requests.wakes.iter().any(|w| *w > self.clock_ms)
+        self.requests.continuous
+            || self.requests.wakes.iter().any(|w| *w > self.clock_ms)
+            || self.anims_active()
     }
 
     /// The reactive runtime backing this app (state store + scheduler). Lets
@@ -1670,7 +1817,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     return false;
                 }
             }
-            for (node, css, resolved) in pending {
+            for (node, mut css, resolved) in pending {
+                // B.5: state flips (hover) are exactly what transitions
+                // animate — run the same retarget/blend on the restyle path.
+                let id = self.meta.get(&node).and_then(|m| m.id.clone());
+                self.apply_transitions(&id, &mut css);
                 self.node_style.insert(node, css);
                 self.node_computed.insert(node, resolved);
             }
@@ -2008,6 +2159,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
         self.tree = tree;
         self.meta = meta;
+        // B.5: drop animations whose node id left the tree.
+        if !self.prop_anims.is_empty() {
+            let live: std::collections::HashSet<StableId> =
+                self.meta.values().filter_map(|m| m.id.clone()).collect();
+            self.prop_anims.retain(|(id, _), _| live.contains(id));
+        }
         self.last_damage = self.paint();
         self.sem_root = Some(self.build_semantics(self.tree.root()));
         self.rebuild_dep_index();
@@ -2620,6 +2777,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             if let Some(inline) = el.css_inline.as_deref() {
                 merge_inline_style(&mut css, &mut resolved, inline);
             }
+            // B.5: substitute mid-flight transition blends (and start/retarget
+            // segments) before anything consumes the style.
+            self.apply_transitions(&el.id, &mut css);
             apply_css_to_element(&mut el, &css);
             // B.3 visibility: a hidden node (or one inside a hidden
             // subtree) keeps its layout space but leaves hit-testing (flags)
@@ -3681,6 +3841,14 @@ fn merge_inline_style(
     if inline.backdrop_saturate.is_some() && !imp(resolved, "backdrop-filter") {
         css.backdrop_saturate = inline.backdrop_saturate;
     }
+}
+
+/// A.3.5 bisect hatch: `LUMEN_FULL_REBUILD=1` disables copy-forward and the
+/// restyle-only visual path, so a live run behaves like the coherence
+/// oracle's rebuild-fresh — isolate a suspected incremental bug in seconds.
+fn full_rebuild_forced() -> bool {
+    static FORCED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FORCED.get_or_init(|| std::env::var("LUMEN_FULL_REBUILD").is_ok_and(|v| v == "1"))
 }
 
 /// Whether two computed styles differ in any property that feeds layout or

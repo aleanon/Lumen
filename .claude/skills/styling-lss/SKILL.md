@@ -70,8 +70,13 @@ numeric only.
   `letter-spacing`, `text-align/overflow/wrap/decoration`,
   `selection-color` (B.4). Use Rust `TextStyle`/`Label` setters instead
   (`font-size`/`font-weight`/`line-height` work — see the works table).
-- `transition:` / `animation:` / `@keyframes` — parsed, never played (B.5).
-  Motion comes from Rust: `motion::spring` + `cx.animate()`.
+- `animation:` / `@keyframes` — parsed, never played (B.5b). Rust motion
+  (`motion::spring` + `cx.animate()`) covers keyframe-ish needs.
+- `transition:` **plays** (B.5a): `transition: background 120ms ease[, …]`
+  on a node **with a stable id** animates background/color/opacity/
+  border-radius between computed values (class flips, `:hovered`, theme
+  edits). No id → snaps. Layout props in a transition are no-ops.
+  `set_reduced_motion(true)` snaps everything.
 
 ## State selectors (full vocabulary since B.6a)
 

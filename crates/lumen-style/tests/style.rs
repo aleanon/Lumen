@@ -90,6 +90,19 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         .clip(lumen_style::StyleClip::Rounded));
     style_parity!(covered, "blend-mode", "multiply", |s: Style| s
         .blend_mode(lumen_style::StyleBlend::Multiply));
+    style_parity!(
+        covered,
+        "transition",
+        "background 120ms linear",
+        |s: Style| {
+            s.transition(lumen_style::Transition {
+                property: "background".into(),
+                duration_ms: 120.0,
+                easing: lumen_style::Easing::Linear,
+                delay_ms: 0.0,
+            })
+        }
+    );
     for (i, side) in ["top", "right", "bottom", "left"].iter().enumerate() {
         let prop = format!("border-{side}");
         let mut from_lss = Style::new();
@@ -136,6 +149,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "visibility" => "hidden",
         "clip" => "rounded",
         "blend-mode" => "multiply",
+        "transition" => "background 120ms linear",
         "border" | "border-top" | "border-right" | "border-bottom" | "border-left" => {
             "2px #ff0000ff"
         }

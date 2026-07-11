@@ -100,35 +100,36 @@ Steps (each oracle-gated, landable separately):
    of the cached subtree lowered normally. Meters:
    `FrameStats::{nodes_rebuilt, nodes_copied}`. Guarded by
    tests/copy_forward.rs + the whole-suite coherence oracle.
-3. **A.3.3** Splice: a re-run scope lowers into fresh nodes that replace
-   its span (generational NodeIndex reuse); parent links/z/document order
-   fixed up; `meta`/semantics/dep-index updated for the span only.
-4. **A.3.4** Intern scope/signal keys (id table / `SmolStr`) — kills the
-   per-build `format!` churn (cheap once spans exist).
-5. **A.3.5** Delete the "rebuild = fresh Tree" assumption behind a
-   feature-flagged escape hatch for one release (`LUMEN_FULL_REBUILD=1`)
-   to bisect coherence regressions; the oracle compares against
-   rebuild-fresh every test anyway.
+3. **A.3.3 — superseded by copy-forward (amendment 2026-07-10).** The
+   acceptance below (O(changed) re-lowering, counted) is met by A.3.2:
+   memo-hit spans skip style resolution, text measurement, meta
+   construction, and dyn evaluation. What splice-in-place would still buy
+   is skipping the O(tree) *shallow* walk (node allocation + entry moves
+   + semantics/dep-index rebuild) — a perf refinement, not a capability.
+   Revisit with the R-phase benches if profiles show the shallow walk
+   dominating; the trigger metric is `pump_one_of_10k` wall time.
+4. **A.3.4 — folded into the same revisit** (interning is measurable
+   only against those benches; no capability hangs on it).
+5. **A.3.5 ✅ (2026-07-10)** `LUMEN_FULL_REBUILD=1` — the bisect hatch:
+   disables copy-forward and the A.5 restyle-only path, forcing the
+   naive rebuild everything-every-pump behavior (the oracle's semantics)
+   in a live run.
 
 **Accept:** one-of-N-rows signal write re-lowers O(row) nodes (counted:
 new `FrameStats.nodes_rebuilt`); `build_node`+semantics+dep-index time on
 the gallery drops ~an order of magnitude on small changes; whole suite +
 80-round F3 fuzz + coherence oracle green; goldens byte-identical.
 
-## A.4 — Incremental layout (L, needs A.3)
+## A.4 — Incremental layout: superseded (amendment 2026-07-10)
 
-With the tree retained, mark spliced spans' taffy nodes dirty and call
-`relayout_subtree` (finally wiring its only-test-caller into the pump);
-full `compute` remains for root-constraint changes (resize/scale).
-Taffy's single-tree parent↔child sizing stays respected: a subtree whose
-*size* changed escalates to its flex container's relayout (taffy handles
-via dirty propagation).
-
-**Accept:** `layout_10k_dirty_subtree`-style bench on the live pump path
-(new bench `pump_one_of_10k`): one leaf text change relayouts ≪ tree;
-bounds identical to full compute (oracle extension: `assert_layout_
-coherent` — relayout result ≡ fresh compute, added to
-`assert_view_coherent`).
+Closed against the two standing decisions: the R4 finding (2026-06-24 —
+`taffy::TaffyTree::compute_layout` is a serial whole-tree solve; partial
+re-solve across disjoint subtrees of one tree is not possible) and the F2
+decision (2026-07-03 — incremental layout **skipped**; full-tree layout
+stays, O(changed) comes from build memoization + damage-driven paint).
+A.4 as written re-opened that territory without new information. The
+someday-path remains the separate-`TaffyTree` split (its own design task,
+bench-gated), unchanged from R4.
 
 ## A.5 — Only-affected restyle + per-node style memo (M, after A.2)
 

@@ -180,7 +180,13 @@ re-approved via R0 diff; `scope_memo_one_of_many` improves again.
 - **B.4 (L)** Typography to the text stack: font-family/style/features/
   variation, font-size/weight (measure pass), line-height, letter-spacing,
   text-align/overflow/wrap/decoration, selection-color. [D#15]
-- **B.5 (L)** Motion wiring: `transition:` → Scheduler; keyframe evaluator
+- **B.5 (L)** *(Amendment 2026-07-10: B.5a shipped — `transition:` plays
+  via an id-keyed PropAnim engine in the runtime (not the Scheduler):
+  paint-tier props, smooth retargeting, delay, reduced-motion snap, wired
+  through both rebuild and the A.5 restyle path. Identity is StableId — the
+  A.3.3 dependency dissolved. B.5b (keyframes evaluator, `animation:`,
+  automatic theme-switch 150 ms, `animation-force`) remains open.)*
+  Motion wiring: `transition:` → Scheduler; keyframe evaluator
   (`@keyframes` playback); theme-switch 150 ms color animation; OS
   reduced-motion → `Scheduler.reduced_motion`; `animation-force`. [D#14,17]
 - **B.6 (M)** Cascade origins: framework-default sheet, theme origin,
