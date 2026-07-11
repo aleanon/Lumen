@@ -72,12 +72,17 @@ fn build(cx: &mut BuildCx) -> Element {
 | `widgets_m4` | `data_grid tree bar_chart rich_text rich_text_editor` |
 | `markdown` | `markdown::render` (CommonMark subset) |
 
-**Missing (plan W.1/W.2 — don't assume, build from primitives or copy the
-example):** Popover (generalize `pick_list`'s anchored overlay), Sheet,
-Drawer, SearchField, Combobox, ColorPicker, Skeleton, Avatar, Pagination,
+**Shipped with W.1:** `Popover::new(cx, name, trigger, content)`
+(light-dismiss anchored panel, `.side()`), `Sheet`/`Drawer` (modal panels;
+open flag = `{name}.open` signal — set it from any handler), `SearchField`
+(editor under `name`, `{name}-input` id inside), and
+`Toast`/`Spinner`/`Chip` (in `lumen_widgets::feedback`; Toast is
+presentation-only — auto-hide policy is the app's `wake_at`).
+
+**Still missing (plan W.2 — don't assume, build from primitives or copy
+the example):** Combobox, ColorPicker, Skeleton, Avatar, Pagination,
 RangeSlider, FilePicker, pie/line charts (line chart lives in
-`examples/chart` as a `LeafWidget`). Toast/Spinner/Chip are example-only
-(`examples/toast`, `loading_spinners`, `glass`). Anything unbounded
+`examples/chart` as a `LeafWidget`). Anything unbounded
 (lists/tables) must use `virtual_list`/`data_grid` — they're O(visible).
 
 ## Step 4 — state rules (the ones that bite)

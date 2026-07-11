@@ -223,12 +223,17 @@ The defined-but-dead bucket from the 2026-07 audit is empty.
 
 Every widget ships with: rustdoc + example, `.lss`-styleable parts documented (type name + parts as classes, e.g. `slider .track`, `slider .thumb`), semantics (role/states/actions per 03 §2), keyboard map, golden test, semantic-tree test.
 
-*Status (2026-07-09):* M0 10/10 and M3 6/6 shipped; M1 17/20 (missing:
-standalone **Align**, **Popover** — overlay primitives exist); M2 4/10
-(missing: **Sheet, Drawer, SearchField**; **Toast/Spinner/Chip**
-example-only); M4 5/11 (missing: **Combobox, ColorPicker, Skeleton, Avatar,
-Pagination, RangeSlider, FilePicker, pie chart**; line chart example-only).
-Plan W.1/W.2. Widget parts-as-classes are unimplemented (plan B.7).
+*Status (2026-07-10, W.1 ✅):* M0 10/10 and M3 6/6 shipped; M1 18/20
+(missing: standalone **Align**; **Popover shipped** — `Popover::new(cx,
+name, trigger, content)`, light-dismiss, `.side(Above|Below)`; screen-edge
+auto-flip deferred, it needs post-layout placement); **M2 10/10** —
+`Sheet`/`Drawer` (signal-keyed `{name}.open`, full-window scrim +
+light-dismiss, panel anchored bottom/left/right), `SearchField`
+(TextInput + magnifier + clear), and `Toast`/`Spinner`/`Chip` promoted
+from the examples into `lumen_widgets::feedback`. M4 5/11 (missing:
+**Combobox, ColorPicker, Skeleton, Avatar, Pagination, RangeSlider,
+FilePicker, pie chart**; line chart example-only) — plan W.2. Widget
+parts-as-classes shipped for slider/progress (B.7).
 
 ## 11. Versioning
 Pre-1.0: workspace-wide lockstep version `0.x`. Public-contract changes require a decision-log entry. The facade crate `lumen` re-exports everything user-facing. **Facade rule (amended per ADR-W2):** *in-repo examples* may depend on the internal crates directly (they double as framework tests); **scaffolded user apps (`lumen new`) are facade-only** — user code depends on `lumen` and `lumen-test` alone.
