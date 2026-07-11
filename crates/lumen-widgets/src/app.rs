@@ -680,6 +680,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         for ev in events {
             self.route(ev);
         }
+        // W.2: handler-enqueued SystemRequests ride the runtime's host
+        // mailbox; drain after routing so a click's request is visible to
+        // the host/agent in the same pump.
+        self.system_requests
+            .extend(self.rt.take_posted::<crate::system::SystemRequest>());
         // Rebuild only when something that affects the frame changed:
         //  - a signal/memo write since the last build (reactive write-gen),
         //  - input-driven visual state (hover/focus/pressed) changed,

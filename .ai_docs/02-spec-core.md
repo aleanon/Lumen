@@ -223,17 +223,23 @@ The defined-but-dead bucket from the 2026-07 audit is empty.
 
 Every widget ships with: rustdoc + example, `.lss`-styleable parts documented (type name + parts as classes, e.g. `slider .track`, `slider .thumb`), semantics (role/states/actions per 03 §2), keyboard map, golden test, semantic-tree test.
 
-*Status (2026-07-10, W.1 ✅):* M0 10/10 and M3 6/6 shipped; M1 18/20
-(missing: standalone **Align**; **Popover shipped** — `Popover::new(cx,
-name, trigger, content)`, light-dismiss, `.side(Above|Below)`; screen-edge
-auto-flip deferred, it needs post-layout placement); **M2 10/10** —
-`Sheet`/`Drawer` (signal-keyed `{name}.open`, full-window scrim +
-light-dismiss, panel anchored bottom/left/right), `SearchField`
-(TextInput + magnifier + clear), and `Toast`/`Spinner`/`Chip` promoted
-from the examples into `lumen_widgets::feedback`. M4 5/11 (missing:
-**Combobox, ColorPicker, Skeleton, Avatar, Pagination, RangeSlider,
-FilePicker, pie chart**; line chart example-only) — plan W.2. Widget
-parts-as-classes shipped for slider/progress (B.7).
+*Status (2026-07-10, W.1+W.2 ✅):* **M0 10/10, M1 19/20, M2 10/10, M3
+6/6, M4 10/11.** W.1: `Popover` (light-dismiss anchored panel,
+`.side(Above|Below)`; screen-edge auto-flip deferred — needs post-layout
+placement), `Sheet`/`Drawer` (signal-keyed `{name}.open`, full-window
+scrim, panel anchored bottom/left/right), `SearchField`, and
+`Toast`/`Spinner`/`Chip` promoted into `lumen_widgets::feedback`. W.2:
+`Combobox` (filtering dropdown; selection in `{name}.selected`),
+`ColorPicker` (preset palette; hex in `{name}`; native dialog waits for
+P.4), `Skeleton`, `Avatar`, `Pagination` (`{name}.page`), `RangeSlider`
+(`{name}.lo`/`.hi`, nearer-thumb drag), `FilePicker` (rides the new
+`Runtime::post` host mailbox → `SystemRequest::OpenFile`; path lands in
+`{name}.path` when the shell fulfils it, P.4), `LineChart`/`PieChart`
+leaves (`charts::*::element(…)`), and the standalone `AlignBox`.
+Remaining: `RichTextEditor` polish is M4's last row (a basic
+`rich_text_editor` exists in `widgets_m4`); the M1 draft's `.key()`/
+generic `.on()` were superseded (W.3 scope decisions). Widget
+parts-as-classes shipped for slider/progress/range-slider (B.7).
 
 ## 11. Versioning
 Pre-1.0: workspace-wide lockstep version `0.x`. Public-contract changes require a decision-log entry. The facade crate `lumen` re-exports everything user-facing. **Facade rule (amended per ADR-W2):** *in-repo examples* may depend on the internal crates directly (they double as framework tests); **scaffolded user apps (`lumen new`) are facade-only** — user code depends on `lumen` and `lumen-test` alone.

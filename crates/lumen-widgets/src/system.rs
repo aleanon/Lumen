@@ -73,7 +73,7 @@ impl MenuModel {
 
 /// A request to an OS service. The headless layer records these; the real shell
 /// fulfils them (and may feed a result back as an event).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SystemRequest {
     /// Show a desktop notification.
@@ -131,4 +131,13 @@ pub fn system_info() -> SystemInfo {
             .map(|n| n.get())
             .unwrap_or(1),
     }
+}
+
+/// Enqueue a [`SystemRequest`] from a handler (`Fn(&Runtime)`) — widgets
+/// only hold `&Runtime`, so requests ride the runtime's host mailbox
+/// (`Runtime::post`; transient, never snapshotted) and `pump` drains them
+/// into `Headless::system_requests` (agent verb `app.systemRequests`; the
+/// shell fulfils them).
+pub fn queue_system(rt: &lumen_core::state::Runtime, req: SystemRequest) {
+    rt.post(req);
 }

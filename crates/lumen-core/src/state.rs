@@ -227,6 +227,11 @@ struct Inner {
     // restore
     #[cfg(feature = "snapshot")]
     pending: HashMap<String, serde_json::Value>,
+    /// Host mailbox (W.2): transient messages from handlers to the host
+    /// (e.g. `SystemRequest`s). Runtime-internal — never part of a snapshot,
+    /// unlike the store — so posting one can't create `W0002` churn on
+    /// tier-3 restore.
+    posted: Vec<Box<dyn std::any::Any>>,
     #[cfg(feature = "snapshot")]
     restore_diags: Vec<Diagnostic>,
 }
@@ -721,6 +726,29 @@ impl Runtime {
             self.flush();
         }
         diags
+    }
+
+    /// Post a transient message to the host mailbox (W.2) — the channel for
+    /// handler-side requests that must reach the host loop (the widget layer
+    /// drains `SystemRequest`s each pump). Not reactive, not snapshotted.
+    pub fn post<T: 'static>(&self, msg: T) {
+        self.inner.borrow_mut().posted.push(Box::new(msg));
+    }
+
+    /// Take every posted message of type `T`, preserving order; other types
+    /// stay queued.
+    pub fn take_posted<T: 'static>(&self) -> Vec<T> {
+        let mut b = self.inner.borrow_mut();
+        let mut out = Vec::new();
+        let mut keep = Vec::new();
+        for item in b.posted.drain(..) {
+            match item.downcast::<T>() {
+                Ok(v) => out.push(*v),
+                Err(other) => keep.push(other),
+            }
+        }
+        b.posted = keep;
+        out
     }
 
     // --- internals ----------------------------------------------------------

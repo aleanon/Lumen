@@ -15,7 +15,10 @@ pub mod asset;
 pub mod audit;
 pub mod boundary;
 pub mod button;
+pub mod charts;
 pub mod check_box;
+pub mod color_picker;
+pub mod combobox;
 pub mod container;
 /// Design-spec (JSON) → `.lss` import — an agent/tooling surface, so it lives
 /// behind `snapshot` (drops `serde_json` in a lean build).
@@ -24,18 +27,22 @@ pub mod design;
 pub mod element;
 /// W.1 promotions: Toast, Spinner, Chip.
 pub mod feedback;
+pub mod file_picker;
 pub mod forms;
 pub mod grid;
 pub mod i18n;
 pub mod label;
 mod macros;
 pub mod markdown;
+/// W.2 small widgets: Skeleton, Avatar, Pagination, AlignBox.
+pub mod misc_w2;
 pub mod motion;
 pub mod nav;
 pub mod pick_list;
 pub mod popover;
 pub mod progress_bar;
 pub mod radio;
+pub mod range_slider;
 pub mod rule;
 pub mod scrollable;
 pub mod search_field;
@@ -147,15 +154,21 @@ pub fn renderer_override() -> Option<Box<dyn Renderer>> {
 // file. Lower to `Element` via `From`; compose with `col!`/`row!` or `Container`.
 pub use accordion::Accordion;
 pub use button::Button;
+pub use charts::{LineChart, PieChart, PieSlice};
 pub use check_box::CheckBox;
+pub use color_picker::ColorPicker;
+pub use combobox::Combobox;
 pub use container::Container;
 pub use feedback::{Chip, Spinner, Toast, ToastKind};
+pub use file_picker::FilePicker;
 pub use grid::{CellRef, Grid, GridStyle};
 pub use label::Label;
+pub use misc_w2::{AlignBox, Avatar, Pagination, Skeleton};
 pub use pick_list::PickList;
 pub use popover::{Popover, PopoverSide};
 pub use progress_bar::ProgressBar;
 pub use radio::Radio;
+pub use range_slider::RangeSlider;
 pub use rule::Rule;
 pub use scrollable::Scrollable;
 pub use search_field::SearchField;

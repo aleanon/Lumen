@@ -79,10 +79,13 @@ open flag = `{name}.open` signal — set it from any handler), `SearchField`
 `Toast`/`Spinner`/`Chip` (in `lumen_widgets::feedback`; Toast is
 presentation-only — auto-hide policy is the app's `wake_at`).
 
-**Still missing (plan W.2 — don't assume, build from primitives or copy
-the example):** Combobox, ColorPicker, Skeleton, Avatar, Pagination,
-RangeSlider, FilePicker, pie/line charts (line chart lives in
-`examples/chart` as a `LeafWidget`). Anything unbounded
+**Shipped with W.2:** `Combobox` (filtering; `{name}.selected`),
+`ColorPicker` (preset palette → hex in `{name}`), `Skeleton`, `Avatar`,
+`Pagination` (`{name}.page`), `RangeSlider` (`{name}.lo`/`.hi`),
+`FilePicker` (queues `SystemRequest::OpenFile` via the `Runtime::post`
+host mailbox — visible in `app.systemRequests`; native dialog lands with
+P.4), `LineChart::element(values, labels)` / `PieChart::element(slices)`,
+`AlignBox::center(child)`. Anything unbounded
 (lists/tables) must use `virtual_list`/`data_grid` — they're O(visible).
 
 ## Step 4 — state rules (the ones that bite)
