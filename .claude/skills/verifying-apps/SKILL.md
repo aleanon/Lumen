@@ -87,6 +87,12 @@ python3 scripts/agent_client.py click '#save'
 python3 scripts/agent_client.py screenshot /tmp/after.png
 ```
 
+Also available (C.8b): `lumen inspect` — pretty semantic tree straight
+from the discovered endpoint (`lumen inspect '#save'` → styles+layout for
+one node); `lumen agent serve` — launch the current crate with the agent
+on an ephemeral port + discovery file; `lumen test --platform gpu` — run
+the `platform(gpu)`-ignored tests with `LUMEN_RENDERER=wgpu` (name your
+gpu tests with `gpu` in them: that's the cargo filter).
 Also available (C.5): `lumen agent call <method> ['{json}']` (the CLI
 one-shot, auto-discovers the address) and `lumen agent mcp` (an MCP stdio
 server proxying to the live window — for MCP-speaking clients).

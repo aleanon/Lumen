@@ -27,6 +27,10 @@ fn run() -> i32 {
         Some("new") => cmd_new(positional.get(1).copied(), json),
         Some("test") => match platform.as_deref() {
             Some(p @ ("android" | "ios_sim" | "web")) => cmd_mobile("test", p, json),
+            // C.8b: run the `#[lumen_test::test(platform(gpu))]`-ignored
+            // tests against the GPU renderer. Convention: their names
+            // contain `gpu` (that's cargo's positional filter below).
+            Some("gpu") => cmd_gpu_test(json),
             Some(other) => fail(json, "test", &format!("unknown platform `{other}`")),
             None => cmd_passthrough("test", &["test"], json),
         },
@@ -37,7 +41,7 @@ fn run() -> i32 {
         },
         Some("package") => cmd_package(json),
         Some("add") => cmd_add(positional.get(1).copied(), json),
-        // C.5: the packaged agent client + MCP stdio server.
+        // C.5/C.8b: the packaged agent client + MCP stdio server + serve.
         Some("agent") => match positional.get(1).copied() {
             Some("call") => lumen_cli::agent::cmd_call(
                 positional.get(2).copied(),
@@ -45,13 +49,16 @@ fn run() -> i32 {
                 json,
             ),
             Some("mcp") => lumen_cli::agent::cmd_mcp(),
-            _ => fail(json, "agent", "usage: lumen agent <call|mcp> …"),
+            Some("serve") => lumen_cli::agent::cmd_serve(),
+            _ => fail(json, "agent", "usage: lumen agent <call|mcp|serve> …"),
         },
+        // C.8b: human-oriented view of the running app.
+        Some("inspect") => lumen_cli::agent::cmd_inspect(positional.get(1).copied(), json),
         Some(other) => fail(json, "usage", &format!("unknown command `{other}`")),
         None => fail(
             json,
             "usage",
-            "usage: lumen <new|run|test|package|add|agent> [--platform <p>] [--json]",
+            "usage: lumen <new|run|test|package|add|agent|inspect> [--platform <p>] [--json]",
         ),
     }
 }
@@ -380,7 +387,32 @@ fn cmd_new(name: Option<&str>, json: bool) -> i32 {
 
 /// `lumen test` / `lumen run`: wrap the corresponding cargo command.
 fn cmd_passthrough(command: &str, cargo_args: &[&str], json: bool) -> i32 {
-    match Command::new("cargo").args(cargo_args).output() {
+    cmd_passthrough_env(command, cargo_args, &[], json)
+}
+
+/// C.8b `lumen test --platform gpu`: run the GPU-platform tests (ignored by
+/// default; names contain `gpu`) with the GPU renderer selected.
+fn cmd_gpu_test(json: bool) -> i32 {
+    cmd_passthrough_env(
+        "test",
+        &["test", "--workspace", "--", "--ignored", "gpu"],
+        &[("LUMEN_RENDERER", "wgpu")],
+        json,
+    )
+}
+
+fn cmd_passthrough_env(
+    command: &str,
+    cargo_args: &[&str],
+    envs: &[(&str, &str)],
+    json: bool,
+) -> i32 {
+    let mut cmd = Command::new("cargo");
+    cmd.args(cargo_args);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    match cmd.output() {
         Ok(out) => {
             let success = out.status.success();
             if json {

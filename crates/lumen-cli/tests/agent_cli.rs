@@ -94,3 +94,43 @@ fn agent_mcp_serves_tools_and_proxies_calls() {
     let _ = child.wait();
     server.join().unwrap();
 }
+
+#[test]
+fn inspect_pretty_prints_the_tree() {
+    // C.8b: `lumen inspect` renders role#id "label" [states] lines.
+    let (addr, server) = canned_endpoint(
+        "ui.getTree",
+        json!({ "root": {
+            "role": "window",
+            "children": [
+                { "role": "button", "id": "save", "label": "Save",
+                  "states": ["disabled"], "children": [] }
+            ]
+        }}),
+    );
+    let out = Command::new(lumen())
+        .args(["inspect"])
+        .env("LUMEN_AGENT_ADDR", &addr)
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("window"), "{stdout}");
+    assert!(
+        stdout.contains("button#save \"Save\" [disabled]"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn inspect_without_an_app_fails_readably() {
+    let out = Command::new(lumen())
+        .args(["inspect"])
+        .env("LUMEN_AGENT_ADDR", "127.0.0.1:1") // nothing listens here
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("agent serve"), "points at the fix: {err}");
+}

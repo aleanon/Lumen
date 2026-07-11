@@ -151,3 +151,107 @@ pub fn cmd_mcp() -> i32 {
     }
     0
 }
+
+/// C.8b `lumen inspect [selector]`: a human-oriented view of the running
+/// app. Without a selector, pretty-prints the semantic tree (role, id,
+/// label/value, states, bounds); with one, the node's computed styles +
+/// layout. A thin formatter over `ui.getTree`/`ui.getStyles`/`ui.getLayout`
+/// against the discovered endpoint (`LUMEN_AGENT_ADDR` / the discovery
+/// file).
+pub fn cmd_inspect(selector: Option<&str>, json_out: bool) -> i32 {
+    match selector {
+        None => match rpc_line(&discover_addr(), "ui.getTree", json!({})) {
+            Ok(reply) => {
+                if json_out {
+                    println!("{reply}");
+                } else if let Some(root) = reply.pointer("/result/root") {
+                    print_node(root, 0);
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&reply).unwrap());
+                }
+                i32::from(reply.get("error").is_some())
+            }
+            Err(e) => {
+                eprintln!("inspect: cannot reach the app's agent endpoint: {e}");
+                eprintln!("(is the app running? start it with `lumen agent serve`)");
+                1
+            }
+        },
+        Some(sel) => {
+            let styles = rpc_line(&discover_addr(), "ui.getStyles", json!({ "selector": sel }));
+            let layout = rpc_line(&discover_addr(), "ui.getLayout", json!({ "selector": sel }));
+            match (styles, layout) {
+                (Ok(st), Ok(la)) => {
+                    let combined = json!({
+                        "selector": sel,
+                        "styles": st.get("result").cloned().unwrap_or(Value::Null),
+                        "layout": la.get("result").cloned().unwrap_or(Value::Null),
+                    });
+                    println!("{}", serde_json::to_string_pretty(&combined).unwrap());
+                    i32::from(st.get("error").is_some() && la.get("error").is_some())
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    eprintln!("inspect: cannot reach the app's agent endpoint: {e}");
+                    1
+                }
+            }
+        }
+    }
+}
+
+/// One line per node: `role#id "label" [states] @x,y wxh`, indented.
+fn print_node(n: &Value, depth: usize) {
+    let g = |k: &str| n.get(k).and_then(|v| v.as_str()).unwrap_or_default();
+    let mut line = format!("{}{}", "  ".repeat(depth), g("role"));
+    if !g("id").is_empty() {
+        line.push_str(&format!("#{}", g("id")));
+    }
+    if !g("label").is_empty() {
+        line.push_str(&format!(" {:?}", g("label")));
+    } else if !g("value").is_empty() {
+        line.push_str(&format!(" {:?}", g("value")));
+    }
+    if let Some(states) = n.get("states").and_then(|v| v.as_array()) {
+        if !states.is_empty() {
+            let s: Vec<&str> = states.iter().filter_map(|v| v.as_str()).collect();
+            line.push_str(&format!(" [{}]", s.join(",")));
+        }
+    }
+    if let Some(b) = n.get("bounds").and_then(|v| v.as_array()) {
+        if b.len() == 4 {
+            line.push_str(&format!(
+                " @{:.0},{:.0} {:.0}x{:.0}",
+                b[0].as_f64().unwrap_or(0.0),
+                b[1].as_f64().unwrap_or(0.0),
+                b[2].as_f64().unwrap_or(0.0) - b[0].as_f64().unwrap_or(0.0),
+                b[3].as_f64().unwrap_or(0.0) - b[1].as_f64().unwrap_or(0.0),
+            ));
+        }
+    }
+    println!("{line}");
+    if let Some(children) = n.get("children").and_then(|v| v.as_array()) {
+        for c in children {
+            print_node(c, depth + 1);
+        }
+    }
+}
+
+/// C.8b `lumen agent serve`: run the current crate's app with the always-on
+/// agent bound to an ephemeral port (`LUMEN_AGENT_ADDR=127.0.0.1:0`); the
+/// bound address lands in the discovery file (`target/lumen-agent.addr`)
+/// that `lumen agent call` / `lumen inspect` read. Streams the app's stdio.
+pub fn cmd_serve() -> i32 {
+    eprintln!("lumen agent serve: launching with LUMEN_AGENT_ADDR=127.0.0.1:0");
+    eprintln!("(bound address appears in target/lumen-agent.addr)");
+    match std::process::Command::new("cargo")
+        .args(["run"])
+        .env("LUMEN_AGENT_ADDR", "127.0.0.1:0")
+        .status()
+    {
+        Ok(st) => st.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!("agent serve: failed to launch `cargo run`: {e}");
+            1
+        }
+    }
+}
