@@ -39,6 +39,17 @@ pub struct Wgpu {
     /// one up. `None` for headless rendering. Lets the renderer present a frame
     /// straight to the swapchain (GPU→GPU blit) with no CPU readback.
     surface: Option<SurfaceState>,
+    /// R.2: content-hash → uploaded image bind group. Same texture bytes
+    /// stop round-tripping the PCIe bus every frame (text/shadow sprites,
+    /// icons). Half-retained at the cap, matching the R.5 doctrine.
+    img_cache:
+        std::cell::RefCell<std::collections::HashMap<(u64, u8), std::rc::Rc<wgpu::BindGroup>>>,
+    /// R.2: (path + style + color) hash → tessellated geometry. Lyon runs
+    /// once per distinct path; repeat frames append cached triangles.
+    #[allow(clippy::type_complexity)]
+    tess_cache: std::cell::RefCell<
+        std::collections::HashMap<u64, std::rc::Rc<(Vec<PathVertex>, Vec<u32>)>>,
+    >,
     rect_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
     glyph_pipeline: wgpu::RenderPipeline,
@@ -153,6 +164,9 @@ struct KeepAlive {
     views: Vec<wgpu::TextureView>,
     buffers: Vec<wgpu::Buffer>,
     binds: Vec<wgpu::BindGroup>,
+    /// R.2: cached image bind groups referenced by this frame (Rc so the
+    /// cache and in-flight frames share the texture).
+    rc_binds: Vec<std::rc::Rc<wgpu::BindGroup>>,
 }
 
 #[repr(C)]
@@ -216,7 +230,7 @@ enum LayerDraw {
     },
     Image {
         buf: wgpu::Buffer,
-        bind: wgpu::BindGroup,
+        bind: std::rc::Rc<wgpu::BindGroup>,
     },
     /// Instanced glyph quads sampling the shared glyph atlas (R3.3).
     Glyphs {
@@ -309,6 +323,30 @@ impl crate::Renderer for Wgpu {
         background: Color,
     ) -> RgbaImage {
         self.render_at_scale(list, width, height, scale, background)
+    }
+
+    fn render_damage(
+        &mut self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+        dirty: kurbo::Rect,
+    ) -> RgbaImage {
+        // R.1: cull to the damage region before encoding — vertex, fragment,
+        // and upload work drop to the damaged commands (shared cull with the
+        // CPU path; the R0 corpus proves culled ≡ full). A swapchain-
+        // preserving scissored path is the bench-gated follow-up: it needs
+        // timestamp-query instrumentation to prove itself, and the present
+        // path still renders full frames for the live agent's readback.
+        let culled = list.culled_for_damage(dirty);
+        let full = self.render_at_scale(&culled, width, height, scale, background);
+        let x = dirty.x0.floor().max(0.0) as u32;
+        let y = dirty.y0.floor().max(0.0) as u32;
+        let w = (dirty.x1.ceil().min(width as f64) - x as f64).max(0.0) as u32;
+        let h = (dirty.y1.ceil().min(height as f64) - y as f64).max(0.0) as u32;
+        full.crop(x, y, w, h)
     }
 
     fn name(&self) -> &'static str {
@@ -837,6 +875,8 @@ impl Wgpu {
         });
 
         Some(Wgpu {
+            img_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            tess_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             device,
             queue,
             instance,
@@ -1336,7 +1376,7 @@ impl Wgpu {
                     style,
                 } => {
                     flush_rects(device, &mut ops, &mut pend_rects);
-                    pend_paths.add(path, [c.r, c.g, c.b, c.a], *style);
+                    pend_paths.add_cached(&self.tess_cache, path, [c.r, c.g, c.b, c.a], *style);
                     i += 1;
                 }
                 DrawCmd::Rect {
@@ -1707,11 +1747,15 @@ impl Wgpu {
                     keep.buffers.push(vbuf);
                     keep.buffers.push(ibuf);
                 }
-                LayerDraw::Gradient { buf, bind }
-                | LayerDraw::Image { buf, bind }
-                | LayerDraw::Composite { buf, bind } => {
+                LayerDraw::Gradient { buf, bind } | LayerDraw::Composite { buf, bind } => {
                     keep.buffers.push(buf);
                     keep.binds.push(bind);
+                }
+                LayerDraw::Image { buf, bind } => {
+                    keep.buffers.push(buf);
+                    // Parking the Rc keeps the texture alive through submit
+                    // even if the cache evicts it meanwhile.
+                    keep.rc_binds.push(bind);
                 }
                 LayerDraw::Backdrop { .. } => {}
             }
@@ -2002,7 +2046,20 @@ impl Wgpu {
         (composite_bind, instance)
     }
 
-    fn upload_image(&self, img: &RgbaImage, quality: Filter) -> wgpu::BindGroup {
+    fn upload_image(&self, img: &RgbaImage, quality: Filter) -> std::rc::Rc<wgpu::BindGroup> {
+        // R.2: content-hash cache — identical bytes reuse the uploaded
+        // texture + bind group instead of re-crossing the bus.
+        use std::hash::{Hash, Hasher};
+        let key = {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            img.width().hash(&mut h);
+            img.height().hash(&mut h);
+            img.pixels().hash(&mut h);
+            (h.finish(), matches!(quality, Filter::Bilinear) as u8)
+        };
+        if let Some(hit) = self.img_cache.borrow().get(&key) {
+            return hit.clone();
+        }
         // Nearest for crisp/pixel-art (and cached text/shadow sprites, which are
         // drawn 1:1); bilinear for smoothly-scaled images. Both filter in gamma
         // space (the texture holds sRGB bytes), matching the CPU reference.
@@ -2041,7 +2098,7 @@ impl Wgpu {
             size,
         );
         let view = tex.create_view(&Default::default());
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("img-bg"),
             layout: &self.image_bgl,
             entries: &[
@@ -2054,7 +2111,20 @@ impl Wgpu {
                     resource: wgpu::BindingResource::Sampler(sampler),
                 },
             ],
-        })
+        });
+        let rc = std::rc::Rc::new(bg);
+        let mut cache = self.img_cache.borrow_mut();
+        // Half-retention at the cap (R.5 doctrine): drop an arbitrary half
+        // rather than everything, so a cap crossing never costs a full
+        // re-upload of the working set.
+        if cache.len() >= 128 {
+            let keys: Vec<_> = cache.keys().copied().step_by(2).collect();
+            for k in keys {
+                cache.remove(&k);
+            }
+        }
+        cache.insert(key, rc.clone());
+        rc
     }
 
     /// Render a WGSL fragment shader to an [`RgbaImage`] (T4.1 ShaderWidget).
@@ -2300,6 +2370,79 @@ struct PathGeometry {
 }
 
 impl PathGeometry {
+    /// R.2: append cached geometry (index-offset splice).
+    fn append(&mut self, geo: &(Vec<PathVertex>, Vec<u32>)) {
+        let base = self.vertices.len() as u32;
+        self.vertices.extend_from_slice(&geo.0);
+        self.indices.extend(geo.1.iter().map(|i| base + i));
+    }
+
+    /// Tessellate-with-cache: identical (path, color, style) triples reuse
+    /// lyon's output across frames (R.2). Half-retained at the cap.
+    #[allow(clippy::type_complexity)]
+    fn add_cached(
+        &mut self,
+        cache: &std::cell::RefCell<
+            std::collections::HashMap<u64, std::rc::Rc<(Vec<PathVertex>, Vec<u32>)>>,
+        >,
+        path: &kurbo::BezPath,
+        color: [f32; 4],
+        style: FillOrStroke,
+    ) {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for el in path.elements() {
+            std::mem::discriminant(el).hash(&mut h);
+            let pts: &[kurbo::Point] = match el {
+                kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => std::slice::from_ref(p),
+                kurbo::PathEl::QuadTo(a, b) => {
+                    a.x.to_bits().hash(&mut h);
+                    a.y.to_bits().hash(&mut h);
+                    std::slice::from_ref(b)
+                }
+                kurbo::PathEl::CurveTo(a, b, c) => {
+                    a.x.to_bits().hash(&mut h);
+                    a.y.to_bits().hash(&mut h);
+                    b.x.to_bits().hash(&mut h);
+                    b.y.to_bits().hash(&mut h);
+                    std::slice::from_ref(c)
+                }
+                kurbo::PathEl::ClosePath => &[],
+            };
+            for p in pts {
+                p.x.to_bits().hash(&mut h);
+                p.y.to_bits().hash(&mut h);
+            }
+        }
+        for c in color {
+            c.to_bits().hash(&mut h);
+        }
+        match style {
+            FillOrStroke::Fill => 0u8.hash(&mut h),
+            FillOrStroke::Stroke { width } => {
+                1u8.hash(&mut h);
+                (width as f32).to_bits().hash(&mut h);
+            }
+        }
+        let key = h.finish();
+        if let Some(hit) = cache.borrow().get(&key) {
+            self.append(hit);
+            return;
+        }
+        let mut fresh = PathGeometry::default();
+        fresh.add(path, color, style);
+        let geo = std::rc::Rc::new((fresh.vertices, fresh.indices));
+        self.append(&geo);
+        let mut c = cache.borrow_mut();
+        if c.len() >= 256 {
+            let keys: Vec<_> = c.keys().copied().step_by(2).collect();
+            for k in keys {
+                c.remove(&k);
+            }
+        }
+        c.insert(key, geo);
+    }
+
     /// Tessellate one kurbo path (filled or stroked) into the shared buffers.
     fn add(&mut self, path: &kurbo::BezPath, color: [f32; 4], style: FillOrStroke) {
         use lyon::tessellation::{

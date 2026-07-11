@@ -291,11 +291,23 @@ new widget follows writing-widgets (test triple + example + live smoke).
 
 - **R.1 (M)** GPU damage scissor (damage already computed; set scissor +
   preserve swapchain / persistent-texture + partial blit). [G perf#4]
+  *(Amendment 2026-07-11: shipped as the shared damage cull —
+  `DisplayList::culled_for_damage` (both backends): a damaged GPU frame
+  encodes/rasterizes only the damaged commands, proven ≡ full by the R0
+  corpus. The swapchain-preserving scissored-pass variant is bench-gated:
+  it needs timestamp-query instrumentation to prove itself, and the
+  present path renders full frames for the live agent's readback anyway.)*
 - **R.2 (M)** Lyon tessellation cache (path+style hash — the R1.3
   promise); persistent uniform/instance buffers (ring allocator);
   ImageId/content-hash texture + ramp cache; skip root blit when no
   backdrop layers; cross-frame layer caching where layers are stable.
   [G perf#4, D#38]
+  *(Amendment 2026-07-11: shipped — content-hash image texture+bind cache
+  (128-entry, half-retained) and the lyon tessellation cache
+  (path+color+style hash, 256-entry, half-retained); GPU determinism +
+  parity suites green. Bench-gated remainder: uniform/instance ring
+  allocators, root-blit skip, cross-frame layer caching — each needs the
+  timestamp-query bench to prove wins before adding complexity.)*
 - **R.3 (M)** CPU path: cull DrawCmds against damage rect pre-raster; wire
   `cull_visible` into paint. [G perf#3, D#38 adj.]
 - **R.4 (S)** Release profile `strip = true` — **`panic = "abort"` is
