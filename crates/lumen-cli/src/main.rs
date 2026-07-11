@@ -54,11 +54,13 @@ fn run() -> i32 {
         },
         // C.8b: human-oriented view of the running app.
         Some("inspect") => lumen_cli::agent::cmd_inspect(positional.get(1).copied(), json),
+        // C.7: the tier-2/3 live dev host — build, load, watch, swap.
+        Some("dev") => cmd_dev(positional.get(1).copied(), positional.get(2).copied(), json),
         Some(other) => fail(json, "usage", &format!("unknown command `{other}`")),
         None => fail(
             json,
             "usage",
-            "usage: lumen <new|run|test|package|add|agent|inspect> [--platform <p>] [--json]",
+            "usage: lumen <new|run|test|package|add|agent|inspect|dev> [--platform <p>] [--json]",
         ),
     }
 }
@@ -388,6 +390,36 @@ fn cmd_new(name: Option<&str>, json: bool) -> i32 {
 /// `lumen test` / `lumen run`: wrap the corresponding cargo command.
 fn cmd_passthrough(command: &str, cargo_args: &[&str], json: bool) -> i32 {
     cmd_passthrough_env(command, cargo_args, &[], json)
+}
+
+/// C.7 `lumen dev <component-crate> <watch-path>`: build the component
+/// cdylib, host it in the live tier-2 driver, and rebuild+swap on every
+/// change (ABI mismatch downgrades to a tier-3 snapshot restart). Emits one
+/// `ReloadResult`-shaped JSON line per applied build.
+fn cmd_dev(krate: Option<&str>, watch: Option<&str>, json: bool) -> i32 {
+    let (Some(krate), Some(watch)) = (krate, watch) else {
+        return fail(
+            json,
+            "dev",
+            "usage: lumen dev <component-crate> <watch-path>",
+        );
+    };
+    let dylib = match lumen_cli::dev::Tier2Driver::build_component(krate) {
+        Ok(p) => p,
+        Err(e) => return fail(json, "dev", &e),
+    };
+    let mut driver = match lumen_cli::dev::Tier2Driver::start(
+        &dylib,
+        lumen_core::geometry::Size::new(800.0, 600.0),
+    ) {
+        Ok(d) => d,
+        Err(e) => return fail(json, "dev", &e),
+    };
+    eprintln!("lumen dev: hosting {krate}; watching {watch} (tier-2 swap, tier-3 on ABI change)");
+    match driver.watch_and_apply(krate, std::path::Path::new(watch)) {
+        Ok(()) => 0,
+        Err(e) => fail(json, "dev", &e.to_string()),
+    }
 }
 
 /// C.8b `lumen test --platform gpu`: run the GPU-platform tests (ignored by

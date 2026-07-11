@@ -218,19 +218,22 @@ discovery + `app.quit` + `just stop-agent`.)*
   reports diagnostics. The CLI has the same watcher for headless use
   (`watch_file`/`tier1_reload`), emitting a `ReloadResult { tier, status,
   duration_ms, diagnostics }` JSON shape.
-- **Tier-2 swap mechanics:** cdylib registry + `libloading` swap with an
-  `lumen_abi_hash` gate and tier-3 downgrade exist as a tested library
-  (`lumen-cli/src/hotpatch.rs`, fixtures `crates/fixtures/hot_*`); there is
-  no live rebuild-and-push driver yet.
-- **Tier-3 state restore:** `AppSnapshot` + `run_headless_restored`
-  round-trip signals/scroll/focus; no process-level restart driver yet.
+- **Tier-2/3 live orchestration (C.7 ✅):** `lumen dev <crate> <path>` /
+  `lumen_cli::dev::Tier2Driver` — watch → `cargo build -p` → swap into the
+  RUNNING host app in place (`HotComponent::swap`, `lumen_abi_hash` gated;
+  host state untouched by construction); an ABI mismatch downgrades to the
+  tier-3 restart driver (in-process `restart_request` + `state_snapshot`
+  handoff: snapshot → fresh load → `run_headless_restored`). One
+  `ReloadResult`-shaped JSON line per applied build. Verified end-to-end:
+  live counter state survives both tiers (tests/tier2_driver.rs).
 
 **Deferred (ADR-D2, 2026-07-08):** the length-prefixed socketed dev-server
 protocol (`LUMEN_DEV_ADDR`, `style_update`/`shader_update`/`asset_update`/
 `dylib_update`/`restart_request`/`ping` server→app; `hello {abi_hash}`/
 `reload_result`/`log`/`diagnostic`/`state_snapshot`/`pong` app→server;
 automatic tier-2→3 downgrade on `abi_hash` mismatch) is **design, not
-implementation**. It is built when its first consumer lands — the live
-tier-2 push (plan C.7), device test proxying (plan P.1), or the web agent
-bridge (plan P.2) — and this section then becomes normative again. The
+implementation**. C.7's live tier-2 loop landed **in-process** (per this
+ADR's preference), so the socket's remaining consumers are device test
+proxying (plan P.1) and the web agent bridge (plan P.2); the section
+becomes normative when one of those builds it. The
 message vocabulary above is preserved as that design.
