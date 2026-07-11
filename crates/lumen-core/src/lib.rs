@@ -17,6 +17,9 @@ pub mod events;
 pub mod geometry;
 pub mod gesture;
 pub mod identity;
+/// `#[state_registry]` runtime support (02 §4): stored trait objects.
+#[cfg(feature = "snapshot")]
+pub mod registry;
 pub mod semantics;
 pub mod state;
 pub mod tasks;

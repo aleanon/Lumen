@@ -95,7 +95,10 @@ RangeSlider, FilePicker, pie/line charts (line chart lives in
 - Keyed dynamic lists: `widgets::keyed(...)`; namespace per-item signals
   (`format!("todo-{id}.done")` — dashes only, see Step 6).
 - State types stay serializable (default `snapshot` feature): prefer
-  sorted `Vec<(K, V)>` over maps with non-string keys.
+  sorted `Vec<(K, V)>` over maps with non-string keys. `Box<dyn Trait>`
+  is storable via `#[lumen_macros::state_registry]` on the trait +
+  `lumen_core::stored_type!(Ty as "tag")` + `register_<trait>::<Ty>("tag")`
+  at startup (W.4c) — unregistered tags drop with W0002 on restore.
 - Reactive text/background without a rebuild: `text!(cx, "…{sig}…")` and
   `bind!` — background binds are paint-only patches (cheapest update).
 

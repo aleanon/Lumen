@@ -28,7 +28,7 @@ Generational `NodeIndex`; intrusive tree links + parallel arrays per 02 §5; ins
 *Accept:* `cargo test -p lumen-core tree::` — incl. property tests (proptest): 10k random tree edits preserve invariants (no dangling indices, parent/child symmetry); hit-test agrees with a naive reference implementation on 1k random scenes.
 
 **T0.3 ☑ Signals + state store + checkpoint.** Deps: T0.2
-`signal/memo/effect/resource` per 02 §4; identity-path keying; batched writes; subscriber-only invalidation; `Checkpoint` impl: snapshot → restore round-trip; `#[state_registry]` macro for stored trait objects; W0002 lenient deserialization. *(Truth note: T0.3 shipped the round-trip as ad-hoc fns; the `Checkpoint` trait itself landed 2026-07-10 — plan W.4b, incl. live in-place restore. `#[state_registry]` remains planned — plan W.4.)*
+`signal/memo/effect/resource` per 02 §4; identity-path keying; batched writes; subscriber-only invalidation; `Checkpoint` impl: snapshot → restore round-trip; `#[state_registry]` macro for stored trait objects; W0002 lenient deserialization. *(Truth note: T0.3 shipped the round-trip as ad-hoc fns; the `Checkpoint` trait itself landed 2026-07-10 — plan W.4b, incl. live in-place restore. `#[state_registry]` shipped 2026-07-10 — plan W.4c.)*
 *Accept:* `cargo test -p lumen-core state::` — incl.: writing 1 of 10k signals re-runs exactly 1 scope (counted); snapshot/restore of a 1k-signal store is lossless; struct-evolution fixture (field added/removed) restores with defaults + W0002.
 
 **T0.4 ☑ Display list + CPU renderer.** Deps: T0.1
