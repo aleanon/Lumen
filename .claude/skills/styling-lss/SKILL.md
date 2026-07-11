@@ -48,6 +48,7 @@ border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 | `clip: none\|bounds\|rounded` | overrides the element's `.clip(bool)`; `bounds` = square corners, `rounded` = follow border-radius (B.3) |
 | `visibility: hidden` | removes the subtree from paint, hit-testing, AND semantics (agents don't see it); layout space is kept (B.3) |
 | `shadow: <dx> <dy> [blur] [spread] <color>` | single outer shadow (B.3); `inset`/comma lists unsupported — `inset` disables the declaration |
+| inline styles: `.css(Style::new().background(c)…)` on any widget/Element | `Origin::Inline` — beats sheet rules unless `!important`; layout fields reach taffy; works with no stylesheet at all (B.6b) |
 | `@media container(width > 200px)` | tests the nearest `Element::container()` ancestor's laid-out size (not the window); only width/height; false with no container ancestor (B.2b) |
 | widget parts: `slider .track`, `slider .thumb`, `progress .fill` | parts are classes on the internals, scoped by the ancestor chain; custom widgets expose parts with `Element::part("thumb")` (B.7) |
 | relative colors `oklch(from <color or $token> L C H)` | channel keywords `l`/`c`/`h` + `calc(l + 0.06)` (`+ - *`, left-to-right, spaces around operators); alpha from the base; `$token`s resolve inside function args/shorthand lists (B.7) |

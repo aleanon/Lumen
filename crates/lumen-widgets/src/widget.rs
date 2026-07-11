@@ -35,6 +35,11 @@ macro_rules! impl_common {
                 self.el = self.el.style(s);
                 self
             }
+            /// Apply a typed inline `.lss` style (B.6b, `Origin::Inline`).
+            pub fn css(mut self, s: lumen_style::Style) -> Self {
+                self.el = self.el.css(s);
+                self
+            }
             /// Borrow the built element (inspection/tests).
             pub fn element(&self) -> &$crate::Element {
                 &self.el

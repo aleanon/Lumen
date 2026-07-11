@@ -94,6 +94,17 @@ let s = Style::new().background(theme.primary()).padding(8.0).radius(6.0)
     .transition(Prop::Background, 120.ms(), Easing::Ease);
 Button::new("Save").style(s)
 ```
+
+*Status (B.6b):* the inline tier ships as `.css(Style)` on widgets and
+`Element::css` (the draft's `.style(s)` name was already taken by
+`LayoutStyle`). Field-wise merge at `Origin::Inline`: beats stylesheet
+declarations unless `!important` (§2), participates in the pre-layout merge
+(inline layout properties reach taffy), survives the A.5 restyle path, and
+works without any stylesheet. `ui.getStyles` reports `source: "inline"` for
+scalar/color values; compound fields (gradients, shadows, per-side arrays,
+backdrop) apply but are not serialized yet. `transition(…)` setters remain
+B.5. The framework-default sheet (`Origin::Default`) is still open —
+widget defaults stay hardcoded on the elements.
 Every `.lss` property has exactly one corresponding typed setter; the macro test `style_parity!` asserts the sets stay equal (part of M1 DoD).
 
 ## 9. Error behavior
@@ -133,8 +144,8 @@ left-to-right, spaces required around operators; alpha inherited from the
 base; `$token`s now resolve inside function args and shorthand lists too);
 theme-switch animation **missing** (B.5); widget
 parts **work** (B.7 ✅ — `slider .track`/`.thumb`, `progress .fill`;
-`Element::part` for custom widgets); cascade origins other
-than the app sheet **unreachable** (B.6); `style_parity!` asserts **set
+`Element::part` for custom widgets); cascade origins: **inline works** (B.6b ✅ — `.css(Style)`, see §8);
+`Origin::Default` (framework sheet) still unreachable; `style_parity!` asserts **set
 equality** over `APPLIED_PROPERTIES` in both directions (B.7 ✅ — every
 applied property has exactly one typed setter, every other known property
 is provably inert); `get_styles` **carries the

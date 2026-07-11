@@ -423,6 +423,9 @@ struct NodeMeta {
     clip: bool,
     overlay: bool,
     shadow: Option<crate::element::Shadow>,
+    /// Typed inline style (B.6b) — retained so the A.5 restyle path can
+    /// re-merge it after re-resolving sheet rules.
+    css_inline: Option<Box<lumen_style::Style>>,
     content: NodeContent,
     /// Left/top padding in px — own-text is painted at the padded (content-box)
     /// origin, so a button label sits inside its padding instead of jammed into
@@ -1726,6 +1729,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 },
             );
         }
+        // B.6b: re-apply the node's retained inline style over the fresh
+        // sheet resolution (same origin order as build_node).
+        if let Some(inline) = self.meta.get(&node).and_then(|m| m.css_inline.as_deref()) {
+            merge_inline_style(&mut css, &mut resolved, inline);
+        }
         let old = self.node_style.get(&node);
         if layout_affecting_differ(old, &css) {
             return false;
@@ -2519,7 +2527,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 self.span_ctx_hash(this_overlay).hash(&mut h);
                 h.finish()
             };
-            let (css, resolved) = if let Some(pair) = self.style_memo.get(&style_key) {
+            let (mut css, mut resolved) = if let Some(pair) = self.style_memo.get(&style_key) {
                 self.style_memo_hits += 1;
                 (**pair).clone()
             } else {
@@ -2550,75 +2558,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     .insert(style_key, std::rc::Rc::new((css.clone(), resolved.clone())));
                 (css, resolved)
             };
-            // Layout overrides: only the fields the sheet actually set win
-            // over the element's `LayoutStyle` (element < .lss, matching the
-            // cascade's origin order once B.6 adds more origins).
-            if let Some(d) = css.display {
-                el.style.display = d;
+            // B.6b: the typed inline style is the `Origin::Inline` tier —
+            // merged after the (memoized) sheet resolution, field-wise, and
+            // yielding to `!important` sheet declarations (04 §2). The merge
+            // runs before the layout override below, so inline layout
+            // properties win there too.
+            if let Some(inline) = el.css_inline.as_deref() {
+                merge_inline_style(&mut css, &mut resolved, inline);
             }
-            if let Some(f) = css.flex_direction {
-                el.style.flex_direction = f;
-            }
-            if let Some(w) = css.width {
-                el.style.width = w;
-            }
-            if let Some(h) = css.height {
-                el.style.height = h;
-            }
-            if let Some(g) = css.gap {
-                el.style.row_gap = g;
-                el.style.column_gap = g;
-            }
-            if let Some(p) = css.padding {
-                el.style.padding = p;
-            }
-            if let Some(m) = css.margin {
-                el.style.margin = m;
-            }
-            // B.3 longhands: per-side values override component-wise (after
-            // the whole-side shorthand, matching CSS source-order intuition).
-            let [pt, pr, pb, pl] = css.padding_sides;
-            if let Some(v) = pt {
-                el.style.padding.top = Dim::px(v);
-            }
-            if let Some(v) = pr {
-                el.style.padding.right = Dim::px(v);
-            }
-            if let Some(v) = pb {
-                el.style.padding.bottom = Dim::px(v);
-            }
-            if let Some(v) = pl {
-                el.style.padding.left = Dim::px(v);
-            }
-            let [mt, mr, mb, ml] = css.margin_sides;
-            if let Some(v) = mt {
-                el.style.margin.top = Dim::px(v);
-            }
-            if let Some(v) = mr {
-                el.style.margin.right = Dim::px(v);
-            }
-            if let Some(v) = mb {
-                el.style.margin.bottom = Dim::px(v);
-            }
-            if let Some(v) = ml {
-                el.style.margin.left = Dim::px(v);
-            }
-            // B.4: typography reaches the text stack — the measured and the
-            // painted TextStyle are the same object (content moves into
-            // NodeMeta), so one override covers both passes.
-            if css.font_size.is_some() || css.font_weight.is_some() || css.line_height.is_some() {
-                if let NodeContent::Text(_, ts) = &mut el.content {
-                    if let Some(fs) = css.font_size {
-                        ts.font_size = fs;
-                    }
-                    if let Some(w) = css.font_weight {
-                        ts.weight = w as f32;
-                    }
-                    if let Some(lh) = css.line_height {
-                        ts.line_height = Some(lh);
-                    }
-                }
-            }
+            apply_css_to_element(&mut el, &css);
             // B.3 visibility: a hidden node (or one inside a hidden
             // subtree) keeps its layout space but leaves hit-testing (flags)
             // and, via the paint partition, rendering + semantics.
@@ -2634,6 +2582,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // B.1: this node becomes an ancestor for its children's matching
             // (popped after the recursion below).
             self.desc_stack.push(desc);
+        } else if let Some(inline) = el.css_inline.as_deref().cloned() {
+            // B.6b without a stylesheet: the inline tier still applies (its
+            // own layout/typography/visibility effects included).
+            let mut css = lumen_style::Style::new();
+            let mut resolved = HashMap::new();
+            merge_inline_style(&mut css, &mut resolved, &inline);
+            apply_css_to_element(&mut el, &css);
+            if css.visibility == Some(false) {
+                self.hidden_count += 1;
+                pushed_hidden = true;
+            }
+            if self.hidden_count > 0 {
+                tree.set_flags(node, NodeFlags::empty());
+            }
+            self.node_style.insert(node, css);
+            self.node_computed.insert(node, resolved);
         }
         let pushed_desc = self.style_env.is_some();
         // B.2b: this node's own styles resolved against the *enclosing*
@@ -2752,6 +2716,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 clip: el.clip,
                 overlay: el.overlay,
                 shadow: el.shadow,
+                css_inline: el.css_inline.take(),
                 content: el.content,
                 pad,
                 wrap_width: text_wrap,
@@ -3490,6 +3455,180 @@ fn panic_msg(payload: &Box<dyn std::any::Any + Send>) -> String {
 
 /// A hover-state version of a control colour: lighten a dark fill, darken a
 /// light one (perceptually, in Oklab). Subtle but visible.
+/// Apply a resolved style's layout + typography fields onto the element
+/// before it is lowered (A.2 pre-layout merge; shared by the sheet path and
+/// the sheet-less inline path). Only the fields the style actually set win
+/// over the element's `LayoutStyle` (element < .lss < inline, 04 §2).
+fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
+    if let Some(d) = css.display {
+        el.style.display = d;
+    }
+    if let Some(f) = css.flex_direction {
+        el.style.flex_direction = f;
+    }
+    if let Some(w) = css.width {
+        el.style.width = w;
+    }
+    if let Some(h) = css.height {
+        el.style.height = h;
+    }
+    if let Some(g) = css.gap {
+        el.style.row_gap = g;
+        el.style.column_gap = g;
+    }
+    if let Some(p) = css.padding {
+        el.style.padding = p;
+    }
+    if let Some(m) = css.margin {
+        el.style.margin = m;
+    }
+    // B.3 longhands: per-side values override component-wise (after the
+    // whole-side shorthand, matching CSS source-order intuition).
+    let [pt, pr, pb, pl] = css.padding_sides;
+    if let Some(v) = pt {
+        el.style.padding.top = Dim::px(v);
+    }
+    if let Some(v) = pr {
+        el.style.padding.right = Dim::px(v);
+    }
+    if let Some(v) = pb {
+        el.style.padding.bottom = Dim::px(v);
+    }
+    if let Some(v) = pl {
+        el.style.padding.left = Dim::px(v);
+    }
+    let [mt, mr, mb, ml] = css.margin_sides;
+    if let Some(v) = mt {
+        el.style.margin.top = Dim::px(v);
+    }
+    if let Some(v) = mr {
+        el.style.margin.right = Dim::px(v);
+    }
+    if let Some(v) = mb {
+        el.style.margin.bottom = Dim::px(v);
+    }
+    if let Some(v) = ml {
+        el.style.margin.left = Dim::px(v);
+    }
+    // B.4: typography reaches the text stack — the measured and the painted
+    // TextStyle are the same object (content moves into NodeMeta), so one
+    // override covers both passes.
+    if css.font_size.is_some() || css.font_weight.is_some() || css.line_height.is_some() {
+        if let NodeContent::Text(_, ts) = &mut el.content {
+            if let Some(fs) = css.font_size {
+                ts.font_size = fs;
+            }
+            if let Some(w) = css.font_weight {
+                ts.weight = w as f32;
+            }
+            if let Some(lh) = css.line_height {
+                ts.line_height = Some(lh);
+            }
+        }
+    }
+}
+
+/// B.6b: merge a typed inline style (`Origin::Inline`) over the resolved
+/// sheet style, field-wise. A sheet declaration marked `!important` keeps the
+/// field (04 §2: `!important` beats inline). Representable values also land
+/// in the computed map with `source: "inline"` for `ui.getStyles`; compound
+/// fields (gradients, shadows, per-side arrays, backdrop) apply to paint and
+/// layout but are not serialized (documented in 04 §8).
+fn merge_inline_style(
+    css: &mut lumen_style::Style,
+    resolved: &mut HashMap<String, lumen_style::Computed>,
+    inline: &lumen_style::Style,
+) {
+    use lumen_style::{Computed, Origin, Unit, Value};
+    fn imp(r: &HashMap<String, lumen_style::Computed>, p: &str) -> bool {
+        r.get(p).is_some_and(|c| c.important)
+    }
+    fn put(r: &mut HashMap<String, lumen_style::Computed>, p: &str, v: Value) {
+        r.insert(
+            p.to_string(),
+            Computed {
+                value: v,
+                important: false,
+                origin: Origin::Inline,
+                span: None,
+            },
+        );
+    }
+    let dim_value = |d: &lumen_layout::Dim| match d {
+        lumen_layout::Dim::Px(v) => Some(Value::Number(*v as f64, Unit::Px)),
+        lumen_layout::Dim::Percent(v) => Some(Value::Number((*v * 100.0) as f64, Unit::Percent)),
+        _ => None,
+    };
+    macro_rules! field {
+        // css assignment only (compound / enum values)
+        ($f:ident, $p:literal) => {
+            if inline.$f.is_some() && !imp(resolved, $p) {
+                css.$f = inline.$f.clone();
+            }
+        };
+        // + computed-map entry via $to(value) -> Option<Value>
+        ($f:ident, $p:literal, $to:expr) => {
+            if let Some(v) = &inline.$f {
+                if !imp(resolved, $p) {
+                    css.$f = inline.$f.clone();
+                    #[allow(clippy::redundant_closure_call)]
+                    if let Some(val) = ($to)(v) {
+                        put(resolved, $p, val);
+                    }
+                }
+            }
+        };
+    }
+    let color = |c: &lumen_core::Color| Some(Value::Color(*c));
+    let px = |v: &f32| Some(Value::Number(*v as f64, Unit::Px));
+    let num = |v: &f32| Some(Value::Number(*v as f64, Unit::None));
+    field!(background, "background", color);
+    field!(color, "color", color);
+    field!(border_color, "border-color", color);
+    field!(width, "width", dim_value);
+    field!(height, "height", dim_value);
+    field!(gap, "gap", dim_value);
+    field!(border_radius, "border-radius", px);
+    field!(border_width, "border-width", px);
+    field!(font_size, "font-size", px);
+    field!(opacity, "opacity", num);
+    field!(line_height, "line-height", num);
+    field!(font_weight, "font-weight", |v: &u16| Some(Value::Number(
+        *v as f64,
+        Unit::None
+    )));
+    field!(visibility, "visibility", |v: &bool| Some(Value::Keyword(
+        if *v { "visible" } else { "hidden" }.to_string()
+    )));
+    // css-only fields: paint/layout honor them; not serialized (04 §8 note).
+    field!(display, "display");
+    field!(flex_direction, "flex-direction");
+    field!(padding, "padding");
+    field!(margin, "margin");
+    field!(background_gradient, "background");
+    field!(shadow, "shadow");
+    field!(clip, "clip");
+    field!(blend_mode, "blend-mode");
+    field!(border_radius_corners, "border-radius");
+    for i in 0..4 {
+        if inline.padding_sides[i].is_some() {
+            css.padding_sides[i] = inline.padding_sides[i];
+        }
+        if inline.margin_sides[i].is_some() {
+            css.margin_sides[i] = inline.margin_sides[i];
+        }
+        if inline.border_sides[i].is_some() {
+            css.border_sides[i] = inline.border_sides[i];
+        }
+    }
+    if inline.backdrop_blur.is_some() && !imp(resolved, "backdrop-filter") {
+        css.backdrop_blur = inline.backdrop_blur;
+    }
+    if inline.backdrop_saturate.is_some() && !imp(resolved, "backdrop-filter") {
+        css.backdrop_saturate = inline.backdrop_saturate;
+    }
+}
+
 /// Whether two computed styles differ in any property that feeds layout or
 /// text measurement (A.5) — if so, a visual-state restyle must escalate to a
 /// full rebuild so the new geometry is real.

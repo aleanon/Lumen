@@ -1,0 +1,7 @@
+# 32-way parallel LLVM debug builds exceed this box's memory (62 GiB, swap
+# 2 GiB): rustc hit "LLVM ERROR: out of memory", and memory-pressure kills
+# mid-write are the prime suspect for three target/-and-.git corruption
+# waves (2026-07-10). Bound build parallelism; raise if the workspace or
+# the machine changes.
+[build]
+jobs = 12

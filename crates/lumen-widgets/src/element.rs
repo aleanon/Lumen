@@ -188,6 +188,10 @@ pub struct Element {
     pub container: bool,
     /// Optional drop shadow behind the box.
     pub shadow: Option<Shadow>,
+    /// Typed inline `.lss` mirror (B.6b, 04 §8): the `Origin::Inline` tier —
+    /// beats stylesheet declarations unless they are `!important`. Set with
+    /// [`css`](Self::css). Boxed: most elements carry none.
+    pub css_inline: Option<Box<lumen_style::Style>>,
     /// If this element is the root a [`BuildCx::scope`] returned, the stable keys
     /// of the signals that scope depends on — projected into semantics (F2) so
     /// the agent can see the reactive structure. Set by `scope`; not authored.
@@ -248,6 +252,7 @@ impl Default for Element {
             overlay: false,
             container: false,
             shadow: None,
+            css_inline: None,
             scope_deps: None,
             scope_key: None,
             shared: None,
@@ -347,6 +352,14 @@ impl Element {
     /// Add a class.
     pub fn class(mut self, c: impl Into<String>) -> Self {
         self.classes.push(c.into());
+        self
+    }
+    /// Apply a typed inline style (B.6b) — the `.lss` mirror at
+    /// `Origin::Inline`: wins over stylesheet rules unless they are
+    /// `!important` (04 §2). The shipped form of the spec's `.style(Style)`
+    /// (that name was already taken by `LayoutStyle`).
+    pub fn css(mut self, s: lumen_style::Style) -> Self {
+        self.css_inline = Some(Box::new(s));
         self
     }
     /// Mark this element as the reference for descendants' `@media
