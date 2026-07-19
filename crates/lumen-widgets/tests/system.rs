@@ -147,3 +147,77 @@ fn secondary_windows_are_listed() {
     assert_eq!(h.windows().len(), 1);
     assert_eq!(h.windows()[0].id, "prefs");
 }
+
+/// P.3d-1: a declared secondary window is its own render pipeline over the
+/// SAME reactive store — a signal written through one window's UI re-renders
+/// the other on its next pump.
+#[test]
+fn secondary_window_shares_the_reactive_store() {
+    use lumen_core::events::{Event, PointerEvent};
+
+    let app = App::new(|cx| {
+        let n = cx.signal("n", || 0i32);
+        widgets::text(format!("main sees {}", n.get(cx.runtime()))).id("main-label")
+    })
+    .window(
+        WindowDesc {
+            id: "prefs".into(),
+            title: "Preferences".into(),
+            width: 200.0,
+            height: 120.0,
+        },
+        |cx| {
+            let n = cx.signal("n", || 0i32);
+            widgets::column(vec![
+                widgets::text(format!("prefs sees {}", n.get(cx.runtime()))).id("prefs-label"),
+                widgets::button("bump", move |rt| n.update(rt, |v| *v += 1)).id("bump"),
+            ])
+        },
+    );
+    let mut main = app.run_headless(Size::new(300.0, 200.0));
+    main.pump();
+    // The declaration is visible as data (agent: ui.getWindows).
+    assert_eq!(main.windows().len(), 1);
+    assert_eq!(main.windows()[0].id, "prefs");
+
+    let mut prefs = main.open_window("prefs").expect("declared window opens");
+    assert_eq!(prefs.size(), Size::new(200.0, 120.0));
+
+    fn label(h: &Headless, id: &str) -> String {
+        fn find(n: &lumen_core::semantics::SemanticsNode, id: &str) -> Option<String> {
+            if n.id.as_ref().map(|i| i.as_str()) == Some(id) {
+                return Some(n.label.clone());
+            }
+            n.children.iter().find_map(|c| find(c, id))
+        }
+        find(&h.semantics_doc().root.elided(), id).unwrap_or_default()
+    }
+    assert_eq!(label(&prefs, "prefs-label"), "prefs sees 0");
+    assert_eq!(label(&main, "main-label"), "main sees 0");
+
+    // Click the button IN THE PREFS WINDOW (its own hit-testing + input queue).
+    let b = {
+        fn find(
+            n: &lumen_core::semantics::SemanticsNode,
+            id: &str,
+        ) -> Option<lumen_core::geometry::Rect> {
+            if n.id.as_ref().map(|i| i.as_str()) == Some(id) {
+                return Some(n.bounds);
+            }
+            n.children.iter().find_map(|c| find(c, id))
+        }
+        find(&prefs.semantics_doc().root.elided(), "bump").expect("button in prefs")
+    };
+    let p = lumen_core::geometry::Point::new((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0);
+    prefs.inject(Event::PointerDown(PointerEvent::at(p)));
+    prefs.inject(Event::PointerUp(PointerEvent::at(p)));
+    prefs.pump();
+    assert_eq!(label(&prefs, "prefs-label"), "prefs sees 1");
+
+    // The MAIN window sees the same store on its next pump.
+    main.pump();
+    assert_eq!(label(&main, "main-label"), "main sees 1");
+
+    // Unknown ids don't open.
+    assert!(main.open_window("nope").is_none());
+}

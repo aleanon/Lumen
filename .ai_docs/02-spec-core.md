@@ -206,6 +206,14 @@ impl App {
 // activate items, and the system tray's context menu hosts the same
 // `MenuModel` natively (P.3e).
 //
+// Multi-window (P.3d): `App::window(WindowDesc, |cx| …)` declares a
+// secondary window with its own root closure; `Headless::open_window(id)`
+// realizes it as an independent render pipeline (own tree/layout/paint/
+// focus at the declared size) over the SAME shared `Runtime` — cross-window
+// reactivity is shared signals (a write in one window re-renders any window
+// that reads it on its next pump). Shell realization (one OS window per
+// declaration, loop keyed by WindowId) is P.3d-2 *(planned)*.
+//
 // OS services (P.3e): `SystemRequest::Notification` → desktop notification;
 // `SystemRequest::TrayTooltip` → lazy system tray (created on first request;
 // tooltip + title text; menu = the app `MenuModel`). OS file drops arrive as

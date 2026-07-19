@@ -48,6 +48,12 @@ pub struct FrameStats {
     pub nodes_copied: u32,
 }
 
+/// P.3d: a declared secondary window — its descriptor plus its root closure.
+type WindowDecl = (
+    crate::system::WindowDesc,
+    std::rc::Rc<dyn Fn(&mut BuildCx) -> Element>,
+);
+
 /// An application: a root build closure, an optional stylesheet, and the frame
 /// renderer backend `R` (defaults to [`lumen_render::DefaultRenderer`] = the
 /// deterministic CPU `TinySkia`). The runtime is generic over `R` — zero-cost by
@@ -60,6 +66,11 @@ pub struct App<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::InlineS
     /// Extra fonts to register at boot (B1): app-provided bytes, selected by
     /// family name via `TextStyle::family`. The bundled font stays the default.
     fonts: Vec<Vec<u8>>,
+    /// P.3d: declared secondary windows — geometry/title plus each window's
+    /// own root closure. Realized as separate [`Headless`] instances sharing
+    /// this app's `Runtime` (`Headless::open_window`); the shell opens one
+    /// OS window per declaration.
+    windows: Vec<WindowDecl>,
     renderer: R,
     executor: E,
 }
@@ -72,6 +83,7 @@ impl App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner> {
             root: Box::new(root),
             stylesheet: None,
             fonts: Vec::new(),
+            windows: Vec::new(),
             renderer: lumen_render::TinySkia,
             executor: lumen_core::tasks::InlineSpawner,
         }
@@ -93,6 +105,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
         self
     }
 
+    /// P.3d: declare a secondary window — its descriptor (id/title/size)
+    /// and its own root build closure. The window shares the app's reactive
+    /// store: a signal written in one window re-renders every window that
+    /// reads it.
+    pub fn window(
+        mut self,
+        desc: crate::system::WindowDesc,
+        root: impl Fn(&mut BuildCx) -> Element + 'static,
+    ) -> App<R, E> {
+        self.windows.push((desc, std::rc::Rc::new(root)));
+        self
+    }
+
     /// Swap the frame renderer backend, changing the app's `R` type (typestate
     /// builder). The CPU reference renderer is the default; the shell hands in a
     /// GPU backend (constructed post-surface), and a consumer wanting runtime
@@ -102,6 +127,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             root: self.root,
             stylesheet: self.stylesheet,
             fonts: self.fonts,
+            windows: self.windows,
             renderer,
             executor: self.executor,
         }
@@ -116,6 +142,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             root: self.root,
             stylesheet: self.stylesheet,
             fonts: self.fonts,
+            windows: self.windows,
             renderer: self.renderer,
             executor,
         }
@@ -152,13 +179,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
     /// Construct the headless instance (fonts registered, focus applied) without
     /// the first build. Shared by the plain and restore boot paths.
     fn into_headless(self, size: Size, focused: Option<StableId>) -> Headless<R, E> {
-        // Register app fonts before the first build so styled text can select them.
+        // Register app fonts before the first build so styled text can select
+        // them. Bytes are retained so secondary windows (P.3d) can build
+        // their own TextEngine with the same faces.
+        let font_bytes = self.fonts.clone();
         let mut text = TextEngine::new();
         for bytes in self.fonts {
             text.register_font(bytes);
         }
+        let window_descs: Vec<crate::system::WindowDesc> =
+            self.windows.iter().map(|(d, _)| d.clone()).collect();
+        let stylesheet_src = self.stylesheet.clone();
         let h = Headless {
             root: self.root,
+            window_decls: self.windows,
+            font_bytes,
+            stylesheet_src,
             rt: Runtime::new(),
             size,
             scale: 1.0,
@@ -219,7 +255,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             menu_rev: 0,
             invoked_menu: Vec::new(),
             system_requests: Vec::new(),
-            windows: Vec::new(),
+            windows: window_descs,
             rtl: false,
             last_dl: None,
             last_damage: lumen_render::Damage::Full,
@@ -467,6 +503,17 @@ fn dim_px(d: Dim) -> f64 {
 /// queue as a real shell, so tests and the agent exercise the real paths.
 pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::InlineSpawner> {
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
+    /// P.3d: declared secondary windows (descriptor + root closure), realized
+    /// on demand by [`open_window`](Self::open_window). `windows` (below)
+    /// carries just the descriptors for the agent.
+    window_decls: Vec<WindowDecl>,
+    /// App-registered font bytes, retained so secondary windows register the
+    /// same faces into their own `TextEngine` (one copy per opened window —
+    /// windows are rare; the main engine's zero-copy registration stands).
+    font_bytes: Vec<Vec<u8>>,
+    /// Raw `.lss` source, retained so secondary windows boot with the same
+    /// stylesheet (each window cascades independently at its own size).
+    stylesheet_src: Option<String>,
     rt: Runtime,
     /// Logical size (the coordinate space for layout, events, and the display
     /// list). The rasterized frame is this times [`Headless::scale`].
@@ -1502,6 +1549,44 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// System requests recorded this session.
     pub fn system_requests(&self) -> &[crate::system::SystemRequest] {
         &self.system_requests
+    }
+
+    /// P.3d: realize a declared secondary window (`App::window`) as its own
+    /// `Headless` instance **sharing this app's `Runtime`** — the same
+    /// signal store, deferred-op channel, clipboard, and host mailbox. Each
+    /// window has its own tree/layout/paint pipeline at its declared size;
+    /// cross-window reactivity is just shared signals (pump a window after
+    /// state changes to re-render it). The caller supplies the window's
+    /// renderer + executor (the shell passes its per-window backend).
+    pub fn open_window_with<R2: lumen_render::Renderer, E2: lumen_core::tasks::Spawner>(
+        &self,
+        id: &str,
+        renderer: R2,
+        executor: E2,
+    ) -> Option<Headless<R2, E2>> {
+        let (desc, root) = self.window_decls.iter().find(|(d, _)| d.id == id)?;
+        let root = root.clone();
+        let app = App {
+            root: Box::new(move |cx| root(cx)),
+            stylesheet: self.stylesheet_src.clone(),
+            fonts: self.font_bytes.clone(),
+            windows: Vec::new(),
+            renderer,
+            executor,
+        };
+        let mut h = app.into_headless(Size::new(desc.width, desc.height), None);
+        // Swap in the shared store before the first build ever runs.
+        h.rt = self.rt.clone();
+        h.theme = self.theme;
+        h.rtl = self.rtl;
+        h.rebuild();
+        Some(h)
+    }
+
+    /// [`open_window_with`](Self::open_window_with) on the default CPU
+    /// renderer + inline executor (tests and headless agents).
+    pub fn open_window(&self, id: &str) -> Option<Headless> {
+        self.open_window_with(id, lumen_render::TinySkia, lumen_core::tasks::InlineSpawner)
     }
 
     /// P.3b: drain the recorded [`SystemRequest`]s — the shell takes them to
