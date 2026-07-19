@@ -108,6 +108,8 @@ pub fn run(app: App, size: Size) {
         cursor: Point::ZERO,
         scale: 1.0,
         modifiers: Modifiers::empty(),
+        os_clipboard: arboard::Clipboard::new().ok(),
+        os_clip_last: String::new(),
         ime_active: false,
         last_frame: Instant::now(),
         pending_resize: false,
@@ -244,6 +246,14 @@ struct Shell {
     cursor: Point,
     /// HiDPI scale factor of the window.
     scale: f64,
+    /// P.3a: the OS clipboard (arboard), bridged to the portable Runtime
+    /// clipboard — `None` when unavailable (no display server). Pull before
+    /// Ctrl-modified keys (paste path); push after a pump when the app-side
+    /// text changed (copy path).
+    os_clipboard: Option<arboard::Clipboard>,
+    /// The last text pushed to / pulled from the OS clipboard, to avoid
+    /// redundant round-trips.
+    os_clip_last: String,
     /// Current keyboard modifier state (Ctrl/Shift/Alt/Meta).
     modifiers: Modifiers,
     /// Whether an IME composition context is active (then text arrives via
@@ -494,6 +504,23 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     }
                 }
                 if let Some(k) = map_key(&event.logical_key) {
+                    // P.3a: a Ctrl-chord may paste — pull the OS clipboard
+                    // into the portable Runtime clipboard first, so Ctrl+V
+                    // commits what the desktop actually holds.
+                    if self.modifiers.contains(Modifiers::CTRL)
+                        && event.state == ElementState::Pressed
+                    {
+                        if let Some(cb) = &mut self.os_clipboard {
+                            if let Ok(text) = cb.get_text() {
+                                if text != self.os_clip_last {
+                                    self.os_clip_last = text.clone();
+                                    if let Some(h) = &mut self.headless {
+                                        h.clipboard_write(text);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let ke = KeyEvent {
                         key: k,
                         modifiers: self.modifiers,
@@ -535,6 +562,16 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     // Present only when the frame actually changed (R2): an idle
                     // tick repaints nothing, so the surface keeps its last frame.
                     let stats = h.pump();
+                    // P.3a: a copy inside the app updated the portable
+                    // clipboard — mirror it out to the OS.
+                    let app_clip = h.clipboard_read();
+                    if !app_clip.is_empty() && app_clip != self.os_clip_last {
+                        if let Some(cb) = &mut self.os_clipboard {
+                            if cb.set_text(app_clip.clone()).is_ok() {
+                                self.os_clip_last = app_clip;
+                            }
+                        }
+                    }
                     if stats.painted || resized {
                         if self.direct {
                             // GPU → swapchain directly, no readback (1c).

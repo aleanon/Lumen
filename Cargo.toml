@@ -124,6 +124,8 @@ raw-window-handle = "0.6"
 smol_str = "0.3"
 bitflags = "2.6"
 notify = "6"
+# ADR-P1 (approved): OS clipboard bridge for the desktop shell (P.3a).
+arboard = "3"
 libloading = "0.8"
 tungstenite = "0.24"
 # Mobile (M3). Pulled only when building for the respective target.
