@@ -116,7 +116,7 @@ carry `"auth": "<token>"` (the packaged clients attach it from the env).
 | `ui.getDeps` | `{ selector }` | signals the node depends on, per-prop |
 | `ui.whatDependsOn` | `{ signal }` | nodes that would patch/rebuild if the signal changed (no write) |
 | `ui.lastChange` | `{}` | what the last pump did: `idle` / `patch` / `rebuild` + patched nodes |
-| `ui.getMenu` | `{}` | the app's `MenuModel` |
+| `ui.getMenu` | `{}` | the app's `MenuModel`; items carry optional `accel` chords (`"Ctrl+O"`) which the shell matches (P.3c) |
 | `app.systemRequests` | `{}` | queued portable `SystemRequest`s |
 | `ui.getWindows` | `{}` | app-declared `WindowDesc` list (shell is single-window) |
 | `clipboard.read` | `{}` | `{ text }` (runtime clipboard — in-memory model) |
@@ -160,7 +160,7 @@ it needs a push-transport design over the request/response loop (C.7).
 | `input.scroll` | `{ selector?, dx?, dy? }` | both axes (`to: top\|bottom\|{x,y}` planned, C.4b) |
 | `input.drop` | `{ selector, … }` | external file/text drop onto a node |
 | `input.setLocale` | `{ locale }` | switches locale incl. RTL mirroring |
-| `menu.invoke` | `{ id }` | invokes an enabled menu item |
+| `menu.invoke` | `{ id }` | invokes an enabled menu item **and runs the command registered under the same id** (`cx.register_command`) — the same path as a native click or accelerator (P.3c) |
 | `clipboard.write` | `{ text }` | runtime clipboard |
 
 ### 3.3 Sessions (record → export)

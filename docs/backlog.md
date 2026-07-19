@@ -35,11 +35,13 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
 ## ⏸ Sandbox-blocked (need hardware / OS / external infra to *verify*)
 
 - **A4 — Desktop OS integration** (native menus, clipboard, file/color dialogs,
-  OS drag-and-drop, tray, notifications, multi-window/monitor). *Why blocked:*
-  needs a real desktop session and new platform deps (e.g. `rfd`, `muda`,
-  `arboard`) that are ADR-003 additions; native dialogs/menus can't be
-  acceptance-tested headlessly. The portable APIs (`lumen-widgets::system`)
-  already exist and are agent-synthesizable — only the OS *wiring* is missing.
+  OS drag-and-drop, tray, notifications, multi-window/monitor). *Re-graded
+  2026-07 (plan P.3): NOT sandbox-blocked* — this dev box has a live X11
+  session, so the wiring is landing and live-verified here: arboard clipboard
+  (P.3a ✅), rfd file-open dialogs (P.3b ✅), muda menus + accelerators
+  (P.3c ✅; Linux/winit has no menubar attachment point — accelerators +
+  `menu.invoke` are the activation paths there). Remaining: multi-window
+  (P.3d), tray/DnD/notifications (P.3e).
   *First step:* ADR for the platform deps; wire `arboard` clipboard (most
   testable) behind the existing `SystemRequest`/`Headless::clipboard_*` API.
 - **A5 — AccessKit platform bridge.** *Why blocked:* the adapter (`accesskit_winit`,

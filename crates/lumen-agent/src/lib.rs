@@ -792,7 +792,9 @@ fn handle<R: Renderer, E: Spawner>(
                 .get("id")
                 .and_then(|v| v.as_str())
                 .ok_or((-32602, "missing `id`".to_string()))?;
-            match app.invoke_menu(id) {
+            // P.3c: same path as a native click — records the invocation
+            // and runs the app command registered under the same id.
+            match app.activate_menu(id) {
                 Some(label) => Ok(json!({ "ok": true, "label": label })),
                 None => Err((-32000, format!("no enabled menu item `{id}`"))),
             }

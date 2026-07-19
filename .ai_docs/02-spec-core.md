@@ -196,6 +196,14 @@ impl App {
 // The windowed entry lives in lumen-shell (amended): `lumen_shell::run(app,
 // size)` / the `RunExt` extension trait — `app.run(Size::new(w, h))` — which
 // returns when the window closes (not `-> !`).
+//
+// Native menus (P.3c): `cx.set_menu(MenuModel)` declares the menu from build
+// (change-detected; ids double as `cx.register_command` names — activation
+// runs the bound command). Items may carry `accel("Ctrl+O")` chords. The
+// shell realizes the model via muda on Windows (hwnd) / macOS (nsapp);
+// Linux/winit has no menubar attachment point (muda is GTK-bound), so there
+// accelerators — matched by the shell — and the agent's `menu.invoke`
+// activate items.
 pub struct Headless;  // used by lumen-test and lumen-agent in headless mode
 impl Headless {
     pub fn pump(&mut self) -> FrameStats;                  // process queue, layout, paint

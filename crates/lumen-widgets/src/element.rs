@@ -486,6 +486,9 @@ pub struct FrameRequests {
     /// ([`BuildCx::register_command`]) — the `app.command` agent verb and
     /// future command-palette UI invoke them by name.
     pub commands: Vec<(String, Handler)>,
+    /// P.3c: menu model declared this build (`None` = leave the installed
+    /// menu untouched).
+    pub menu: Option<crate::system::MenuModel>,
 }
 
 /// A request to run background work, recorded during build and dispatched by the
@@ -526,6 +529,10 @@ pub struct BuildCx<'a> {
     pub(crate) tasks: RefCell<Vec<TaskRequest>>,
     /// C.4b: named commands registered this build.
     commands: RefCell<Vec<(String, Handler)>>,
+    /// P.3c: menu model declared this build (`cx.set_menu`); the app applies
+    /// it on pump (change-detected, so an identical model doesn't churn the
+    /// native menu).
+    menu: RefCell<Option<crate::system::MenuModel>>,
     /// Memoized subtrees (F1), persisted on `Headless` across builds.
     scope_cache: &'a RefCell<ScopeCache>,
     /// Scope keys accessed this build (F5 GC): after the build, cached scopes +
@@ -558,6 +565,7 @@ impl<'a> BuildCx<'a> {
             read_clock: Cell::new(false),
             tasks: RefCell::new(Vec::new()),
             commands: RefCell::new(Vec::new()),
+            menu: RefCell::new(None),
             scope_cache,
             scope_live,
             prefix: RefCell::new(String::new()),
@@ -652,6 +660,15 @@ impl<'a> BuildCx<'a> {
             .push((name.to_string(), std::rc::Rc::new(f)));
     }
 
+    /// Declare the app's native menu (P.3c, 02 §4): a [`MenuModel`]
+    /// (crate::system::MenuModel) whose items may carry accelerator chords
+    /// (`MenuItem::accel("Ctrl+O")`). Menu ids double as command names —
+    /// bind behavior with [`register_command`](Self::register_command) under
+    /// the same id. Applied on pump only when the model actually changed.
+    pub fn set_menu(&mut self, menu: crate::system::MenuModel) {
+        *self.menu.borrow_mut() = Some(menu);
+    }
+
     /// Derived value (02 §4, W.3): recomputed when its reads change,
     /// notifying subscribers only when the value actually changes
     /// (`PartialEq`). Keyed like a signal — the enclosing `cx.scope`
@@ -734,6 +751,7 @@ impl<'a> BuildCx<'a> {
             wakes: self.requests.into_inner(),
             tasks: self.tasks.into_inner(),
             commands: self.commands.into_inner(),
+            menu: self.menu.into_inner(),
         }
     }
 }

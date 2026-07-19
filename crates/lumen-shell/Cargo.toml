@@ -22,6 +22,10 @@ winit = { workspace = true }
 arboard = { workspace = true }
 # P.3b (ADR-P1): native file dialogs fulfilling SystemRequest::OpenFile.
 rfd = { workspace = true }
+# P.3c (ADR-P1): native menus. Attached on Windows (hwnd) / macOS (nsapp);
+# on Linux muda is GTK-bound and winit has no menubar attachment point, so
+# activation there is the portable accelerator path + agent verbs.
+muda = { workspace = true }
 wgpu = { workspace = true }
 # Embedded agent endpoint (LUMEN_AGENT_ADDR): lets an AI observe and drive the
 # *live* window over the same JSON-RPC the headless agent speaks. Behind the

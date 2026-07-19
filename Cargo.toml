@@ -131,6 +131,13 @@ arboard = "3"
 # dynamically linked and present on every Linux desktop; revisit per the
 # ADR if the GTK linkage leaks into non-shell crates.
 rfd = { version = "0.14", default-features = false, features = ["gtk3"] }
+# ADR-P1 (approved): native menus (P.3c). Defaults off drops libxdo (only
+# used by muda's predefined items, which Lumen doesn't emit — the menu model
+# is app-defined data); `gtk` stays on because it IS muda's Linux platform
+# impl (the crate doesn't compile on Linux without it) and shares the GTK
+# linkage rfd already brings. No menubar attaches under winit on Linux —
+# accelerators + agent verbs activate items there.
+muda = { version = "0.19", default-features = false, features = ["gtk"] }
 libloading = "0.8"
 tungstenite = "0.24"
 # Mobile (M3). Pulled only when building for the respective target.

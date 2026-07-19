@@ -108,6 +108,8 @@ pub fn run(app: App, size: Size) {
         cursor: Point::ZERO,
         scale: 1.0,
         modifiers: Modifiers::empty(),
+        menu_rev_seen: 0,
+        native_menu: None,
         os_clipboard: arboard::Clipboard::new().ok(),
         os_clip_last: String::new(),
         ime_active: false,
@@ -256,6 +258,14 @@ struct Shell {
     os_clip_last: String,
     /// Current keyboard modifier state (Ctrl/Shift/Alt/Meta).
     modifiers: Modifiers,
+    /// P.3c: [`Headless::menu_rev`] last realized as a native (muda) menu —
+    /// the menu is rebuilt only when the app installs a new model.
+    menu_rev_seen: u64,
+    /// The realized native menu. Attached to the window on Windows/macOS;
+    /// on Linux muda is GTK-bound and winit offers no menubar attachment
+    /// point, so the model stays data and accelerators/agent verbs activate
+    /// items (see `attach_native_menu`).
+    native_menu: Option<muda::Menu>,
     /// Whether an IME composition context is active (then text arrives via
     /// `Ime::Commit`, not `KeyEvent::text`).
     ime_active: bool,
@@ -521,6 +531,26 @@ impl ApplicationHandler<ShellEvent> for Shell {
                             }
                         }
                     }
+                    // P.3c: menu accelerators win over widget key handling —
+                    // exactly like a native menubar chord. On Linux this is
+                    // the only native activation path (no menubar under
+                    // winit); on Windows/macOS muda usually consumes the
+                    // chord first, so this is the portable fallback.
+                    if event.state == ElementState::Pressed && !event.repeat && !self.ime_active {
+                        let target = self
+                            .headless
+                            .as_ref()
+                            .and_then(|h| accel_target(h.menu(), self.modifiers, &k));
+                        if let Some(id) = target {
+                            if let Some(h) = &mut self.headless {
+                                h.activate_menu(&id);
+                            }
+                            if let Some(w) = &self.window {
+                                w.request_redraw();
+                            }
+                            return;
+                        }
+                    }
                     let ke = KeyEvent {
                         key: k,
                         modifiers: self.modifiers,
@@ -568,6 +598,16 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     if !reqs.is_empty() {
                         fulfill_system_requests(h, reqs, native_dialog_resolver);
                     }
+                    // P.3c: realize a newly installed menu model natively.
+                    // (Attach is a no-op on Linux — see `attach_native_menu`.)
+                    if h.menu_rev() != self.menu_rev_seen {
+                        self.menu_rev_seen = h.menu_rev();
+                        let menu = build_native_menu(h.menu());
+                        if let Some(w) = &self.window {
+                            attach_native_menu(&menu, w);
+                        }
+                        self.native_menu = Some(menu);
+                    }
                     // P.3a: a copy inside the app updated the portable
                     // clipboard — mirror it out to the OS.
                     let app_clip = h.clipboard_read();
@@ -606,6 +646,18 @@ impl ApplicationHandler<ShellEvent> for Shell {
     /// Decide how to wait for the next frame from what the UI asked for, so an
     /// idle UI costs zero frames while an animating one runs free.
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        // P.3c: native menu clicks (Windows/macOS menubars) arrive on muda's
+        // process-global channel while the loop pumps OS events — drain them
+        // into the same activation path the agent and accelerators use.
+        // (Never fires on Linux: nothing is attached there.)
+        while let Ok(ev) = muda::MenuEvent::receiver().try_recv() {
+            if let Some(h) = &mut self.headless {
+                h.activate_menu(ev.id().0.as_str());
+            }
+            if let Some(w) = &self.window {
+                w.request_redraw();
+            }
+        }
         let Some(h) = &self.headless else { return };
         match h.next_deadline() {
             // Idle: sleep until the next OS event (input/resize/close).
@@ -638,6 +690,149 @@ impl Shell {
         }
     }
 }
+
+// --- P.3c: native menus (muda) + portable accelerators ----------------------
+
+/// Parse a portable accelerator chord — `"Ctrl+O"`, `"Ctrl+Shift+S"`,
+/// `"Alt+Enter"` — into (modifiers, key). Modifier tokens: `Ctrl`/`Control`,
+/// `Shift`, `Alt`/`Option`, `Meta`/`Cmd`/`Super` (and `CmdOrCtrl`, which maps
+/// to Meta on macOS and Ctrl elsewhere). The final token is the key: a single
+/// character (matched case-insensitively) or a named key.
+fn parse_accel(chord: &str) -> Option<(Modifiers, Key)> {
+    let mut mods = Modifiers::empty();
+    let mut key = None;
+    for part in chord.split('+') {
+        let p = part.trim();
+        match p.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => mods |= Modifiers::CTRL,
+            "shift" => mods |= Modifiers::SHIFT,
+            "alt" | "option" => mods |= Modifiers::ALT,
+            "meta" | "cmd" | "super" | "command" => mods |= Modifiers::META,
+            "cmdorctrl" => {
+                mods |= if cfg!(target_os = "macos") {
+                    Modifiers::META
+                } else {
+                    Modifiers::CTRL
+                }
+            }
+            "enter" | "return" => key = Some(Key::Named(NamedKey::Enter)),
+            "escape" | "esc" => key = Some(Key::Named(NamedKey::Escape)),
+            "tab" => key = Some(Key::Named(NamedKey::Tab)),
+            "space" => key = Some(Key::Named(NamedKey::Space)),
+            "backspace" => key = Some(Key::Named(NamedKey::Backspace)),
+            "delete" | "del" => key = Some(Key::Named(NamedKey::Delete)),
+            "left" => key = Some(Key::Named(NamedKey::ArrowLeft)),
+            "right" => key = Some(Key::Named(NamedKey::ArrowRight)),
+            "up" => key = Some(Key::Named(NamedKey::ArrowUp)),
+            "down" => key = Some(Key::Named(NamedKey::ArrowDown)),
+            other if other.chars().count() == 1 => {
+                key = Some(Key::Character(other.into()));
+            }
+            _ => return None,
+        }
+    }
+    key.map(|k| (mods, k))
+}
+
+/// Does the pressed (modifiers, key) match `chord`? Character keys compare
+/// case-insensitively (Shift is part of the chord, not the character).
+fn accel_matches(chord: &str, mods: Modifiers, key: &Key) -> bool {
+    let Some((am, ak)) = parse_accel(chord) else {
+        return false;
+    };
+    if am != mods {
+        return false;
+    }
+    match (&ak, key) {
+        (Key::Named(a), Key::Named(b)) => a == b,
+        (Key::Character(a), Key::Character(b)) => a.eq_ignore_ascii_case(b),
+        _ => false,
+    }
+}
+
+/// Find the enabled menu item whose accelerator matches the pressed chord
+/// (depth-first; disabled subtrees are skipped like a native menu would).
+fn accel_target(
+    model: &lumen_widgets::system::MenuModel,
+    mods: Modifiers,
+    key: &Key,
+) -> Option<String> {
+    fn walk(
+        items: &[lumen_widgets::system::MenuItem],
+        mods: Modifiers,
+        key: &Key,
+    ) -> Option<String> {
+        items.iter().filter(|i| i.enabled).find_map(|i| {
+            i.accel
+                .as_deref()
+                .filter(|a| accel_matches(a, mods, key))
+                .map(|_| i.id.clone())
+                .or_else(|| walk(&i.children, mods, key))
+        })
+    }
+    walk(&model.items, mods, key)
+}
+
+/// Realize the portable [`MenuModel`](lumen_widgets::system::MenuModel) as a
+/// muda menu (same ids, so a native click reports the portable command id).
+fn build_native_menu(model: &lumen_widgets::system::MenuModel) -> muda::Menu {
+    fn native(item: &lumen_widgets::system::MenuItem) -> Box<dyn muda::IsMenuItem> {
+        if item.children.is_empty() {
+            // Native accelerator registration is best-effort: muda's parser
+            // covers the same `Mod+Key` grammar; an unparsable chord still
+            // works through the shell's own matcher.
+            let accel = item
+                .accel
+                .as_deref()
+                .and_then(|a| a.parse::<muda::accelerator::Accelerator>().ok());
+            Box::new(muda::MenuItem::with_id(
+                item.id.clone(),
+                &item.label,
+                item.enabled,
+                accel,
+            ))
+        } else {
+            let sub = muda::Submenu::with_id(item.id.clone(), &item.label, item.enabled);
+            for c in &item.children {
+                let ci = native(c);
+                let _ = sub.append(ci.as_ref());
+            }
+            Box::new(sub)
+        }
+    }
+    let menu = muda::Menu::new();
+    for item in &model.items {
+        let ni = native(item);
+        let _ = menu.append(ni.as_ref());
+    }
+    menu
+}
+
+/// Attach the realized menu as the window's native menubar.
+#[cfg(target_os = "windows")]
+fn attach_native_menu(menu: &muda::Menu, window: &Window) {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(h) = window.window_handle() {
+        if let RawWindowHandle::Win32(w) = h.as_raw() {
+            unsafe {
+                let _ = menu.init_for_hwnd(w.hwnd.get());
+            }
+        }
+    }
+}
+
+/// Attach the realized menu as the application menu (macOS menubar).
+#[cfg(target_os = "macos")]
+fn attach_native_menu(menu: &muda::Menu, _window: &Window) {
+    menu.init_for_nsapp();
+}
+
+/// Linux: muda's backend is GTK — a winit X11/Wayland window has no menubar
+/// attachment point (the limitation is winit-wide, not Lumen's). The menu
+/// stays observable data; activation paths here are accelerator chords
+/// (matched by the shell's key handler) and the agent's `menu.invoke`.
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn attach_native_menu(_menu: &muda::Menu, _window: &Window) {}
 
 fn map_modifiers(s: winit::keyboard::ModifiersState) -> Modifiers {
     let mut m = Modifiers::empty();
@@ -1049,5 +1244,130 @@ mod system_fulfil_tests {
         );
         let sig: Signal<String> = h.runtime().signal("doc.path", String::new);
         assert_eq!(sig.get(h.runtime()), "/tmp/pic.png");
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+    use lumen_widgets::system::{MenuItem, MenuModel};
+    use lumen_widgets::{col, widgets, App};
+
+    fn model() -> MenuModel {
+        MenuModel {
+            items: vec![MenuItem::submenu(
+                "file",
+                "File",
+                vec![
+                    MenuItem::new("file.open", "Open…").accel("Ctrl+O"),
+                    {
+                        let mut save = MenuItem::new("file.save", "Save").accel("Ctrl+Shift+S");
+                        save.enabled = false;
+                        save
+                    },
+                    MenuItem::new("file.quit", "Quit"),
+                ],
+            )],
+        }
+    }
+
+    #[test]
+    fn accel_chords_parse() {
+        assert_eq!(
+            parse_accel("Ctrl+O"),
+            Some((Modifiers::CTRL, Key::Character("o".into())))
+        );
+        assert_eq!(
+            parse_accel("ctrl+shift+s"),
+            Some((
+                Modifiers::CTRL | Modifiers::SHIFT,
+                Key::Character("s".into())
+            ))
+        );
+        assert_eq!(
+            parse_accel("Alt+Enter"),
+            Some((Modifiers::ALT, Key::Named(NamedKey::Enter)))
+        );
+        // CmdOrCtrl resolves per-platform (Ctrl here on Linux/Windows).
+        let (m, _) = parse_accel("CmdOrCtrl+Q").unwrap();
+        assert!(m == Modifiers::CTRL || m == Modifiers::META);
+        assert_eq!(parse_accel("Ctrl+Bogus"), None);
+        assert_eq!(parse_accel("Ctrl"), None); // modifier with no key
+    }
+
+    #[test]
+    fn accel_target_matches_enabled_items_only() {
+        let m = model();
+        assert_eq!(
+            accel_target(&m, Modifiers::CTRL, &Key::Character("o".into())).as_deref(),
+            Some("file.open")
+        );
+        // Case-insensitive on the character.
+        assert_eq!(
+            accel_target(&m, Modifiers::CTRL, &Key::Character("O".into())).as_deref(),
+            Some("file.open")
+        );
+        // Wrong modifiers: no match.
+        assert_eq!(
+            accel_target(
+                &m,
+                Modifiers::CTRL | Modifiers::ALT,
+                &Key::Character("o".into())
+            ),
+            None
+        );
+        // Disabled item never fires.
+        assert_eq!(
+            accel_target(
+                &m,
+                Modifiers::CTRL | Modifiers::SHIFT,
+                &Key::Character("s".into())
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn native_menu_mirrors_the_model() {
+        // Executes muda's (GTK-backend) item construction on Linux — the
+        // native tree must carry the same ids/labels/structure so a native
+        // click reports the portable command id.
+        let menu = build_native_menu(&model());
+        let items = menu.items();
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            muda::MenuItemKind::Submenu(s) => {
+                assert_eq!(s.text(), "File");
+                let kids = s.items();
+                assert_eq!(kids.len(), 3);
+                assert_eq!(kids[0].id().0, "file.open");
+                assert_eq!(kids[2].id().0, "file.quit");
+            }
+            other => panic!("expected a submenu, got id {:?}", other.id()),
+        }
+    }
+
+    #[test]
+    fn accelerator_activates_menu_and_runs_the_bound_command() {
+        // The full Linux activation path: chord → accel_target → activate_menu
+        // → the `cx.register_command` handler under the same id.
+        let mut h = App::new(|cx| {
+            let n = cx.signal("n", || 0i32);
+            cx.register_command("file.new", move |rt| n.update(rt, |v| *v += 1));
+            col![widgets::text("app").id("t")]
+        })
+        .run_headless(lumen_core::geometry::Size::new(200.0, 100.0));
+        h.pump();
+        h.set_menu(MenuModel {
+            items: vec![MenuItem::new("file.new", "New").accel("Ctrl+N")],
+        });
+
+        let id = accel_target(h.menu(), Modifiers::CTRL, &Key::Character("n".into()))
+            .expect("chord resolves to the item");
+        let label = h.activate_menu(&id);
+        assert_eq!(label.as_deref(), Some("New"));
+        assert_eq!(h.invoked_menu(), ["file.new"]);
+        let n: lumen_core::state::Signal<i32> = h.runtime().signal("n", || 0);
+        assert_eq!(n.get(h.runtime()), 1, "bound command ran");
     }
 }

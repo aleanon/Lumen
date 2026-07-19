@@ -216,6 +216,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             frame_ms: std::collections::VecDeque::new(),
             frames_rendered: 0,
             menu: crate::system::MenuModel::default(),
+            menu_rev: 0,
             invoked_menu: Vec::new(),
             system_requests: Vec::new(),
             windows: Vec::new(),
@@ -599,6 +600,7 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     // Desktop system integration (T5.2). The clipboard lives on the Runtime so
     // event handlers can reach it; see `Runtime::clipboard`.
     menu: crate::system::MenuModel,
+    menu_rev: u64,
     invoked_menu: Vec<String>,
     system_requests: Vec<crate::system::SystemRequest>,
     windows: Vec<crate::system::WindowDesc>,
@@ -1445,11 +1447,18 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// Install the app's native menu model.
     pub fn set_menu(&mut self, menu: crate::system::MenuModel) {
         self.menu = menu;
+        self.menu_rev += 1;
     }
 
     /// The current menu model.
     pub fn menu(&self) -> &crate::system::MenuModel {
         &self.menu
+    }
+
+    /// Bumped on every [`set_menu`](Self::set_menu) — the shell rebuilds the
+    /// native (muda) menu only when this changes (P.3c).
+    pub fn menu_rev(&self) -> u64 {
+        self.menu_rev
     }
 
     /// Invoke a menu command by id; returns its label if it exists and is
@@ -1467,6 +1476,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// Menu command ids invoked so far.
     pub fn invoked_menu(&self) -> &[String] {
         &self.invoked_menu
+    }
+
+    /// P.3c: a native activation (muda click, accelerator chord, agent
+    /// `menu.invoke`) — records the invocation like
+    /// [`invoke_menu`](Self::invoke_menu), then *runs* the app command
+    /// registered under the same id (`cx.register_command`), so menu items
+    /// bound to commands actually drive the app. Pumps either way; returns
+    /// the item's label, or `None` if the id is unknown/disabled.
+    pub fn activate_menu(&mut self, id: &str) -> Option<String> {
+        let label = self.invoke_menu(id)?;
+        if self.commands.contains_key(id) {
+            let _ = self.run_command(id); // runs the handler + pumps
+        } else {
+            self.pump();
+        }
+        Some(label)
     }
 
     /// Record a request to an OS service (the real shell fulfils it).
@@ -2184,7 +2209,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // into `structural_reads` there.
         let rt = self.rt.clone();
         self.scope_live.borrow_mut().clear();
-        let (root_el, requests, root_reads) = {
+        let (root_el, mut requests, root_reads) = {
             let mut cx = BuildCx::new(
                 &self.rt,
                 self.clock_ms,
@@ -2200,6 +2225,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // C.4b: last registration of a command name wins; the map is
         // rebuilt per build like handlers.
         self.commands = requests.commands.iter().cloned().collect::<HashMap<_, _>>();
+        // P.3c: a build-declared menu (`cx.set_menu`) installs only when the
+        // model actually changed, so `menu_rev` (the shell's native-menu
+        // rebuild trigger) doesn't churn on every build.
+        if let Some(m) = requests.menu.take() {
+            if m != self.menu {
+                self.set_menu(m);
+            }
+        }
         self.requests = requests;
         self.structural_reads = root_reads;
         self.bg_bindings.clear();

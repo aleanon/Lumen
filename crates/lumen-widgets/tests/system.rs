@@ -67,6 +67,57 @@ fn menu_model_query_and_invoke() {
 }
 
 #[test]
+fn activate_menu_runs_the_command_registered_under_the_same_id() {
+    // P.3c: a native activation (muda click / accelerator / agent
+    // `menu.invoke`) both records the invocation and runs the bound command.
+    let mut h = run(|cx| {
+        let n = cx.signal("count", || 0i32);
+        cx.register_command("edit.bump", move |rt| n.update(rt, |v| *v += 1));
+        widgets::text("x")
+    });
+    h.set_menu(MenuModel {
+        items: vec![
+            MenuItem::new("edit.bump", "Bump").accel("Ctrl+B"),
+            MenuItem::new("help.about", "About"), // no bound command
+        ],
+    });
+    assert_eq!(h.activate_menu("edit.bump").as_deref(), Some("Bump"));
+    let n: lumen_core::state::Signal<i32> = h.runtime().signal("count", || 0);
+    assert_eq!(n.get(h.runtime()), 1, "bound command ran");
+    // Unbound items still record + pump without error.
+    assert_eq!(h.activate_menu("help.about").as_deref(), Some("About"));
+    assert_eq!(h.invoked_menu(), ["edit.bump", "help.about"]);
+    // menu_rev tracks installs (the shell's rebuild trigger).
+    assert_eq!(h.menu_rev(), 1);
+    h.set_menu(MenuModel::default());
+    assert_eq!(h.menu_rev(), 2);
+}
+
+#[test]
+fn build_declared_menu_installs_once_per_change() {
+    // P.3c: `cx.set_menu` declares the menu from build; identical models
+    // must not churn menu_rev (the shell's native-menu rebuild trigger).
+    let mut h = run(|cx| {
+        let label = cx.signal("label", || "Open".to_string());
+        cx.set_menu(MenuModel {
+            items: vec![MenuItem::new("file.open", label.get(cx.runtime())).accel("Ctrl+O")],
+        });
+        widgets::text("x")
+    });
+    assert_eq!(h.menu().find("file.open").unwrap().label, "Open");
+    assert_eq!(h.menu_rev(), 1);
+    h.pump();
+    h.pump();
+    assert_eq!(h.menu_rev(), 1, "unchanged model must not reinstall");
+    // A state change flowing into the model reinstalls it.
+    let label = h.runtime().signal("label", || "Open".to_string());
+    label.set(h.runtime(), "Öppna".into());
+    h.pump();
+    assert_eq!(h.menu().find("file.open").unwrap().label, "Öppna");
+    assert_eq!(h.menu_rev(), 2);
+}
+
+#[test]
 fn system_requests_are_recorded() {
     let mut h = run(|_| widgets::text("x"));
     h.request_system(SystemRequest::Notification {

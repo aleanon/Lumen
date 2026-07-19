@@ -5,6 +5,7 @@
 //! driven from the stylesheet. `just win-watch counter examples/counter/app.lss`.
 use lumen_core::state::Runtime;
 use lumen_widgets::element::Shadow;
+use lumen_widgets::system::{MenuItem, MenuModel};
 use lumen_widgets::{widgets, App, BuildCx, Element};
 
 use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
@@ -59,6 +60,25 @@ fn build(cx: &mut BuildCx) -> Element {
     };
 
     let step = move |n: i64| move |rt: &Runtime| count.update(rt, |c| *c += n);
+
+    // P.3c: native menu. Item ids double as `register_command` names, so a
+    // native click, an accelerator chord, or the agent's `menu.invoke` all
+    // run the same handler. On Linux/winit no menubar attaches (muda is
+    // GTK-bound) — there the accelerators and the agent are the menu.
+    cx.register_command("tally.inc", step(1));
+    cx.register_command("tally.dec", step(-1));
+    cx.register_command("tally.reset", move |rt| count.set(rt, 0));
+    cx.set_menu(MenuModel {
+        items: vec![MenuItem::submenu(
+            "tally",
+            "Tally",
+            vec![
+                MenuItem::new("tally.inc", "Increment").accel("Ctrl+I"),
+                MenuItem::new("tally.dec", "Decrement").accel("Ctrl+D"),
+                MenuItem::new("tally.reset", "Reset").accel("Ctrl+R"),
+            ],
+        )],
+    });
 
     let mut card = widgets::column(vec![
         txt("TALLY", 13.0, 700.0).class("caption"),

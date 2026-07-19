@@ -12,7 +12,7 @@
 use serde::Serialize;
 
 /// One node of a native menu (menu bar item or context-menu entry).
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MenuItem {
     /// Stable command id (what `invoke_menu` matches).
     pub id: String,
@@ -20,6 +20,13 @@ pub struct MenuItem {
     pub label: String,
     /// Whether the item is enabled.
     pub enabled: bool,
+    /// Optional accelerator chord, e.g. `"Ctrl+O"` / `"Ctrl+Shift+S"`
+    /// (P.3c). The shell fires the item when the chord is pressed — on
+    /// Linux/winit this is the *only* native activation path (no menubar
+    /// attachment point exists outside GTK); on Windows/macOS the native
+    /// menu also registers it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accel: Option<String>,
     /// Submenu items.
     pub children: Vec<MenuItem>,
 }
@@ -31,6 +38,7 @@ impl MenuItem {
             id: id.into(),
             label: label.into(),
             enabled: true,
+            accel: None,
             children: Vec::new(),
         }
     }
@@ -45,8 +53,15 @@ impl MenuItem {
             id: id.into(),
             label: label.into(),
             enabled: true,
+            accel: None,
             children,
         }
+    }
+
+    /// Attach an accelerator chord (e.g. `"Ctrl+O"`).
+    pub fn accel(mut self, chord: impl Into<String>) -> MenuItem {
+        self.accel = Some(chord.into());
+        self
     }
 
     fn find<'a>(&'a self, id: &str) -> Option<&'a MenuItem> {
@@ -58,7 +73,7 @@ impl MenuItem {
 }
 
 /// A native menu tree (menu bar or context menu).
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct MenuModel {
     /// Top-level items.
     pub items: Vec<MenuItem>,
