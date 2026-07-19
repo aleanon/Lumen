@@ -10,6 +10,12 @@ publish = false
 [lib]
 name = "lumen_shell_ios"
 
+[features]
+# Forward the facade's snapshot tier (default-on via `lumen`'s defaults):
+# the session preserves state across a rotate via the snapshot handoff.
+default = ["snapshot"]
+snapshot = ["lumen/snapshot"]
+
 [dependencies]
 lumen = { workspace = true }
 lumen-core = { workspace = true }

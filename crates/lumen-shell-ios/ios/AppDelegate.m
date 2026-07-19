@@ -3,11 +3,13 @@
 // A CADisplayLink drives the loop; production uses a CAMetalLayer + MTLTexture,
 // here we present via CoreGraphics for a self-contained template. UITouches map
 // to Lumen pointer events; the safe-area insets crop the drawable; UITextInput
-// bridges IME. (Touch/IME FFI: lumen_ios_touch/lumen_ios_text — declared in the
-// Rust shell as they are wired on-device.)
+// bridges IME.
 #import <UIKit/UIKit.h>
 
 extern size_t lumen_ios_render(uint32_t w, uint32_t h, uint8_t *out, size_t out_len);
+// P.5: the session FFI (implemented in the Rust lib; host-compilable + tested).
+extern void lumen_ios_touch(uint32_t phase, double x, double y);
+extern void lumen_ios_text(const char *utf8);
 
 @interface LumenView : UIView @end
 @implementation LumenView
@@ -28,6 +30,16 @@ extern size_t lumen_ios_render(uint32_t w, uint32_t h, uint8_t *out, size_t out_
     }
     free(buf);
 }
+// P.5: UITouch → session FFI; the view redraws after each event.
+- (void)dispatchTouch:(NSSet<UITouch *> *)touches phase:(uint32_t)phase {
+    UITouch *t = touches.anyObject;
+    CGPoint p = [t locationInView:self];
+    lumen_ios_touch(phase, p.x, p.y);
+    [self setNeedsDisplay];
+}
+- (void)touchesBegan:(NSSet<UITouch *> *)t withEvent:(UIEvent *)e { [self dispatchTouch:t phase:0]; }
+- (void)touchesMoved:(NSSet<UITouch *> *)t withEvent:(UIEvent *)e { [self dispatchTouch:t phase:1]; }
+- (void)touchesEnded:(NSSet<UITouch *> *)t withEvent:(UIEvent *)e { [self dispatchTouch:t phase:2]; }
 @end
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>

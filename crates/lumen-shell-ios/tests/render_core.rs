@@ -60,3 +60,29 @@ fn stylesheet_repaints_for_tier1() {
     );
     assert!(red_pixels(&buf) > 1000, "tier-1 .lss must repaint the root");
 }
+
+// --- P.5 --------------------------------------------------------------
+
+#[test]
+fn session_touch_mutates_state_between_frames() {
+    use lumen::widgets;
+    let build = |cx: &mut lumen::BuildCx| {
+        let count = cx.signal("count", || 0i32);
+        let v = count.get(cx.runtime());
+        widgets::column(vec![
+            widgets::text(format!("n={v}")).id("n"),
+            widgets::button("tap", move |rt| count.update(rt, |c| *c += 1)).id("tap"),
+        ])
+    };
+    let (w, h) = (200u32, 120u32);
+    let mut a = vec![0u8; (w * h * 4) as usize];
+    assert!(lumen_shell_ios::session_render(build, w, h, None, &mut a) > 0);
+
+    // Tap roughly where the button sits (below the label).
+    lumen_shell_ios::session_touch(0, 30.0, 45.0);
+    lumen_shell_ios::session_touch(2, 30.0, 45.0);
+
+    let mut b = vec![0u8; (w * h * 4) as usize];
+    assert!(lumen_shell_ios::session_render(build, w, h, None, &mut b) > 0);
+    assert_ne!(a, b, "the tap changed the rendered frame (state persisted)");
+}

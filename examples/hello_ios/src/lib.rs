@@ -28,5 +28,29 @@ pub unsafe extern "C" fn lumen_ios_render(w: u32, h: u32, out: *mut u8, out_len:
         return 0;
     }
     let buf = std::slice::from_raw_parts_mut(out, out_len);
-    lumen_shell_ios::render_into(app, w, h, None, buf)
+    // P.5: the persistent session — state survives across frames, so
+    // touches (below) actually mutate the app the next frame renders.
+    lumen_shell_ios::session_render(app, w, h, None, buf)
+}
+
+/// C ABI: a touch event — `phase` 0 = began, 1 = moved, 2 = ended; `x`/`y`
+/// in logical points. The template's UITouch handlers call this (P.5 — this
+/// symbol was referenced by the template before it existed).
+#[no_mangle]
+pub extern "C" fn lumen_ios_touch(phase: u32, x: f64, y: f64) {
+    lumen_shell_ios::session_touch(phase, x, y);
+}
+
+/// C ABI: committed text from the UITextInput bridge (IME).
+///
+/// # Safety
+/// `utf8` must be a valid NUL-terminated C string.
+#[no_mangle]
+pub unsafe extern "C" fn lumen_ios_text(utf8: *const std::ffi::c_char) {
+    if utf8.is_null() {
+        return;
+    }
+    if let Ok(s) = std::ffi::CStr::from_ptr(utf8).to_str() {
+        lumen_shell_ios::session_text(s);
+    }
 }
