@@ -20,6 +20,8 @@ kurbo = { workspace = true }
 winit = { workspace = true }
 # P.3a (ADR-P1): OS clipboard — bridged to the portable Runtime clipboard.
 arboard = { workspace = true }
+# P.3b (ADR-P1): native file dialogs fulfilling SystemRequest::OpenFile.
+rfd = { workspace = true }
 wgpu = { workspace = true }
 # Embedded agent endpoint (LUMEN_AGENT_ADDR): lets an AI observe and drive the
 # *live* window over the same JSON-RPC the headless agent speaks. Behind the

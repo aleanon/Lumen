@@ -87,6 +87,9 @@ pub enum SystemRequest {
     OpenFile {
         /// Extension filters (e.g. `["png", "jpg"]`).
         filters: Vec<String>,
+        /// Signal key the chosen path is written into when the shell
+        /// fulfils the dialog (P.3b) — e.g. `"doc.path"`.
+        reply: String,
     },
     /// Open a native file-save dialog.
     SaveFile {

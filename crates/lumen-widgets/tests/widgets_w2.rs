@@ -134,8 +134,8 @@ fn file_picker_queues_a_system_request() {
     let reqs = h.system_requests();
     assert_eq!(reqs.len(), 1, "{reqs:?}");
     assert!(
-        matches!(&reqs[0], lumen_widgets::system::SystemRequest::OpenFile { filters }
-            if filters == &vec!["png".to_string(), "jpg".to_string()]),
+        matches!(&reqs[0], lumen_widgets::system::SystemRequest::OpenFile { filters, reply }
+            if filters == &vec!["png".to_string(), "jpg".to_string()] && reply == "doc.path"),
         "{reqs:?}"
     );
     h.assert_view_coherent();

@@ -1479,6 +1479,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         &self.system_requests
     }
 
+    /// P.3b: drain the recorded [`SystemRequest`]s — the shell takes them to
+    /// fulfil natively (dialogs, notifications); tests/agents that only
+    /// observe use [`system_requests`](Self::system_requests).
+    pub fn take_system_requests(&mut self) -> Vec<crate::system::SystemRequest> {
+        std::mem::take(&mut self.system_requests)
+    }
+
     /// Declare the app's secondary windows (multi-window).
     pub fn set_windows(&mut self, windows: Vec<crate::system::WindowDesc>) {
         self.windows = windows;

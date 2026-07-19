@@ -75,6 +75,7 @@ fn system_requests_are_recorded() {
     });
     h.request_system(SystemRequest::OpenFile {
         filters: vec!["png".into()],
+        reply: "pick.path".into(),
     });
     assert_eq!(h.system_requests().len(), 2);
     assert!(matches!(

@@ -562,6 +562,12 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     // Present only when the frame actually changed (R2): an idle
                     // tick repaints nothing, so the surface keeps its last frame.
                     let stats = h.pump();
+                    // P.3b: fulfil recorded system requests natively (file
+                    // dialogs are modal; the loop resumes after the pick).
+                    let reqs = h.take_system_requests();
+                    if !reqs.is_empty() {
+                        fulfill_system_requests(h, reqs, native_dialog_resolver);
+                    }
                     // P.3a: a copy inside the app updated the portable
                     // clipboard — mirror it out to the OS.
                     let app_clip = h.clipboard_read();
@@ -953,5 +959,95 @@ mod tests {
             map_modifiers(all),
             Modifiers::SHIFT | Modifiers::CTRL | Modifiers::ALT | Modifiers::META
         );
+    }
+}
+
+// --- P.3b: SystemRequest fulfilment ----------------------------------------
+
+/// Fulfil drained [`SystemRequest`]s (P.3b): `resolve` produces the reply
+/// value for requests that have one (a file path for `OpenFile`); the reply
+/// lands in the request's `reply` signal. Split from the rfd-backed resolver
+/// so the delivery plumbing is unit-testable without a display.
+pub fn fulfill_system_requests<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner>(
+    h: &mut Headless<R, E>,
+    reqs: Vec<lumen_widgets::system::SystemRequest>,
+    mut resolve: impl FnMut(&lumen_widgets::system::SystemRequest) -> Option<String>,
+) {
+    use lumen_widgets::system::SystemRequest;
+    let mut delivered = false;
+    for req in reqs {
+        match &req {
+            SystemRequest::OpenFile { reply, .. } => {
+                if let Some(path) = resolve(&req) {
+                    let sig: lumen_core::state::Signal<String> =
+                        h.runtime().signal(reply, String::new);
+                    sig.set(h.runtime(), path);
+                    delivered = true;
+                }
+            }
+            SystemRequest::Notification { title, body } => {
+                // Native notifications land with P.3e; visible today via
+                // the terminal the shell was launched from.
+                eprintln!("lumen notification: {title}: {body}");
+            }
+            // Recorded-only until their fulfilment slice (P.3e).
+            _ => {}
+        }
+    }
+    if delivered {
+        h.pump();
+    }
+}
+
+/// The rfd-backed resolver: a modal native file-open dialog (GTK backend,
+/// ADR-P1 P.3b decision — the portal backend needs a full async runtime).
+pub fn native_dialog_resolver(req: &lumen_widgets::system::SystemRequest) -> Option<String> {
+    if let lumen_widgets::system::SystemRequest::OpenFile { filters, .. } = req {
+        let mut dlg = rfd::FileDialog::new();
+        if !filters.is_empty() {
+            let refs: Vec<&str> = filters.iter().map(String::as_str).collect();
+            dlg = dlg.add_filter("files", &refs);
+        }
+        return dlg.pick_file().map(|p| p.display().to_string());
+    }
+    None
+}
+
+#[cfg(test)]
+mod system_fulfil_tests {
+    use super::*;
+    use lumen_core::state::Signal;
+    use lumen_widgets::system::SystemRequest;
+    use lumen_widgets::{col, widgets, App};
+
+    #[test]
+    fn bare_runtime_string_signal_roundtrip() {
+        let rt = lumen_core::Runtime::new();
+        let s: Signal<String> = rt.signal("x", String::new);
+        s.set(&rt, "v".into());
+        assert_eq!(s.get(&rt), "v");
+    }
+
+    #[test]
+    fn open_file_reply_lands_in_the_named_signal() {
+        let mut h = App::new(|_cx| col![widgets::text("app").id("t")])
+            // The lean widget graph (T.4): this test executes signal set/get
+            // under the lean State bound — the path that was silently broken
+            // until it ran here (the Box-blanket dispatch bug, fixed in
+            // lumen-core alongside this test).
+            .with_executor(lumen_core::tasks::ThreadPoolSpawner::new(1))
+            .run_headless(lumen_core::geometry::Size::new(200.0, 100.0));
+        h.pump();
+
+        fulfill_system_requests(
+            &mut h,
+            vec![SystemRequest::OpenFile {
+                filters: vec!["png".into()],
+                reply: "doc.path".into(),
+            }],
+            |_| Some("/tmp/pic.png".into()),
+        );
+        let sig: Signal<String> = h.runtime().signal("doc.path", String::new);
+        assert_eq!(sig.get(h.runtime()), "/tmp/pic.png");
     }
 }

@@ -5,3 +5,11 @@
 # the machine changes.
 [build]
 jobs = 12
+
+# Disk-pressure mitigations (2026-07-11, after the third 100%-full incident:
+# a day of dev cycles regrew target/ to 151 GB). Line-tables keep usable
+# backtraces at a fraction of full debuginfo; incremental caches were both
+# multi-GB and the corruption-prone artifact class. Revert if you need full
+# debugger variable info.
+[env]
+CARGO_INCREMENTAL = "0"

@@ -126,6 +126,11 @@ bitflags = "2.6"
 notify = "6"
 # ADR-P1 (approved): OS clipboard bridge for the desktop shell (P.3a).
 arboard = "3"
+# ADR-P1 (approved): native file dialogs (P.3b). GTK3 backend — the portal
+# backend drags in a full async runtime (tokio/async-std), while GTK is
+# dynamically linked and present on every Linux desktop; revisit per the
+# ADR if the GTK linkage leaks into non-shell crates.
+rfd = { version = "0.14", default-features = false, features = ["gtk3"] }
 libloading = "0.8"
 tungstenite = "0.24"
 # Mobile (M3). Pulled only when building for the respective target.
@@ -158,3 +163,9 @@ codegen-units = 1
 # `error_boundary` in boundary.rs) requires unwinding via catch_unwind —
 # abort would turn any contained build panic into a process kill.
 strip = true
+
+# Disk-pressure mitigation (see .cargo/config.toml): full debuginfo made
+# debug/test artifacts ~3-5x larger; line tables keep panics/backtraces
+# readable.
+[profile.dev]
+debug = "line-tables-only"

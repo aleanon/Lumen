@@ -24,11 +24,13 @@ impl FilePicker {
     ) -> FilePicker {
         cx.signal(&format!("{name}.path"), String::new);
         let filters: Vec<String> = filters.into_iter().map(Into::into).collect();
+        let reply = format!("{name}.path");
         let mut el: Element = widgets::button(label, move |rt| {
             crate::system::queue_system(
                 rt,
                 crate::system::SystemRequest::OpenFile {
                     filters: filters.clone(),
+                    reply: reply.clone(),
                 },
             );
         });

@@ -182,6 +182,14 @@ impl WriteCx for ReadScope {
 }
 
 struct Slot {
+    /// NOTE: never call `StoredValue` methods via `self.value.method()` —
+    /// in the lean build the `impl<T: 'static> StoredValue for T` blanket
+    /// covers `Box<dyn StoredValue>` itself, so method resolution picks the
+    /// blanket ON THE BOX (autoref beats deref) and `as_any` reports the
+    /// Box's `TypeId`, breaking every downcast. Use [`Slot::stored`]/
+    /// [`Slot::stored_mut`] (UFCS through the trait object) instead. The
+    /// snapshot build was immune only because its serde bounds exclude the
+    /// Box; the lean build shipped broken until P.3b's shell test hit it.
     value: Box<dyn StoredValue>,
     subs: HashSet<ScopeId>,
     /// The `write_gen` at this value's last write (0 = never written since
@@ -189,6 +197,18 @@ struct Slot {
     /// scope can tell whether *its* deps changed — finer than the global
     /// `write_gen`, which only says *something* changed.
     version: u64,
+}
+
+impl Slot {
+    /// The stored value as `&dyn Any` — dispatched through the trait
+    /// object explicitly (see the field note).
+    fn stored(&self) -> &dyn Any {
+        <dyn StoredValue as StoredValue>::as_any(&*self.value)
+    }
+    /// Mutable counterpart of [`stored`](Self::stored).
+    fn stored_mut(&mut self) -> &mut dyn Any {
+        <dyn StoredValue as StoredValue>::as_any_mut(&mut *self.value)
+    }
 }
 
 struct ScopeData {
@@ -648,7 +668,7 @@ impl Runtime {
         let mut map = serde_json::Map::new();
         for (id, slot) in &b.slots {
             let key = b.id_to_key[id.0 as usize].clone();
-            map.insert(key, slot.value.to_json());
+            map.insert(key, <dyn StoredValue as StoredValue>::to_json(&*slot.value));
         }
         StateSnapshot(serde_json::Value::Object(map))
     }
@@ -703,7 +723,7 @@ impl Runtime {
                 let Some(json) = b.pending.remove(key) else {
                     continue;
                 };
-                match slot.value.restore_json(key, &json) {
+                match <dyn StoredValue as StoredValue>::restore_json(&mut *slot.value, key, &json) {
                     Ok(d) => diags.extend(d),
                     Err(d) => {
                         diags.push(d);
@@ -816,8 +836,7 @@ impl Runtime {
         let b = self.inner.borrow();
         let slot = b.slots.get(&id).expect("signal slot missing");
         let v = slot
-            .value
-            .as_any()
+            .stored()
             .downcast_ref::<T>()
             .expect("signal type mismatch");
         f(v)
@@ -854,8 +873,7 @@ impl Runtime {
         let mut b = self.inner.borrow_mut();
         let changed = match b.slots.get(&id) {
             Some(slot) => slot
-                .value
-                .as_any()
+                .stored()
                 .downcast_ref::<T>()
                 .map(|cur| *cur != value)
                 .unwrap_or(true),
@@ -966,8 +984,7 @@ impl<T: State> Signal<T> {
                 let slot = b.slots.get_mut(&self.id).expect("signal slot missing");
                 slot.version = ver;
                 let v = slot
-                    .value
-                    .as_any_mut()
+                    .stored_mut()
                     .downcast_mut::<T>()
                     .expect("signal type mismatch");
                 f(v);
