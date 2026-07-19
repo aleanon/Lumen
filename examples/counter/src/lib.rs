@@ -68,6 +68,23 @@ fn build(cx: &mut BuildCx) -> Element {
     cx.register_command("tally.inc", step(1));
     cx.register_command("tally.dec", step(-1));
     cx.register_command("tally.reset", move |rt| count.set(rt, 0));
+    // P.3e: OS-service requests ride the host mailbox; the shell fulfils
+    // them (desktop notification / system tray) — the live demo for both.
+    cx.register_command("tally.notify", move |rt| {
+        lumen_widgets::system::queue_system(
+            rt,
+            lumen_widgets::system::SystemRequest::Notification {
+                title: "Tally".into(),
+                body: format!("count is {}", count.get(rt)),
+            },
+        )
+    });
+    cx.register_command("tally.tray", move |rt| {
+        lumen_widgets::system::queue_system(
+            rt,
+            lumen_widgets::system::SystemRequest::TrayTooltip(format!("Tally: {}", count.get(rt))),
+        )
+    });
     cx.set_menu(MenuModel {
         items: vec![MenuItem::submenu(
             "tally",
@@ -76,6 +93,8 @@ fn build(cx: &mut BuildCx) -> Element {
                 MenuItem::new("tally.inc", "Increment").accel("Ctrl+I"),
                 MenuItem::new("tally.dec", "Decrement").accel("Ctrl+D"),
                 MenuItem::new("tally.reset", "Reset").accel("Ctrl+R"),
+                MenuItem::new("tally.notify", "Notify count").accel("Ctrl+T"),
+                MenuItem::new("tally.tray", "Show in tray").accel("Ctrl+Y"),
             ],
         )],
     });

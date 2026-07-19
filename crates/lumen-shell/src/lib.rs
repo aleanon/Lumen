@@ -10,8 +10,8 @@
 
 use kurbo::{Point, Size, Vec2};
 use lumen_core::events::{
-    Event, ImeEvent, Key, KeyEvent, Modifiers, NamedKey, PointerButton, PointerEvent, PointerKind,
-    TextInputEvent, WheelEvent,
+    DropData, DropEvent, Event, ImeEvent, Key, KeyEvent, Modifiers, NamedKey, PointerButton,
+    PointerEvent, PointerKind, TextInputEvent, WheelEvent,
 };
 use lumen_render::RgbaImage;
 use lumen_widgets::{App, Headless};
@@ -56,6 +56,12 @@ enum ShellEvent {
     /// P.4: an assistive technology activated, deactivated, or requested an
     /// action; the accesskit_winit adapter posts these through the loop.
     AccessKit(accesskit_winit::Event),
+    /// P.3c/P.3e: a native menu activation — menubar item (Windows/macOS) or
+    /// tray-menu item (all platforms; the tray menu hosts the app's
+    /// `MenuModel`). Pushed via muda's event handler so the click *wakes*
+    /// the loop (a drain in `about_to_wait` only ran on the next unrelated
+    /// event).
+    Menu(muda::MenuEvent),
 }
 
 impl From<accesskit_winit::Event> for ShellEvent {
@@ -95,6 +101,14 @@ pub fn run(app: App, size: Size) {
         let proxy = event_loop.create_proxy();
         std::thread::spawn(move || watch_styles(&path, proxy));
     }
+    // P.3c/P.3e: native menu + tray-menu clicks land here from muda's
+    // handler thread; forward them into the loop (each one wakes it).
+    {
+        let proxy = event_loop.create_proxy();
+        muda::MenuEvent::set_event_handler(Some(move |ev: muda::MenuEvent| {
+            let _ = proxy.send_event(ShellEvent::Menu(ev));
+        }));
+    }
     // Upgrade the default inline executor to a real thread pool for the live app,
     // so `cx.resource`/`cx.task` run off the UI thread.
     let app = app.with_executor(lumen_core::tasks::ThreadPoolSpawner::default());
@@ -120,6 +134,7 @@ pub fn run(app: App, size: Size) {
         menu_rev_seen: 0,
         native_menu: None,
         a11y: None,
+        tray: None,
         os_clipboard: arboard::Clipboard::new().ok(),
         os_clip_last: String::new(),
         ime_active: false,
@@ -280,6 +295,11 @@ struct Shell {
     /// assistive technology subscribes; then the semantic tree — the same
     /// one the agent and tests read — is published after every frame.
     a11y: Option<accesskit_winit::Adapter>,
+    /// P.3e: system tray, created lazily on the app's first
+    /// `SystemRequest::TrayTooltip` (no tray unless asked for). On Linux it
+    /// lives on a dedicated gtk thread (winit owns the main loop) reached by
+    /// this channel; elsewhere the TrayIcon is held directly.
+    tray: Option<TrayState>,
     /// Whether an IME composition context is active (then text arrives via
     /// `Ime::Commit`, not `KeyEvent::text`).
     ime_active: bool,
@@ -373,6 +393,14 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     if let Some(p) = &mut self.presenter {
                         p.present(&h.screenshot());
                     }
+                }
+            }
+            ShellEvent::Menu(ev) => {
+                if let Some(h) = &mut self.headless {
+                    h.activate_menu(ev.id().0.as_str());
+                }
+                if let Some(w) = &self.window {
+                    w.request_redraw();
                 }
             }
             ShellEvent::AccessKit(ev) => {
@@ -526,6 +554,21 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     modifiers: self.modifiers,
                 }));
             }
+            // P.3e: OS drag-and-drop. winit handles the platform protocol
+            // (XDND here) and delivers one DroppedFile per file; each becomes
+            // a portable Drop through the one input queue — the same event
+            // headless tests and the agent's input.drop synthesize. Position
+            // is the last-known cursor (X11 does not report a drop point).
+            WindowEvent::DroppedFile(path) => {
+                let pos = self.cursor;
+                self.inject(Event::Drop(DropEvent {
+                    pos,
+                    data: DropData {
+                        text: None,
+                        files: vec![path.display().to_string()],
+                    },
+                }));
+            }
             WindowEvent::Ime(ime) => match ime {
                 // `ime_active` means *composing a preedit* — not merely that IME
                 // is enabled. Otherwise platforms that fire `Ime::Enabled` for
@@ -607,6 +650,8 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 }
             }
             WindowEvent::RedrawRequested => {
+                let mut pending_tray: Option<(Vec<String>, lumen_widgets::system::MenuModel)> =
+                    None;
                 if let Some(h) = &mut self.headless {
                     let resized = std::mem::take(&mut self.pending_resize);
                     let now = Instant::now();
@@ -637,9 +682,23 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     let stats = h.pump();
                     // P.3b: fulfil recorded system requests natively (file
                     // dialogs are modal; the loop resumes after the pick).
-                    let reqs = h.take_system_requests();
+                    let mut reqs = h.take_system_requests();
+                    // P.3e: tray requests are shell state, not fulfilment —
+                    // split them out (borrow: applied after this block).
+                    let mut tray_tips = Vec::new();
+                    reqs.retain(|r| {
+                        if let lumen_widgets::system::SystemRequest::TrayTooltip(t) = r {
+                            tray_tips.push(t.clone());
+                            false
+                        } else {
+                            true
+                        }
+                    });
                     if !reqs.is_empty() {
                         fulfill_system_requests(h, reqs, native_dialog_resolver);
+                    }
+                    if !tray_tips.is_empty() {
+                        pending_tray = Some((tray_tips, h.menu().clone()));
                     }
                     // P.3c: realize a newly installed menu model natively.
                     // (Attach is a no-op on Linux — see `attach_native_menu`.)
@@ -679,6 +738,11 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         }
                     }
                 }
+                if let Some((tips, model)) = pending_tray {
+                    for t in tips {
+                        self.tray_update(&t, &model);
+                    }
+                }
             }
             _ => {}
         }
@@ -697,18 +761,6 @@ impl ApplicationHandler<ShellEvent> for Shell {
     /// Decide how to wait for the next frame from what the UI asked for, so an
     /// idle UI costs zero frames while an animating one runs free.
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        // P.3c: native menu clicks (Windows/macOS menubars) arrive on muda's
-        // process-global channel while the loop pumps OS events — drain them
-        // into the same activation path the agent and accelerators use.
-        // (Never fires on Linux: nothing is attached there.)
-        while let Ok(ev) = muda::MenuEvent::receiver().try_recv() {
-            if let Some(h) = &mut self.headless {
-                h.activate_menu(ev.id().0.as_str());
-            }
-            if let Some(w) = &self.window {
-                w.request_redraw();
-            }
-        }
         let Some(h) = &self.headless else { return };
         match h.next_deadline() {
             // Idle: sleep until the next OS event (input/resize/close).
@@ -749,6 +801,118 @@ impl Shell {
         }
         if let Some(w) = &self.window {
             w.request_redraw(); // event-driven: redraw only after input
+        }
+    }
+}
+
+// --- P.3e: system tray --------------------------------------------------------
+
+/// The realized tray. Linux: a channel into the tray's gtk thread; other
+/// platforms hold the icon on the loop thread.
+enum TrayState {
+    #[cfg(target_os = "linux")]
+    Channel(mpsc::Sender<String>),
+    #[cfg(not(target_os = "linux"))]
+    Direct(tray_icon::TrayIcon),
+}
+
+/// A 16×16 solid-accent icon generated in code — identifies the tray slot
+/// without shipping an asset (apps get real icon support with `lumen
+/// package` branding, E.1).
+fn tray_icon_pixels() -> tray_icon::Icon {
+    let mut rgba = Vec::with_capacity(16 * 16 * 4);
+    for _ in 0..(16 * 16) {
+        rgba.extend_from_slice(&[0x4a, 0x7c, 0xff, 0xff]);
+    }
+    tray_icon::Icon::from_rgba(rgba, 16, 16).expect("tray icon")
+}
+
+/// Linux: run the tray on its own gtk thread (appindicator requires a gtk
+/// loop; winit owns the main one). Appindicator has no tooltips, so the text
+/// lands as the *title* (shown beside the icon) as well. The tray's context
+/// menu hosts the app's `MenuModel` — the menu Linux can't show as a winit
+/// menubar gets a native home here, and **ayatana appindicator silently
+/// refuses to register without a menu** (found live: no menu ⇒ no
+/// StatusNotifierItem, no error). Item clicks arrive on muda's event
+/// handler → `ShellEvent::Menu` → `activate_menu`.
+#[cfg(target_os = "linux")]
+fn spawn_tray(initial: String, model: lumen_widgets::system::MenuModel) -> TrayState {
+    let (tx, rx) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        if gtk::init().is_err() {
+            eprintln!("lumen tray: gtk init failed");
+            return;
+        }
+        let menu = if model.items.is_empty() {
+            // Registration requires *some* menu; a lone disabled entry keeps
+            // the icon alive for apps that only set a tooltip.
+            let m = muda::Menu::new();
+            let _ = m.append(&muda::MenuItem::with_id("tray", "Lumen", false, None));
+            m
+        } else {
+            build_native_menu(&model)
+        };
+        let tray = match tray_icon::TrayIconBuilder::new()
+            .with_icon(tray_icon_pixels())
+            .with_title(&initial)
+            .with_tooltip(&initial)
+            .with_menu(Box::new(menu))
+            .build()
+        {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("lumen tray: {e}");
+                return;
+            }
+        };
+        // A real glib main loop is required: appindicator's watcher
+        // handshake (RegisterStatusNotifierItem + property callbacks)
+        // dispatches on this thread's default main context — a hand-rolled
+        // `main_iteration_do` poll starves it and the item never registers.
+        gtk::glib::timeout_add_local(Duration::from_millis(200), move || {
+            while let Ok(text) = rx.try_recv() {
+                tray.set_title(Some(&text));
+                let _ = tray.set_tooltip(Some(&text));
+            }
+            gtk::glib::ControlFlow::Continue
+        });
+        gtk::main();
+    });
+    TrayState::Channel(tx)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn spawn_tray(initial: String, model: lumen_widgets::system::MenuModel) -> TrayState {
+    let mut builder = tray_icon::TrayIconBuilder::new()
+        .with_icon(tray_icon_pixels())
+        .with_tooltip(&initial);
+    if !model.items.is_empty() {
+        builder = builder.with_menu(Box::new(build_native_menu(&model)));
+    }
+    match builder.build() {
+        Ok(t) => TrayState::Direct(t),
+        Err(e) => {
+            eprintln!("lumen tray: {e}");
+            // Keep a dead channel-less placeholder impossible: retry next time.
+            panic!("tray creation failed: {e}");
+        }
+    }
+}
+
+impl Shell {
+    /// Apply a `TrayTooltip` request: create the tray on first use, then
+    /// push the text.
+    fn tray_update(&mut self, text: &str, model: &lumen_widgets::system::MenuModel) {
+        match &mut self.tray {
+            None => self.tray = Some(spawn_tray(text.to_string(), model.clone())),
+            #[cfg(target_os = "linux")]
+            Some(TrayState::Channel(tx)) => {
+                let _ = tx.send(text.to_string());
+            }
+            #[cfg(not(target_os = "linux"))]
+            Some(TrayState::Direct(t)) => {
+                let _ = t.set_tooltip(Some(text));
+            }
         }
     }
 }
@@ -1273,9 +1437,10 @@ pub fn fulfill_system_requests<R: lumen_render::Renderer, E: lumen_core::tasks::
                 }
             }
             SystemRequest::Notification { title, body } => {
-                // Native notifications land with P.3e; visible today via
-                // the terminal the shell was launched from.
-                eprintln!("lumen notification: {title}: {body}");
+                // P.3e: native desktop notification, terminal fallback.
+                if !notify_native(title, body) {
+                    eprintln!("lumen notification: {title}: {body}");
+                }
             }
             // Recorded-only until their fulfilment slice (P.3e).
             _ => {}
@@ -1284,6 +1449,27 @@ pub fn fulfill_system_requests<R: lumen_render::Renderer, E: lumen_core::tasks::
     if delivered {
         h.pump();
     }
+}
+
+/// P.3e: show a desktop notification. Linux dispatches through
+/// `notify-send` (freedesktop spec; present on every desktop this targets —
+/// a D-Bus client dep would drag an async runtime into the shell, the same
+/// trade rejected for rfd's portal backend). Other platforms fall back to
+/// the caller's terminal path until their shells land.
+#[cfg(target_os = "linux")]
+fn notify_native(title: &str, body: &str) -> bool {
+    std::process::Command::new("notify-send")
+        .arg("--app-name=Lumen")
+        .arg("--")
+        .arg(title)
+        .arg(body)
+        .spawn()
+        .is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn notify_native(_title: &str, _body: &str) -> bool {
+    false
 }
 
 /// The rfd-backed resolver: a modal native file-open dialog (GTK backend,

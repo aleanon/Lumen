@@ -142,6 +142,12 @@ muda = { version = "0.19", default-features = false, features = ["gtk"] }
 # assistive tech (AT-SPI/UIA/NSAccessibility) via winit. 0.23 is the pairing
 # for accesskit 0.17 + winit 0.30.
 accesskit_winit = "0.23"
+# P.3e: system tray realizing SystemRequest::TrayTooltip. Shares muda 0.19
+# and the gtk linkage; on Linux it runs on a dedicated gtk thread (winit owns
+# the main loop) and appindicator shows title text, not tooltips.
+tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
+# The tray thread's gtk loop (Linux only; same gtk 0.18 muda/tray-icon link).
+gtk = "0.18"
 libloading = "0.8"
 tungstenite = "0.24"
 # Mobile (M3). Pulled only when building for the respective target.

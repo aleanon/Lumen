@@ -203,7 +203,13 @@ impl App {
 // shell realizes the model via muda on Windows (hwnd) / macOS (nsapp);
 // Linux/winit has no menubar attachment point (muda is GTK-bound), so there
 // accelerators — matched by the shell — and the agent's `menu.invoke`
-// activate items.
+// activate items, and the system tray's context menu hosts the same
+// `MenuModel` natively (P.3e).
+//
+// OS services (P.3e): `SystemRequest::Notification` → desktop notification;
+// `SystemRequest::TrayTooltip` → lazy system tray (created on first request;
+// tooltip + title text; menu = the app `MenuModel`). OS file drops arrive as
+// the same `Event::Drop` headless tests synthesize.
 pub struct Headless;  // used by lumen-test and lumen-agent in headless mode
 impl Headless {
     pub fn pump(&mut self) -> FrameStats;                  // process queue, layout, paint

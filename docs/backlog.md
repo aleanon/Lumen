@@ -40,8 +40,10 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
   session, so the wiring is landing and live-verified here: arboard clipboard
   (P.3a ✅), rfd file-open dialogs (P.3b ✅), muda menus + accelerators
   (P.3c ✅; Linux/winit has no menubar attachment point — accelerators +
-  `menu.invoke` are the activation paths there). Remaining: multi-window
-  (P.3d), tray/DnD/notifications (P.3e).
+  `menu.invoke` are the activation paths there), OS drag-and-drop + desktop
+  notifications + system tray (P.3e ✅ — tray menu hosts the app MenuModel;
+  live-verified: SNI registration + a dbusmenu click driving app state).
+  Remaining: multi-window (P.3d).
   *First step:* ADR for the platform deps; wire `arboard` clipboard (most
   testable) behind the existing `SystemRequest`/`Headless::clipboard_*` API.
 - **A5 — AccessKit platform bridge.** *Why blocked:* the adapter (`accesskit_winit`,

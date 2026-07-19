@@ -31,6 +31,8 @@ muda = { workspace = true }
 # through the event loop and route into the same input queue.
 accesskit = { workspace = true }
 accesskit_winit = { workspace = true }
+# P.3e: system tray (lazy — created on the first TrayTooltip request).
+tray-icon = { workspace = true }
 wgpu = { workspace = true }
 # Embedded agent endpoint (LUMEN_AGENT_ADDR): lets an AI observe and drive the
 # *live* window over the same JSON-RPC the headless agent speaks. Behind the
@@ -50,3 +52,7 @@ agent = ["dep:lumen-agent", "dep:serde_json", "lumen-widgets/snapshot"]
 wgpu = ["lumen-widgets/wgpu"]
 snapshot = ["lumen-widgets/snapshot"]
 pan-unicode = ["lumen-widgets/pan-unicode"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The tray's dedicated gtk thread (winit owns the main loop on Linux).
+gtk = { workspace = true }
