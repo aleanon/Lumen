@@ -46,7 +46,13 @@ Required → `required`; Busy → `busy`. Focused/Hovered/Pressed are runtime st
 - [ ] Focus changes (tab, dialog open) are announced.
 
 ## Linux — Orca / AT-SPI (smoke)
-- [ ] `accerciser` shows the Lumen tree with correct roles + states.
+- [x] The Lumen tree is on the AT-SPI bus with correct roles/names (P.4,
+      2026-07-19, this dev box via pyatspi: app identity `counter-win`,
+      `label`/`push button` roles, names incl. static text, `click` action
+      exposed, and an AT-initiated `doAction('click')` drove app state
+      0→1). Orca launches and sees the same registry; a spoken-output pass
+      needs a human listener — everything machine-checkable is automated.
+- [ ] `accerciser` visual pass (optional; pyatspi covers the same tree).
 
 ## WCAG 2.2 — automated vs manual (T7.4)
 Automated in `lumen_widgets::wcag` + `audit` (run in CI over the semantic tree):

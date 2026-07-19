@@ -55,7 +55,7 @@ Rules:
 - Roles (closed set, extend via decision log): `window, button, checkbox, radio, switch, slider, text_input, text, image, link, list, list_item, table, row, cell, column_header, tab_list, tab, tab_panel, menu, menu_item, dialog, alert, tooltip, progress, group, scroll_area, tree, tree_item, combo_box, generic`.
 - Every focusable leaf must have a non-empty `label` or `value`; otherwise diagnostic `W0301`.
 - `bounds` here ≡ SoA `bounds` ≡ `ui.getLayout` — one source of truth (02 §5).
-- AccessKit mapping: the role/state map + `TreeUpdate` builder exist (`lumen-widgets/src/a11y.rs`, table in `lumen-core/a11y-map.md`); the OS platform adapter is planned (plan P.4).
+- AccessKit mapping (P.4 ✅): the role/state map + `TreeUpdate` builder (`lumen-widgets/src/a11y.rs`; nodes carry bounds, declared actions, and value-for-static-text) publish to the OS through an `accesskit_winit` adapter in the shell — dormant until an AT subscribes, tree pushed after every painted frame, AT `Click` actions routed into the one input queue (`route_at_action`). Live-verified over AT-SPI on this box: app identity, names, and a `doAction('click')` that drove app state.
 
 ## 2. Selector grammar
 

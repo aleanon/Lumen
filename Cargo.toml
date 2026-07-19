@@ -138,6 +138,10 @@ rfd = { version = "0.14", default-features = false, features = ["gtk3"] }
 # linkage rfd already brings. No menubar attaches under winit on Linux —
 # accelerators + agent verbs activate items there.
 muda = { version = "0.19", default-features = false, features = ["gtk"] }
+# P.4: AT bridge — publishes the existing a11y TreeUpdate (T4.3) to platform
+# assistive tech (AT-SPI/UIA/NSAccessibility) via winit. 0.23 is the pairing
+# for accesskit 0.17 + winit 0.30.
+accesskit_winit = "0.23"
 libloading = "0.8"
 tungstenite = "0.24"
 # Mobile (M3). Pulled only when building for the respective target.

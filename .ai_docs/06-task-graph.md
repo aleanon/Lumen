@@ -117,7 +117,7 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 ## M4 — Depth & 1.0
 **T4.1 ☑ ShaderWidget** (WGSL, typed uniforms, built-ins, CPU fallback fill, shader hot reload, E0201 diagnostics). *Accept:* GPU-runner goldens for 3 sample shaders; broken-shader edit keeps old pipeline + diagnostic.
 **T4.2 ☑ DataGrid + Tree + charts + RichTextEditor.** *Accept:* test triples; DataGrid 1M-row gate added to perf suite.
-**T4.3 ◐ AccessKit integration** (role/state map per 03 §1; platform a11y smoke tests). *Accept:* map table complete; VoiceOver/NVDA manual checklist documented + automated AccessKit-tree diff tests.
+**T4.3 ☑ AccessKit integration** (role/state map per 03 §1; platform adapter landed in plan P.4: `accesskit_winit` in the shell, per-frame `update_if_active`, AT actions → input queue). *Accept met:* map table complete; adapter tree ≡ semantics diff test (node-for-node walk incl. bounds/children order); AT-SPI live smoke on this box (identity + names + `doAction` driving state). VoiceOver/NVDA manual runs still need mac/Windows hardware (`docs/a11y-checklist.md`).
 *(◐: role/state map + `accesskit::TreeUpdate` builder real and tested in-memory (`a11y.rs`); **no `accesskit_winit` adapter** — the tree never reaches the OS; backlog A5; plan P.4.)*
 **T4.4 ☑ Inspector app** (tree view, style editor, animation scrubber, trace replay — built in Lumen). *Accept:* inspector drives itself via lumen-agent in a self-test.
 **T4.5 ☑ Remaining widget set, API audit, rustdoc pass, 1.0 freeze.** *Accept:* `cargo doc` no warnings; public-API diff reviewed; semver-checks clean.

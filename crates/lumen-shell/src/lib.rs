@@ -53,6 +53,15 @@ enum ShellEvent {
     /// A background task pushed a result; schedule a frame to apply it (the data
     /// layer waker target).
     Wake,
+    /// P.4: an assistive technology activated, deactivated, or requested an
+    /// action; the accesskit_winit adapter posts these through the loop.
+    AccessKit(accesskit_winit::Event),
+}
+
+impl From<accesskit_winit::Event> for ShellEvent {
+    fn from(ev: accesskit_winit::Event) -> ShellEvent {
+        ShellEvent::AccessKit(ev)
+    }
 }
 
 /// The shell's concrete runtime: CPU reference renderer + a real thread-pool
@@ -110,6 +119,7 @@ pub fn run(app: App, size: Size) {
         modifiers: Modifiers::empty(),
         menu_rev_seen: 0,
         native_menu: None,
+        a11y: None,
         os_clipboard: arboard::Clipboard::new().ok(),
         os_clip_last: String::new(),
         ime_active: false,
@@ -266,6 +276,10 @@ struct Shell {
     /// point, so the model stays data and accelerators/agent verbs activate
     /// items (see `attach_native_menu`).
     native_menu: Option<muda::Menu>,
+    /// P.4: the AccessKit adapter. Dormant (near-zero cost) until an
+    /// assistive technology subscribes; then the semantic tree — the same
+    /// one the agent and tests read — is published after every frame.
+    a11y: Option<accesskit_winit::Adapter>,
     /// Whether an IME composition context is active (then text arrives via
     /// `Ime::Commit`, not `KeyEvent::text`).
     ime_active: bool,
@@ -361,6 +375,23 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     }
                 }
             }
+            ShellEvent::AccessKit(ev) => {
+                use accesskit_winit::WindowEvent as AkEvent;
+                match ev.window_event {
+                    // An AT subscribed: publish the current tree.
+                    AkEvent::InitialTreeRequested => self.push_a11y_tree(),
+                    // AT action → the same input queue everything else uses.
+                    AkEvent::ActionRequested(req) => {
+                        if let Some(h) = &mut self.headless {
+                            route_at_action(h, &req);
+                        }
+                        if let Some(w) = &self.window {
+                            w.request_redraw();
+                        }
+                    }
+                    AkEvent::AccessibilityDeactivated => {}
+                }
+            }
         }
     }
 
@@ -373,8 +404,16 @@ impl ApplicationHandler<ShellEvent> for Shell {
             .with_inner_size(winit::dpi::LogicalSize::new(
                 self.size.width,
                 self.size.height,
-            ));
+            ))
+            // P.4: the AccessKit adapter must exist before the window is
+            // first shown — create invisible, attach, then show.
+            .with_visible(false);
         let window = Arc::new(el.create_window(attrs).expect("window"));
+        self.a11y = Some(accesskit_winit::Adapter::with_event_loop_proxy(
+            &window,
+            self.proxy.clone(),
+        ));
+        window.set_visible(true);
         window.set_ime_allowed(true); // receive IME composition + commit
         let app = self.app.take().expect("app");
         // Runtime works in logical px; the surface is physical. Derive the
@@ -420,6 +459,10 @@ impl ApplicationHandler<ShellEvent> for Shell {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // P.4: the adapter tracks focus/visibility from the raw event stream.
+        if let (Some(a), Some(w)) = (&mut self.a11y, &self.window) {
+            a.process_event(w, &event);
+        }
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(s) => {
@@ -626,6 +669,14 @@ impl ApplicationHandler<ShellEvent> for Shell {
                             let frame = h.screenshot();
                             p.present(&frame);
                         }
+                        // P.4: publish the new semantic tree to any
+                        // subscribed AT (no-op — the closure never runs —
+                        // when none is active).
+                        if let Some(a) = &mut self.a11y {
+                            a.update_if_active(|| {
+                                lumen_widgets::a11y::build_tree(&h.semantics_doc().root.elided())
+                            });
+                        }
                     }
                 }
             }
@@ -681,6 +732,17 @@ impl ApplicationHandler<ShellEvent> for Shell {
 }
 
 impl Shell {
+    /// P.4: publish the current semantic tree to the AT (used for the
+    /// initial-tree request; per-frame updates ride `RedrawRequested`).
+    fn push_a11y_tree(&mut self) {
+        let Some(h) = &self.headless else { return };
+        if let Some(a) = &mut self.a11y {
+            a.update_if_active(|| {
+                lumen_widgets::a11y::build_tree(&h.semantics_doc().root.elided())
+            });
+        }
+    }
+
     fn inject(&mut self, ev: Event) {
         if let Some(h) = &mut self.headless {
             h.inject(ev);
@@ -688,6 +750,36 @@ impl Shell {
         if let Some(w) = &self.window {
             w.request_redraw(); // event-driven: redraw only after input
         }
+    }
+}
+
+// --- P.4: assistive-technology action routing --------------------------------
+
+/// Route an AT [`accesskit::ActionRequest`] into the one input queue. The
+/// target id is the runtime node index (the same ids `build_tree` publishes);
+/// `Click` synthesizes the standard down/up pair at the node's center — the
+/// exact shape the agent's `input.click` and the live pointer produce.
+/// (Focus/scroll actions are documented-unrouted until a headless focus-by-
+/// node API exists; Tab-order focus already works through key events.)
+fn route_at_action<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner>(
+    h: &mut Headless<R, E>,
+    req: &accesskit::ActionRequest,
+) {
+    fn find_bounds(n: &lumen_core::semantics::SemanticsNode, id: u64) -> Option<kurbo::Rect> {
+        if u64::from(n.node) == id {
+            return Some(n.bounds);
+        }
+        n.children.iter().find_map(|c| find_bounds(c, id))
+    }
+    let root = h.semantics_doc().root.elided();
+    let Some(bounds) = find_bounds(&root, req.target.0) else {
+        return;
+    };
+    if req.action == accesskit::Action::Click {
+        let p = Point::new((bounds.x0 + bounds.x1) / 2.0, (bounds.y0 + bounds.y1) / 2.0);
+        h.inject(Event::PointerDown(PointerEvent::at(p)));
+        h.inject(Event::PointerUp(PointerEvent::at(p)));
+        h.pump();
     }
 }
 

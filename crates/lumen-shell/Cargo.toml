@@ -26,6 +26,11 @@ rfd = { workspace = true }
 # on Linux muda is GTK-bound and winit has no menubar attachment point, so
 # activation there is the portable accelerator path + agent verbs.
 muda = { workspace = true }
+# P.4: platform assistive-tech bridge — the semantic tree (already built for
+# tests/agent) published to AT-SPI/UIA/NSAccessibility; AT actions come back
+# through the event loop and route into the same input queue.
+accesskit = { workspace = true }
+accesskit_winit = { workspace = true }
 wgpu = { workspace = true }
 # Embedded agent endpoint (LUMEN_AGENT_ADDR): lets an AI observe and drive the
 # *live* window over the same JSON-RPC the headless agent speaks. Behind the
