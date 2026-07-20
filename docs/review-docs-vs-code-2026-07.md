@@ -1,5 +1,15 @@
 # Docs ↔ Code implementation diff — 2026-07-08
 
+> **HISTORICAL RECORD — RESOLVED (D9.3, 2026-07-20).** Every liability in
+> this review was worked off by `docs/plan-remediation-2026-07.md`
+> (phases D0→S0→A→B→C→T→W→R→P→M→E→D9), executed 2026-07-09 → 2026-07-20,
+> commit range 7580e74..8a042c2. Per-item resolution evidence lives in
+> `.ai_docs/07-decision-log.md` (the "Remediation 2026-07" section, one
+> entry per landed task) and the flipped marks in `.ai_docs/06-task-graph.md`.
+> The v2 scorecard proving the goal-level liabilities closed is
+> `docs/review-goals-2026-07-v2.md`.
+
+
 Three-way diff of **(a) what the docs claim is implemented** (task-graph ☑s,
 plan "done" markers, module doc comments), **(b) what the normative specs say
 should be implemented** (.ai_docs/01–05), and **(c) what the code actually

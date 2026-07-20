@@ -72,8 +72,8 @@ makes memoization and list-GC possible), so a post-hoc tag on a built
 element cannot provide it. A generic `.on(EventKind, handler)` is likewise
 **superseded** by the typed `on_*` fields plus the leaf `event()` hook —
 a stringly-generic registration adds no capability over the typed surface.
-*Still planned:* `.style(Style)` taking the typed 04 §8 style (pairs with
-the Phase-B cascade-origin work, B.6b).
+*Shipped (B.6b) as `.css(Style)`* — the typed 04 §8 style at inline
+origin (the name `.style` was taken by `LayoutStyle`).
 
 **Components** are functions; memoization is signal-based via `cx.scope`
 (a scope whose recorded signal reads are current returns its cached
@@ -97,11 +97,11 @@ impl<T: State> Signal<T> {
 
 impl BuildCx {
     /// Creates or re-attaches state. Key = scope prefix + `name`.
-    pub fn signal<T: State>(&mut self, name: &str, init: impl FnOnce() -> T) -> Signal<T>;
+    pub fn signal<T: State>(&self, name: &str, init: impl FnOnce() -> T) -> Signal<T>;
     /// Signal-read-memoized subtree (the shipped memoization primitive).
     pub fn scope(&mut self, name: &str, f: impl FnOnce(&mut BuildCx) -> Element) -> Element;
     /// Async data keyed by (name, deps): re-fetches when deps change.
-    pub fn resource<T: State>(&mut self, name: &str, deps: …, fetch: …) -> Resource<T>;
+    pub fn resource<T, E>(&self, name: &str, deps: …, fetch: …) -> Resource<T, E>; // value + error + loading
 }
 // `cx.memo` / `cx.effect` (W.3): scope-key-prefixed forwards to the
 // spec-shaped `Runtime::memo`/`Runtime::effect`.
@@ -161,7 +161,8 @@ pub enum Event {
     ImePreedit(ImeEvent),
     FocusIn, FocusOut,
     WindowResized(Size), ThemeChanged(ThemeKind), Timer(TimerToken),
-    Gesture(GestureEvent),              // tap, double-tap, long-press, pan, pinch (M3 fleshes out)
+    Gesture(GestureEvent),
+    Drop(DropEvent),          // external drag-and-drop payload (text/files)              // tap, double-tap, long-press, pan, pinch (M3 fleshes out)
     Custom(Box<dyn AnyEvent>),
 }
 pub struct PointerEvent { pub pos: Point, pub button: PointerButton, pub pointer: PointerKind, pub modifiers: Modifiers, pub click_count: u8 }
@@ -179,7 +180,8 @@ pub enum DrawCmd {
     GlyphRun { run: GlyphRunId, brush: Brush },
     PushLayer { clip: Option<RoundedRect>, opacity: f32, transform: Affine, blend: BlendMode },
     PopLayer,
-    Shader { id: ShaderId, rect: Rect, uniforms: UniformBlock },   // CPU backend: deterministic fallback fill
+    Shader { id: ShaderId, rect: Rect, uniforms: UniformBlock },
+    BackdropFilter { .. },   // glass: blur/saturate the painted backdrop (B.4)   // CPU backend: deterministic fallback fill
 }
 pub enum Brush { Solid(Color), LinearGradient(...), RadialGradient(...), ConicGradient(...) }
 ```
@@ -240,7 +242,7 @@ All warnings/errors are `Diagnostic { code: &'static str, severity, message, spa
 
 *Status:* every registered code is emitted — W0002, E0101, E0102, E0103
 (type mismatches, B.7a), E0104, W0103/W0104/W0105 + **W0001**
-(duplicate StableId, W.4a) + **W0301** (unnamed focusable leaf, W.4a) via
+(duplicate StableId, W.4a) + **W0301** (unnamed focusable leaf, W.4a), **W0402** (tofu — glyphs uncovered by any registered font, T.4), **E0701**/**E0702** (contained / uncontained panic — error boundary + crash hook, E.3) via
 the audit lint, E0201, W0401 (i18n missing key), E0701 (contained panic).
 The defined-but-dead bucket from the 2026-07 audit is empty.
 
@@ -254,7 +256,7 @@ The defined-but-dead bucket from the 2026-07 audit is empty.
 Every widget ships with: rustdoc + example, `.lss`-styleable parts documented (type name + parts as classes, e.g. `slider .track`, `slider .thumb`), semantics (role/states/actions per 03 §2), keyboard map, golden test, semantic-tree test.
 
 *Status (2026-07-10, W.1+W.2 ✅):* **M0 10/10, M1 19/20, M2 10/10, M3
-6/6, M4 10/11.** W.1: `Popover` (light-dismiss anchored panel,
+6/6, M4 11/11** (RichTextEditor completed in M.4). W.1: `Popover` (light-dismiss anchored panel,
 `.side(Above|Below)`; screen-edge auto-flip deferred — needs post-layout
 placement), `Sheet`/`Drawer` (signal-keyed `{name}.open`, full-window
 scrim, panel anchored bottom/left/right), `SearchField`, and

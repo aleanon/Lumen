@@ -114,7 +114,7 @@ carry `"auth": "<token>"` (the packaged clients attach it from the env).
 | `ui.screenshot` | `{ selector, scale?: f64 = 4, overlay?: bool = true }` | zoomed crop of one element; overlay draws the box (blue) and ink (red) outlines — a defect magnifier |
 | `ui.lint` | `{}` | `{ findings: [{code, message}] }` (layout/contrast audits: W0103/W0104/W0105/W0301, WCAG) |
 | `app.diagnostics` | `{}` | `{ diagnostics: [Diagnostic] }` (02 §9) |
-| `app.perf` | `{}` | `{ frame_ms_p50, frame_ms_p95, frames_rendered, node_count }` — rolling stats over the last ≤120 painted pumps (C.2) |
+| `app.perf` | `{}` | `{ frame_ms_p50, frame_ms_p95, frames_rendered, node_count }` — rolling stats over the last ≤120 painted pumps (C.2); `node_count` = total elided-tree nodes (D9) |
 | `app.logs` | `{ since?: seq }` | `{ entries: [{seq, level, message}] }` — the runtime's diagnostic ring (handler `rt.log(level, msg)`, E0701 panics, stylesheet rejections); page with `since` = last seq + 1 (C.2) |
 | `ui.probe` | `{ x, y }` | `{ color: [r,g,b,a] }` at physical px |
 | `ui.probeRegion` | `{ x, y, w, h }` | `{ uniform: [r,g,b,a] \| null }` |
@@ -176,7 +176,7 @@ it needs a push-transport design over the request/response loop (C.7).
 |---|---|
 | `session.assertText` | assert a node's text (recorded as an assertion) |
 | `session.assertState` | assert a node's semantic state |
-| `session.exportTest` | `{ name }` → standalone `lumen-test` Rust source reproducing the recorded steps + assertions (compiles under `cargo test`) |
+| `session.exportTest` | `{ appExpr, fnName?, header? }` | `appExpr` REQUIRED (the expression that builds the app in the generated test); `fnName` defaults `agent_regression` |
 
 Available on **both** the live shell (routed through a recording `Session`
 since C.3 — explore the window, commit the exported test) and the
@@ -201,13 +201,13 @@ WebSocket test path.
 ### 3.5 Planned (not yet implemented — do not call)
 
 Each item carries its remediation-plan task. `events.subscribe` + `event.*`
-notifications (C.4b) · `input.drag` node-to-node (C.4b) · `input.gesture`
-(C.4b) · `app.setValue` (C.4b) · `app.command` / `cx.register_command`
-(C.4b) · `session.start`/`session.stop` (C.4b) · `reload.apply` (C.4b) ·
-auto-wait for clock-driven **animation settling** (C.1b;
-existence/actionability/async waiting shipped in C.1a) · `input.click
-{pos}` (C.4b) · `input.scroll {to}` (C.4b) · CLI-hosted endpoint (`lumen
-agent serve` proxying a managed app, C.8b). *(Shipped since the re-ground:
+notifications (C.4b) · auto-wait for clock-driven **animation settling**
+(C.1b; existence/actionability/async waiting shipped in C.1a) ·
+`input.click {pos}` (C.4b) · `input.scroll {to}` (C.4b) · CLI-hosted
+endpoint (`lumen agent serve` proxying a managed app, C.8b).
+*(D9: `input.drag`, `input.gesture`, `app.setValue`, `app.command`,
+`session.start`/`session.stop`, and `reload.apply` all SHIPPED — they are
+in the §3.1–§3.3 tables; this list previously contradicted them.)* *(Shipped since the re-ground:
 C.1a auto-wait + `ui.waitFor`; C.2 `app.logs` + real `app.perf`; C.3 live
 `session.*`, `node-N` selectors, readable resolver errors; C.4a state.get/
 subtree-getTree/max_width/hover/click-opts/scroll-dx/type-clear; C.5

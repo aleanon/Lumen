@@ -440,11 +440,17 @@ fn handle<R: Renderer, E: Spawner>(
         "app.perf" => {
             // C.2: real values from the runtime's rolling painted-frame times.
             let (p50, p95, frames) = app.perf_stats();
+            // D9: a REAL total (the elided tree, recursively) — the old
+            // value was just the root's direct-child count.
+            fn count_nodes(n: &SemanticsNode) -> usize {
+                1 + n.children.iter().map(count_nodes).sum::<usize>()
+            }
+            let node_count = count_nodes(&app.semantics_doc().root.elided());
             Ok(json!({
                 "frame_ms_p50": p50,
                 "frame_ms_p95": p95,
                 "frames_rendered": frames,
-                "node_count": app.semantics_doc().root.elided().children.len(),
+                "node_count": node_count,
             }))
         }
         "app.logs" => {

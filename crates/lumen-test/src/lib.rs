@@ -74,6 +74,14 @@ fn golden_dir() -> std::path::PathBuf {
 }
 
 impl TestApp {
+    /// Invoke a named app command registered by the last build
+    /// (`cx.register_command`) — the same registry the agent's
+    /// `app.command` verb uses. Errors list the registered names (D9: 05 §2
+    /// promised this; now it exists).
+    pub fn run_command(&mut self, name: &str) -> Result<(), Vec<String>> {
+        self.inner.borrow_mut().run_command(name)
+    }
+
     /// Run `app` headless at the default 800×600.
     pub fn new(app: App) -> TestApp {
         TestApp::with_size(app, Size::new(800.0, 600.0))

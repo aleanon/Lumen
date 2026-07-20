@@ -44,7 +44,6 @@ fn main() {
         let n = cx.signal("n", || 0i64);
         column(vec![
             text(format!("Count: {}", {
-                use lumen::state::ReadCx as _;
                 n.get(cx.runtime())
             })),
             button("+", move |rt| n.update(rt, |v| *v += 1)),

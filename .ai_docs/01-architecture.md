@@ -92,7 +92,11 @@ lumen-render    display list, CPU (tiny-skia) + GPU (wgpu) backends, atlases, da
 lumen-text      parley/swash wrapper, editing, IME
 lumen-style     .lss parser, cascade, tokens, animation scheduler
 lumen-widgets   built-in widget library
-lumen-shell     winit shell; android/ios shells (M3)
+`lumen-shell`         winit desktop shell (agent endpoint, menus/tray/a11y)
+`lumen-shell-android` NativeActivity shell (touch/IME/safe areas, P.1)
+`lumen-shell-ios`     iOS FFI shell (headless-verified; simulator needs macOS)
+`lumen-shell-web`     wasm session + canvas present + agent bridge (P.2)
+`lumen-macros`        proc-macros (`#[lumen_test::test]`, `stable_handler`, `state_registry`)
 lumen-test      harness, locators, snapshots, traces
 lumen-agent     JSON-RPC/MCP server
 lumen-cli       dev server, hot reload, emulator orchestration

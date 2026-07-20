@@ -29,7 +29,7 @@ impl TestApp {
     pub async fn screenshot(&mut self) -> RgbaImage;
     pub async fn expect_screenshot(&mut self, name: &str);   // golden compare, §4
     pub fn tree(&self) -> SemanticsDoc;                      // typed view of 03 §1
-    pub async fn run_command(&mut self, name: &str, args: Value) -> Value;
+    pub fn run_command(&mut self, name: &str) -> Result<(), Vec<String>>; // registered names on Err
 }
 
 impl Locator {
@@ -39,14 +39,14 @@ impl Locator {
     pub async fn type_text(&self, text: &str);               // append keystrokes
     pub async fn press(&self, chord: &str);                  // "Ctrl+Enter"
     pub async fn hover(&self); pub async fn focus(&self);
-    pub async fn scroll_into_view(&self);
+    // scroll_into_view: *planned* (D9 — not implemented; agents use input.scroll)
     pub async fn drag_to(&self, target: &Locator);
-    pub async fn set_value(&self, v: impl Into<Value>);      // sliders, selects
+    pub async fn set_value(&self, fraction: f64);            // drag-to-fraction (sliders)
     // queries
     pub async fn text(&self) -> String; pub async fn value(&self) -> Value;
     pub async fn bounds(&self) -> Rect; pub async fn count(&self) -> usize;
     pub async fn style(&self, prop: &str) -> StyleValue;     // canonical form, 04 §7
-    pub fn nth(&self, i: usize) -> Locator; pub fn first(&self) -> Locator;
+    // nth / first: *planned* (D9 — actions require exactly one match today)
 }
 
 // assertions (ALL auto-retrying on the virtual clock until pass or timeout — T.2)
@@ -58,25 +58,32 @@ expect(loc).to_have_count(n).await;      expect(loc).to_have_style("background",
 expect(loc).to_have_bounds_within(rect, tol).await;
 ```
 
-## 3. Auto-wait semantics (shared verbatim by agent actions, 03 §3)
-Before acting, poll every 10 ms (virtual-clock aware) until ALL hold, or fail `Timeout` at 5 s (configurable per test/call):
-1. selector resolves to exactly one node (0 → keep waiting; >1 → fail `Ambiguous` immediately with candidates),
-2. node VISIBLE, not `disabled`, opacity > 0, on-screen after auto `scroll_into_view`,
-3. no pending layout, no running enter-animation on the node, event queue drained,
-4. node's bounds stable across two consecutive frames.
-Failures return structured errors with the closest-match suggestions and a tree snapshot attached to the trace.
+## 3. Auto-wait semantics (D9: re-grounded to what is implemented)
+
+**Implemented (C.1a):** before acting, poll every 10 ms until the selector
+resolves to **exactly one** node, or fail `Timeout` at 5 s (configurable
+via `timeout_ms`); >1 matches fail `Ambiguous` immediately with the
+candidate list. The **agent** action path additionally requires non-empty
+bounds and not-`disabled` (`resolve_action`); `lumen-test`'s `Locator`
+enforces the exactly-one rule only — the two paths share the resolver, not
+the full actionability check.
+
+**Planned (C.1b tail):** visibility/opacity checks, auto
+`scroll_into_view`, enter-animation settling, and bounds-stable-across-
+two-frames. Until then, tests settle explicitly (`ui.waitSettled` /
+`ui.waitFor`, advancing the virtual clock).
 
 ## 4. Golden screenshots
-- Stored at `tests/golden/<renderer>/<test_name>[.<tag>].png` (`renderer` = `cpu` or `gpu-<platform>`).
+- Stored at `tests/golden/cpu/<test_name>` (one canonical CPU golden set; `LUMEN_GOLDEN_DIR` overrides — per-renderer segmentation is *planned*; the GPU parity suite compares perceptually against the same CPU goldens). `[.<tag>].png` (`renderer` = `cpu` or `gpu-<platform>`).
 - CPU comparisons are **exact** (bit-identical; the CPU renderer is deterministic by contract 02 §7). GPU comparisons use perceptual diff: per-pixel ΔE in Oklab ≤ 2.0 and ≤ 0.1% of pixels differing; thresholds overridable per assertion.
 - On mismatch: write `<name>.actual.png` and `<name>.diff.png` (differing pixels red over a dimmed base — T.3) next to the golden and fail with their paths. `LUMEN_UPDATE_GOLDENS=1 cargo test` re-records; CI never sets it.
 - Perceptual compares use `TestApp::expect_screenshot_within(name, tol)` with `lumen_render::diff::Tolerance` (`PARITY`: ΔE 0.04 / 0.5% budget; `AA`: ΔE 0.04 / 4% seam budget) — the same implementation the R0 GPU-parity harness uses (T.3).
 - Determinism requirements for tests: virtual clock auto-pauses animations at `pump_until_idle` unless the test advances time explicitly; system fonts are never used — the test harness bundles Noto Sans/Noto Sans CJK/Noto Color Emoji and forces them.
 
-## 5. Traces
-Every test writes `target/lumen-traces/<test>.trace.jsonl` (one JSON event per line: input events, signal writes, rebuild scopes, layout passes, frames with damage rects, tree snapshots at each action, assertion results). On failure, the last screenshot + tree snapshot are embedded. The trace format is `lumen-trace/1`, documented in `lumen-test/trace.md`; `session.exportTest` (03 §3) and the M4 inspector consume the same format.
+## 5. Traces (D9: re-grounded)
+Trace writing is **opt-in**: a test calls `TestApp::write_trace` / `capture_failure` explicitly (the `#[lumen_test::test]` macro does not auto-write). Events recorded (`lumen-test/src/trace.rs`, format `lumen-trace/1`): `action` (selector-keyed input), `assert`, `tree` snapshots, `frame` (damage rects), and `failure` (screenshot + tree embedded). Signal-write/rebuild-scope/layout-pass events are *planned*. `session.exportTest` (03 §3) and the inspector consume the same format; the format's reference doc is the rustdoc in `trace.rs`.
 
 ## 6. Runners
 - `cargo test` → headless CPU.
 - `lumen test --platform gpu` → headed/offscreen wgpu on the host.
-- `lumen test --platform android|ios_sim` (M3) → builds, installs to emulator/simulator, proxies the same TestApp API over the dev socket. Test code is identical across platforms.
+- `lumen test --platform android|ios_sim` (M3) → shells to the platform orchestration script: build, install, launch, then an ON-DEVICE golden leg (device screenshot perceptually compared to the headless CPU frame — `device_golden.rs`). Proxying the full TestApp locator API over a dev socket is *deferred with the socketed dev server* (ADR-D2, 03 §4); headless test binaries also run unmodified on-device via `android_device_test.sh`.

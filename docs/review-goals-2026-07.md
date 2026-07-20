@@ -1,5 +1,15 @@
 # Framework review against the project goals — 2026-07-06
 
+> **HISTORICAL RECORD — RESOLVED (D9.3, 2026-07-20).** Every liability in
+> this review was worked off by `docs/plan-remediation-2026-07.md`
+> (phases D0→S0→A→B→C→T→W→R→P→M→E→D9), executed 2026-07-09 → 2026-07-20,
+> commit range 7580e74..8a042c2. Per-item resolution evidence lives in
+> `.ai_docs/07-decision-log.md` (the "Remediation 2026-07" section, one
+> entry per landed task) and the flipped marks in `.ai_docs/06-task-graph.md`.
+> The v2 scorecard proving the goal-level liabilities closed is
+> `docs/review-goals-2026-07-v2.md`.
+
+
 Scope: the whole framework as of `main` (4aedd82), reviewed against the three
 stated goals: **(1) peak performance, (2) minimal resource usage for that
 performance, (3) an agent's ability to verify applications in dev mode.**
