@@ -120,27 +120,114 @@ fn cmd_package(json: bool) -> i32 {
             .to_string()
     };
     let name = field("name =").replace('"', "");
-    let version = field("version =");
+    // `version.workspace = true` crates have no literal in their toml —
+    // cargo metadata knows the resolved version.
+    let mut version = field("version =");
+    if version == "app" || version.is_empty() {
+        version = Command::new("cargo")
+            .args(["metadata", "--format-version", "1", "--no-deps"])
+            .output()
+            .ok()
+            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+            .and_then(|v| {
+                v["packages"].as_array().and_then(|ps| {
+                    ps.iter()
+                        .find(|p| p["name"] == name.as_str())
+                        .and_then(|p| p["version"].as_str().map(String::from))
+                })
+            })
+            .unwrap_or_else(|| "0.0.0".to_string());
+    }
 
-    let built = Command::new("cargo").args(["build", "--release"]).status();
+    // E.1: `cargo auditable` embeds the dependency list inside the binary
+    // when installed; fall back to a plain build (the sbom.json asset covers
+    // the bundle either way).
+    let auditable = Command::new("cargo")
+        .args(["auditable", "--version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let built = if auditable {
+        Command::new("cargo")
+            .args(["auditable", "build", "--release"])
+            .status()
+    } else {
+        Command::new("cargo").args(["build", "--release"]).status()
+    };
     match built {
         Ok(s) if s.success() => {}
         _ => return fail(json, "package", "release build failed"),
     }
-    let bin = Path::new("target/release").join(&name);
+    // Workspace members build into the WORKSPACE target dir — resolve it.
+    let target_dir = Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .output()
+        .ok()
+        .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+        .and_then(|v| v["target_directory"].as_str().map(std::path::PathBuf::from))
+        .unwrap_or_else(|| Path::new("target").to_path_buf());
+    let bin = target_dir.join("release").join(&name);
     let bytes = match std::fs::read(&bin) {
         Ok(b) => b,
-        Err(_) => return fail(json, "package", &format!("no release binary at {bin:?}")),
+        Err(_) => {
+            return fail(
+                json,
+                "package",
+                &format!("no release binary at {bin:?} (the crate needs a [[bin]] target)"),
+            )
+        }
     };
     let platform = std::env::consts::OS;
     let manifest = lumen_cli::dist::BundleManifest::new(&name, &version, platform, &name);
-    match lumen_cli::dist::package(Path::new("target"), manifest, &bytes, &[]) {
-        Ok(dir) => ok(
-            json,
-            "package",
-            json!({ "bundle": dir.display().to_string(), "platform": platform }),
-            &format!("packaged {name} {version} → {}", dir.display()),
-        ),
+    // E.1: the SBOM rides the bundle as an asset.
+    let sbom_bytes = lumen_cli::dist::sbom(Path::new("."))
+        .ok()
+        .and_then(|p| serde_json::to_vec_pretty(&p).ok())
+        .unwrap_or_default();
+    let assets = if sbom_bytes.is_empty() {
+        vec![]
+    } else {
+        vec![("sbom.json".to_string(), sbom_bytes)]
+    };
+    match lumen_cli::dist::package(&target_dir, manifest, &bytes, &assets) {
+        Ok(dir) => {
+            // E.1: on Linux, wrap the bundle as an AppDir and (when the
+            // type-2 runtime is available) a runnable .AppImage.
+            let mut extra = serde_json::Map::new();
+            if platform == "linux" {
+                match lumen_cli::dist::build_appdir(&dir, &name) {
+                    Ok(appdir) => {
+                        extra.insert("appdir".into(), json!(appdir.display().to_string()));
+                        match lumen_cli::dist::build_appimage(&appdir, &name) {
+                            Ok(ai) => {
+                                extra.insert("appimage".into(), json!(ai.display().to_string()));
+                            }
+                            Err(e) => {
+                                extra.insert("appimage_skipped".into(), json!(e.to_string()));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        extra.insert("appdir_skipped".into(), json!(e.to_string()));
+                    }
+                }
+            }
+            let mut payload = json!({
+                "bundle": dir.display().to_string(),
+                "platform": platform,
+                "auditable": auditable,
+            });
+            payload.as_object_mut().unwrap().extend(extra.clone());
+            let human = match extra.get("appimage") {
+                Some(ai) => format!(
+                    "packaged {name} {version} → {} (+ {})",
+                    dir.display(),
+                    ai.as_str().unwrap_or("")
+                ),
+                None => format!("packaged {name} {version} → {}", dir.display()),
+            };
+            ok(json, "package", payload, &human)
+        }
         Err(e) => fail(json, "package", &format!("bundle failed: {e}")),
     }
 }
