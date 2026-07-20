@@ -113,6 +113,10 @@ pub enum SystemRequest {
     },
     /// Set the system-tray tooltip.
     TrayTooltip(String),
+    /// Quit the application (M.6): the shell exits its event loop cleanly
+    /// (same path as the window-close button / agent `app.quit`); headless
+    /// hosts observe it as data.
+    Exit,
 }
 
 /// A secondary window the app declares (multi-window).

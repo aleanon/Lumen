@@ -66,6 +66,10 @@ members = [
     "examples/tour",
     "examples/events",
     "examples/accordion",
+    "examples/exit",
+    "examples/url_handler",
+    "examples/multi_window",
+    "examples/qr",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
@@ -149,6 +153,8 @@ tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
 # The tray thread's gtk loop (Linux only; same gtk 0.18 muda/tray-icon link).
 gtk = "0.18"
 libloading = "0.8"
+# M.6 (ADR-M1 umbrella): pure-Rust QR encoder — example-scoped, zero deps.
+qrcodegen = "1.8"
 tungstenite = "0.24"
 # Mobile (M3). Pulled only when building for the respective target.
 android-activity = "0.6"

@@ -1413,6 +1413,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "exit"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "fancy-regex"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3279,6 +3291,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "multi_window"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "naga"
 version = "22.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4193,6 +4217,25 @@ name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+
+[[package]]
+name = "qr"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
+ "qrcodegen",
+]
+
+[[package]]
+name = "qrcodegen"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4339fc7a1021c9c1621d87f5e3505f2805c8c105420ba2f2a4df86814590c142"
 
 [[package]]
 name = "quick-error"
@@ -5509,6 +5552,18 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+]
+
+[[package]]
+name = "url_handler"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-shell",
+ "lumen-widgets",
 ]
 
 [[package]]

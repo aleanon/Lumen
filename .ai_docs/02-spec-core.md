@@ -219,7 +219,8 @@ impl App {
 // clipboard bridging, the AT adapter, and the agent endpoint stay bound to
 // the MAIN window (per-window agent verbs are future work).
 //
-// OS services (P.3e): `SystemRequest::Notification` → desktop notification;
+// OS services (P.3e): `SystemRequest::Exit` → the shell exits its loop
+// cleanly (M.6); `SystemRequest::Notification` → desktop notification;
 // `SystemRequest::TrayTooltip` → lazy system tray (created on first request;
 // tooltip + title text; menu = the app `MenuModel`). OS file drops arrive as
 // the same `Event::Drop` headless tests synthesize.

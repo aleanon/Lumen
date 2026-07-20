@@ -720,17 +720,26 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     // P.3b: fulfil recorded system requests natively (file
                     // dialogs are modal; the loop resumes after the pick).
                     let mut reqs = h.take_system_requests();
-                    // P.3e: tray requests are shell state, not fulfilment —
-                    // split them out (borrow: applied after this block).
+                    // P.3e/M.6: tray + exit requests are shell state, not
+                    // fulfilment — split them out (tray applied after this
+                    // block for borrow reasons; exit ends the loop).
                     let mut tray_tips = Vec::new();
-                    reqs.retain(|r| {
-                        if let lumen_widgets::system::SystemRequest::TrayTooltip(t) = r {
+                    let mut exit = false;
+                    reqs.retain(|r| match r {
+                        lumen_widgets::system::SystemRequest::TrayTooltip(t) => {
                             tray_tips.push(t.clone());
                             false
-                        } else {
-                            true
                         }
+                        lumen_widgets::system::SystemRequest::Exit => {
+                            exit = true;
+                            false
+                        }
+                        _ => true,
                     });
+                    if exit {
+                        el.exit();
+                        return;
+                    }
                     if !reqs.is_empty() {
                         fulfill_system_requests(h, reqs, native_dialog_resolver);
                     }

@@ -45,7 +45,7 @@ examples.
 | game_of_life | grid sim + interaction | 🔴 | **Canvas** (or a perf-tuned cell grid) (E8.1) |
 | sierpinski_triangle | recursive vector drawing | 🔴 | **Canvas** (E8.1) |
 | vectorial_text | text as scalable outlines | 🟡 | swash exposes glyph outlines; needs **outline-path rendering** (E8.1/E8.6) |
-| qr_code | encode + render a QR | 🟡 | rendering = rect grid (have); needs a **QR encoder** (E8.6) |
+| qr_code | encode + render a QR | ✅ | `examples/qr` (M.6): `qrcodegen` (pure-Rust, ADR-M1 umbrella) → Canvas rect grid, live re-encode from a text field |
 | markdown | render markdown | 🟡 | `rich_text` + markdown-lite; needs a **markdown parser → rich elements** (E8.5) |
 | changelog | scrollable markdown doc | 🟡 | depends on markdown (E8.5) |
 | image | image viewer | 🟡 | PNG works; jpeg/webp/gif decode PENDING (E8.6) |
@@ -58,8 +58,8 @@ examples.
 | pokedex | fetch + display from an API | 🔴 | needs an **async HTTP client** on `resource()` (E8.3) |
 | download_progress | streamed download + progress | 🔴 | **HTTP client** + streaming (E8.3) |
 | websocket | live WebSocket chat | 🔴 | needs a **WebSocket client** (agent has server-side tungstenite only) (E8.3) |
-| url_handler | open external URLs / deep links | 🟡 | `nav::deep_link` ready; opening URLs needs an **OS open request + binding** (E8.7) |
-| exit | programmatic window close | 🟡 | needs the **OS window binding** (winit close; model in T5.2) (E8.7) |
+| url_handler | open external URLs / deep links | ✅ | `examples/url_handler` (M.6): `lumen://…` parse → `Router::deep_link`, param-carrying screens; OS scheme registration belongs to packaging (E.1) |
+| exit | programmatic window close | ✅ | `examples/exit` (M.6): confirm flow → `SystemRequest::Exit` → the shell ends its loop cleanly (headless hosts see data) |
 | system_information | CPU/mem/GPU info | 🔴 | needs a **system-info source** (sysinfo) (E8.7) |
 | integration | embed Lumen in a host renderer | 🟡 | GPU renderer exists; needs a documented **embedding surface** (E8.7) |
 
