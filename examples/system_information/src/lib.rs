@@ -70,8 +70,22 @@ fn build(cx: &mut BuildCx) -> Element {
             tile("ARCHITECTURE", &info.arch, false, "arch"),
         ]);
         top.style.column_gap = Dim::px(14.0);
+        // M.6: richer host facts (opt-in `sysinfo` feature) — the default
+        // build stays dependency-free via `system_info()`.
+        #[cfg(feature = "sysinfo")]
+        let mem = {
+            let mut sys = sysinfo::System::new();
+            sys.refresh_memory();
+            format!(
+                "{:.1} GiB",
+                sys.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0)
+            )
+        };
+        #[cfg(not(feature = "sysinfo"))]
+        let mem = "enable `sysinfo`".to_string();
         let mut bottom = widgets::row(vec![
             tile("LOGICAL CPUS", &info.cpus.to_string(), true, "cpus"),
+            tile("MEMORY", &mem, false, "memory"),
             tile("RENDERER", "tiny-skia", false, "renderer"),
         ]);
         bottom.style.column_gap = Dim::px(14.0);

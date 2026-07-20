@@ -1,5 +1,5 @@
 [package]
-name = "system_information"
+name = "integration"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,15 +8,11 @@ repository.workspace = true
 publish = false
 
 [lib]
-name = "system_information"
+name = "integration"
 path = "src/lib.rs"
 
-[[bin]]
-name = "system_information"
-path = "src/main.rs"
-
 [[example]]
-name = "system_information-win"
+name = "integration-win"
 path = "examples/win.rs"
 
 [dependencies]
@@ -26,11 +22,8 @@ lumen-widgets = { workspace = true }
 lumen-layout = { workspace = true }
 kurbo = { workspace = true }
 
-# M.6: optional richer host facts (memory) behind the `sysinfo` feature.
-sysinfo = { workspace = true, optional = true }
-
-[features]
-sysinfo = ["dep:sysinfo"]
-
 [dev-dependencies]
+# The point of this example: the HOST owns winit + wgpu; Lumen is a component.
+winit = { workspace = true }
+wgpu = { workspace = true }
 lumen-shell = { workspace = true }

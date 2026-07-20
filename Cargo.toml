@@ -70,6 +70,8 @@ members = [
     "examples/url_handler",
     "examples/multi_window",
     "examples/qr",
+    "examples/vectorial_text",
+    "examples/integration",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
@@ -155,6 +157,10 @@ gtk = "0.18"
 libloading = "0.8"
 # M.6 (ADR-M1 umbrella): pure-Rust QR encoder — example-scoped, zero deps.
 qrcodegen = "1.8"
+# M.6: memory/host detail source for system_information — example-scoped and
+# feature-gated (the framework's dependency-free system_info() stays the
+# default; 02 §10 SystemInfo "PENDING platform source" is this, opt-in).
+sysinfo = { version = "0.37", default-features = false, features = ["system"] }
 tungstenite = "0.24"
 # Mobile (M3). Pulled only when building for the respective target.
 android-activity = "0.6"

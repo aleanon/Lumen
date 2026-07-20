@@ -748,6 +748,75 @@ impl TextBlock {
     /// color)` — `pen_x`/`pen_y` are logical, the bitmap is physical-resolution.
     /// Shared by the sprite renderer (`scale = 1.0`) and the [`glyph_run`]
     /// producer (HiDPI scale) so both see identical rasterization.
+    /// M.6 (vectorial text): every glyph's outline as a filled Bézier path
+    /// in logical px, positioned in layout space (y-down). Canvas consumers
+    /// scale, stroke, or animate them freely — text as geometry, not
+    /// bitmaps.
+    pub fn outlines(&self) -> Vec<kurbo::BezPath> {
+        let mut ctx = ScaleContext::new();
+        let mut out = Vec::new();
+        for line in self.layout.lines() {
+            for item in line.items() {
+                let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                    continue;
+                };
+                let run = glyph_run.run();
+                let font = run.font();
+                let Some(font_ref) = FontRef::from_index(font.data.as_ref(), font.index as usize)
+                else {
+                    continue;
+                };
+                let mut scaler = ctx
+                    .builder(font_ref)
+                    .size(run.font_size())
+                    .normalized_coords(run.normalized_coords())
+                    .build();
+                for glyph in glyph_run.positioned_glyphs() {
+                    let Some(outline) = scaler.scale_outline(glyph.id as u16) else {
+                        continue;
+                    };
+                    let (gx, gy) = (f64::from(glyph.x), f64::from(glyph.y));
+                    // swash outlines are y-up; layout space is y-down.
+                    let pt = |v: swash::zeno::Vector| {
+                        kurbo::Point::new(gx + f64::from(v.x), gy - f64::from(v.y))
+                    };
+                    let mut path = kurbo::BezPath::new();
+                    let points = outline.points();
+                    let mut pi = 0usize;
+                    for v in outline.verbs() {
+                        match v {
+                            swash::zeno::Verb::MoveTo => {
+                                path.move_to(pt(points[pi]));
+                                pi += 1;
+                            }
+                            swash::zeno::Verb::LineTo => {
+                                path.line_to(pt(points[pi]));
+                                pi += 1;
+                            }
+                            swash::zeno::Verb::QuadTo => {
+                                path.quad_to(pt(points[pi]), pt(points[pi + 1]));
+                                pi += 2;
+                            }
+                            swash::zeno::Verb::CurveTo => {
+                                path.curve_to(
+                                    pt(points[pi]),
+                                    pt(points[pi + 1]),
+                                    pt(points[pi + 2]),
+                                );
+                                pi += 3;
+                            }
+                            swash::zeno::Verb::Close => path.close_path(),
+                        }
+                    }
+                    if !path.elements().is_empty() {
+                        out.push(path);
+                    }
+                }
+            }
+        }
+        out
+    }
+
     fn for_each_glyph(
         &self,
         scale: f32,

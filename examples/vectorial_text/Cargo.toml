@@ -1,5 +1,5 @@
 [package]
-name = "system_information"
+name = "vectorial_text"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,15 +8,11 @@ repository.workspace = true
 publish = false
 
 [lib]
-name = "system_information"
+name = "vectorial_text"
 path = "src/lib.rs"
 
-[[bin]]
-name = "system_information"
-path = "src/main.rs"
-
 [[example]]
-name = "system_information-win"
+name = "vectorial_text-win"
 path = "examples/win.rs"
 
 [dependencies]
@@ -25,12 +21,7 @@ lumen-render = { workspace = true }
 lumen-widgets = { workspace = true }
 lumen-layout = { workspace = true }
 kurbo = { workspace = true }
-
-# M.6: optional richer host facts (memory) behind the `sysinfo` feature.
-sysinfo = { workspace = true, optional = true }
-
-[features]
-sysinfo = ["dep:sysinfo"]
+lumen-text = { workspace = true }
 
 [dev-dependencies]
 lumen-shell = { workspace = true }

@@ -44,7 +44,7 @@ examples.
 | solar_system | animated orbits | 🔴 | **Canvas** + the motion clock (E8.1) |
 | game_of_life | grid sim + interaction | 🔴 | **Canvas** (or a perf-tuned cell grid) (E8.1) |
 | sierpinski_triangle | recursive vector drawing | 🔴 | **Canvas** (E8.1) |
-| vectorial_text | text as scalable outlines | 🟡 | swash exposes glyph outlines; needs **outline-path rendering** (E8.1/E8.6) |
+| vectorial_text | text as scalable outlines | ✅ | `examples/vectorial_text` (M.6): `TextBlock::outlines()` (swash Béziers, layout-positioned, y-down) filled/stroked/scaled through Canvas |
 | qr_code | encode + render a QR | ✅ | `examples/qr` (M.6): `qrcodegen` (pure-Rust, ADR-M1 umbrella) → Canvas rect grid, live re-encode from a text field |
 | markdown | render markdown | 🟡 | `rich_text` + markdown-lite; needs a **markdown parser → rich elements** (E8.5) |
 | changelog | scrollable markdown doc | 🟡 | depends on markdown (E8.5) |
@@ -60,8 +60,8 @@ examples.
 | websocket | live WebSocket chat | 🔴 | needs a **WebSocket client** (agent has server-side tungstenite only) (E8.3) |
 | url_handler | open external URLs / deep links | ✅ | `examples/url_handler` (M.6): `lumen://…` parse → `Router::deep_link`, param-carrying screens; OS scheme registration belongs to packaging (E.1) |
 | exit | programmatic window close | ✅ | `examples/exit` (M.6): confirm flow → `SystemRequest::Exit` → the shell ends its loop cleanly (headless hosts see data) |
-| system_information | CPU/mem/GPU info | 🔴 | needs a **system-info source** (sysinfo) (E8.7) |
-| integration | embed Lumen in a host renderer | 🟡 | GPU renderer exists; needs a documented **embedding surface** (E8.7) |
+| system_information | CPU/mem/GPU info | ✅ | dependency-free `system_info()` by default; `--features sysinfo` adds memory (M.6, example-scoped `sysinfo` crate) |
+| integration | embed Lumen in a host renderer | ✅ | `examples/integration` (M.6): host-owned winit+wgpu scene embeds a `Headless` HUD — pump/screenshot→texture, region-clipped input forwarding; Lumen never touches the host loop/device |
 
 ## 2. Capability gaps → proposed M8 tasks
 
