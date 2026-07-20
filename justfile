@@ -88,6 +88,10 @@ examples:
 test name *args:
     cargo test -p {{name}} {{args}}
 
+# P.1 gate: settings app on the emulator responds to touch + soft keyboard.
+android-gate:
+    bash scripts/android_input_gate.sh
+
 # Run an example on a device/web target, e.g. `just run-on web` / `android`.
 run-on platform:
     cargo run -p lumen-cli -- run --platform {{platform}}

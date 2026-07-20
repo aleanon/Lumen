@@ -100,7 +100,7 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 
 ## M3 — Mobile
 **T3.1 ◐ Android shell** (cargo-ndk, GameActivity, surface lifecycle, touch, soft-keyboard/IME, safe areas). *Accept:* hello app runs on API-34 emulator in CI (headless emulator), agent screenshot matches golden perceptually.
-*(◐: renders + surface lifecycle + tier-1 reload verified on the local emulator; **all input events are dropped** (`imp.rs` `_ => {}`) — no touch/IME/safe-areas/back; mobile CI is commented out; plan P.1.)*
+*(P.1 ✅ 2026-07-20: input is wired through the one queue — touch (down/move/up incl. multi-pointer actions), back = Escape (overlay dismissal; app survives), named keys + unicode text via the device `KeyCharacterMap`, soft keyboard shown/hidden on text-input focus, safe-area layout via the content rect (shrinks under the IME — and state now SURVIVES resize; the old shell rebuilt the app and dropped every signal), DPI scale from density/160, cleared+offset blit. Emulator-verified end-to-end and gated: `just android-gate` (build+install+launch, tap ⇒ pixels change, type ⇒ pixels change, back ⇒ alive). Still native-activity: true IME commit text (CJK composition) needs GameActivity — future work; mobile CI stays local-gate.)*
 **T3.2 ☑ Android orchestration** (`lumen run --platform android`: AVD provision, build, install, log stream, adb reverse for dev socket). *Accept:* scripted end-to-end on CI emulator incl. tier-1 hot reload.
 **T3.3 ◐ iOS shell** (UIKit host, Metal surface, touch/IME/safe areas, Xcode project template). *Accept:* hello app on iOS Simulator (macOS runner) with agent screenshot golden.
 *(◐: headless `render_into()` only; template uses CoreGraphics (not Metal) and references FFI symbols that don't exist; no macOS/simulator on this box; see `docs/cross-platform-readiness.md`; plan P.5.)*
@@ -110,7 +110,7 @@ Desktop window, surface, resize/scale handling, vsync present, damage-aware redr
 **T3.6 ◐ `lumen test --platform android|ios_sim`.** *Accept:* M0-exit test passes unmodified on both.
 *(◐: a bash-script dispatcher that cross-compiles the test binary and pushes goldens via adb — not the specced TestApp-over-dev-socket proxying; iOS leg unexercised.)*
 **M3-exit ◐:** settings app runs on Android emulator + iOS Simulator; same test suite green on desktop+both; agent loop (edit `.lss` → reload → screenshot) works against the Android emulator.
-*(◐: the Android emulator leg is real (local); the iOS-Simulator leg has never run; no touch on either.)*
+*(◐: the Android emulator leg is real (local) **with touch + soft keyboard (P.1)**; the iOS-Simulator leg has never run (P.5 shipped headless FFI only).)*
 
 ---
 
