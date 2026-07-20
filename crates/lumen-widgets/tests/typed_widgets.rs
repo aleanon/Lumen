@@ -224,3 +224,99 @@ fn picklist_dismisses_on_click_away_and_escape() {
         "Escape dismissed the menu"
     );
 }
+
+// --- migration: typed forms ≡ fn shims + behave (2026-07-20) ------------------
+
+use lumen_widgets::{widgets, widgets_extra, widgets_m3, widgets_m4};
+
+fn tree(build: impl Fn(&mut lumen_widgets::BuildCx) -> Element + 'static) -> String {
+    App::new(build)
+        .run_headless(Size::new(400.0, 400.0))
+        .semantics_json()
+        .to_string()
+}
+
+#[test]
+fn stateless_typed_forms_equal_their_shims() {
+    // Byte-identical semantic trees, shim vs typed.
+    assert_eq!(
+        tree(|_| widgets_extra::split_pane(widgets::text("l"), widgets::text("r"), 0.3)),
+        tree(|_| widgets_extra::SplitPane::new(widgets::text("l"), widgets::text("r"), 0.3).into()),
+    );
+    assert_eq!(
+        tree(|_| widgets_m3::app_bar("Title", vec![])),
+        tree(|_| widgets_m3::AppBar::new("Title", vec![]).into()),
+    );
+    assert_eq!(
+        tree(|_| widgets_m4::bar_chart(&[1.0, 3.0, 2.0], 120.0, 60.0)),
+        tree(|_| widgets_m4::BarChart::new(&[1.0, 3.0, 2.0], 120.0, 60.0).into()),
+    );
+    assert_eq!(
+        tree(|_| widgets_extra::wrap(vec![widgets::text("a"), widgets::text("b")])),
+        tree(|_| widgets_extra::Wrap::new(vec![widgets::text("a"), widgets::text("b")]).into()),
+    );
+}
+
+#[test]
+fn stateful_typed_forms_equal_their_shims() {
+    // These take &BuildCx — compare inside the same build closure.
+    assert_eq!(
+        tree(|cx| widgets_extra::select(cx, "s", &["A", "B"])),
+        tree(|cx| widgets_extra::Select::new(cx, "s", &["A", "B"]).into()),
+    );
+    assert_eq!(
+        tree(|cx| widgets_m3::bottom_nav(cx, "n", &["Home", "Feed"])),
+        tree(|cx| widgets_m3::BottomNav::new(cx, "n", &["Home", "Feed"]).into()),
+    );
+    assert_eq!(
+        tree(|cx| widgets_m4::rich_text_editor(cx, "doc", "# Hi")),
+        tree(|cx| widgets_m4::RichTextEditor::new(cx, "doc", "# Hi").into()),
+    );
+}
+
+#[test]
+fn modal_open_flag_branches() {
+    let closed = tree(|_| {
+        widgets_extra::Modal::new(
+            widgets::text("base").id("base"),
+            widgets::text("dlg").id("dlg"),
+            false,
+        )
+        .into()
+    });
+    assert!(closed.contains("base") && !closed.contains("modal-overlay"));
+    let open = tree(|_| {
+        widgets_extra::Modal::new(
+            widgets::text("base").id("base"),
+            widgets::text("dlg").id("dlg"),
+            true,
+        )
+        .into()
+    });
+    assert!(open.contains("modal-overlay"), "dialog overlays when open");
+}
+
+#[test]
+fn data_grid_typed_form_windows_rows() {
+    let mut h = App::new(|cx| {
+        widgets::column(vec![widgets_m4::DataGrid::new(
+            cx,
+            "dg",
+            &["A", "B"],
+            500,
+            20.0,
+            100.0,
+            |r, c| format!("r{r}c{c}"),
+        )
+        .id("dg")
+        .into()])
+    })
+    .run_headless(Size::new(400.0, 200.0));
+    h.pump();
+    let t = h.semantics_json().to_string();
+    assert!(
+        t.contains("r0c0") && !t.contains("r400c0"),
+        "grid windows rows"
+    );
+    h.assert_view_coherent();
+}

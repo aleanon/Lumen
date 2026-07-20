@@ -5,6 +5,7 @@
 //! Default styles are hardcoded constants until the `.lss` system (T1.2).
 
 use crate::element::{BuildCx, Element};
+use crate::widget::impl_common;
 use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
 use lumen_core::Color;
 use lumen_layout::{Dim, Display, Edges, FlexDirection, LayoutStyle, Position};
@@ -56,19 +57,38 @@ pub fn leaf(w: impl crate::LeafWidget + 'static) -> Element {
     }
 }
 
-/// An image of its own pixel size.
-pub fn image(img: RgbaImage) -> Element {
-    let (w, h) = (img.width() as f32, img.height() as f32);
-    Element {
-        role: Role::Image,
-        content: crate::NodeContent::Image(img),
-        style: LayoutStyle {
-            width: Dim::px(w),
-            height: Dim::px(h),
-            ..LayoutStyle::default()
-        },
-        ..Element::default()
+/// [`Image`] — a decoded bitmap at its own pixel size (typed form of
+/// [`image`]).
+pub struct Image {
+    el: Element,
+}
+
+impl Image {
+    /// An image of its own pixel size.
+    pub fn new(img: RgbaImage) -> Image {
+        let el = {
+            let (w, h) = (img.width() as f32, img.height() as f32);
+            Element {
+                role: Role::Image,
+                content: crate::NodeContent::Image(img),
+                style: LayoutStyle {
+                    width: Dim::px(w),
+                    height: Dim::px(h),
+                    ..LayoutStyle::default()
+                },
+                ..Element::default()
+            }
+        };
+        Image { el }
     }
+}
+
+impl_common!(Image);
+
+/// An image of its own pixel size.
+/// *(Thin shim over [`Image`] — the typed form is preferred.)*
+pub fn image(img: RgbaImage) -> Element {
+    Image::new(img).into()
 }
 
 /// A horizontal flex container.
@@ -284,24 +304,48 @@ pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
     }
 }
 
+/// [`Canvas`] — an immediate-mode drawing surface (typed form of
+/// [`canvas`]): `draw` paints into a `Frame` sized to the widget each frame.
+pub struct Canvas {
+    el: Element,
+}
+
+impl Canvas {
+    /// An immediate-mode drawing canvas (E8.1). `draw` paints into a `Frame` sized
+    /// to the widget each frame; emit paths, rects, circles, and gradients.
+    pub fn new(
+        width: f64,
+        height: f64,
+        draw: impl Fn(&mut lumen_render::canvas::Frame, lumen_core::geometry::Size) + 'static,
+    ) -> Canvas {
+        let el = {
+            use lumen_layout::{Dim, LayoutStyle};
+            Element {
+                role: lumen_core::semantics::Role::Image,
+                style: LayoutStyle {
+                    width: Dim::px(width as f32),
+                    height: Dim::px(height as f32),
+                    ..LayoutStyle::default()
+                },
+                content: crate::NodeContent::Canvas(std::rc::Rc::new(draw)),
+                ..Element::default()
+            }
+        };
+        Canvas { el }
+    }
+}
+
+impl_common!(Canvas);
+
 /// An immediate-mode drawing canvas (E8.1). `draw` paints into a `Frame` sized
 /// to the widget each frame; emit paths, rects, circles, and gradients.
+/// *(Thin shim over [`Canvas`] — the typed form is preferred.)*
 pub fn canvas(
     width: f64,
     height: f64,
     draw: impl Fn(&mut lumen_render::canvas::Frame, lumen_core::geometry::Size) + 'static,
 ) -> Element {
-    use lumen_layout::{Dim, LayoutStyle};
-    Element {
-        role: lumen_core::semantics::Role::Image,
-        style: LayoutStyle {
-            width: Dim::px(width as f32),
-            height: Dim::px(height as f32),
-            ..LayoutStyle::default()
-        },
-        content: crate::NodeContent::Canvas(std::rc::Rc::new(draw)),
-        ..Element::default()
-    }
+    Canvas::new(width, height, draw).into()
 }
 
 /// A determinate progress bar showing `fraction` (0..=1) of a track filled.
@@ -330,5 +374,62 @@ pub fn progress_bar(fraction: f64) -> Element {
         },
         children: vec![fill],
         ..Element::default()
+    }
+}
+
+#[cfg(test)]
+mod typed_tests {
+    use crate::{widgets, App};
+    use kurbo::Size;
+
+    /// Image and Canvas typed forms lay out at their intrinsic sizes and the
+    /// shims produce identical trees.
+    #[test]
+    fn image_and_canvas_typed_forms() {
+        let mut h = App::new(|_| {
+            widgets::column(vec![
+                widgets::Image::new(crate::RgbaImage::new(24, 16))
+                    .id("img")
+                    .into(),
+                widgets::Canvas::new(50.0, 30.0, |f, size| {
+                    f.fill_rect(
+                        kurbo::Rect::new(0.0, 0.0, size.width, size.height),
+                        lumen_render::Brush::Solid(lumen_core::Color::srgb8(255, 0, 0, 255)),
+                    );
+                })
+                .id("cv")
+                .into(),
+            ])
+        })
+        .run_headless(Size::new(200.0, 200.0));
+        h.pump();
+        let img = h.node_bounds_by_id("img").expect("image laid out");
+        assert_eq!((img.width(), img.height()), (24.0, 16.0));
+        let cv = h.node_bounds_by_id("cv").expect("canvas laid out");
+        assert_eq!((cv.width(), cv.height()), (50.0, 30.0));
+        // The canvas painted (red present).
+        let px = h.screenshot();
+        assert!(px.pixels().chunks_exact(4).any(|p| p[0] > 200 && p[1] < 60));
+        h.assert_view_coherent();
+    }
+
+    /// Container::stack overlays children like widgets::stack.
+    #[test]
+    fn container_stack_matches_stack_fn() {
+        let mk_kids = || {
+            vec![
+                widgets::text("under").id("under"),
+                widgets::text("over").id("over"),
+            ]
+        };
+        let a = App::new(move |_| widgets::stack(mk_kids()))
+            .run_headless(Size::new(200.0, 100.0))
+            .semantics_json()
+            .to_string();
+        let b = App::new(move |_| crate::Container::new(mk_kids()).stack().into())
+            .run_headless(Size::new(200.0, 100.0))
+            .semantics_json()
+            .to_string();
+        assert_eq!(a, b);
     }
 }

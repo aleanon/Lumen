@@ -64,12 +64,13 @@ fn build(cx: &mut BuildCx) -> Element {
 
 | Module | Constructors |
 |---|---|
-| `widgets` | `text image row column stack button checkbox slider scroll text_field_basic canvas progress_bar keyed leaf` |
-| typed structs | `Button CheckBox Slider TextField TextInput Container Label Accordion PickList ProgressBar Radio Rule Scrollable Space Grid` |
-| `widgets_m1` | `spacer divider padding icon switch stepper tabs virtual_list` |
-| `widgets_extra` | `radio select tooltip menu grid wrap split_pane text_area modal pane_grid` |
-| `widgets_m3` | `bottom_nav navigation_rail app_bar pull_to_refresh date_picker time_picker` |
-| `widgets_m4` | `data_grid tree bar_chart rich_text rich_text_editor` |
+| `widgets` (primitives) | `text image row column stack button checkbox slider scroll text_field_basic canvas progress_bar keyed leaf` — thin fns; the stateful ones delegate to the typed structs below |
+| typed structs (prefer these) | `Button CheckBox Slider TextField TextInput Container Label Accordion PickList Combobox ColorPicker ProgressBar Radio Rule Scrollable Space Grid SearchField Sheet Drawer Popover RangeSlider FilePicker Toast Spinner Chip Skeleton Avatar Pagination AlignBox` |
+| typed structs (migrated 2026-07) | `Image Canvas · Icon Switch Stepper Tabs VirtualList · BottomNav NavigationRail AppBar PullToRefresh DatePicker TimePicker · Select Tooltip Menu Wrap SplitPane Modal PaneGrid · DataGrid Tree BarChart RichText RichTextEditor FindReplaceBar` — each has a same-named `fn` shim kept for source compat |
+| `widgets_m1` fns | `spacer divider padding icon switch stepper tabs virtual_list` (icon/switch/… now shim `Icon`/`Switch`/…; spacer→`Space`, divider→`Rule`, padding→`Container::padding`) |
+| `widgets_extra` fns | `radio select tooltip menu grid wrap split_pane text_area modal pane_grid` (radio→`Radio`, grid→`Grid`, text_area→`TextField`; the rest shim their new types) |
+| `widgets_m3` fns | `bottom_nav navigation_rail app_bar pull_to_refresh date_picker time_picker` (all shim the typed forms) |
+| `widgets_m4` fns | `data_grid tree bar_chart rich_text rich_text_editor find_replace_bar` (all shim the typed forms) |
 | `markdown` | `markdown::render` (CommonMark subset) |
 
 **Shipped with W.1:** `Popover::new(cx, name, trigger, content)`

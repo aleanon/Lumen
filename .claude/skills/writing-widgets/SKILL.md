@@ -18,12 +18,13 @@ what is legitimately changeable for that widget, so invalid widgets
 semantic tree, the agent, and AT) are unrepresentable at construction time.
 A bare `Element` return hands the caller every pub field.
 
-⚠️ **Do NOT copy the shape of the legacy fn-style modules** — `widgets.rs`,
-`widgets_m1.rs`, `widgets_m3.rs`, `widgets_m4.rs`, `widgets_extra.rs`,
-`misc_w2.rs` predate this convention (T0.10/T1.6 accretion, no ADR behind
-them) and are queued for migration. A new widget added to one of those
-files still gets the typed shape below; existing fns being touched should
-be converted (struct + a thin delegating fn shim for compatibility).
+The legacy fn-style modules (`widgets.rs`, `widgets_m1/m3/m4.rs`,
+`widgets_extra.rs`) were **migrated to typed structs on 2026-07-20** — each
+`pub fn foo(...) -> Element` now has a same-named `Foo` struct + a thin
+`fn` shim (`Foo::new(...).into()`) kept for source compatibility. **Call
+the typed form (`Foo::new`), and add new widgets as typed structs.** The
+remaining bare fns are compositional primitives (`text`/`row`/`column`/
+`stack`/`leaf`/`keyed`) — not stateful widgets — so they stay functions.
 
 Work in small steps and **commit per widget/task** (see `AGENT.md`). Read a
 neighbouring **typed** widget first (`button.rs` stateless,

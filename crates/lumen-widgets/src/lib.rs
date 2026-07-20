@@ -154,6 +154,7 @@ pub fn renderer_override() -> Option<Box<dyn Renderer>> {
 // The widget library — each builds its `Element` inside `::new()`, in its own
 // file. Lower to `Element` via `From`; compose with `col!`/`row!` or `Container`.
 pub use accordion::Accordion;
+// Typed forms of the legacy fn-style widgets (migration, 2026-07-20).
 pub use button::Button;
 pub use charts::{LineChart, PieChart, PieSlice};
 pub use check_box::CheckBox;
@@ -178,3 +179,8 @@ pub use slider::Slider;
 pub use space::Space;
 pub use text_field::TextField;
 pub use text_input::TextInput;
+pub use widgets::{Canvas, Image};
+pub use widgets_extra::{Menu, Modal, PaneGrid, Select, SplitPane, Tooltip, Wrap};
+pub use widgets_m1::{Icon, Stepper, Switch, Tabs, VirtualList};
+pub use widgets_m3::{AppBar, BottomNav, DatePicker, NavigationRail, PullToRefresh, TimePicker};
+pub use widgets_m4::{BarChart, DataGrid, FindReplaceBar, RichText, RichTextEditor, Tree};

@@ -43,6 +43,25 @@ impl Container {
     }
 
     /// Uniform padding on all sides (px).
+    /// Overlay layout: children stack at the top-left, last on top (the
+    /// typed form of `widgets::stack`).
+    pub fn stack(mut self) -> Container {
+        use lumen_layout::{Edges, Position};
+        self.el.style.position = Position::Relative;
+        self.el.style.display = lumen_layout::Display::Flex;
+        for c in &mut self.el.children {
+            c.style.position = Position::Absolute;
+            c.style.inset = Edges {
+                left: Dim::px(0.0),
+                top: Dim::px(0.0),
+                ..Edges::AUTO
+            };
+        }
+        self.el.elide_semantics = true;
+        self
+    }
+
+    /// Uniform padding (px) on all sides.
     pub fn padding(mut self, px: f32) -> Container {
         self.el.style.padding = Edges::all(Dim::px(px));
         self
