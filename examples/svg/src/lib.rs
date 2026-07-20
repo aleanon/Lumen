@@ -54,6 +54,17 @@ fn build(cx: &mut BuildCx) -> Element {
     let diamond = "<svg width=\"64\" height=\"64\">\
         <path d=\"M32 8 L56 32 L32 56 L8 32 Z\" fill=\"#3b82f6\"/>\
         </svg>";
+    // M.2: the completed subset — gradient fill, a rotated group, a clip.
+    let sunset = "<svg width=\"64\" height=\"64\">\
+        <defs><linearGradient id=\"sky\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"64\">\
+        <stop offset=\"0\" stop-color=\"#ff8a3d\"/>\
+        <stop offset=\"1\" stop-color=\"#7c4dff\"/></linearGradient>\
+        <clipPath id=\"c\"><rect x=\"4\" y=\"4\" width=\"56\" height=\"40\"/></clipPath></defs>\
+        <g clip-path=\"url(#c)\"><rect x=\"0\" y=\"0\" width=\"64\" height=\"64\" fill=\"url(#sky)\"/>\
+        <circle cx=\"32\" cy=\"44\" r=\"12\" fill=\"#ffd54d\"/></g>\
+        <g transform=\"translate(32 54) rotate(45)\">\
+        <rect x=\"-5\" y=\"-5\" width=\"10\" height=\"10\" fill=\"#2ea043\"/></g>\
+        </svg>";
     let target = "<svg width=\"64\" height=\"64\">\
         <circle cx=\"32\" cy=\"32\" r=\"24\" fill=\"#7c4dff\"/>\
         <circle cx=\"32\" cy=\"32\" r=\"15\" fill=\"#ffffff\"/>\
@@ -66,6 +77,7 @@ fn build(cx: &mut BuildCx) -> Element {
             icon(heart, "Heart"),
             icon(diamond, "Gem"),
             icon(target, "Target"),
+            icon(sunset, "Sunset"),
         ]);
         r.style.column_gap = Dim::px(16.0);
         r.style.justify_content = Some(Align::Center);
