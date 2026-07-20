@@ -87,7 +87,12 @@ Resolution semantics shared by tests and agent: a selector resolves to all match
 `LUMEN_AGENT_ADDR` is set (default `127.0.0.1:9230`; `just run-agent <name>`).
 One JSON object per line, one reply line per request; requests are bridged
 onto the UI thread and dispatched against the live runtime, and the window
-redraws after each action. A WebSocket transport (`serve_one`/
+redraws after each action. **Web (P.2):** the same dispatch compiles to wasm
+and is exposed as `window.lumenAgent(json)`; in dev, `?agent=ws://…` opens a
+WebSocket to `scripts/web_agent_relay.py`, which re-serves the newline-TCP
+protocol so the desktop tooling drives a live browser unmodified. Auto-waits
+degrade to single-attempt on wasm (no monotonic clock; blocking the only
+thread cannot make the app progress). A WebSocket transport (`serve_one`/
 `serve_one_session`, tungstenite) exists and is used by the conformance
 tests. **Packaged clients (C.5):** `lumen agent call <method> [json]`
 (one-shot; auto-discovers the address) and `lumen agent mcp` — a real MCP

@@ -88,6 +88,10 @@ examples:
 test name *args:
     cargo test -p {{name}} {{args}}
 
+# P.2 gate: wasm size + node session leg + headless-browser click leg.
+web-gate:
+    bash scripts/web_gate.sh
+
 # P.1 gate: settings app on the emulator responds to touch + soft keyboard.
 android-gate:
     bash scripts/android_input_gate.sh

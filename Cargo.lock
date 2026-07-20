@@ -3000,8 +3000,10 @@ name = "lumen-shell-web"
 version = "0.0.0"
 dependencies = [
  "lumen",
+ "lumen-agent",
  "lumen-core",
  "lumen-render",
+ "serde_json",
 ]
 
 [[package]]

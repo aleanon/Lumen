@@ -13,6 +13,7 @@ use lumen_core::semantics::{resolve_one, SemanticsNode};
 use lumen_core::Color;
 use lumen_widgets::{center, Headless, Renderer, Spawner};
 use serde_json::{json, Value};
+#[cfg(feature = "ws")]
 use std::net::TcpListener;
 
 mod base64;
@@ -32,6 +33,33 @@ pub fn dispatch<R: Renderer, E: Spawner>(app: &mut Headless<R, E>, req: &Value) 
 }
 
 type RpcResult = Result<Value, (i64, String)>;
+
+/// Auto-wait deadline. On wasm32-unknown-unknown there is no `Instant` (it
+/// traps) and blocking the browser's only thread cannot make the app
+/// progress anyway — so waits degrade to a single attempt there (P.2).
+struct Deadline {
+    #[cfg(not(target_arch = "wasm32"))]
+    at: std::time::Instant,
+}
+
+impl Deadline {
+    fn after_ms(_ms: u64) -> Deadline {
+        Deadline {
+            #[cfg(not(target_arch = "wasm32"))]
+            at: std::time::Instant::now() + std::time::Duration::from_millis(_ms),
+        }
+    }
+    fn passed(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        return std::time::Instant::now() >= self.at;
+        #[cfg(target_arch = "wasm32")]
+        true
+    }
+    fn tick(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
 
 /// Autonomously repair an app (T7.5 AI-native): read its structured
 /// diagnostics, apply `fixer` to each, and repeat until the app is clean or
@@ -445,21 +473,29 @@ fn handle<R: Renderer, E: Spawner>(
                 .get("timeout_ms")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(5000);
+            let deadline = Deadline::after_ms(timeout_ms);
+            #[cfg(not(target_arch = "wasm32"))]
             let start = std::time::Instant::now();
-            let deadline = start + std::time::Duration::from_millis(timeout_ms);
+            #[cfg(not(target_arch = "wasm32"))]
             let mut last = start;
             loop {
-                let now = std::time::Instant::now();
-                app.advance_clock(((now - last).as_secs_f64() * 1000.0).min(100.0));
-                last = now;
+                // Advance the virtual clock by real elapsed time (native
+                // only — on wasm the RAF loop owns the clock).
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let now = std::time::Instant::now();
+                    app.advance_clock(((now - last).as_secs_f64() * 1000.0).min(100.0));
+                    last = now;
+                }
                 app.pump();
                 if !app.is_time_driven() && app.runtime().is_quiescent() {
-                    break Ok(json!({
-                        "settled": true,
-                        "waited_ms": start.elapsed().as_millis() as u64,
-                    }));
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let waited = start.elapsed().as_millis() as u64;
+                    #[cfg(target_arch = "wasm32")]
+                    let waited = 0u64;
+                    break Ok(json!({ "settled": true, "waited_ms": waited }));
                 }
-                if std::time::Instant::now() >= deadline {
+                if deadline.passed() {
                     break Err((
                         -32000,
                         format!(
@@ -467,7 +503,7 @@ fn handle<R: Renderer, E: Spawner>(
                         ),
                     ));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                deadline.tick();
             }
         }
         "ui.waitFor" => {
@@ -490,7 +526,7 @@ fn handle<R: Renderer, E: Spawner>(
                 .get("timeout_ms")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(5000);
-            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+            let deadline = Deadline::after_ms(timeout_ms);
             loop {
                 app.pump();
                 let root = app.semantics_doc().root.elided();
@@ -512,7 +548,7 @@ fn handle<R: Renderer, E: Spawner>(
                         }
                     }
                 }
-                if std::time::Instant::now() >= deadline {
+                if deadline.passed() {
                     return Err((
                         -32000,
                         format!(
@@ -526,7 +562,7 @@ fn handle<R: Renderer, E: Spawner>(
                         ),
                     ));
                 }
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                deadline.tick();
             }
         }
         "input.click" => {
@@ -895,7 +931,7 @@ fn resolve_action<R: Renderer, E: Spawner>(
         .get("timeout_ms")
         .and_then(|v| v.as_u64())
         .unwrap_or(5000);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    let deadline = Deadline::after_ms(timeout_ms);
     loop {
         app.pump();
         let root = app.semantics_doc().root.elided();
@@ -908,7 +944,7 @@ fn resolve_action<R: Renderer, E: Spawner>(
                     if actionable {
                         return Ok(n.clone());
                     }
-                    if std::time::Instant::now() >= deadline {
+                    if deadline.passed() {
                         return Err((
                             -32000,
                             format!(
@@ -925,7 +961,7 @@ fn resolve_action<R: Renderer, E: Spawner>(
                 return Err((-32000, resolve_err_msg(&selector, &e)));
             }
             Err(e) => {
-                if std::time::Instant::now() >= deadline {
+                if deadline.passed() {
                     return Err((
                         -32000,
                         format!(
@@ -936,7 +972,7 @@ fn resolve_action<R: Renderer, E: Spawner>(
                 }
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        deadline.tick();
     }
 }
 
@@ -1059,6 +1095,7 @@ pub fn mcp_manifest() -> Value {
 /// Serve the agent protocol on `listener` for one connection, driving `app`.
 /// Blocking and single-threaded (the app lives here). Returns when the client
 /// disconnects.
+#[cfg(feature = "ws")]
 pub fn serve_one<R: Renderer, E: Spawner>(
     listener: &TcpListener,
     app: &mut Headless<R, E>,
@@ -1068,6 +1105,7 @@ pub fn serve_one<R: Renderer, E: Spawner>(
 
 /// Like [`serve_one`], but records the connection into `session` so it can be
 /// exported as a regression suite (`session.exportTest`).
+#[cfg(feature = "ws")]
 pub fn serve_one_session<R: Renderer, E: Spawner>(
     listener: &TcpListener,
     app: &mut Headless<R, E>,

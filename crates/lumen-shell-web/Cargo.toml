@@ -14,3 +14,10 @@ name = "lumen_shell_web"
 lumen = { workspace = true }
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }
+# P.2: the agent bridge — dispatch only; the browser owns the transport
+# (WebSocket/CDP), so the native ws serving loop stays off. Direct path dep:
+# cargo silently IGNORES `default-features = false` on workspace-inherited
+# deps (same trap as the facade's lean profile), which would drag
+# tungstenite→rand→getrandom into the wasm build.
+lumen-agent = { path = "../lumen-agent", default-features = false }
+serde_json = { workspace = true }

@@ -104,7 +104,7 @@ pub trait Renderer {
     /// the surface on their own device and return `true`; others (CPU) return
     /// `false`, and the caller keeps the readback + separate-presenter path.
     /// `width`/`height` are physical px. (Requires the `wgpu` feature.)
-    #[cfg(feature = "wgpu")]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     fn attach_surface(
         &mut self,
         _target: wgpu::SurfaceTarget<'static>,
@@ -115,12 +115,12 @@ pub trait Renderer {
     }
 
     /// Reconfigure the attached surface to a new physical size (no-op if none).
-    #[cfg(feature = "wgpu")]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     fn resize_surface(&mut self, _width: u32, _height: u32) {}
 
     /// Render `list` straight to the attached swapchain — no CPU readback (1c).
     /// Returns `false` if no surface is attached (caller uses `render_frame`).
-    #[cfg(feature = "wgpu")]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     fn present_to_surface(
         &mut self,
         _list: &DisplayList,
@@ -215,7 +215,7 @@ impl<R: Renderer + ?Sized> Renderer for Box<R> {
         (**self).render_damage(list, width, height, scale, background, dirty)
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     fn attach_surface(
         &mut self,
         target: wgpu::SurfaceTarget<'static>,
@@ -225,12 +225,12 @@ impl<R: Renderer + ?Sized> Renderer for Box<R> {
         (**self).attach_surface(target, width, height)
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     fn resize_surface(&mut self, width: u32, height: u32) {
         (**self).resize_surface(width, height)
     }
 
-    #[cfg(feature = "wgpu")]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     fn present_to_surface(
         &mut self,
         list: &DisplayList,

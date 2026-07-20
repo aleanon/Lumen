@@ -1,11 +1,7 @@
 <!doctype html><meta charset=utf-8><title>Lumen Web</title>
-<canvas id=c width=480 height=320></canvas>
-<script type=module>
-const W=480,H=320;
-const { instance } = await WebAssembly.instantiateStreaming(fetch('./hello_web.wasm'), {});
-const ptr = instance.exports.lumen_web_render(W,H);
-const px = new Uint8ClampedArray(instance.exports.memory.buffer, ptr, W*H*4);
-const ctx = document.getElementById('c').getContext('2d');
-ctx.putImageData(new ImageData(px, W, H), 0, 0);
-// Production: a WebSocket bridge exposes lumen-agent (input.*/ui.getTree) here.
-</script>
+<style>html,body{margin:0}#lumen{width:400px;height:300px;touch-action:none}</style>
+<canvas id=lumen></canvas>
+<!-- P.2: persistent interactive session — input listeners, RAF present,
+     agent bridge on window.lumenAgent (add ?agent=ws://… for the dev
+     WebSocket transport). -->
+<script type=module src=app.mjs></script>

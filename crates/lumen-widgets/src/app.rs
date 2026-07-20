@@ -1301,7 +1301,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// Returns whether the backend accepted it (GPU present); on `false` the
     /// shell keeps the CPU readback + separate-presenter path. `width`/`height`
     /// are physical px.
-    #[cfg(feature = "wgpu")]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     pub fn attach_surface(
         &mut self,
         target: lumen_render::wgpu::SurfaceTarget<'static>,
@@ -1314,7 +1314,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     }
 
     /// Reconfigure the attached surface to a new physical size (1c).
-    #[cfg(feature = "wgpu")]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     pub fn resize_surface(&mut self, width: u32, height: u32) {
         self.renderer.resize_surface(width, height);
     }
@@ -1322,7 +1322,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// Present the most recent frame straight to the attached swapchain (1c) —
     /// no CPU readback. Returns `false` if nothing is attached or there's no
     /// frame yet. The shell calls this after `pump()` when the frame changed.
-    #[cfg(feature = "wgpu")]
+    #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     pub fn present_to_surface(&mut self) -> bool {
         if !self.surface_attached {
             return false;

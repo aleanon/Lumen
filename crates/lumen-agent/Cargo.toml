@@ -14,7 +14,15 @@ kurbo = { workspace = true }
 serde_json = { workspace = true }
 # Sync WebSocket so the non-Send app stays on the serving thread (ADR-003,
 # ADR-018: tokio is only for the dev-server multiplexer, not this loop).
-tungstenite = { workspace = true }
+# Optional (P.2): the wasm agent bridge needs only `dispatch` — the browser
+# side owns the transport — and tungstenite's dep tree doesn't build on
+# wasm32-unknown-unknown.
+tungstenite = { workspace = true, optional = true }
+
+[features]
+default = ["ws"]
+# The native WebSocket serving loop (serve_one/serve_one_session).
+ws = ["dep:tungstenite"]
 
 [dev-dependencies]
 lumen-layout = { workspace = true }
