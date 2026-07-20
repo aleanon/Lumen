@@ -9,9 +9,26 @@ A widget is a typed builder that produces one `Element` (a subtree). It lowers t
 `Element` via `From`/`.into()` (or `.build(cx)`), composes with `col!`/`row!`/
 `Container`, and — if stateful — keeps its state in signals keyed by a `name`.
 
+## The typed rule (binding — user preference, 2026-07-20)
+
+**Every widget is a typed struct. Never write a bare `pub fn … -> Element`
+widget constructor.** Rationale: the type is the contract — it exposes only
+what is legitimately changeable for that widget, so invalid widgets
+(clobbered `role`, stripped `actions`, replaced `content` — lies to the
+semantic tree, the agent, and AT) are unrepresentable at construction time.
+A bare `Element` return hands the caller every pub field.
+
+⚠️ **Do NOT copy the shape of the legacy fn-style modules** — `widgets.rs`,
+`widgets_m1.rs`, `widgets_m3.rs`, `widgets_m4.rs`, `widgets_extra.rs`,
+`misc_w2.rs` predate this convention (T0.10/T1.6 accretion, no ADR behind
+them) and are queued for migration. A new widget added to one of those
+files still gets the typed shape below; existing fns being touched should
+be converted (struct + a thin delegating fn shim for compatibility).
+
 Work in small steps and **commit per widget/task** (see `AGENT.md`). Read a
-neighbouring widget first (`button.rs` stateless, `check_box.rs`/`slider.rs`
-stateful, `grid.rs` builder) — match its shape, doc density, and idioms.
+neighbouring **typed** widget first (`button.rs` stateless,
+`check_box.rs`/`slider.rs` stateful, `grid.rs` builder) — match its doc
+density and idioms; match its *shape* only if it follows the typed rule.
 
 ## Step 1 — pick the shape
 
