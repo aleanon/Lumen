@@ -135,6 +135,7 @@ pub fn run(app: App, size: Size) {
         native_menu: None,
         a11y: None,
         tray: None,
+        secondary: std::collections::HashMap::new(),
         os_clipboard: arboard::Clipboard::new().ok(),
         os_clip_last: String::new(),
         ime_active: false,
@@ -295,6 +296,13 @@ struct Shell {
     /// assistive technology subscribes; then the semantic tree — the same
     /// one the agent and tests read — is published after every frame.
     a11y: Option<accesskit_winit::Adapter>,
+    /// P.3d-2: realized secondary windows, keyed by their winit id. Each is
+    /// an independent `Headless` pipeline over the shared `Runtime`
+    /// (`Headless::open_window_with`); input routes here by window id, and
+    /// any injected event schedules a redraw of *every* window (shared
+    /// signals may change any of them; an untouched window's pump is a
+    /// dirty-checked no-op).
+    secondary: std::collections::HashMap<WindowId, SecondaryWindow>,
     /// P.3e: system tray, created lazily on the app's first
     /// `SystemRequest::TrayTooltip` (no tray unless asked for). On Linux it
     /// lives on a dedicated gtk thread (winit owns the main loop) reached by
@@ -316,6 +324,20 @@ struct Shell {
     /// **live** window — explore live, commit the exported regression test.
     #[cfg(feature = "agent")]
     agent_session: lumen_agent::Session,
+}
+
+/// P.3d-2: one realized secondary window — its pipeline plus per-window
+/// presentation state (mirrors the main-window fields on [`Shell`]).
+struct SecondaryWindow {
+    headless: ShellHeadless,
+    window: Arc<Window>,
+    presenter: Option<Presenter>,
+    direct: bool,
+    size: Size,
+    scale: f64,
+    cursor: Point,
+    last_frame: Instant,
+    pending_resize: bool,
 }
 
 impl ApplicationHandler<ShellEvent> for Shell {
@@ -363,11 +385,9 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"app not ready"}}"#
                         .to_string()
                 };
-                // Reflect any state change the action caused in the window (works
-                // for both the direct-present and CPU-fallback paths).
-                if let Some(w) = &self.window {
-                    w.request_redraw();
-                }
+                // Reflect any state change the action caused in the window(s) —
+                // shared signals may re-render secondaries too (P.3d-2).
+                self.redraw_all();
                 let _ = reply.send(resp);
             }
             ShellEvent::ReloadStyles(src) => {
@@ -387,21 +407,21 @@ impl ApplicationHandler<ShellEvent> for Shell {
             }
             ShellEvent::Wake => {
                 // A background result is queued; pump applies it (drains the
-                // deferred-op queue) and we present the new frame.
+                // deferred-op queue) and we present the new frame. Secondary
+                // windows pick the change up via the fan-out redraw.
                 if let Some(h) = &mut self.headless {
                     h.pump();
                     if let Some(p) = &mut self.presenter {
                         p.present(&h.screenshot());
                     }
                 }
+                self.redraw_all();
             }
             ShellEvent::Menu(ev) => {
                 if let Some(h) = &mut self.headless {
                     h.activate_menu(ev.id().0.as_str());
                 }
-                if let Some(w) = &self.window {
-                    w.request_redraw();
-                }
+                self.redraw_all();
             }
             ShellEvent::AccessKit(ev) => {
                 use accesskit_winit::WindowEvent as AkEvent;
@@ -484,9 +504,26 @@ impl ApplicationHandler<ShellEvent> for Shell {
         window.request_redraw(); // paint the first frame
         self.window = Some(window);
         self.last_frame = Instant::now();
+        // P.3d-2: realize every declared secondary window.
+        let descs: Vec<lumen_widgets::system::WindowDesc> = self
+            .headless
+            .as_ref()
+            .map(|h| h.windows().to_vec())
+            .unwrap_or_default();
+        for d in &descs {
+            self.open_secondary(el, d);
+        }
     }
 
-    fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        // P.3d-2: secondary windows have their own (reduced) event path —
+        // pointer/keys/resize/redraw/close. Menus, accelerators, IME,
+        // clipboard bridging, and the AT adapter stay main-window (the
+        // adapter is bound to the main window's handle).
+        if self.secondary.contains_key(&id) {
+            self.secondary_event(el, id, event);
+            return;
+        }
         // P.4: the adapter tracks focus/visibility from the raw event stream.
         if let (Some(a), Some(w)) = (&mut self.a11y, &self.window) {
             a.process_event(w, &event);
@@ -761,29 +798,249 @@ impl ApplicationHandler<ShellEvent> for Shell {
     /// Decide how to wait for the next frame from what the UI asked for, so an
     /// idle UI costs zero frames while an animating one runs free.
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        let Some(h) = &self.headless else { return };
-        match h.next_deadline() {
-            // Idle: sleep until the next OS event (input/resize/close).
-            None => el.set_control_flow(ControlFlow::Wait),
-            // Continuous animation: keep producing frames back-to-back.
-            Some(t) if t <= h.now_ms() => {
-                el.set_control_flow(ControlFlow::Poll);
-                if let Some(w) = &self.window {
-                    w.request_redraw();
+        // P.3d-2: the loop sleeps until the EARLIEST deadline across every
+        // window (each pipeline has its own virtual clock); a window already
+        // due gets a redraw and the loop polls.
+        let mut poll = false;
+        let mut min_dt: Option<f64> = None;
+        if let Some(h) = &self.headless {
+            match h.next_deadline() {
+                None => {}
+                Some(t) if t <= h.now_ms() => {
+                    poll = true;
+                    if let Some(w) = &self.window {
+                        w.request_redraw();
+                    }
+                }
+                Some(t) => min_dt = Some(t - h.now_ms()),
+            }
+        }
+        for sw in self.secondary.values() {
+            match sw.headless.next_deadline() {
+                None => {}
+                Some(t) if t <= sw.headless.now_ms() => {
+                    poll = true;
+                    sw.window.request_redraw();
+                }
+                Some(t) => {
+                    let dt = t - sw.headless.now_ms();
+                    min_dt = Some(min_dt.map_or(dt, |m: f64| m.min(dt)));
                 }
             }
-            // One-shot wake: sleep until the (virtual==real) deadline.
-            Some(t) => {
-                let dt = (t - h.now_ms()).max(0.0);
-                el.set_control_flow(ControlFlow::WaitUntil(
-                    Instant::now() + Duration::from_secs_f64(dt / 1000.0),
-                ));
-            }
+        }
+        if poll {
+            el.set_control_flow(ControlFlow::Poll);
+        } else if let Some(dt) = min_dt {
+            el.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_secs_f64(dt.max(0.0) / 1000.0),
+            ));
+        } else {
+            el.set_control_flow(ControlFlow::Wait);
         }
     }
 }
 
 impl Shell {
+    /// P.3d-2: schedule a frame for every window — an input or state change
+    /// anywhere may re-render any window (shared signals); untouched windows
+    /// pump as dirty-checked no-ops.
+    fn redraw_all(&self) {
+        if let Some(w) = &self.window {
+            w.request_redraw();
+        }
+        for sw in self.secondary.values() {
+            sw.window.request_redraw();
+        }
+    }
+
+    /// P.3d-2: realize one declared secondary window (its own winit window,
+    /// renderer, and `Headless` pipeline over the shared `Runtime`).
+    fn open_secondary(&mut self, el: &ActiveEventLoop, d: &lumen_widgets::system::WindowDesc) {
+        let Some(main) = &self.headless else { return };
+        let renderer: ShellRenderer = lumen_widgets::renderer_override()
+            .unwrap_or_else(|| Box::new(lumen_render::WgpuFallbackTinySkia::new()));
+        let Some(mut h) = main.open_window_with(
+            &d.id,
+            renderer,
+            lumen_core::tasks::ThreadPoolSpawner::new(1),
+        ) else {
+            eprintln!("lumen: window '{}' has no declaration", d.id);
+            return;
+        };
+        let attrs = Window::default_attributes()
+            .with_title(&d.title)
+            .with_inner_size(winit::dpi::LogicalSize::new(d.width, d.height));
+        let window = match el.create_window(attrs) {
+            Ok(w) => Arc::new(w),
+            Err(e) => {
+                eprintln!("lumen: window '{}': {e}", d.id);
+                return;
+            }
+        };
+        let scale = window.scale_factor();
+        let phys = window.inner_size();
+        let size = Size::new(
+            (phys.width.max(1) as f64 / scale).max(1.0),
+            (phys.height.max(1) as f64 / scale).max(1.0),
+        );
+        h.prepare_resize(size, scale);
+        let direct = h.attach_surface(window.clone().into(), phys.width.max(1), phys.height.max(1));
+        let presenter = if direct {
+            None
+        } else {
+            Some(Presenter::new(window.clone()))
+        };
+        let proxy = self.proxy.clone();
+        h.set_waker(std::sync::Arc::new(move || {
+            let _ = proxy.send_event(ShellEvent::Wake);
+        }));
+        window.request_redraw();
+        self.secondary.insert(
+            window.id(),
+            SecondaryWindow {
+                headless: h,
+                window,
+                presenter,
+                direct,
+                size,
+                scale,
+                cursor: Point::ZERO,
+                last_frame: Instant::now(),
+                pending_resize: false,
+            },
+        );
+    }
+
+    /// P.3d-2: the secondary-window event path.
+    fn secondary_event(&mut self, _el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if matches!(event, WindowEvent::CloseRequested) {
+            self.secondary.remove(&id); // dropping the window closes it
+            return;
+        }
+        // Inputs that can change shared state fan a redraw out to all windows.
+        let fan_out = matches!(
+            event,
+            WindowEvent::MouseInput { .. }
+                | WindowEvent::KeyboardInput { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::DroppedFile(_)
+        );
+        let modifiers = self.modifiers;
+        let Some(sw) = self.secondary.get_mut(&id) else {
+            return;
+        };
+        match event {
+            WindowEvent::Resized(s) => {
+                sw.scale = sw.window.scale_factor();
+                sw.size = Size::new(
+                    (s.width.max(1) as f64 / sw.scale).max(1.0),
+                    (s.height.max(1) as f64 / sw.scale).max(1.0),
+                );
+                sw.pending_resize = true;
+                sw.window.request_redraw();
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                sw.scale = scale_factor;
+                sw.pending_resize = true;
+                sw.window.request_redraw();
+            }
+            WindowEvent::ModifiersChanged(m) => {
+                self.modifiers = map_modifiers(m.state());
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                sw.cursor = Point::new(position.x / sw.scale, position.y / sw.scale);
+                let mut ev = PointerEvent::at(sw.cursor);
+                ev.modifiers = modifiers;
+                sw.headless.inject(Event::PointerMove(ev));
+                sw.window.request_redraw();
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let mut ev = PointerEvent::at(sw.cursor);
+                ev.button = map_button(button);
+                ev.modifiers = modifiers;
+                sw.headless.inject(if state == ElementState::Pressed {
+                    Event::PointerDown(ev)
+                } else {
+                    Event::PointerUp(ev)
+                });
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let (dx, dy) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (f64::from(x) * 40.0, f64::from(y) * 40.0),
+                    MouseScrollDelta::PixelDelta(p) => (p.x, p.y),
+                };
+                sw.headless.inject(Event::Wheel(WheelEvent {
+                    pos: sw.cursor,
+                    delta: Vec2::new(dx, dy),
+                    modifiers,
+                }));
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                // Direct text + keys; IME composition stays main-window (v1).
+                if event.state == ElementState::Pressed {
+                    if let Some(t) = &event.text {
+                        if !t.is_empty() && !t.chars().all(char::is_control) {
+                            sw.headless.inject(Event::TextInput(TextInputEvent {
+                                text: t.to_string(),
+                            }));
+                        }
+                    }
+                }
+                if let Some(k) = map_key(&event.logical_key) {
+                    let ke = KeyEvent {
+                        key: k,
+                        modifiers,
+                        repeat: event.repeat,
+                    };
+                    sw.headless.inject(if event.state == ElementState::Pressed {
+                        Event::KeyDown(ke)
+                    } else {
+                        Event::KeyUp(ke)
+                    });
+                }
+            }
+            WindowEvent::DroppedFile(path) => {
+                let pos = sw.cursor;
+                sw.headless.inject(Event::Drop(DropEvent {
+                    pos,
+                    data: DropData {
+                        text: None,
+                        files: vec![path.display().to_string()],
+                    },
+                }));
+            }
+            WindowEvent::RedrawRequested => {
+                let now = Instant::now();
+                let elapsed_ms = (now - sw.last_frame).as_secs_f64() * 1000.0;
+                sw.last_frame = now;
+                sw.headless.advance_clock(elapsed_ms.min(1000.0));
+                if std::mem::take(&mut sw.pending_resize) {
+                    let pw = (sw.size.width * sw.scale).round().max(1.0) as u32;
+                    let ph = (sw.size.height * sw.scale).round().max(1.0) as u32;
+                    if sw.direct {
+                        sw.headless.resize_surface(pw, ph);
+                    } else if let Some(p) = &mut sw.presenter {
+                        p.resize(pw, ph);
+                    }
+                    sw.headless.prepare_resize(sw.size, sw.scale);
+                }
+                let stats = sw.headless.pump();
+                if stats.painted {
+                    if sw.direct {
+                        sw.headless.present_to_surface();
+                    } else if let Some(p) = &mut sw.presenter {
+                        let frame = sw.headless.screenshot();
+                        p.present(&frame);
+                    }
+                }
+            }
+            _ => {}
+        }
+        if fan_out {
+            self.redraw_all();
+        }
+    }
+
     /// P.4: publish the current semantic tree to the AT (used for the
     /// initial-tree request; per-frame updates ride `RedrawRequested`).
     fn push_a11y_tree(&mut self) {
@@ -799,9 +1056,9 @@ impl Shell {
         if let Some(h) = &mut self.headless {
             h.inject(ev);
         }
-        if let Some(w) = &self.window {
-            w.request_redraw(); // event-driven: redraw only after input
-        }
+        // Event-driven: redraw only after input — every window, since the
+        // shared store may re-render any of them (P.3d-2).
+        self.redraw_all();
     }
 }
 

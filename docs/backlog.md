@@ -43,7 +43,9 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
   `menu.invoke` are the activation paths there), OS drag-and-drop + desktop
   notifications + system tray (P.3e ✅ — tray menu hosts the app MenuModel;
   live-verified: SNI registration + a dbusmenu click driving app state).
-  Remaining: multi-window (P.3d).
+  Multi-window (P.3d ✅): declared windows realized as real OS windows over
+  the shared reactive store (live-verified pixel propagation). Remaining:
+  per-window agent verbs.
   *First step:* ADR for the platform deps; wire `arboard` clipboard (most
   testable) behind the existing `SystemRequest`/`Headless::clipboard_*` API.
 - **A5 — AccessKit platform bridge.** *Why blocked:* the adapter (`accesskit_winit`,

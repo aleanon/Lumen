@@ -12,7 +12,39 @@ use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
 
 /// Build the counter app.
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    App::new(build)
+        .stylesheet(include_str!("../app.lss"))
+        // P.3d: a second window over the same store — the tally is live in
+        // both, and its +1 drives the main window (and vice versa).
+        .window(
+            lumen_widgets::system::WindowDesc {
+                id: "stats".into(),
+                title: "Tally stats".into(),
+                width: 260.0,
+                height: 160.0,
+            },
+            stats_window,
+        )
+}
+
+/// The secondary "stats" window: same signal, its own tree.
+fn stats_window(cx: &mut BuildCx) -> Element {
+    let count = cx.signal("count", || 0i64);
+    let v = count.get(cx.runtime());
+    let mut card = widgets::column(vec![
+        txt("LIVE TALLY", 12.0, 700.0),
+        txt(format!("{v}"), 40.0, 800.0).id("stats-value"),
+        button("+1 from stats", "accent", move |rt| {
+            count.update(rt, |c| *c += 1)
+        })
+        .id("stats-inc"),
+    ]);
+    card.style.align_items = Some(Align::Center);
+    card.style.row_gap = Dim::px(10.0);
+    card.style.width = Dim::pct(1.0);
+    card.style.height = Dim::pct(1.0);
+    card.style.justify_content = Some(Align::Center);
+    card.id("stats-page")
 }
 
 fn txt(s: impl Into<String>, size: f32, weight: f32) -> Element {

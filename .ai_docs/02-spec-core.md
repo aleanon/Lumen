@@ -211,8 +211,13 @@ impl App {
 // realizes it as an independent render pipeline (own tree/layout/paint/
 // focus at the declared size) over the SAME shared `Runtime` — cross-window
 // reactivity is shared signals (a write in one window re-renders any window
-// that reads it on its next pump). Shell realization (one OS window per
-// declaration, loop keyed by WindowId) is P.3d-2 *(planned)*.
+// that reads it on its next pump). The shell (P.3d-2) realizes every
+// declaration as a real OS window — loop keyed by winit WindowId, its own
+// renderer/surface/scale, pointer/keys/wheel/resize/drop routed per window;
+// any injected input schedules a redraw of every window (untouched windows
+// pump as dirty-checked no-ops). Menus/accelerators, IME composition,
+// clipboard bridging, the AT adapter, and the agent endpoint stay bound to
+// the MAIN window (per-window agent verbs are future work).
 //
 // OS services (P.3e): `SystemRequest::Notification` → desktop notification;
 // `SystemRequest::TrayTooltip` → lazy system tray (created on first request;

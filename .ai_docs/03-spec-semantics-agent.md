@@ -118,7 +118,7 @@ carry `"auth": "<token>"` (the packaged clients attach it from the env).
 | `ui.lastChange` | `{}` | what the last pump did: `idle` / `patch` / `rebuild` + patched nodes |
 | `ui.getMenu` | `{}` | the app's `MenuModel`; items carry optional `accel` chords (`"Ctrl+O"`) which the shell matches (P.3c) |
 | `app.systemRequests` | `{}` | queued portable `SystemRequest`s |
-| `ui.getWindows` | `{}` | app-declared `WindowDesc` list (P.3d-1: each is realizable headless via `Headless::open_window` — own pipeline, shared store; shell realization is P.3d-2, *planned*) |
+| `ui.getWindows` | `{}` | app-declared `WindowDesc` list; the shell realizes each as a real OS window over the shared store (P.3d). Agent verbs address the MAIN window; per-window addressing is future work |
 | `clipboard.read` | `{}` | `{ text }` (runtime clipboard — in-memory model) |
 
 The reactive-introspection trio (`getDeps` / `whatDependsOn` / `lastChange`)
