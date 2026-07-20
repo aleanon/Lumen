@@ -63,3 +63,17 @@ fn appdir_wraps_the_bundle() {
         .expect("AppRun executes");
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
 }
+
+// --- E.2 ---------------------------------------------------------------------
+
+#[test]
+fn crates_io_version_parses_from_api_shape() {
+    let body =
+        br#"{"crate":{"id":"qrcodegen","max_stable_version":"1.8.0","max_version":"1.8.0"}}"#;
+    assert_eq!(lumen_cli::parse_max_version(body).as_deref(), Some("1.8.0"));
+    assert_eq!(lumen_cli::parse_max_version(b"not json"), None);
+    assert_eq!(
+        lumen_cli::parse_max_version(br#"{"crate":{"max_stable_version":null}}"#),
+        None
+    );
+}

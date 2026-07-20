@@ -83,7 +83,13 @@ fn cmd_add(krate: Option<&str>, json: bool) -> i32 {
             &format!("{krate} already a dependency"),
         );
     }
-    let line = format!("{krate} = \"*\"\n");
+    // E.2: resolve a REAL version from crates.io (curl; offline falls back
+    // to "*" with a warning — the resolved pin is the contract).
+    let version = lumen_cli::resolve_crate_version(krate).unwrap_or_else(|| {
+        eprintln!("lumen add: crates.io unreachable — pinning \"*\" (re-run online to pin)");
+        "*".to_string()
+    });
+    let line = format!("{krate} = \"{version}\"\n");
     let updated = if let Some(i) = toml.find("[dependencies]") {
         let nl = toml[i..]
             .find('\n')
