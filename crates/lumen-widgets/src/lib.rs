@@ -43,6 +43,7 @@ pub mod popover;
 pub mod progress_bar;
 pub mod radio;
 pub mod range_slider;
+pub mod richdoc;
 pub mod rule;
 pub mod scrollable;
 pub mod search_field;

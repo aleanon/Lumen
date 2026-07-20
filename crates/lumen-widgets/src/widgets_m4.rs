@@ -305,64 +305,110 @@ pub fn rich_text(runs: &[Run]) -> Element {
     }
 }
 
-/// An editable rich-text field: stores markdown-lite source (`*emphasis*`) in a
-/// signal and renders it as styled [`rich_text`] runs. Typing appends to the
-/// source; the semantic `value` is the raw source.
+/// M.4: the rich-text editor — the `RichDoc` model edited at the SOURCE
+/// level with the full [`lumen_text::TextEditor`] caret/selection/clipboard/
+/// undo machinery (same engine as `TextField`), plus a live parsed preview.
+/// State: `{name}` holds the `TextEditor`; `{name}.text` mirrors the source
+/// for plain reads. The semantic value is the source; the preview subtree
+/// carries the rendered document (links/lists/images per [`crate::richdoc`]).
 pub fn rich_text_editor(cx: &BuildCx, name: &str, initial: &str) -> Element {
-    let value = cx.signal(name, || initial.to_string());
-    let src = value.get(cx.runtime());
+    use lumen_text::TextEditor;
+    let editor = cx.signal(name, || TextEditor::new(initial));
+    let mirror = cx.signal(&format!("{name}.text"), || initial.to_string());
+    let ed = editor.get(cx.runtime());
+    let src = ed.text().to_string();
+    let shown = if src.is_empty() {
+        " ".to_string()
+    } else {
+        src.clone()
+    };
 
-    let runs = parse_runs(&src);
-    let run_refs: Vec<Run> = runs
-        .iter()
-        .map(|(t, em)| Run {
-            text: t,
-            color: if *em {
-                Color::srgb8(0xc0, 0x39, 0x2b, 0xff)
-            } else {
-                Color::BLACK
-            },
-            size: 16.0,
-        })
-        .collect();
-    let mut display = rich_text(&run_refs);
-    display.role = Role::TextInput;
-    display.focusable = true;
-    display.value = Some(src.clone());
-    display.label = src.clone();
-    display.actions = vec![Action::Focus, Action::SetValue];
-    display.background = Some(Color::srgb8(0xf2, 0xf2, 0xf2, 0xff));
-    display.corner_radius = 4.0;
-    display.style.padding = Edges::all(Dim::px(6.0));
-    display.style.min_width = Dim::px(160.0);
-    display.on_text = Some(Rc::new(move |rt, t| {
-        let t = t.to_string();
-        value.update(rt, |s| s.push_str(&t))
-    }));
-    // Focus tracking is keyed by StableId, so the field needs one.
-    display.id(name)
+    // The source pane: real caret + selection on the markdown-lite source.
+    let source_pane = Element {
+        role: Role::TextInput,
+        focusable: true,
+        label: src.clone(),
+        value: Some(src.clone()),
+        actions: vec![Action::Focus, Action::SetValue],
+        background: Some(Color::srgb8(0xf2, 0xf2, 0xf2, 0xff)),
+        corner_radius: 4.0,
+        style: LayoutStyle {
+            padding: Edges::all(Dim::px(6.0)),
+            min_width: Dim::px(220.0),
+            min_height: Dim::px(56.0),
+            width: Dim::px(300.0),
+            ..LayoutStyle::default()
+        },
+        content: crate::NodeContent::Text(shown, lumen_text::TextStyle::default()),
+        caret_byte: Some(ed.cursor()),
+        selection: ed.has_selection().then(|| ed.selection()),
+        on_text: Some(Rc::new(move |rt, t| {
+            editor.update(rt, |e| e.insert(t));
+            mirror.set(rt, editor.get(rt).text().to_string());
+        })),
+        on_caret_set: Some(Rc::new(move |rt, byte, extend| {
+            editor.update(rt, |e| e.place(byte, extend));
+        })),
+        on_key: Some(Rc::new(move |rt, ke| {
+            crate::text_input::edit_key(rt, ke, editor, mirror, true);
+        })),
+        ..Element::default()
+    }
+    .id(name);
+
+    // The live preview: the parsed RichDoc (lists, links, images).
+    let doc = crate::richdoc::RichDoc::parse(&src);
+    let mut preview = doc.render(|_, _| {});
+    preview = preview.id(format!("{name}-preview"));
+
+    let mut col = crate::widgets::column(vec![source_pane, preview]);
+    col.style.row_gap = Dim::px(8.0);
+    col
 }
 
-/// Split markdown-lite source into `(text, emphasised)` runs on `*…*`.
-fn parse_runs(src: &str) -> Vec<(String, bool)> {
-    let mut runs = Vec::new();
-    let mut cur = String::new();
-    let mut em = false;
-    for ch in src.chars() {
-        if ch == '*' {
-            if !cur.is_empty() {
-                runs.push((std::mem::take(&mut cur), em));
+/// M.4: a find/replace bar operating on a [`rich_text_editor`]'s source.
+/// `{name}.find` / `{name}.replace` hold the inputs; the count label shows
+/// live match counts and the button rewrites every occurrence (caret resets
+/// to the end; the editor's undo history keeps the previous text).
+pub fn find_replace_bar(cx: &BuildCx, name: &str, editor_name: &str) -> Element {
+    use lumen_text::TextEditor;
+    let editor = cx.signal(editor_name, || TextEditor::new(""));
+    let mirror = cx.signal(&format!("{editor_name}.text"), String::new);
+    let find = cx.signal(&format!("{name}.find"), String::new);
+    let needle = find.get(cx.runtime());
+    let count = crate::richdoc::RichDoc::find(&mirror.get(cx.runtime()), &needle).len();
+
+    let replace = cx.signal(&format!("{name}.replace"), String::new);
+    let apply = {
+        move |rt: &lumen_core::state::Runtime| {
+            let needle = find.get(rt);
+            let with = replace.get(rt);
+            if needle.is_empty() {
+                return;
             }
-            em = !em;
-        } else {
-            cur.push(ch);
+            editor.update(rt, |e| {
+                let (next, n) = crate::richdoc::RichDoc::replace_all(e.text(), &needle, &with);
+                if n > 0 {
+                    e.select_all();
+                    e.insert(&next);
+                }
+            });
+            mirror.set(rt, editor.get(rt).text().to_string());
         }
-    }
-    if !cur.is_empty() {
-        runs.push((cur, em));
-    }
-    if runs.is_empty() {
-        runs.push((" ".to_string(), false));
-    }
-    runs
+    };
+
+    let mut row = crate::widgets::row(vec![
+        crate::widgets::text_field_basic(cx, &format!("{name}.find"), &needle)
+            .id(format!("{name}-find")),
+        crate::widgets::text_field_basic(
+            cx,
+            &format!("{name}.replace"),
+            &replace.get(cx.runtime()),
+        )
+        .id(format!("{name}-replace")),
+        crate::widgets::text(format!("{count} match(es)")).id(format!("{name}-count")),
+        crate::widgets::button("Replace all", apply).id(format!("{name}-apply")),
+    ]);
+    row.style.column_gap = Dim::px(8.0);
+    row
 }

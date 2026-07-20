@@ -266,8 +266,9 @@ P.4), `Skeleton`, `Avatar`, `Pagination` (`{name}.page`), `RangeSlider`
 `Runtime::post` host mailbox → `SystemRequest::OpenFile`; path lands in
 `{name}.path` when the shell fulfils it, P.4), `LineChart`/`PieChart`
 leaves (`charts::*::element(…)`), and the standalone `AlignBox`.
-Remaining: `RichTextEditor` polish is M4's last row (a basic
-`rich_text_editor` exists in `widgets_m4`); the M1 draft's `.key()`/
+`RichTextEditor` completed in plan M.4 (`richdoc::RichDoc` model:
+lists/links/images + round-trip; source editing on the full `TextEditor`
+caret machinery + live preview; `find_replace_bar`); the M1 draft's `.key()`/
 generic `.on()` were superseded (W.3 scope decisions). Widget
 parts-as-classes shipped for slider/progress/range-slider (B.7).
 

@@ -133,20 +133,34 @@ fn bar_chart_renders_and_reports_count() {
 
 #[test]
 fn rich_text_editor_types_and_styles() {
-    let mut h = run(220.0, 60.0, |cx| {
+    // M.4: the editor is now source pane (full TextEditor caret machinery)
+    // + live RichDoc preview; the pane's value is the markdown-lite source.
+    let mut h = run(360.0, 200.0, |cx| {
         widgets_m4::rich_text_editor(cx, "doc", "hi ")
     });
-    assert_eq!(sem(&h).role, Role::TextInput);
-
-    // Type an emphasised word; the value updates and a coloured run appears.
-    let field = mid(&sem(&h));
+    fn pane(n: &lumen_core::semantics::SemanticsNode) -> lumen_core::semantics::SemanticsNode {
+        fn find(
+            n: &lumen_core::semantics::SemanticsNode,
+        ) -> Option<lumen_core::semantics::SemanticsNode> {
+            if n.role == Role::TextInput {
+                return Some(n.clone());
+            }
+            n.children.iter().find_map(find)
+        }
+        find(n).expect("source pane")
+    }
+    let field = mid(&pane(&sem(&h)));
     h.inject(Event::PointerDown(PointerEvent::at(field)));
     h.inject(Event::PointerUp(PointerEvent::at(field)));
+    h.pump();
+    // Caret placed by the click lands at the end region; type an emphasised
+    // word — insertion happens AT THE CARET (TextEditor), not by appending.
     h.inject(Event::TextInput(TextInputEvent {
         text: "*world*".into(),
     }));
     h.pump();
-    assert_eq!(sem(&h).value.as_deref(), Some("hi *world*"));
-    // The emphasised run "world" is rendered as its own text node.
+    let v = pane(&sem(&h)).value.unwrap();
+    assert!(v.contains("*world*"), "typed at caret: {v}");
+    // The preview parsed the italic span into its own styled node.
     assert!(first_text(&sem(&h), "world").is_some());
 }
