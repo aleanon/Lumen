@@ -117,6 +117,7 @@ P.4), `LineChart::element(values, labels)` / `PieChart::element(slices)`,
 | `nav` | `Router::{new current navigate navigate_guarded back deep_link can_go_back}` | back stack + guards + deep links; render by matching `router.current()` |
 | `forms` | `Validator`, `validate`, `form_field(cx, name, label, validators)` | errors surface as structured data + a11y association |
 | `i18n` | `Locale` (`is_rtl`, plurals), `Catalog::{insert with_fallback}` | RTL mirroring is real; test with `input.setLocale` |
+| `motion` | `spring(cx,…)`, `shared_bounds(cx, name, target, ms)`, `route_progress(cx, name, route, ms)`, `drag_surface`/`drag_fraction` | store-backed, virtual-clock; morph on target change, per-navigation progress, gesture→fraction (M.3) |
 | `undo` | `History<T>::{push undo redo can_undo can_redo present}` | pair with a signal holding the present |
 | `system` | `MenuModel` (items take `.accel("Ctrl+O")`), `WindowDesc`, `SystemRequest`, runtime clipboard | OS-wired in the shell: clipboard↔arboard, `OpenFile`→rfd dialog (reply lands in the request's `reply` signal), menus→muda (Windows/macOS menubar; on Linux accelerators + `menu.invoke` activate — both run the `cx.register_command` handler under the item's id), `Notification`→desktop notification, `TrayTooltip`→system tray (lazy; its context menu hosts the app `MenuModel`), OS file drops→`Event::Drop`. Agent: `ui.getMenu`/`menu.invoke`/`app.systemRequests` |
 | `tasks` | `cx.resource(name, deps, fetch)`, `resource_blocking`, `Spawner` (Inline/Manual/ThreadPool), `Sink` | see Step 7 |
