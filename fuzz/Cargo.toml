@@ -1,0 +1,47 @@
+# E.3: cargo-fuzz targets for the security-surface parsers (.lss, selector,
+# agent JSON, PNG/SVG decode). Not a workspace member — built only by
+# `cargo +nightly fuzz run <target>` (nightly job: .github/workflows/fuzz.yml).
+# The proptest "fuzz-lite" no-panic suites in each crate's tests run in the
+# NORMAL gate; these libFuzzer targets go deeper on schedule.
+[package]
+name = "lumen-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+lumen-core = { path = "../crates/lumen-core" }
+lumen-style = { path = "../crates/lumen-style" }
+lumen-render = { path = "../crates/lumen-render" }
+lumen-widgets = { path = "../crates/lumen-widgets" }
+lumen-agent = { path = "../crates/lumen-agent", default-features = false }
+serde_json = "1"
+kurbo = "0.11"
+
+[[bin]]
+name = "lss_parse"
+path = "fuzz_targets/lss_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "selector"
+path = "fuzz_targets/selector.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "agent_json"
+path = "fuzz_targets/agent_json.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "decode"
+path = "fuzz_targets/decode.rs"
+test = false
+doc = false

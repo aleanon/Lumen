@@ -69,6 +69,21 @@ Every reload emits a structured result event (tier, status, components swapped, 
 - Layout of 10k-node dirty subtree < 2 ms desktop release. *(gated)*
 - Cold start: <300 ms desktop, <800 ms mobile. Hello-world binary <5 MB.
 
+## 9b. Hardening & privacy (E.3)
+
+- **Fuzzing**: the four security-surface parsers (`.lss`, selector, agent
+  JSON dispatch, PNG/SVG decode) have libFuzzer targets under `fuzz/`
+  (nightly job `.github/workflows/fuzz.yml`) AND bounded proptest
+  "fuzz-lite" no-panic suites that run in every normal gate.
+- **Crash reports**: `lumen_core::diagnostics::install_crash_hook(sink)` —
+  an uncontained panic becomes a structured `E0702` diagnostic delivered to
+  the app's sink before the default abort path. Contained panics stay
+  `E0701` (error boundaries).
+- **Telemetry: not planned.** Nothing in the framework phones home — no
+  usage pings, no crash uploads, no update checks. Crash reports go only
+  where the app's own sink sends them. This is a privacy stance, not a
+  missing feature; revisit requires an explicit ADR.
+
 ## 10. Crate map
 ```
 lumen-core      tree, NodeIndex/SoA hot data, signals, state store, events, semantics

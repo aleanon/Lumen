@@ -137,4 +137,37 @@ pub mod codes {
     /// A build/layout/paint panic was contained; the previous frame was kept
     /// and the app stayed alive (T7.3 error boundary, top level).
     pub const E0701: &str = "E0701";
+    /// An UNcontained panic crossed the crash-report hook (E.3): the process
+    /// is going down, but the structured report reached the sink first.
+    pub const E0702: &str = "E0702";
+}
+
+// --- E.3: the crash-report hook -----------------------------------------------
+
+/// Install a process-wide crash-report hook: any panic that escapes the
+/// error boundaries is converted to a structured [`Diagnostic`]
+/// ([`codes::E0702`], message = panic payload + location) and handed to
+/// `sink` BEFORE the default panic output runs. The sink must not panic and
+/// should be fast (write a file, post a channel) — the process is going
+/// down. Telemetry is explicitly NOT what this is: nothing leaves the
+/// machine unless the app's own sink sends it (privacy stance, 01 §ops).
+pub fn install_crash_hook(sink: impl Fn(Diagnostic) + Send + Sync + 'static) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".into());
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".into());
+        sink(Diagnostic::new(
+            codes::E0702,
+            format!("uncontained panic at {location}: {payload}"),
+        ));
+        previous(info);
+    }));
 }

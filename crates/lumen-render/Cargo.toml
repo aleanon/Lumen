@@ -36,5 +36,6 @@ default = ["wgpu"]
 wgpu = ["dep:wgpu", "dep:lyon"]
 
 [dev-dependencies]
+proptest = { workspace = true }
 # Golden JSON for the design-analysis tests.
 serde_json = { workspace = true }

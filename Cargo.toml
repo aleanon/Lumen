@@ -75,6 +75,8 @@ members = [
     "examples/pokedex",
     "examples/download_progress",
 ]
+# E.3: the cargo-fuzz project builds only under `cargo +nightly fuzz`.
+exclude = ["fuzz"]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
 [workspace.package]

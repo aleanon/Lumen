@@ -2943,6 +2943,7 @@ dependencies = [
  "lumen-core",
  "lumen-layout",
  "lumen-widgets",
+ "proptest",
  "serde_json",
  "tungstenite",
 ]
@@ -3012,6 +3013,7 @@ dependencies = [
  "kurbo",
  "lumen-core",
  "lyon",
+ "proptest",
  "serde",
  "serde_json",
  "tiny-skia",
@@ -3082,6 +3084,7 @@ dependencies = [
  "kurbo",
  "lumen-core",
  "lumen-layout",
+ "proptest",
  "serde_json",
 ]
 

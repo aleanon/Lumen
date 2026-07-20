@@ -1,0 +1,27 @@
+# E.3: nightly fuzz job — the four libFuzzer targets (fuzz/) run deeper than
+# the per-gate proptest fuzz-lite suites. Any crash artifact fails the job.
+name: fuzz
+on:
+  schedule:
+    - cron: "0 3 * * *" # nightly 03:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: run targets
+        run: |
+          for t in lss_parse selector agent_json decode; do
+            cargo +nightly fuzz run "$t" -- -max_total_time=300
+          done
+      - name: fail on crash artifacts
+        run: |
+          if compgen -G "fuzz/artifacts/*/*" >/dev/null; then
+            echo "fuzz artifacts found:"; ls -R fuzz/artifacts; exit 1
+          fi

@@ -25,4 +25,5 @@ default = ["ws"]
 ws = ["dep:tungstenite"]
 
 [dev-dependencies]
+proptest = { workspace = true }
 lumen-layout = { workspace = true }
