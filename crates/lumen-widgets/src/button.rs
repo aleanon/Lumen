@@ -12,13 +12,28 @@ use lumen_text::TextStyle;
 /// A push button labelled with text. Accent (primary) styling by default; use
 /// [`ghost`](Button::ghost) for a quiet variant and [`on_press`](Button::on_press)
 /// for the handler.
+///
 /// # Example
+///
 /// ```
 /// use lumen_widgets::{App, Button};
 ///
 /// let app = App::new(|_| Button::new("Save").on_press(|_| {}).into());
 /// # lumen_widgets::doc_shot(app, 160.0, 60.0, "button");
 /// ```
+///
+/// Renders:
+///
+#[doc = concat!(
+    "<img alt=\"Button example render\" width=\"160\" ",
+    "style=\"border:1px solid #e0e2e6;border-radius:6px\" ",
+    "src=\"data:image/png;base64,",
+    include_str!("doc_shots/button.b64"),
+    "\">"
+)]
+///
+/// The picture above is this exact example's output — `doc_shot` re-renders
+/// it every test run and fails if it drifts from the committed image.
 pub struct Button {
     el: Element,
 }

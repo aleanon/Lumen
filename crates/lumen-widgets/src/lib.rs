@@ -109,37 +109,20 @@ pub use lumen_render::{DefaultRenderer, Renderer, RgbaImage, TinySkia};
 pub use tasks::{Resource, TaskError};
 
 /// Render a widget doc-example `app` at `w`×`h` and verify it against the
-/// committed screenshot `tests/golden/widgets/<name>.png` — the machinery
-/// behind every widget's `# Example` (hidden in the examples themselves).
-/// `LUMEN_UPDATE_GOLDENS=1` (re)writes the screenshot. Byte-exact compare on
-/// the deterministic CPU renderer (05 §4).
+/// base64 PNG at `src/doc_shots/<name>.b64` — the SAME artifact the struct's
+/// doc `<img>` embeds via `include_str!`, so the picture shown on hover is
+/// provably this render. `LUMEN_UPDATE_GOLDENS=1` (re)writes it. Byte-exact
+/// compare on the deterministic CPU renderer (05 §4).
 #[doc(hidden)]
 pub fn doc_shot(app: App, w: f64, h: f64, name: &str) {
     let mut hl = app.run_headless(lumen_core::geometry::Size::new(w, h));
     hl.pump();
-    let shot = hl.screenshot();
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/widgets");
-    let path = dir.join(format!("{name}.png"));
-    if std::env::var_os("LUMEN_UPDATE_GOLDENS").is_some() {
-        std::fs::create_dir_all(&dir).expect("create golden dir");
-        std::fs::write(&path, shot.to_png()).expect("write screenshot");
-        return;
-    }
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|_| panic!("missing screenshot {path:?}; run LUMEN_UPDATE_GOLDENS=1"));
-    let want = lumen_render::RgbaImage::from_png(&bytes).expect("golden decode");
-    assert!(
-        want.width() == shot.width()
-            && want.height() == shot.height()
-            && want.pixels() == shot.pixels(),
-        "widget `{name}`: render differs from its committed screenshot ({path:?}); \
-         re-approve with LUMEN_UPDATE_GOLDENS=1 if the change is intended"
-    );
+    verify_or_write_shot(hl.screenshot(), name);
 }
 
 /// Like [`doc_shot`], but opens a signal-gated overlay first: pump, set the
-/// `{name}.open` boolean, pump again, then screenshot + verify. For
-/// `Sheet`/`Drawer`-style widgets whose panel is hidden until opened.
+/// `{name}.open` boolean, pump again, then screenshot. For `Sheet`/`Drawer`-
+/// style widgets whose panel is hidden until opened.
 #[doc(hidden)]
 pub fn doc_shot_open(app: App, w: f64, h: f64, name: &str, open_key: &str) {
     let mut hl = app.run_headless(lumen_core::geometry::Size::new(w, h));
@@ -147,23 +130,57 @@ pub fn doc_shot_open(app: App, w: f64, h: f64, name: &str, open_key: &str) {
     let sig = hl.runtime().signal::<bool>(open_key, || false);
     sig.set(hl.runtime(), true);
     hl.pump();
-    let shot = hl.screenshot();
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/widgets");
-    let path = dir.join(format!("{name}.png"));
+    verify_or_write_shot(hl.screenshot(), name);
+}
+
+fn shot_path(name: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/doc_shots")
+        .join(format!("{name}.b64"))
+}
+
+fn verify_or_write_shot(shot: RgbaImage, name: &str) {
+    let b64 = b64_encode(&shot.to_png());
+    let path = shot_path(name);
     if std::env::var_os("LUMEN_UPDATE_GOLDENS").is_some() {
-        std::fs::create_dir_all(&dir).expect("create golden dir");
-        std::fs::write(&path, shot.to_png()).expect("write screenshot");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create doc_shots dir");
+        std::fs::write(&path, &b64).expect("write doc shot");
         return;
     }
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|_| panic!("missing screenshot {path:?}; run LUMEN_UPDATE_GOLDENS=1"));
-    let want = lumen_render::RgbaImage::from_png(&bytes).expect("golden decode");
+    let stored = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("missing doc shot {path:?}; run LUMEN_UPDATE_GOLDENS=1"));
+    // The embedded image (include_str! of this file) is what a reader sees;
+    // asserting the fresh render base64-matches it proves the picture in the
+    // docs is exactly this example's output.
     assert!(
-        want.width() == shot.width()
-            && want.height() == shot.height()
-            && want.pixels() == shot.pixels(),
-        "widget `{name}`: render differs from its committed screenshot ({path:?})"
+        stored.trim_end() == b64,
+        "widget `{name}`: the doc image ({path:?}) is stale vs the example render; \
+         re-approve with LUMEN_UPDATE_GOLDENS=1 if the change is intended"
     );
+}
+
+/// Minimal standard-alphabet base64 encode (no line wrapping) — keeps the
+/// doc-shot data URIs self-contained without a dependency.
+fn b64_encode(data: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let b = [c[0], *c.get(1).unwrap_or(&0), *c.get(2).unwrap_or(&0)];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        out.push(A[(n >> 18 & 63) as usize] as char);
+        out.push(A[(n >> 12 & 63) as usize] as char);
+        out.push(if c.len() > 1 {
+            A[(n >> 6 & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if c.len() > 2 {
+            A[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 /// An explicit renderer choice from the command line (`--wgpu` / `--tiny-skia`)
