@@ -158,6 +158,10 @@ android_logger = "0.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tiny-skia = "0.11"
+# ADR-M1 (decided): raster codecs beyond PNG — jpeg + gif + webp only, all
+# pure-Rust decoders, defaults off (no encoders, no avif/exr/tiff tail).
+# Feature-gated in lumen-widgets so the lean profile drops the whole stack.
+image = { version = "0.25", default-features = false, features = ["jpeg", "gif", "webp"] }
 accesskit = "0.17"
 # proc-macro toolchain (ADR-003 amendment 2026-07-03), for `lumen-macros`.
 syn = { version = "2", features = ["full"] }
