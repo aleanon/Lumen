@@ -30,6 +30,16 @@ fn cell(text: String, role: Role) -> Element {
 
 /// [`DataGrid`] — a virtualized table (header + windowed rows); scroll
 /// offset under `name` (typed form of [`data_grid`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, DataGrid};
+///
+/// let app = App::new(|cx| {
+///     DataGrid::new(cx, "grid", &["Name", "Age"], 100, 24.0, 96.0, |r, c| format!("r{r}c{c}")).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 200.0, 120.0, "data_grid");
+/// ```
 pub struct DataGrid {
     el: Element,
 }
@@ -177,6 +187,19 @@ pub struct TreeRow<'a> {
 
 /// [`Tree`] — an expand/collapse tree; expanded set under `name` (typed
 /// form of [`tree`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::widgets_m4::TreeRow;
+/// use lumen_widgets::{App, Tree};
+///
+/// let rows = [
+///     TreeRow { id: "animals", label: "Animals", depth: 0, has_children: true },
+///     TreeRow { id: "cat", label: "Cat", depth: 1, has_children: false },
+/// ];
+/// let app = App::new(move |cx| Tree::new(cx, "tree", &rows).into());
+/// # lumen_widgets::doc_shot(app, 200.0, 100.0, "tree");
+/// ```
 pub struct Tree {
     el: Element,
 }
@@ -275,6 +298,14 @@ pub fn tree(cx: &BuildCx, name: &str, rows: &[TreeRow]) -> Element {
 
 /// [`BarChart`] — vertical bars for `values` (typed form of
 /// [`bar_chart`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, BarChart};
+///
+/// let app = App::new(|_| BarChart::new(&[3.0, 7.0, 4.0, 8.0, 2.0], 160.0, 80.0).into());
+/// # lumen_widgets::doc_shot(app, 176.0, 96.0, "bar_chart");
+/// ```
 pub struct BarChart {
     el: Element,
 }
@@ -345,6 +376,20 @@ pub struct Run<'a> {
 
 /// [`RichText`] — a row of differently-styled text runs (typed form of
 /// [`rich_text`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::widgets_m4::Run;
+/// use lumen_widgets::{App, RichText};
+/// use lumen_core::Color;
+///
+/// let runs = [
+///     Run { text: "Bold ", color: Color::BLACK, size: 16.0 },
+///     Run { text: "and blue", color: Color::srgb8(0x1a, 0x73, 0xe8, 0xff), size: 16.0 },
+/// ];
+/// let app = App::new(move |_| RichText::new(&runs).into());
+/// # lumen_widgets::doc_shot(app, 180.0, 40.0, "rich_text");
+/// ```
 pub struct RichText {
     el: Element,
 }
@@ -399,6 +444,14 @@ pub fn rich_text(runs: &[Run]) -> Element {
 
 /// [`RichTextEditor`] — a markdown-lite source editor with a live parsed
 /// preview; state under `name` (typed form of [`rich_text_editor`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, RichTextEditor};
+///
+/// let app = App::new(|cx| RichTextEditor::new(cx, "doc", "# Title\nSome **bold** body").into());
+/// # lumen_widgets::doc_shot(app, 300.0, 120.0, "rich_text_editor");
+/// ```
 pub struct RichTextEditor {
     el: Element,
 }
@@ -484,6 +537,19 @@ pub fn rich_text_editor(cx: &BuildCx, name: &str, initial: &str) -> Element {
 
 /// [`FindReplaceBar`] — find/replace over a [`RichTextEditor`]'s source;
 /// inputs under `name` (typed form of [`find_replace_bar`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, FindReplaceBar, RichTextEditor};
+///
+/// let app = App::new(|cx| {
+///     widgets::column(vec![
+///         RichTextEditor::new(cx, "doc", "hello world").into(),
+///         FindReplaceBar::new(cx, "fr", "doc").into(),
+///     ])
+/// });
+/// # lumen_widgets::doc_shot(app, 340.0, 140.0, "find_replace_bar");
+/// ```
 pub struct FindReplaceBar {
     el: Element,
 }

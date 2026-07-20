@@ -79,6 +79,15 @@ fn scrim_and_panel(
 }
 
 /// A modal bottom sheet.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Sheet};
+///
+/// let app = App::new(|cx| Sheet::new(cx, "sheet", widgets::text("Sheet content")).into());
+/// # // The panel is hidden until `sheet.open` is set (see the module docs).
+/// # lumen_widgets::doc_shot_open(app, 220.0, 150.0, "sheet", "sheet.open");
+/// ```
 pub struct Sheet {
     el: Element,
 }
@@ -107,6 +116,14 @@ impl Sheet {
 impl_common!(Sheet);
 
 /// A modal side drawer.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Drawer};
+///
+/// let app = App::new(|cx| Drawer::new(cx, "drawer", widgets::text("Menu")).into());
+/// # lumen_widgets::doc_shot_open(app, 260.0, 150.0, "drawer", "drawer.open");
+/// ```
 pub struct Drawer {
     el: Element,
     side: DrawerSide,

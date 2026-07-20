@@ -25,6 +25,16 @@ pub enum PopoverSide {
 }
 
 /// An anchored floating panel: a trigger element that toggles an overlay.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Popover};
+///
+/// let app = App::new(|cx| {
+///     Popover::new(cx, "pop", widgets::button("Open", |_| {}), widgets::text("Panel")).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 160.0, 60.0, "popover");
+/// ```
 pub struct Popover {
     el: Element,
 }

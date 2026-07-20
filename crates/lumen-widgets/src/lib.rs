@@ -108,6 +108,64 @@ pub use lumen_macros::text;
 pub use lumen_render::{DefaultRenderer, Renderer, RgbaImage, TinySkia};
 pub use tasks::{Resource, TaskError};
 
+/// Render a widget doc-example `app` at `w`×`h` and verify it against the
+/// committed screenshot `tests/golden/widgets/<name>.png` — the machinery
+/// behind every widget's `# Example` (hidden in the examples themselves).
+/// `LUMEN_UPDATE_GOLDENS=1` (re)writes the screenshot. Byte-exact compare on
+/// the deterministic CPU renderer (05 §4).
+#[doc(hidden)]
+pub fn doc_shot(app: App, w: f64, h: f64, name: &str) {
+    let mut hl = app.run_headless(lumen_core::geometry::Size::new(w, h));
+    hl.pump();
+    let shot = hl.screenshot();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/widgets");
+    let path = dir.join(format!("{name}.png"));
+    if std::env::var_os("LUMEN_UPDATE_GOLDENS").is_some() {
+        std::fs::create_dir_all(&dir).expect("create golden dir");
+        std::fs::write(&path, shot.to_png()).expect("write screenshot");
+        return;
+    }
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|_| panic!("missing screenshot {path:?}; run LUMEN_UPDATE_GOLDENS=1"));
+    let want = lumen_render::RgbaImage::from_png(&bytes).expect("golden decode");
+    assert!(
+        want.width() == shot.width()
+            && want.height() == shot.height()
+            && want.pixels() == shot.pixels(),
+        "widget `{name}`: render differs from its committed screenshot ({path:?}); \
+         re-approve with LUMEN_UPDATE_GOLDENS=1 if the change is intended"
+    );
+}
+
+/// Like [`doc_shot`], but opens a signal-gated overlay first: pump, set the
+/// `{name}.open` boolean, pump again, then screenshot + verify. For
+/// `Sheet`/`Drawer`-style widgets whose panel is hidden until opened.
+#[doc(hidden)]
+pub fn doc_shot_open(app: App, w: f64, h: f64, name: &str, open_key: &str) {
+    let mut hl = app.run_headless(lumen_core::geometry::Size::new(w, h));
+    hl.pump();
+    let sig = hl.runtime().signal::<bool>(open_key, || false);
+    sig.set(hl.runtime(), true);
+    hl.pump();
+    let shot = hl.screenshot();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/widgets");
+    let path = dir.join(format!("{name}.png"));
+    if std::env::var_os("LUMEN_UPDATE_GOLDENS").is_some() {
+        std::fs::create_dir_all(&dir).expect("create golden dir");
+        std::fs::write(&path, shot.to_png()).expect("write screenshot");
+        return;
+    }
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|_| panic!("missing screenshot {path:?}; run LUMEN_UPDATE_GOLDENS=1"));
+    let want = lumen_render::RgbaImage::from_png(&bytes).expect("golden decode");
+    assert!(
+        want.width() == shot.width()
+            && want.height() == shot.height()
+            && want.pixels() == shot.pixels(),
+        "widget `{name}`: render differs from its committed screenshot ({path:?})"
+    );
+}
+
 /// An explicit renderer choice from the command line (`--wgpu` / `--tiny-skia`)
 /// or the `LUMEN_RENDERER=wgpu|tiny-skia` environment variable, ready to install
 /// with [`App::with_renderer`]. Returns `None` when nothing is specified, so the

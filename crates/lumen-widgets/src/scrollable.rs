@@ -9,6 +9,16 @@ use lumen_layout::{Dim, LayoutStyle};
 use std::rc::Rc;
 
 /// A clipping viewport that scrolls its content vertically with the wheel.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Scrollable};
+///
+/// let app = App::new(|cx| {
+///     Scrollable::new(cx, "sc", 80.0, 400.0, vec![widgets::text("Tall content")]).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 180.0, 100.0, "scrollable");
+/// ```
 pub struct Scrollable {
     el: Element,
 }

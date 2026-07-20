@@ -13,6 +13,14 @@ const W: f64 = 200.0;
 const THUMB: f64 = 16.0;
 
 /// A double-ended slider over `[min, max]`.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, RangeSlider};
+///
+/// let app = App::new(|cx| RangeSlider::new(cx, "range", 0.0, 100.0).into());
+/// # lumen_widgets::doc_shot(app, 200.0, 40.0, "range_slider");
+/// ```
 pub struct RangeSlider {
     el: Element,
 }

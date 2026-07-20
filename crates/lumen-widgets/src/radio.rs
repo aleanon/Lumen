@@ -11,6 +11,14 @@ use std::rc::Rc;
 
 /// A radio button for `value` within group `group`. Selecting it sets the group
 /// signal to `value`; it renders filled when the group equals `value`.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Radio};
+///
+/// let app = App::new(|cx| Radio::new(cx, "color", "red", "Red").into());
+/// # lumen_widgets::doc_shot(app, 120.0, 40.0, "radio");
+/// ```
 pub struct Radio {
     el: Element,
 }

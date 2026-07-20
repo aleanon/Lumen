@@ -12,6 +12,13 @@ use lumen_text::TextStyle;
 /// A push button labelled with text. Accent (primary) styling by default; use
 /// [`ghost`](Button::ghost) for a quiet variant and [`on_press`](Button::on_press)
 /// for the handler.
+/// # Example
+/// ```
+/// use lumen_widgets::{App, Button};
+///
+/// let app = App::new(|_| Button::new("Save").on_press(|_| {}).into());
+/// # lumen_widgets::doc_shot(app, 160.0, 60.0, "button");
+/// ```
 pub struct Button {
     el: Element,
 }

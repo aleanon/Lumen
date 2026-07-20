@@ -15,6 +15,14 @@ const ROW_H: f64 = 34.0;
 
 /// A dropdown: the trigger shows the selection (or `placeholder`); clicking it
 /// reveals the options, and choosing one stores it under `name`.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, PickList};
+///
+/// let app = App::new(|cx| PickList::new(cx, "pick", "Select…", ["One", "Two", "Three"]).into());
+/// # lumen_widgets::doc_shot(app, 200.0, 60.0, "pick_list");
+/// ```
 pub struct PickList {
     el: Element,
 }

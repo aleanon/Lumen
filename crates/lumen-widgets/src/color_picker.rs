@@ -16,6 +16,14 @@ const PRESETS: [&str; 12] = [
 ];
 
 /// A palette color picker.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, ColorPicker};
+///
+/// let app = App::new(|cx| ColorPicker::new(cx, "color").into());
+/// # lumen_widgets::doc_shot(app, 200.0, 80.0, "color_picker");
+/// ```
 pub struct ColorPicker {
     el: Element,
 }

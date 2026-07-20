@@ -13,6 +13,14 @@ const W: f64 = 200.0;
 const THUMB: f64 = 16.0;
 
 /// A horizontal slider; drag or press to set the value from the pointer position.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Slider};
+///
+/// let app = App::new(|cx| Slider::new(cx, "vol", 0.0, 100.0).into());
+/// # lumen_widgets::doc_shot(app, 200.0, 40.0, "slider");
+/// ```
 pub struct Slider {
     el: Element,
 }

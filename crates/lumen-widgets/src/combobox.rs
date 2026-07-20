@@ -15,6 +15,14 @@ const W: f64 = 240.0;
 const ROW_H: f64 = 32.0;
 
 /// A filtering dropdown over a fixed option list.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Combobox};
+///
+/// let app = App::new(|cx| Combobox::new(cx, "fruit", ["Apple", "Banana", "Cherry"]).into());
+/// # lumen_widgets::doc_shot(app, 200.0, 60.0, "combobox");
+/// ```
 pub struct Combobox {
     el: Element,
 }

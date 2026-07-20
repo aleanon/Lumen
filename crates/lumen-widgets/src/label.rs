@@ -9,6 +9,14 @@ use lumen_text::TextStyle;
 
 /// A line (or wrapped paragraph, if given a width) of text. Exposes typography
 /// modifiers; no event handlers.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Label};
+///
+/// let app = App::new(|_| Label::new("Hello, Lumen").into());
+/// # lumen_widgets::doc_shot(app, 140.0, 36.0, "label");
+/// ```
 pub struct Label {
     el: Element,
 }

@@ -12,6 +12,14 @@ const BOX: f64 = 20.0;
 
 /// A checkbox: click (or Space when focused) toggles the boolean stored under
 /// `name`. Checked shows a tick on a filled box; unchecked is an empty outline.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, CheckBox};
+///
+/// let app = App::new(|cx| CheckBox::new(cx, "agree", "I agree").into());
+/// # lumen_widgets::doc_shot(app, 160.0, 40.0, "check_box");
+/// ```
 pub struct CheckBox {
     el: Element,
 }

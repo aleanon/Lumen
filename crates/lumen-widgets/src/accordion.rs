@@ -18,6 +18,16 @@ use std::rc::Rc;
 /// The body is conditional *structure*, not a hidden style flag: when collapsed
 /// the content nodes are absent from the element tree entirely, so they cost
 /// nothing to lay out and are invisible to the agent / a11y tree.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Accordion};
+///
+/// let app = App::new(|cx| {
+///     Accordion::new(cx, "faq", "What is Lumen?").body([widgets::text("An AI-first GUI framework.")]).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 260.0, 60.0, "accordion");
+/// ```
 pub struct Accordion {
     el: Element,
     /// The state key, so [`Accordion::body`] can tag its panel `{name}-body`.

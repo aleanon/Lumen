@@ -35,6 +35,17 @@ fn tick_label(v: f64) -> String {
 }
 
 /// A line chart leaf: evenly-spaced Y values, optional X labels, filled area.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, LineChart};
+///
+/// let app = App::new(|_| {
+///     LineChart::element(vec![3.0, 7.0, 5.0, 9.0, 6.0],
+///                        vec!["Mon".into(), "Tue".into(), "Wed".into(), "Thu".into(), "Fri".into()])
+/// });
+/// # lumen_widgets::doc_shot(app, 240.0, 140.0, "line_chart");
+/// ```
 pub struct LineChart {
     /// Y values, evenly spaced along X.
     pub values: Vec<f64>,
@@ -169,6 +180,22 @@ pub struct PieSlice {
 }
 
 /// A pie chart leaf.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::PieSlice;
+/// use lumen_widgets::{App, PieChart};
+/// use lumen_core::Color;
+///
+/// let app = App::new(|_| {
+///     PieChart::element(vec![
+///         PieSlice { label: "A".into(), value: 3.0, color: Color::srgb8(0x1a,0x73,0xe8,0xff) },
+///         PieSlice { label: "B".into(), value: 2.0, color: Color::srgb8(0x2e,0xa0,0x43,0xff) },
+///         PieSlice { label: "C".into(), value: 1.0, color: Color::srgb8(0xe8,0x40,0x4b,0xff) },
+///     ])
+/// });
+/// # lumen_widgets::doc_shot(app, 180.0, 180.0, "pie_chart");
+/// ```
 pub struct PieChart {
     /// The slices, drawn clockwise from 12 o'clock.
     pub slices: Vec<PieSlice>,

@@ -17,6 +17,14 @@ use lumen_text::{TextEditor, TextStyle};
 use std::rc::Rc;
 
 /// A single-line text input with a caret, selection, clipboard, and undo.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, TextInput};
+///
+/// let app = App::new(|cx| TextInput::new(cx, "name", "Ada").into());
+/// # lumen_widgets::doc_shot(app, 200.0, 44.0, "text_input");
+/// ```
 pub struct TextInput {
     el: Element,
     editor: Signal<TextEditor>,

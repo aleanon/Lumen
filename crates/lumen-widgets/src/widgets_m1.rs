@@ -54,6 +54,14 @@ pub fn padding(px: f32, child: Element) -> Element {
 }
 
 /// [`Icon`] — a small labelled icon placeholder (typed form of [`icon`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Icon};
+///
+/// let app = App::new(|_| Icon::new("gear").into());
+/// # lumen_widgets::doc_shot(app, 40.0, 40.0, "icon");
+/// ```
 pub struct Icon {
     el: Element,
 }
@@ -89,6 +97,14 @@ pub fn icon(label: &str) -> Element {
 
 /// [`Switch`] — a labelled toggle switch; boolean state under `name`
 /// (typed form of [`switch`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Switch};
+///
+/// let app = App::new(|cx| Switch::new(cx, "wifi", "Wi-Fi").into());
+/// # lumen_widgets::doc_shot(app, 120.0, 40.0, "switch");
+/// ```
 pub struct Switch {
     el: Element,
 }
@@ -149,6 +165,14 @@ pub fn switch(cx: &BuildCx, name: &str, label: impl Into<String>) -> Element {
 
 /// [`Stepper`] — a `-`/value/`+` numeric stepper; integer state under
 /// `name` (typed form of [`stepper`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Stepper};
+///
+/// let app = App::new(|cx| Stepper::new(cx, "qty", 0, 10).into());
+/// # lumen_widgets::doc_shot(app, 120.0, 48.0, "stepper");
+/// ```
 pub struct Stepper {
     el: Element,
 }
@@ -194,6 +218,14 @@ pub fn stepper(cx: &BuildCx, name: &str, min: i64, max: i64) -> Element {
 
 /// [`Tabs`] — a tab bar; selected index under `name` (typed form of
 /// [`tabs`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Tabs};
+///
+/// let app = App::new(|cx| Tabs::new(cx, "tab", &["One", "Two", "Three"]).into());
+/// # lumen_widgets::doc_shot(app, 220.0, 44.0, "tabs");
+/// ```
 pub struct Tabs {
     el: Element,
 }
@@ -268,6 +300,16 @@ pub fn tabs(cx: &BuildCx, name: &str, labels: &[&str]) -> Element {
 /// [`VirtualList`] — a windowing list materializing only visible items
 /// plus overscan; scroll offset under `name` (typed form of
 /// [`virtual_list`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, VirtualList};
+///
+/// let app = App::new(|cx| {
+///     VirtualList::new(cx, "vl", 1000, 24.0, 96.0, |i| widgets::text(format!("Row {i}"))).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 180.0, 100.0, "virtual_list");
+/// ```
 pub struct VirtualList {
     el: Element,
 }

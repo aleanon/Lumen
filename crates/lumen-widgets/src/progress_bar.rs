@@ -8,6 +8,14 @@ use lumen_core::Color;
 use lumen_layout::{Dim, LayoutStyle};
 
 /// A horizontal bar showing `fraction` (0..=1) of a track filled.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, ProgressBar};
+///
+/// let app = App::new(|_| ProgressBar::new(0.65).into());
+/// # lumen_widgets::doc_shot(app, 220.0, 28.0, "progress_bar");
+/// ```
 pub struct ProgressBar {
     el: Element,
 }

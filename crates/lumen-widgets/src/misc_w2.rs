@@ -10,6 +10,14 @@ use std::rc::Rc;
 
 /// A loading placeholder block: a soft grey box that pulses (opacity keyed
 /// to the clock) while content loads.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Skeleton};
+///
+/// let app = App::new(|cx| Skeleton::new(cx, 160.0, 16.0).into());
+/// # lumen_widgets::doc_shot(app, 180.0, 36.0, "skeleton");
+/// ```
 pub struct Skeleton {
     el: Element,
 }
@@ -34,6 +42,14 @@ impl Skeleton {
 impl_common!(Skeleton);
 
 /// A round avatar showing the initials of a name over a color hashed from it.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Avatar};
+///
+/// let app = App::new(|_| Avatar::new("Ada Lovelace", 40.0).into());
+/// # lumen_widgets::doc_shot(app, 56.0, 56.0, "avatar");
+/// ```
 pub struct Avatar {
     el: Element,
 }
@@ -90,6 +106,14 @@ impl Avatar {
 impl_common!(Avatar);
 
 /// Page navigation: `‹ 1 2 … n ›`, current page in a signal.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Pagination};
+///
+/// let app = App::new(|cx| Pagination::new(cx, "page", 5).into());
+/// # lumen_widgets::doc_shot(app, 240.0, 48.0, "pagination");
+/// ```
 pub struct Pagination {
     el: Element,
 }
@@ -155,6 +179,15 @@ impl_common!(Pagination);
 
 /// A standalone alignment container: positions one child inside the
 /// available box (the M1 list's `Align`).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, AlignBox};
+/// use lumen_layout::Align;
+///
+/// let app = App::new(|_| AlignBox::new(widgets::text("centered"), Align::Center, Align::Center).into());
+/// # lumen_widgets::doc_shot(app, 160.0, 60.0, "align_box");
+/// ```
 pub struct AlignBox {
     el: Element,
 }

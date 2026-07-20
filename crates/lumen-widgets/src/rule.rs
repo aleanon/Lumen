@@ -10,6 +10,14 @@ use lumen_layout::{Dim, LayoutStyle};
 const THICKNESS: f32 = 1.0;
 
 /// A separator line — full-width (horizontal) or full-height (vertical).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Rule};
+///
+/// let app = App::new(|_| Rule::horizontal().into());
+/// # lumen_widgets::doc_shot(app, 160.0, 20.0, "rule");
+/// ```
 pub struct Rule {
     el: Element,
 }

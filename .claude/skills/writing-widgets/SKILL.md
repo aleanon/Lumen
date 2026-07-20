@@ -220,6 +220,37 @@ re-touching `cx`. Namespace any tagged sub-nodes under `name` (`{name}-body`).
 3. If it needs a new runtime dep, add it to the **workspace** `Cargo.toml`
    (ADR-003 whitelist) and the crate — don't pin versions per-crate.
 
+## Step 4b — a rendered doc example (mandatory)
+
+Every widget struct carries a `# Example` in its rustdoc that **compiles,
+runs, and screenshot-verifies itself**. Boilerplate is hidden with `#`; the
+visible lines show real usage (the `App::new(|cx| Foo::new(...).into())`
+pattern). The hidden last line renders + checks the screenshot against a
+committed PNG under `tests/golden/widgets/<name>.png`:
+
+```rust
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Foo};
+///
+/// let app = App::new(|cx| Foo::new(cx, "name", "Label").into());
+/// # lumen_widgets::doc_shot(app, 200.0, 60.0, "foo");
+/// ```
+```
+
+- `doc_shot(app, w, h, "name")` renders headless, screenshots, and asserts
+  byte-equality with `tests/golden/widgets/name.png`. A signal-gated overlay
+  (Sheet/Drawer-style, hidden until `{name}.open`) uses
+  `doc_shot_open(app, w, h, "name", "name.open")` instead.
+- **Generate/re-approve the screenshot** with
+  `LUMEN_UPDATE_GOLDENS=1 cargo test -p lumen-widgets --doc <name>`, then
+  `Read` the PNG to eyeball it. Commit the PNG with the widget.
+- Plain `cargo test -p lumen-widgets --doc` is the verification: the example
+  fails if the render drifts from the committed screenshot. This is the
+  literal "the screenshot is what the example produces" guarantee — the
+  example IS the test.
+
 ## Step 5 — test headless (deterministic)
 
 Add a `#[cfg(test)] mod tests` in the widget file (see `grid.rs`) that drives it

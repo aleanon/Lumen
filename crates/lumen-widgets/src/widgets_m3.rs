@@ -27,6 +27,14 @@ fn touch_style(extra_pad: f32) -> LayoutStyle {
 
 /// [`BottomNav`] — a full-width bottom navigation row (≥44px targets);
 /// selected index under `name` (typed form of [`bottom_nav`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, BottomNav};
+///
+/// let app = App::new(|cx| BottomNav::new(cx, "nav", &["Home", "Search", "Me"]).into());
+/// # lumen_widgets::doc_shot(app, 260.0, 56.0, "bottom_nav");
+/// ```
 pub struct BottomNav {
     el: Element,
 }
@@ -51,6 +59,14 @@ pub fn bottom_nav(cx: &BuildCx, name: &str, items: &[&str]) -> Element {
 
 /// [`NavigationRail`] — a vertical navigation rail; selected index under
 /// `name` (typed form of [`navigation_rail`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, NavigationRail};
+///
+/// let app = App::new(|cx| NavigationRail::new(cx, "rail", &["Home", "Files", "Cfg"]).into());
+/// # lumen_widgets::doc_shot(app, 80.0, 180.0, "navigation_rail");
+/// ```
 pub struct NavigationRail {
     el: Element,
 }
@@ -131,6 +147,14 @@ fn nav(cx: &BuildCx, name: &str, items: &[&str], dir: FlexDirection) -> Element 
 
 /// [`AppBar`] — a title bar with trailing action items (typed form of
 /// [`app_bar`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, AppBar};
+///
+/// let app = App::new(|_| AppBar::new("Inbox", vec![]).into());
+/// # lumen_widgets::doc_shot(app, 260.0, 56.0, "app_bar");
+/// ```
 pub struct AppBar {
     el: Element,
 }
@@ -193,6 +217,16 @@ pub fn app_bar(title: impl Into<String>, actions: Vec<Element>) -> Element {
 
 /// [`PullToRefresh`] — drag-down-to-refresh wrapper; pull state under
 /// `name` (typed form of [`pull_to_refresh`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, PullToRefresh};
+///
+/// let app = App::new(|cx| {
+///     PullToRefresh::new(cx, "ptr", 60.0, |_| {}, vec![widgets::text("Pull me down")]).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 200.0, 100.0, "pull_to_refresh");
+/// ```
 pub struct PullToRefresh {
     el: Element,
 }
@@ -311,6 +345,14 @@ pub fn pull_to_refresh(
 
 /// [`DatePicker`] — year/month/day spinners; ISO date under `name`
 /// (typed form of [`date_picker`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, DatePicker};
+///
+/// let app = App::new(|cx| DatePicker::new(cx, "date").into());
+/// # lumen_widgets::doc_shot(app, 220.0, 80.0, "date_picker");
+/// ```
 pub struct DatePicker {
     el: Element,
 }
@@ -341,6 +383,14 @@ pub fn date_picker(cx: &BuildCx, name: &str) -> Element {
 
 /// [`TimePicker`] — hour/minute spinners; `HH:MM` under `name` (typed
 /// form of [`time_picker`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, TimePicker};
+///
+/// let app = App::new(|cx| TimePicker::new(cx, "time").into());
+/// # lumen_widgets::doc_shot(app, 180.0, 80.0, "time_picker");
+/// ```
 pub struct TimePicker {
     el: Element,
 }

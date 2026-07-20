@@ -9,6 +9,14 @@ use crate::{widgets, BuildCx, Element};
 use lumen_layout::Dim;
 
 /// A file-open button over the SystemRequest seam.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, FilePicker};
+///
+/// let app = App::new(|cx| FilePicker::new(cx, "file", "Choose file…", ["png", "jpg"]).into());
+/// # lumen_widgets::doc_shot(app, 240.0, 48.0, "file_picker");
+/// ```
 pub struct FilePicker {
     el: Element,
 }

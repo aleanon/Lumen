@@ -9,6 +9,16 @@ use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
 
 /// A flex container (column by default) holding child elements. Use it to group,
 /// pad, space, align, and size a subtree.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Container};
+///
+/// let app = App::new(|_| {
+///     Container::new(vec![widgets::text("A"), widgets::text("B")]).row().gap(8.0).padding(6.0).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 120.0, 48.0, "container");
+/// ```
 pub struct Container {
     el: Element,
 }

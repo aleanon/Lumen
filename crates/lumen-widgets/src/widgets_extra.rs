@@ -41,6 +41,14 @@ pub fn radio(cx: &BuildCx, group: &str, value: usize, label: impl Into<String>) 
 
 /// [`Select`] — a combo box cycling through `options` on click; selected
 /// index under `name` (typed form of [`select`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Select};
+///
+/// let app = App::new(|cx| Select::new(cx, "sel", &["Red", "Green", "Blue"]).into());
+/// # lumen_widgets::doc_shot(app, 140.0, 48.0, "select");
+/// ```
 pub struct Select {
     el: Element,
 }
@@ -89,6 +97,14 @@ pub fn select(cx: &BuildCx, name: &str, options: &[&str]) -> Element {
 
 /// [`Tooltip`] — wraps `target` with hover-revealed help `text` (typed
 /// form of [`tooltip`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Tooltip};
+///
+/// let app = App::new(|_| Tooltip::new(widgets::text("hover me"), "A helpful hint").into());
+/// # lumen_widgets::doc_shot(app, 160.0, 48.0, "tooltip");
+/// ```
 pub struct Tooltip {
     el: Element,
 }
@@ -140,6 +156,14 @@ pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
 }
 
 /// [`Menu`] — a vertical list of menu items (typed form of [`menu`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Menu};
+///
+/// let app = App::new(|_| Menu::new(&["New", "Open", "Save", "Quit"]).into());
+/// # lumen_widgets::doc_shot(app, 140.0, 140.0, "menu");
+/// ```
 pub struct Menu {
     el: Element,
 }
@@ -202,6 +226,16 @@ pub fn grid(columns: usize, children: Vec<Element>) -> Element {
 }
 
 /// [`Wrap`] — a flex-wrap row of children (typed form of [`wrap`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Wrap};
+///
+/// let app = App::new(|_| {
+///     Wrap::new(vec![widgets::text("alpha"), widgets::text("beta"), widgets::text("gamma")]).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 180.0, 60.0, "wrap");
+/// ```
 pub struct Wrap {
     el: Element,
 }
@@ -238,6 +272,16 @@ pub fn wrap(children: Vec<Element>) -> Element {
 
 /// [`SplitPane`] — two panes at a fixed `ratio` split (typed form of
 /// [`split_pane`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, SplitPane};
+///
+/// let app = App::new(|_| {
+///     SplitPane::new(widgets::text("left"), widgets::text("right"), 0.4).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 220.0, 80.0, "split_pane");
+/// ```
 pub struct SplitPane {
     el: Element,
 }
@@ -320,6 +364,16 @@ pub fn text_area(cx: &BuildCx, name: &str, initial: &str) -> Element {
 
 /// [`Modal`] — `base` content with an optional centered `dialog` overlay
 /// when `open` (typed form of [`modal`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Modal};
+///
+/// let app = App::new(|_| {
+///     Modal::new(widgets::text("Page behind"), widgets::text("Dialog"), true).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 220.0, 140.0, "modal");
+/// ```
 pub struct Modal {
     el: Element,
 }
@@ -367,6 +421,16 @@ pub fn modal(base: Element, dialog: Element, open: bool) -> Element {
 
 /// [`PaneGrid`] — a draggable two-pane split; ratio under `name` (typed
 /// form of [`pane_grid`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, PaneGrid};
+///
+/// let app = App::new(|cx| {
+///     PaneGrid::new(cx, "pg", widgets::text("Pane A"), widgets::text("Pane B")).into()
+/// });
+/// # lumen_widgets::doc_shot(app, 240.0, 100.0, "pane_grid");
+/// ```
 pub struct PaneGrid {
     el: Element,
 }

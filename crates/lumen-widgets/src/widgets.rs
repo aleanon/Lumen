@@ -59,6 +59,16 @@ pub fn leaf(w: impl crate::LeafWidget + 'static) -> Element {
 
 /// [`Image`] — a decoded bitmap at its own pixel size (typed form of
 /// [`image`]).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Image, RgbaImage};
+///
+/// # let px: Vec<u8> = (0..48 * 32).flat_map(|_| [0x2b, 0x6c, 0xff, 0xff]).collect();
+/// # let img = RgbaImage::from_raw(48, 32, px);
+/// let app = App::new(move |_| Image::new(img.clone()).into());
+/// # lumen_widgets::doc_shot(app, 60.0, 44.0, "image");
+/// ```
 pub struct Image {
     el: Element,
 }
@@ -306,6 +316,22 @@ pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
 
 /// [`Canvas`] — an immediate-mode drawing surface (typed form of
 /// [`canvas`]): `draw` paints into a `Frame` sized to the widget each frame.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Canvas};
+/// use lumen_core::Color;
+/// use lumen_render::Brush;
+///
+/// let app = App::new(|_| {
+///     Canvas::new(80.0, 40.0, |f, size| {
+///         f.fill_rect(kurbo::Rect::new(0.0, 0.0, size.width, size.height),
+///                     Brush::Solid(Color::srgb8(0x18, 0xc2, 0x7d, 0xff)));
+///     })
+///     .into()
+/// });
+/// # lumen_widgets::doc_shot(app, 96.0, 56.0, "canvas");
+/// ```
 pub struct Canvas {
     el: Element,
 }

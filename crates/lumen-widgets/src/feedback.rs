@@ -45,6 +45,14 @@ impl ToastKind {
 /// A transient notification card: accent bar + title + body. Presentation
 /// only — stacking/auto-hide policy belongs to the app (drive it from a
 /// signal + `wake_at`).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Toast, ToastKind};
+///
+/// let app = App::new(|_| Toast::new(ToastKind::Success, "Saved", "Changes stored").into());
+/// # lumen_widgets::doc_shot(app, 240.0, 72.0, "toast");
+/// ```
 pub struct Toast {
     el: Element,
 }
@@ -93,6 +101,14 @@ impl Toast {
 impl_common!(Toast);
 
 /// An indeterminate progress spinner (canvas arc, `cx.animate()`-driven).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Spinner};
+///
+/// let app = App::new(|cx| Spinner::new(cx, 32.0).into());
+/// # lumen_widgets::doc_shot(app, 56.0, 56.0, "spinner");
+/// ```
 pub struct Spinner {
     el: Element,
 }
@@ -129,6 +145,14 @@ impl Spinner {
 impl_common!(Spinner);
 
 /// A compact pill label, optionally removable.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, Chip};
+///
+/// let app = App::new(|_| Chip::new("Filter").into());
+/// # lumen_widgets::doc_shot(app, 100.0, 40.0, "chip");
+/// ```
 pub struct Chip {
     el: Element,
 }

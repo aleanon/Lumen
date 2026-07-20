@@ -16,6 +16,14 @@ use std::rc::Rc;
 
 /// A multi-line text area with a caret, selection, clipboard, and undo. Wraps to
 /// its width; the box is sized for several lines.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, TextField};
+///
+/// let app = App::new(|cx| TextField::new(cx, "bio", "Multi-line text…").into());
+/// # lumen_widgets::doc_shot(app, 280.0, 120.0, "text_field");
+/// ```
 pub struct TextField {
     el: Element,
 }

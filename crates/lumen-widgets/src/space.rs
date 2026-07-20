@@ -9,6 +9,17 @@ use lumen_layout::{Dim, LayoutStyle};
 
 /// Empty layout space. Flexible by default (grows to fill the main axis);
 /// [`px`](Space::px) makes it a fixed size.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Space};
+///
+/// // Space pushes siblings apart; shown here between two labels.
+/// let app = App::new(|_| {
+///     widgets::row(vec![widgets::text("left"), Space::horizontal(60.0).into(), widgets::text("right")])
+/// });
+/// # lumen_widgets::doc_shot(app, 200.0, 36.0, "space");
+/// ```
 pub struct Space {
     el: Element,
 }

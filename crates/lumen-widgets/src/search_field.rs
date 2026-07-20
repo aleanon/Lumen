@@ -13,6 +13,14 @@ use lumen_text::TextEditor;
 use std::rc::Rc;
 
 /// A search box over a text editor signal.
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{App, SearchField};
+///
+/// let app = App::new(|cx| SearchField::new(cx, "q", "Search…").into());
+/// # lumen_widgets::doc_shot(app, 220.0, 44.0, "search_field");
+/// ```
 pub struct SearchField {
     el: Element,
 }

@@ -135,6 +135,18 @@ type HeaderFn = Rc<dyn Fn(u32) -> Element>;
 
 /// A virtualized 2D grid. Build it up, then [`build`](Grid::build) it into an
 /// [`Element`] that fills its container. See the [module docs](self).
+/// # Example
+///
+/// ```
+/// use lumen_widgets::{widgets, App, Grid};
+///
+/// let app = App::new(|cx| {
+///     Grid::new("g", 2, 3, 48.0, 32.0)
+///         .cell(|_, c| Some(widgets::text(format!("{},{}", c.row, c.col))))
+///         .build(cx)
+/// });
+/// # lumen_widgets::doc_shot(app, 180.0, 100.0, "grid");
+/// ```
 pub struct Grid {
     name: String,
     rows: u32,
