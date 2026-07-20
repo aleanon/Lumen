@@ -72,6 +72,8 @@ members = [
     "examples/qr",
     "examples/vectorial_text",
     "examples/integration",
+    "examples/pokedex",
+    "examples/download_progress",
 ]
 
 # Pre-1.0 lockstep version for the whole workspace (02 §11).
@@ -181,6 +183,9 @@ quote = "1"
 proc-macro2 = "1"
 
 # whitelisted dev deps (ADR-003)
+# M.5 (ADR-M2): the bring-your-own-client examples' LIVE runner transport —
+# dev-scope only; nothing HTTP ships in the framework tree.
+ureq = { version = "2", default-features = false }
 proptest = "1"
 jsonschema = "0.26"
 criterion = "0.5"

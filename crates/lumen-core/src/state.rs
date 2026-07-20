@@ -30,7 +30,6 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::task::{Context, Poll, Waker};
 
 /// Anything that can live in the state store.
 ///
@@ -125,28 +124,6 @@ impl<T> Clone for Memo<T> {
     }
 }
 impl<T> Copy for Memo<T> {}
-
-/// The loading state of an async [`Resource`].
-#[derive(Clone)]
-#[cfg_attr(feature = "snapshot", derive(serde::Serialize, serde::Deserialize))]
-pub enum ResourceState<T> {
-    /// The backing future has not yet resolved.
-    Loading,
-    /// The future resolved to a value.
-    Ready(T),
-}
-
-/// A handle to an async resource (02 §4). Full polling integration lands with
-/// the shell's runtime (T0.9 / ADR-018); creation polls the future once.
-pub struct Resource<T> {
-    sig: Signal<ResourceState<T>>,
-}
-impl<T> Clone for Resource<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl<T> Copy for Resource<T> {}
 
 /// Read access to the store. Implemented by [`Runtime`] (untracked) and
 /// [`ReadScope`] (tracked — subscribes the running scope).
@@ -625,24 +602,6 @@ impl Runtime {
         }
     }
 
-    /// Create an async resource. The future is polled once now; if it does not
-    /// resolve immediately the resource stays [`ResourceState::Loading`] until
-    /// the shell's executor drives it (T0.9).
-    pub fn resource<T: State>(
-        &self,
-        key: &str,
-        fut: impl std::future::Future<Output = T> + 'static,
-    ) -> Resource<T> {
-        let sig = self.signal::<ResourceState<T>>(key, || ResourceState::Loading);
-        let mut fut = Box::pin(fut);
-        let waker = Waker::noop();
-        let mut cx = Context::from_waker(waker);
-        if let Poll::Ready(v) = fut.as_mut().poll(&mut cx) {
-            sig.set(self, ResourceState::Ready(v));
-        }
-        Resource { sig }
-    }
-
     /// Run `f` with writes batched: subscribed scopes flush once, after `f`
     /// returns, instead of after each write.
     pub fn batch<R>(&self, f: impl FnOnce() -> R) -> R {
@@ -1015,13 +974,6 @@ impl<T: State + Clone> Memo<T> {
     /// Read the derived value by reference.
     pub fn with<R>(&self, cx: &impl ReadCx, f: impl FnOnce(&T) -> R) -> R {
         cx.runtime().read_with(cx, self.id, f)
-    }
-}
-
-impl<T: State + Clone> Resource<T> {
-    /// The current resource state.
-    pub fn get(&self, cx: &impl ReadCx) -> ResourceState<T> {
-        self.sig.get(cx)
     }
 }
 

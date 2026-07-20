@@ -164,3 +164,42 @@ fn boxed_executor_opt_in_compiles_and_runs() {
         "boxed inline resolved"
     );
 }
+
+/// M.5 (ADR-M2 d): the re-entry contract — a LATE result from a superseded
+/// fetch generation must be discarded, not clobber the newer one.
+#[test]
+fn stale_generation_result_is_discarded() {
+    use lumen_core::tasks::ManualSpawner;
+    let spawner = ManualSpawner::new();
+    let mut h = lumen_widgets::App::new(|cx| {
+        let dep = cx.signal("dep", || 1i32);
+        let d = dep.get(cx.runtime());
+        let r = cx.resource::<String, String, _, _>("data", d, |d| async move {
+            Ok(format!("result-for-{d}"))
+        });
+        lumen_widgets::widgets::text(format!(
+            "v={} loading={}",
+            r.value.unwrap_or_default(),
+            r.loading
+        ))
+        .id("t")
+    })
+    .with_executor(spawner.clone())
+    .run_headless(kurbo::Size::new(300.0, 100.0));
+    h.pump(); // build 1 queues fetch(gen 1) — NOT yet run (manual spawner)
+
+    // The dep changes BEFORE gen 1's job runs: build 2 queues fetch(gen 2).
+    let dep = h.runtime().signal("dep", || 0i32);
+    dep.set(h.runtime(), 2);
+    h.pump();
+
+    // Now run both queued jobs — gen 1 completes LATE, after gen 2 started.
+    // Order: gen1 then gen2; gen1's finish must be ignored either way.
+    spawner.run_pending();
+    h.pump();
+    let t = h.semantics_json().to_string();
+    assert!(
+        t.contains("result-for-2") && !t.contains("result-for-1"),
+        "late gen-1 result discarded: {t}"
+    );
+}

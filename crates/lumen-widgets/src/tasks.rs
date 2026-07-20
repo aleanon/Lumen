@@ -6,7 +6,7 @@
 
 use crate::element::{BuildCx, TaskRequest};
 use lumen_core::state::{Signal, State};
-use lumen_core::tasks::Sink;
+use lumen_core::tasks::{MaybeSend, Sink};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::future::Future;
@@ -91,7 +91,7 @@ fn hash_deps(d: &impl Hash) -> u64 {
 }
 
 /// Build the deferred op that applies a resource result (guarded by `gen`).
-fn finish<T: State + Send, E: State + Send>(
+fn finish<T: State + MaybeSend, E: State + MaybeSend>(
     sink: &Sink,
     sig: Signal<ResourceCell<T, E>>,
     gen: u64,
@@ -122,13 +122,13 @@ impl BuildCx<'_> {
         &self,
         key: &str,
         deps: D,
-        fetch: impl FnOnce(D) -> Fut + Send + 'static,
+        fetch: impl FnOnce(D) -> Fut + MaybeSend + 'static,
     ) -> Resource<T, E>
     where
-        T: State + Send + Clone,
-        E: State + Send + Clone,
-        D: Hash + Send + 'static,
-        Fut: Future<Output = Result<T, E>> + Send + 'static,
+        T: State + MaybeSend + Clone,
+        E: State + MaybeSend + Clone,
+        D: Hash + MaybeSend + 'static,
+        Fut: Future<Output = Result<T, E>> + MaybeSend + 'static,
     {
         self.resource_impl(key, deps, |deps, sig, gen| {
             TaskRequest::Future(Box::new(move |sink| {
@@ -146,12 +146,12 @@ impl BuildCx<'_> {
         &self,
         key: &str,
         deps: D,
-        fetch: impl FnOnce(D) -> Result<T, E> + Send + 'static,
+        fetch: impl FnOnce(D) -> Result<T, E> + MaybeSend + 'static,
     ) -> Resource<T, E>
     where
-        T: State + Send + Clone,
-        E: State + Send + Clone,
-        D: Hash + Send + 'static,
+        T: State + MaybeSend + Clone,
+        E: State + MaybeSend + Clone,
+        D: Hash + MaybeSend + 'static,
     {
         self.resource_impl(key, deps, |deps, sig, gen| {
             TaskRequest::Blocking(Box::new(move |sink| {
@@ -195,10 +195,14 @@ impl BuildCx<'_> {
     /// Spawn a long-lived async task (e.g. a stream) once per (key, deps). The
     /// closure gets a [`crate::Sink`] to push results back over time (`sink.set` /
     /// `sink.update` a signal). Use for streaming/subscriptions.
-    pub fn task<D, Fut>(&self, key: &str, deps: D, f: impl FnOnce(D, Sink) -> Fut + Send + 'static)
-    where
-        D: Hash + Send + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
+    pub fn task<D, Fut>(
+        &self,
+        key: &str,
+        deps: D,
+        f: impl FnOnce(D, Sink) -> Fut + MaybeSend + 'static,
+    ) where
+        D: Hash + MaybeSend + 'static,
+        Fut: Future<Output = ()> + MaybeSend + 'static,
     {
         self.task_impl(key, deps, |deps| {
             TaskRequest::Future(Box::new(move |sink| Box::pin(f(deps, sink))))
@@ -207,9 +211,13 @@ impl BuildCx<'_> {
 
     /// Spawn a blocking task (e.g. a heavy compute job streaming progress) once
     /// per (key, deps). The closure gets a [`crate::Sink`] to push results/progress.
-    pub fn task_blocking<D>(&self, key: &str, deps: D, f: impl FnOnce(D, Sink) + Send + 'static)
-    where
-        D: Hash + Send + 'static,
+    pub fn task_blocking<D>(
+        &self,
+        key: &str,
+        deps: D,
+        f: impl FnOnce(D, Sink) + MaybeSend + 'static,
+    ) where
+        D: Hash + MaybeSend + 'static,
     {
         self.task_impl(key, deps, |deps| {
             TaskRequest::Blocking(Box::new(move |sink| f(deps, sink)))

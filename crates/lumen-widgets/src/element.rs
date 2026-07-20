@@ -491,15 +491,32 @@ pub struct FrameRequests {
     pub menu: Option<crate::system::MenuModel>,
 }
 
+/// Task factory boxes (M.5): `Send` where threads exist; wasm futures are
+/// `!Send` and single-threaded (trait objects only take auto-trait bounds,
+/// so the split is on the alias — see `lumen_core::tasks::MaybeSend`).
+#[cfg(not(target_arch = "wasm32"))]
+pub type BlockingFactory = Box<dyn FnOnce(lumen_core::tasks::Sink) + Send>;
+/// wasm: runs inline (no threads).
+#[cfg(target_arch = "wasm32")]
+pub type BlockingFactory = Box<dyn FnOnce(lumen_core::tasks::Sink)>;
+/// Async-work factory: given the [`Sink`](lumen_core::tasks::Sink), yields
+/// the future the executor runs.
+#[cfg(not(target_arch = "wasm32"))]
+pub type FutureFactory =
+    Box<dyn FnOnce(lumen_core::tasks::Sink) -> lumen_core::tasks::BoxFuture + Send>;
+/// wasm: single-threaded, `!Send` futures welcome.
+#[cfg(target_arch = "wasm32")]
+pub type FutureFactory = Box<dyn FnOnce(lumen_core::tasks::Sink) -> lumen_core::tasks::BoxFuture>;
+
 /// A request to run background work, recorded during build and dispatched by the
 /// runtime *after* the build (it owns the executor + the deferred-op channel, so
 /// the executor never leaks into `BuildCx`). Each variant is "given a [`Sink`](lumen_core::tasks::Sink),
 /// do the work" — the runtime mints the sink at dispatch and runs it.
 pub enum TaskRequest {
     /// CPU-bound work for `spawn_blocking`.
-    Blocking(Box<dyn FnOnce(lumen_core::tasks::Sink) + Send>),
+    Blocking(BlockingFactory),
     /// Async work for `spawn` — a factory that, given the sink, yields the future.
-    Future(Box<dyn FnOnce(lumen_core::tasks::Sink) -> lumen_core::tasks::BoxFuture + Send>),
+    Future(FutureFactory),
 }
 
 /// A memoized view scope's cached output plus the signals it read (F1). While

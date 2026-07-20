@@ -22,11 +22,45 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::task::{Context, Poll, Wake, Waker};
 
-/// A pending state mutation produced off-thread, applied on the UI thread.
-pub type DeferredOp = Box<dyn FnOnce(&Runtime) + Send>;
+/// M.5 (ADR-M2): `Send` where threads exist, nothing on wasm — the
+/// platform-conditional bound that lets ONE generic surface fit tokio
+/// handles, the thread pool, and browser `spawn_local`-style executors
+/// (wasm futures — `fetch` — are `!Send`, and there are no threads to
+/// cross anyway).
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSend: Send {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + ?Sized> MaybeSend for T {}
+/// wasm: no threads, no bound.
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSend {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> MaybeSend for T {}
 
-/// A boxed, `Send` future — the unit of async work a [`Spawner`] runs.
+/// A pending state mutation produced off-thread, applied on the UI thread.
+/// (Trait objects can only carry auto-trait bounds, so the platform split is
+/// on the alias, not `MaybeSend`.)
+#[cfg(not(target_arch = "wasm32"))]
+pub type DeferredOp = Box<dyn FnOnce(&Runtime) + Send>;
+/// wasm: single-threaded — no `Send`.
+#[cfg(target_arch = "wasm32")]
+pub type DeferredOp = Box<dyn FnOnce(&Runtime)>;
+
+/// A boxed blocking job for [`Spawner::spawn_blocking`]. `Send` on native
+/// (it crosses to a pool thread); wasm runs it inline on the only thread.
+#[cfg(not(target_arch = "wasm32"))]
+pub type BlockingJob = Box<dyn FnOnce() + Send>;
+/// wasm: inline, no `Send`.
+#[cfg(target_arch = "wasm32")]
+pub type BlockingJob = Box<dyn FnOnce()>;
+
+/// A boxed future — the unit of async work a [`Spawner`] runs. `Send` on
+/// native; wasm futures are `!Send`.
+#[cfg(not(target_arch = "wasm32"))]
 pub type BoxFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+/// wasm: `!Send` futures welcome.
+#[cfg(target_arch = "wasm32")]
+pub type BoxFuture = Pin<Box<dyn Future<Output = ()>>>;
 
 /// Wakes the host event loop after a deferred op is queued, so a frame gets
 /// scheduled. Set by the shell; absent in headless/tests (where the executor is
@@ -63,7 +97,7 @@ pub struct Sink {
 impl Sink {
     /// Enqueue an arbitrary mutation applied on the UI thread next turn (the
     /// flexible, **non-replayable** escape hatch).
-    pub fn mutate(&self, f: impl FnOnce(&Runtime) + Send + 'static) {
+    pub fn mutate(&self, f: impl FnOnce(&Runtime) + MaybeSend + 'static) {
         if self.tx.send(Box::new(f)).is_ok() {
             if let Some(w) = &self.waker {
                 w();
@@ -72,12 +106,16 @@ impl Sink {
     }
 
     /// Set `sig` to `v` (applied next turn). Value-based ⇒ recordable/replayable.
-    pub fn set<T: State + Send>(&self, sig: Signal<T>, v: T) {
+    pub fn set<T: State + MaybeSend>(&self, sig: Signal<T>, v: T) {
         self.mutate(move |rt| sig.set(rt, v));
     }
 
     /// Update `sig` in place (applied next turn).
-    pub fn update<T: State + Send>(&self, sig: Signal<T>, f: impl FnOnce(&mut T) + Send + 'static) {
+    pub fn update<T: State + MaybeSend>(
+        &self,
+        sig: Signal<T>,
+        f: impl FnOnce(&mut T) + MaybeSend + 'static,
+    ) {
         self.mutate(move |rt| sig.update(rt, f));
     }
 }
@@ -121,7 +159,7 @@ pub trait Spawner {
     /// Run a future to completion off the UI thread.
     fn spawn(&self, fut: BoxFuture);
     /// Run a blocking closure off the UI thread (CPU-bound work).
-    fn spawn_blocking(&self, f: Box<dyn FnOnce() + Send>);
+    fn spawn_blocking(&self, f: BlockingJob);
 }
 
 /// A boxed spawner is itself a spawner — the dynamic-dispatch opt-in.
@@ -129,7 +167,7 @@ impl<S: Spawner + ?Sized> Spawner for Box<S> {
     fn spawn(&self, fut: BoxFuture) {
         (**self).spawn(fut)
     }
-    fn spawn_blocking(&self, f: Box<dyn FnOnce() + Send>) {
+    fn spawn_blocking(&self, f: BlockingJob) {
         (**self).spawn_blocking(f)
     }
 }
@@ -146,7 +184,7 @@ impl Spawner for InlineSpawner {
     fn spawn(&self, fut: BoxFuture) {
         block_on(fut);
     }
-    fn spawn_blocking(&self, f: Box<dyn FnOnce() + Send>) {
+    fn spawn_blocking(&self, f: BlockingJob) {
         f();
     }
 }
@@ -162,7 +200,7 @@ pub struct ManualSpawner {
 
 enum Job {
     Future(BoxFuture),
-    Blocking(Box<dyn FnOnce() + Send>),
+    Blocking(BlockingJob),
 }
 
 impl ManualSpawner {
@@ -195,7 +233,7 @@ impl Spawner for ManualSpawner {
     fn spawn(&self, fut: BoxFuture) {
         self.pending.borrow_mut().push(Job::Future(fut));
     }
-    fn spawn_blocking(&self, f: Box<dyn FnOnce() + Send>) {
+    fn spawn_blocking(&self, f: BlockingJob) {
         self.pending.borrow_mut().push(Job::Blocking(f));
     }
 }
@@ -248,7 +286,7 @@ impl Spawner for ThreadPoolSpawner {
     fn spawn(&self, fut: BoxFuture) {
         let _ = self.tx.send(Box::new(move || block_on(fut)));
     }
-    fn spawn_blocking(&self, f: Box<dyn FnOnce() + Send>) {
+    fn spawn_blocking(&self, f: BlockingJob) {
         let _ = self.tx.send(f);
     }
 }
@@ -328,4 +366,53 @@ mod tests {
         rt.drain_deferred();
         assert_eq!(sig.get(&rt), 5, "run + drain applies it");
     }
+}
+
+// --- M.5 (ADR-M2): the wasm executor ----------------------------------------
+
+/// wasm: a dependency-free single-thread executor. `spawn` queues the future;
+/// the host's RAF tick drives it via [`pump_wasm_tasks`] (completion lands
+/// through [`Sink`] like every other executor — the framework never drives
+/// foreign wakers beyond its own ready flag). `spawn_blocking` runs inline:
+/// there is no other thread to run it on.
+#[cfg(target_arch = "wasm32")]
+#[derive(Default, Clone, Copy)]
+pub struct WasmSpawner;
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static WASM_TASKS: RefCell<Vec<BoxFuture>> = const { RefCell::new(Vec::new()) };
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Spawner for WasmSpawner {
+    fn spawn(&self, fut: BoxFuture) {
+        WASM_TASKS.with(|q| q.borrow_mut().push(fut));
+    }
+    fn spawn_blocking(&self, f: BlockingJob) {
+        f(); // single thread: inline (document in the skill; keep jobs small)
+    }
+}
+
+/// Poll every queued wasm task once (RAF cadence). Returns whether any tasks
+/// remain pending — the host keeps ticking while true.
+#[cfg(target_arch = "wasm32")]
+pub fn pump_wasm_tasks() -> bool {
+    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+    fn raw() -> RawWaker {
+        fn no(_: *const ()) {}
+        fn cl(_: *const ()) -> RawWaker {
+            raw()
+        }
+        RawWaker::new(std::ptr::null(), &RawWakerVTable::new(cl, no, no, no))
+    }
+    let waker = unsafe { Waker::from_raw(raw()) };
+    let mut cx = Context::from_waker(&waker);
+    WASM_TASKS.with(|q| {
+        let mut tasks = q.take();
+        tasks.retain_mut(|fut| fut.as_mut().poll(&mut cx) == Poll::Pending);
+        let pending = !tasks.is_empty();
+        q.borrow_mut().extend(tasks);
+        pending
+    })
 }

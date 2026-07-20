@@ -142,11 +142,13 @@ ADR-M2: the framework ships the executor seam; **you bring the transport**.
   the runtime; re-fetches when `deps` change.
 - **Never touch the `Runtime` from a worker** — results come back through
   the resource/`Sink` path only.
-- **Do not** hand `Runtime::resource(name, future)` a real async future —
-  it polls once with a noop waker and never completes (fixed in plan M.5).
-- HTTP: bring a client as an **app dependency** (blocking `ureq` on the
-  pool is the simple recipe; a tokio-based client runs on *your* runtime
-  thread and reports back the same way). WebSocket: see
+- `Runtime::resource(name, future)` (the old noop-waker form) is REMOVED
+  (M.5) — the seam above is the only path.
+- HTTP: bring a client as an **app dependency** — full recipes (ureq on
+  the pool, tokio/reqwest via a custom Spawner, wasm fetch) live in the
+  **lumen-data-async** skill; worked examples: `examples/pokedex`
+  (transport injection — tests stay offline) and
+  `examples/download_progress` (Sink-streamed progress). WebSocket: see
   `examples/websocket` (tungstenite).
 - Tests: `ManualSpawner` makes async deterministic — pump tasks explicitly.
 

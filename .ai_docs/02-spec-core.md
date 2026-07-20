@@ -105,10 +105,12 @@ impl BuildCx {
 }
 // `cx.memo` / `cx.effect` (W.3): scope-key-prefixed forwards to the
 // spec-shaped `Runtime::memo`/`Runtime::effect`.
-// NOTE: `Runtime::resource(name, fut)` (the future-taking form) currently
-// polls once with a noop waker — do NOT hand it a real async future; use
-// the (name, deps, fetch) form / `resource_blocking` on the thread pool.
-// Fixed by ADR-M2's executor-seam work (plan M.5).
+// M.5 (ADR-M2): the old `Runtime::resource(name, fut)` noop-waker form is
+// REMOVED — resources are completion-based through the Spawner/Sink seam
+// (`cx.resource`/`resource_blocking`/`cx.task`); the framework never drives
+// foreign wakers. Bounds are `MaybeSend` (Send native, nothing on wasm) so
+// one API fits tokio handles, the thread pool, and the RAF-driven
+// `WasmSpawner`. Recipes: the `lumen-data-async` skill.
 ```
 
 Rules (enforced by the type system where possible, by review otherwise):

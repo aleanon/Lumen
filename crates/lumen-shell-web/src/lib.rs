@@ -176,6 +176,10 @@ pub fn session_wheel(x: f64, y: f64, dx: f64, dy: f64) {
 /// the frame actually changed — write the physical-px RGBA frame into `out`.
 /// Returns bytes written (0 ⇒ idle, keep the previous canvas contents).
 pub fn session_frame(dt_ms: f64, out: &mut [u8]) -> usize {
+    // M.5: drive queued wasm tasks (WasmSpawner) at RAF cadence — results
+    // land through Sink like every other executor.
+    #[cfg(target_arch = "wasm32")]
+    lumen_core::tasks::pump_wasm_tasks();
     with_session(|hl| {
         hl.advance_clock(dt_ms.clamp(0.0, 1000.0));
         let stats = hl.pump();
