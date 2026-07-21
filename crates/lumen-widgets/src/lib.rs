@@ -108,9 +108,9 @@ pub use lumen_macros::text;
 pub use lumen_render::{DefaultRenderer, Renderer, RgbaImage, TinySkia};
 pub use tasks::{Resource, TaskError};
 
-/// Render a widget doc-example `app` at `w`×`h` and verify it against the
-/// base64 PNG at `src/doc_shots/<name>.b64` — the SAME artifact the struct's
-/// doc `<img>` embeds via `include_str!`, so the picture shown on hover is
+/// Render a widget doc-example `app` at `w`×`h` and verify it against the PNG
+/// at `src/doc_shots/<name>.png` — the SAME file the struct's doc `<img>`
+/// references (via its raw-GitHub URL), so the picture shown on hover is
 /// provably this render. `LUMEN_UPDATE_GOLDENS=1` (re)writes it. Byte-exact
 /// compare on the deterministic CPU renderer (05 §4).
 #[doc(hidden)]
@@ -133,54 +133,28 @@ pub fn doc_shot_open(app: App, w: f64, h: f64, name: &str, open_key: &str) {
     verify_or_write_shot(hl.screenshot(), name);
 }
 
-fn shot_path(name: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/doc_shots")
-        .join(format!("{name}.b64"))
-}
-
 fn verify_or_write_shot(shot: RgbaImage, name: &str) {
-    let b64 = b64_encode(&shot.to_png());
-    let path = shot_path(name);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("src/doc_shots")
+        .join(format!("{name}.png"));
     if std::env::var_os("LUMEN_UPDATE_GOLDENS").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).expect("create doc_shots dir");
-        std::fs::write(&path, &b64).expect("write doc shot");
+        std::fs::write(&path, shot.to_png()).expect("write doc shot");
         return;
     }
-    let stored = std::fs::read_to_string(&path)
+    let bytes = std::fs::read(&path)
         .unwrap_or_else(|_| panic!("missing doc shot {path:?}; run LUMEN_UPDATE_GOLDENS=1"));
-    // The embedded image (include_str! of this file) is what a reader sees;
-    // asserting the fresh render base64-matches it proves the picture in the
-    // docs is exactly this example's output.
+    let want = lumen_render::RgbaImage::from_png(&bytes).expect("doc shot decode");
+    // The doc `<img>` serves this committed PNG (via its raw-GitHub URL);
+    // asserting the fresh render matches it proves the picture in the docs is
+    // exactly this example's output.
     assert!(
-        stored.trim_end() == b64,
+        want.width() == shot.width()
+            && want.height() == shot.height()
+            && want.pixels() == shot.pixels(),
         "widget `{name}`: the doc image ({path:?}) is stale vs the example render; \
          re-approve with LUMEN_UPDATE_GOLDENS=1 if the change is intended"
     );
-}
-
-/// Minimal standard-alphabet base64 encode (no line wrapping) — keeps the
-/// doc-shot data URIs self-contained without a dependency.
-fn b64_encode(data: &[u8]) -> String {
-    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for c in data.chunks(3) {
-        let b = [c[0], *c.get(1).unwrap_or(&0), *c.get(2).unwrap_or(&0)];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        out.push(A[(n >> 18 & 63) as usize] as char);
-        out.push(A[(n >> 12 & 63) as usize] as char);
-        out.push(if c.len() > 1 {
-            A[(n >> 6 & 63) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if c.len() > 2 {
-            A[(n & 63) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
 }
 
 /// An explicit renderer choice from the command line (`--wgpu` / `--tiny-skia`)

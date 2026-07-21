@@ -252,27 +252,26 @@ committed PNG under `tests/golden/widgets/<name>.png`:
   example IS the test.
 
 **Show the image in the rendered docs (so it appears on hover).** The shot is
-stored as base64 at `src/doc_shots/<name>.b64`; embed it as a self-contained
-data-URI `<img>` right after the example, via `include_str!` of the SAME file
-`doc_shot` verifies — so the picture and the checked bytes are one artifact
-(see `button.rs`):
+stored as a PNG at `src/doc_shots/<name>.png` and referenced by a
+**raw-GitHub URL** — a plain markdown image right after the example (see
+`button.rs`):
 
 ```rust
 /// Renders:
 ///
-#[doc = concat!(
-    "<img alt=\"Foo example render\" width=\"160\" ",
-    "src=\"data:image/png;base64,",
-    include_str!("doc_shots/foo.b64"),
-    "\">"
-)]
+/// ![Foo example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/foo.png)
 pub struct Foo { /* … */ }
 ```
 
-Generate the `.b64` first (`LUMEN_UPDATE_GOLDENS=1 cargo test -p lumen-widgets
---doc <name>`) before adding the `include_str!` (the crate won't compile
-without the file). rustdoc keeps data-URI `<img>`s, so the render shows inline
-in the type's docs.
+- Markdown `![](url)` (not raw `<img>`) so IDE hovers render it too; a raw
+  `http(s)` URL (not a `data:` URI) so Zed — which can't load data URIs —
+  shows it.
+- `doc_shot` verifies the render byte-matches that SAME committed PNG, so the
+  hovered image is provably the example's output.
+- Generate the PNG: `LUMEN_UPDATE_GOLDENS=1 cargo test -p lumen-widgets --doc
+  <name>`. Commit it. **The URL resolves only once the PNG is pushed to
+  `main`** (raw.githubusercontent reads the pushed tree) — expect a broken
+  image locally until then.
 
 ## Step 5 — test headless (deterministic)
 

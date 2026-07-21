@@ -24,14 +24,11 @@ use lumen_text::TextStyle;
 ///
 /// Renders:
 ///
-#[doc = concat!(
-    "![Button example render](data:image/png;base64,",
-    include_str!("doc_shots/button.b64"),
-    ")"
-)]
+/// ![Button example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/button.png)
 ///
-/// The picture above is this exact example's output — `doc_shot` re-renders
-/// it every test run and fails if it drifts from the committed image.
+/// The picture above is `src/doc_shots/button.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Button {
     el: Element,
 }
