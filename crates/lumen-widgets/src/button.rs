@@ -25,11 +25,9 @@ use lumen_text::TextStyle;
 /// Renders:
 ///
 #[doc = concat!(
-    "<img alt=\"Button example render\" width=\"160\" ",
-    "style=\"border:1px solid #e0e2e6;border-radius:6px\" ",
-    "src=\"data:image/png;base64,",
+    "![Button example render](data:image/png;base64,",
     include_str!("doc_shots/button.b64"),
-    "\">"
+    ")"
 )]
 ///
 /// The picture above is this exact example's output — `doc_shot` re-renders
