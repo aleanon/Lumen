@@ -62,6 +62,14 @@ pub fn padding(px: f32, child: Element) -> Element {
 /// let app = App::new(|_| Icon::new("gear").into());
 /// # lumen_widgets::doc_shot(app, 40.0, 40.0, "icon");
 /// ```
+///
+/// Renders:
+///
+/// ![Icon example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/icon.png)
+///
+/// The picture above is `src/doc_shots/icon.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Icon {
     el: Element,
 }
@@ -105,6 +113,14 @@ pub fn icon(label: &str) -> Element {
 /// let app = App::new(|cx| Switch::new(cx, "wifi", "Wi-Fi").into());
 /// # lumen_widgets::doc_shot(app, 120.0, 40.0, "switch");
 /// ```
+///
+/// Renders:
+///
+/// ![Switch example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/switch.png)
+///
+/// The picture above is `src/doc_shots/switch.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Switch {
     el: Element,
 }
@@ -173,6 +189,14 @@ pub fn switch(cx: &BuildCx, name: &str, label: impl Into<String>) -> Element {
 /// let app = App::new(|cx| Stepper::new(cx, "qty", 0, 10).into());
 /// # lumen_widgets::doc_shot(app, 120.0, 48.0, "stepper");
 /// ```
+///
+/// Renders:
+///
+/// ![Stepper example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/stepper.png)
+///
+/// The picture above is `src/doc_shots/stepper.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Stepper {
     el: Element,
 }
@@ -226,6 +250,14 @@ pub fn stepper(cx: &BuildCx, name: &str, min: i64, max: i64) -> Element {
 /// let app = App::new(|cx| Tabs::new(cx, "tab", &["One", "Two", "Three"]).into());
 /// # lumen_widgets::doc_shot(app, 220.0, 44.0, "tabs");
 /// ```
+///
+/// Renders:
+///
+/// ![Tabs example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/tabs.png)
+///
+/// The picture above is `src/doc_shots/tabs.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Tabs {
     el: Element,
 }
@@ -310,6 +342,14 @@ pub fn tabs(cx: &BuildCx, name: &str, labels: &[&str]) -> Element {
 /// });
 /// # lumen_widgets::doc_shot(app, 180.0, 100.0, "virtual_list");
 /// ```
+///
+/// Renders:
+///
+/// ![Virtual List example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/virtual_list.png)
+///
+/// The picture above is `src/doc_shots/virtual_list.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct VirtualList {
     el: Element,
 }

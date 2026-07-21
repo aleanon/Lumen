@@ -20,6 +20,14 @@ const BOX: f64 = 20.0;
 /// let app = App::new(|cx| CheckBox::new(cx, "agree", "I agree").into());
 /// # lumen_widgets::doc_shot(app, 160.0, 40.0, "check_box");
 /// ```
+///
+/// Renders:
+///
+/// ![Check Box example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/check_box.png)
+///
+/// The picture above is `src/doc_shots/check_box.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct CheckBox {
     el: Element,
 }

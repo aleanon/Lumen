@@ -19,6 +19,14 @@ use std::rc::Rc;
 /// let app = App::new(|cx| Radio::new(cx, "color", "red", "Red").into());
 /// # lumen_widgets::doc_shot(app, 120.0, 40.0, "radio");
 /// ```
+///
+/// Renders:
+///
+/// ![Radio example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/radio.png)
+///
+/// The picture above is `src/doc_shots/radio.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Radio {
     el: Element,
 }

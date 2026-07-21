@@ -28,6 +28,14 @@ use std::rc::Rc;
 /// });
 /// # lumen_widgets::doc_shot(app, 260.0, 60.0, "accordion");
 /// ```
+///
+/// Renders:
+///
+/// ![Accordion example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/accordion.png)
+///
+/// The picture above is `src/doc_shots/accordion.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Accordion {
     el: Element,
     /// The state key, so [`Accordion::body`] can tag its panel `{name}-body`.

@@ -23,6 +23,14 @@ const ROW_H: f64 = 32.0;
 /// let app = App::new(|cx| Combobox::new(cx, "fruit", ["Apple", "Banana", "Cherry"]).into());
 /// # lumen_widgets::doc_shot(app, 200.0, 60.0, "combobox");
 /// ```
+///
+/// Renders:
+///
+/// ![Combobox example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/combobox.png)
+///
+/// The picture above is `src/doc_shots/combobox.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Combobox {
     el: Element,
 }

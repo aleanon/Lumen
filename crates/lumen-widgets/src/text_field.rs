@@ -24,6 +24,14 @@ use std::rc::Rc;
 /// let app = App::new(|cx| TextField::new(cx, "bio", "Multi-line text…").into());
 /// # lumen_widgets::doc_shot(app, 280.0, 120.0, "text_field");
 /// ```
+///
+/// Renders:
+///
+/// ![Text Field example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/text_field.png)
+///
+/// The picture above is `src/doc_shots/text_field.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct TextField {
     el: Element,
 }

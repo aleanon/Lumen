@@ -24,6 +24,14 @@ const PRESETS: [&str; 12] = [
 /// let app = App::new(|cx| ColorPicker::new(cx, "color").into());
 /// # lumen_widgets::doc_shot(app, 200.0, 80.0, "color_picker");
 /// ```
+///
+/// Renders:
+///
+/// ![Color Picker example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/color_picker.png)
+///
+/// The picture above is `src/doc_shots/color_picker.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct ColorPicker {
     el: Element,
 }

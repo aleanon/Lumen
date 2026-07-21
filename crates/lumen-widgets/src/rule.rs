@@ -18,6 +18,14 @@ const THICKNESS: f32 = 1.0;
 /// let app = App::new(|_| Rule::horizontal().into());
 /// # lumen_widgets::doc_shot(app, 160.0, 20.0, "rule");
 /// ```
+///
+/// Renders:
+///
+/// ![Rule example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/rule.png)
+///
+/// The picture above is `src/doc_shots/rule.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Rule {
     el: Element,
 }

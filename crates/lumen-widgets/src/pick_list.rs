@@ -23,6 +23,14 @@ const ROW_H: f64 = 34.0;
 /// let app = App::new(|cx| PickList::new(cx, "pick", "Select…", ["One", "Two", "Three"]).into());
 /// # lumen_widgets::doc_shot(app, 200.0, 60.0, "pick_list");
 /// ```
+///
+/// Renders:
+///
+/// ![Pick List example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/pick_list.png)
+///
+/// The picture above is `src/doc_shots/pick_list.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct PickList {
     el: Element,
 }

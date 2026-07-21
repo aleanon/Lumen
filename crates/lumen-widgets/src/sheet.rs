@@ -88,6 +88,14 @@ fn scrim_and_panel(
 /// # // The panel is hidden until `sheet.open` is set (see the module docs).
 /// # lumen_widgets::doc_shot_open(app, 220.0, 150.0, "sheet", "sheet.open");
 /// ```
+///
+/// Renders:
+///
+/// ![Sheet example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/sheet.png)
+///
+/// The picture above is `src/doc_shots/sheet.png` — this exact example's
+/// output. `doc_shot_open` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Sheet {
     el: Element,
 }
@@ -124,6 +132,14 @@ impl_common!(Sheet);
 /// let app = App::new(|cx| Drawer::new(cx, "drawer", widgets::text("Menu")).into());
 /// # lumen_widgets::doc_shot_open(app, 260.0, 150.0, "drawer", "drawer.open");
 /// ```
+///
+/// Renders:
+///
+/// ![Drawer example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/drawer.png)
+///
+/// The picture above is `src/doc_shots/drawer.png` — this exact example's
+/// output. `doc_shot_open` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Drawer {
     el: Element,
     side: DrawerSide,

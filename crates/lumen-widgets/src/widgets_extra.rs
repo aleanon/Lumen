@@ -49,6 +49,14 @@ pub fn radio(cx: &BuildCx, group: &str, value: usize, label: impl Into<String>) 
 /// let app = App::new(|cx| Select::new(cx, "sel", &["Red", "Green", "Blue"]).into());
 /// # lumen_widgets::doc_shot(app, 140.0, 48.0, "select");
 /// ```
+///
+/// Renders:
+///
+/// ![Select example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/select.png)
+///
+/// The picture above is `src/doc_shots/select.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Select {
     el: Element,
 }
@@ -105,6 +113,14 @@ pub fn select(cx: &BuildCx, name: &str, options: &[&str]) -> Element {
 /// let app = App::new(|_| Tooltip::new(widgets::text("hover me"), "A helpful hint").into());
 /// # lumen_widgets::doc_shot(app, 160.0, 48.0, "tooltip");
 /// ```
+///
+/// Renders:
+///
+/// ![Tooltip example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/tooltip.png)
+///
+/// The picture above is `src/doc_shots/tooltip.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Tooltip {
     el: Element,
 }
@@ -164,6 +180,14 @@ pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
 /// let app = App::new(|_| Menu::new(&["New", "Open", "Save", "Quit"]).into());
 /// # lumen_widgets::doc_shot(app, 140.0, 140.0, "menu");
 /// ```
+///
+/// Renders:
+///
+/// ![Menu example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/menu.png)
+///
+/// The picture above is `src/doc_shots/menu.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Menu {
     el: Element,
 }
@@ -236,6 +260,14 @@ pub fn grid(columns: usize, children: Vec<Element>) -> Element {
 /// });
 /// # lumen_widgets::doc_shot(app, 180.0, 60.0, "wrap");
 /// ```
+///
+/// Renders:
+///
+/// ![Wrap example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/wrap.png)
+///
+/// The picture above is `src/doc_shots/wrap.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Wrap {
     el: Element,
 }
@@ -282,6 +314,14 @@ pub fn wrap(children: Vec<Element>) -> Element {
 /// });
 /// # lumen_widgets::doc_shot(app, 220.0, 80.0, "split_pane");
 /// ```
+///
+/// Renders:
+///
+/// ![Split Pane example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/split_pane.png)
+///
+/// The picture above is `src/doc_shots/split_pane.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct SplitPane {
     el: Element,
 }
@@ -374,6 +414,14 @@ pub fn text_area(cx: &BuildCx, name: &str, initial: &str) -> Element {
 /// });
 /// # lumen_widgets::doc_shot(app, 220.0, 140.0, "modal");
 /// ```
+///
+/// Renders:
+///
+/// ![Modal example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/modal.png)
+///
+/// The picture above is `src/doc_shots/modal.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Modal {
     el: Element,
 }
@@ -431,6 +479,14 @@ pub fn modal(base: Element, dialog: Element, open: bool) -> Element {
 /// });
 /// # lumen_widgets::doc_shot(app, 240.0, 100.0, "pane_grid");
 /// ```
+///
+/// Renders:
+///
+/// ![Pane Grid example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/pane_grid.png)
+///
+/// The picture above is `src/doc_shots/pane_grid.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct PaneGrid {
     el: Element,
 }

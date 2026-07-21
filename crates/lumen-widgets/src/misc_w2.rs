@@ -18,6 +18,14 @@ use std::rc::Rc;
 /// let app = App::new(|cx| Skeleton::new(cx, 160.0, 16.0).into());
 /// # lumen_widgets::doc_shot(app, 180.0, 36.0, "skeleton");
 /// ```
+///
+/// Renders:
+///
+/// ![Skeleton example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/skeleton.png)
+///
+/// The picture above is `src/doc_shots/skeleton.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Skeleton {
     el: Element,
 }
@@ -50,6 +58,14 @@ impl_common!(Skeleton);
 /// let app = App::new(|_| Avatar::new("Ada Lovelace", 40.0).into());
 /// # lumen_widgets::doc_shot(app, 56.0, 56.0, "avatar");
 /// ```
+///
+/// Renders:
+///
+/// ![Avatar example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/avatar.png)
+///
+/// The picture above is `src/doc_shots/avatar.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Avatar {
     el: Element,
 }
@@ -114,6 +130,14 @@ impl_common!(Avatar);
 /// let app = App::new(|cx| Pagination::new(cx, "page", 5).into());
 /// # lumen_widgets::doc_shot(app, 240.0, 48.0, "pagination");
 /// ```
+///
+/// Renders:
+///
+/// ![Pagination example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/pagination.png)
+///
+/// The picture above is `src/doc_shots/pagination.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Pagination {
     el: Element,
 }
@@ -188,6 +212,14 @@ impl_common!(Pagination);
 /// let app = App::new(|_| AlignBox::new(widgets::text("centered"), Align::Center, Align::Center).into());
 /// # lumen_widgets::doc_shot(app, 160.0, 60.0, "align_box");
 /// ```
+///
+/// Renders:
+///
+/// ![Align Box example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/align_box.png)
+///
+/// The picture above is `src/doc_shots/align_box.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct AlignBox {
     el: Element,
 }

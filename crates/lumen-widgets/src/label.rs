@@ -17,6 +17,14 @@ use lumen_text::TextStyle;
 /// let app = App::new(|_| Label::new("Hello, Lumen").into());
 /// # lumen_widgets::doc_shot(app, 140.0, 36.0, "label");
 /// ```
+///
+/// Renders:
+///
+/// ![Label example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/label.png)
+///
+/// The picture above is `src/doc_shots/label.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Label {
     el: Element,
 }

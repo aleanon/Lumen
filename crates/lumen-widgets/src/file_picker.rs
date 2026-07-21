@@ -17,6 +17,14 @@ use lumen_layout::Dim;
 /// let app = App::new(|cx| FilePicker::new(cx, "file", "Choose file…", ["png", "jpg"]).into());
 /// # lumen_widgets::doc_shot(app, 240.0, 48.0, "file_picker");
 /// ```
+///
+/// Renders:
+///
+/// ![File Picker example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/file_picker.png)
+///
+/// The picture above is `src/doc_shots/file_picker.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct FilePicker {
     el: Element,
 }

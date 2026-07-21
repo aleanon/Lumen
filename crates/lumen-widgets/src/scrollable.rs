@@ -19,6 +19,14 @@ use std::rc::Rc;
 /// });
 /// # lumen_widgets::doc_shot(app, 180.0, 100.0, "scrollable");
 /// ```
+///
+/// Renders:
+///
+/// ![Scrollable example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/scrollable.png)
+///
+/// The picture above is `src/doc_shots/scrollable.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Scrollable {
     el: Element,
 }

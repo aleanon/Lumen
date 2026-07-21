@@ -21,6 +21,14 @@ use std::rc::Rc;
 /// let app = App::new(|cx| SearchField::new(cx, "q", "Search…").into());
 /// # lumen_widgets::doc_shot(app, 220.0, 44.0, "search_field");
 /// ```
+///
+/// Renders:
+///
+/// ![Search Field example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/search_field.png)
+///
+/// The picture above is `src/doc_shots/search_field.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct SearchField {
     el: Element,
 }

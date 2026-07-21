@@ -16,6 +16,14 @@ use lumen_layout::{Dim, LayoutStyle};
 /// let app = App::new(|_| ProgressBar::new(0.65).into());
 /// # lumen_widgets::doc_shot(app, 220.0, 28.0, "progress_bar");
 /// ```
+///
+/// Renders:
+///
+/// ![Progress Bar example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/progress_bar.png)
+///
+/// The picture above is `src/doc_shots/progress_bar.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct ProgressBar {
     el: Element,
 }

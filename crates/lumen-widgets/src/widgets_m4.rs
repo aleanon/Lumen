@@ -40,6 +40,14 @@ fn cell(text: String, role: Role) -> Element {
 /// });
 /// # lumen_widgets::doc_shot(app, 200.0, 120.0, "data_grid");
 /// ```
+///
+/// Renders:
+///
+/// ![Data Grid example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/data_grid.png)
+///
+/// The picture above is `src/doc_shots/data_grid.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct DataGrid {
     el: Element,
 }
@@ -200,6 +208,14 @@ pub struct TreeRow<'a> {
 /// let app = App::new(move |cx| Tree::new(cx, "tree", &rows).into());
 /// # lumen_widgets::doc_shot(app, 200.0, 100.0, "tree");
 /// ```
+///
+/// Renders:
+///
+/// ![Tree example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/tree.png)
+///
+/// The picture above is `src/doc_shots/tree.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Tree {
     el: Element,
 }
@@ -306,6 +322,14 @@ pub fn tree(cx: &BuildCx, name: &str, rows: &[TreeRow]) -> Element {
 /// let app = App::new(|_| BarChart::new(&[3.0, 7.0, 4.0, 8.0, 2.0], 160.0, 80.0).into());
 /// # lumen_widgets::doc_shot(app, 176.0, 96.0, "bar_chart");
 /// ```
+///
+/// Renders:
+///
+/// ![Bar Chart example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/bar_chart.png)
+///
+/// The picture above is `src/doc_shots/bar_chart.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct BarChart {
     el: Element,
 }
@@ -390,6 +414,14 @@ pub struct Run<'a> {
 /// let app = App::new(move |_| RichText::new(&runs).into());
 /// # lumen_widgets::doc_shot(app, 180.0, 40.0, "rich_text");
 /// ```
+///
+/// Renders:
+///
+/// ![Rich Text example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/rich_text.png)
+///
+/// The picture above is `src/doc_shots/rich_text.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct RichText {
     el: Element,
 }
@@ -452,6 +484,14 @@ pub fn rich_text(runs: &[Run]) -> Element {
 /// let app = App::new(|cx| RichTextEditor::new(cx, "doc", "# Title\nSome **bold** body").into());
 /// # lumen_widgets::doc_shot(app, 300.0, 120.0, "rich_text_editor");
 /// ```
+///
+/// Renders:
+///
+/// ![Rich Text Editor example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/rich_text_editor.png)
+///
+/// The picture above is `src/doc_shots/rich_text_editor.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct RichTextEditor {
     el: Element,
 }
@@ -550,6 +590,14 @@ pub fn rich_text_editor(cx: &BuildCx, name: &str, initial: &str) -> Element {
 /// });
 /// # lumen_widgets::doc_shot(app, 340.0, 140.0, "find_replace_bar");
 /// ```
+///
+/// Renders:
+///
+/// ![Find Replace Bar example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/find_replace_bar.png)
+///
+/// The picture above is `src/doc_shots/find_replace_bar.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct FindReplaceBar {
     el: Element,
 }

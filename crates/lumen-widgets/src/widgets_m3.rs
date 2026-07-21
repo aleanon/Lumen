@@ -35,6 +35,14 @@ fn touch_style(extra_pad: f32) -> LayoutStyle {
 /// let app = App::new(|cx| BottomNav::new(cx, "nav", &["Home", "Search", "Me"]).into());
 /// # lumen_widgets::doc_shot(app, 260.0, 56.0, "bottom_nav");
 /// ```
+///
+/// Renders:
+///
+/// ![Bottom Nav example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/bottom_nav.png)
+///
+/// The picture above is `src/doc_shots/bottom_nav.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct BottomNav {
     el: Element,
 }
@@ -67,6 +75,14 @@ pub fn bottom_nav(cx: &BuildCx, name: &str, items: &[&str]) -> Element {
 /// let app = App::new(|cx| NavigationRail::new(cx, "rail", &["Home", "Files", "Cfg"]).into());
 /// # lumen_widgets::doc_shot(app, 80.0, 180.0, "navigation_rail");
 /// ```
+///
+/// Renders:
+///
+/// ![Navigation Rail example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/navigation_rail.png)
+///
+/// The picture above is `src/doc_shots/navigation_rail.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct NavigationRail {
     el: Element,
 }
@@ -155,6 +171,14 @@ fn nav(cx: &BuildCx, name: &str, items: &[&str], dir: FlexDirection) -> Element 
 /// let app = App::new(|_| AppBar::new("Inbox", vec![]).into());
 /// # lumen_widgets::doc_shot(app, 260.0, 56.0, "app_bar");
 /// ```
+///
+/// Renders:
+///
+/// ![App Bar example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/app_bar.png)
+///
+/// The picture above is `src/doc_shots/app_bar.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct AppBar {
     el: Element,
 }
@@ -227,6 +251,14 @@ pub fn app_bar(title: impl Into<String>, actions: Vec<Element>) -> Element {
 /// });
 /// # lumen_widgets::doc_shot(app, 200.0, 100.0, "pull_to_refresh");
 /// ```
+///
+/// Renders:
+///
+/// ![Pull To Refresh example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/pull_to_refresh.png)
+///
+/// The picture above is `src/doc_shots/pull_to_refresh.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct PullToRefresh {
     el: Element,
 }
@@ -353,6 +385,14 @@ pub fn pull_to_refresh(
 /// let app = App::new(|cx| DatePicker::new(cx, "date").into());
 /// # lumen_widgets::doc_shot(app, 220.0, 80.0, "date_picker");
 /// ```
+///
+/// Renders:
+///
+/// ![Date Picker example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/date_picker.png)
+///
+/// The picture above is `src/doc_shots/date_picker.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct DatePicker {
     el: Element,
 }
@@ -391,6 +431,14 @@ pub fn date_picker(cx: &BuildCx, name: &str) -> Element {
 /// let app = App::new(|cx| TimePicker::new(cx, "time").into());
 /// # lumen_widgets::doc_shot(app, 180.0, 80.0, "time_picker");
 /// ```
+///
+/// Renders:
+///
+/// ![Time Picker example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/time_picker.png)
+///
+/// The picture above is `src/doc_shots/time_picker.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct TimePicker {
     el: Element,
 }

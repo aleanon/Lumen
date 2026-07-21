@@ -46,6 +46,14 @@ fn tick_label(v: f64) -> String {
 /// });
 /// # lumen_widgets::doc_shot(app, 240.0, 140.0, "line_chart");
 /// ```
+///
+/// Renders:
+///
+/// ![Line Chart example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/line_chart.png)
+///
+/// The picture above is `src/doc_shots/line_chart.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct LineChart {
     /// Y values, evenly spaced along X.
     pub values: Vec<f64>,
@@ -196,6 +204,14 @@ pub struct PieSlice {
 /// });
 /// # lumen_widgets::doc_shot(app, 180.0, 180.0, "pie_chart");
 /// ```
+///
+/// Renders:
+///
+/// ![Pie Chart example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/pie_chart.png)
+///
+/// The picture above is `src/doc_shots/pie_chart.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct PieChart {
     /// The slices, drawn clockwise from 12 o'clock.
     pub slices: Vec<PieSlice>,

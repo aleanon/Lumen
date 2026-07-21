@@ -69,6 +69,14 @@ pub fn leaf(w: impl crate::LeafWidget + 'static) -> Element {
 /// let app = App::new(move |_| Image::new(img.clone()).into());
 /// # lumen_widgets::doc_shot(app, 60.0, 44.0, "image");
 /// ```
+///
+/// Renders:
+///
+/// ![Image example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/image.png)
+///
+/// The picture above is `src/doc_shots/image.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Image {
     el: Element,
 }
@@ -332,6 +340,14 @@ pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
 /// });
 /// # lumen_widgets::doc_shot(app, 96.0, 56.0, "canvas");
 /// ```
+///
+/// Renders:
+///
+/// ![Canvas example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/canvas.png)
+///
+/// The picture above is `src/doc_shots/canvas.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Canvas {
     el: Element,
 }

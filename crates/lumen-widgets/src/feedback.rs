@@ -53,6 +53,14 @@ impl ToastKind {
 /// let app = App::new(|_| Toast::new(ToastKind::Success, "Saved", "Changes stored").into());
 /// # lumen_widgets::doc_shot(app, 240.0, 72.0, "toast");
 /// ```
+///
+/// Renders:
+///
+/// ![Toast example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/toast.png)
+///
+/// The picture above is `src/doc_shots/toast.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Toast {
     el: Element,
 }
@@ -109,6 +117,14 @@ impl_common!(Toast);
 /// let app = App::new(|cx| Spinner::new(cx, 32.0).into());
 /// # lumen_widgets::doc_shot(app, 56.0, 56.0, "spinner");
 /// ```
+///
+/// Renders:
+///
+/// ![Spinner example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/spinner.png)
+///
+/// The picture above is `src/doc_shots/spinner.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Spinner {
     el: Element,
 }
@@ -153,6 +169,14 @@ impl_common!(Spinner);
 /// let app = App::new(|_| Chip::new("Filter").into());
 /// # lumen_widgets::doc_shot(app, 100.0, 40.0, "chip");
 /// ```
+///
+/// Renders:
+///
+/// ![Chip example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/chip.png)
+///
+/// The picture above is `src/doc_shots/chip.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
 pub struct Chip {
     el: Element,
 }
