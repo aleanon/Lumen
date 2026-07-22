@@ -19,10 +19,15 @@ const PRESETS: [&str; 12] = [
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, ColorPicker};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, ColorPicker, BuildCx, Element};
 ///
-/// let app = App::new(|cx| ColorPicker::new(cx, "color").into());
-/// # lumen_widgets::doc_shot(app, 200.0, 80.0, "color_picker");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     // Rendered with the palette open (see the `.open` signal below).
+///     centered(cx, ColorPicker::new(cx, "brand").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot_open(app, 240.0, 240.0, "color_picker", "brand.open");
 /// ```
 ///
 /// Renders:

@@ -157,6 +157,42 @@ fn verify_or_write_shot(shot: RgbaImage, name: &str) {
     );
 }
 
+/// Present `child` centered on both axes inside a box the size of the current
+/// window ([`BuildCx::size`](element::BuildCx::size)). A bare widget root is
+/// content-sized and pins to the top-left, so this is the wrapper that makes a
+/// single widget sit centered — used by the widget doc examples, and handy as a
+/// root for any "one widget on a screen" view.
+pub fn centered(cx: &BuildCx, child: Element) -> Element {
+    showcase_frame(cx, child, lumen_layout::Align::Center)
+}
+
+/// Like [`centered`], but `child` spans the full window width (still centered
+/// vertically) — for bars, sliders, rows, tab strips, and list-like widgets
+/// that should stretch to the frame rather than sit at their natural width.
+pub fn full_width(cx: &BuildCx, child: Element) -> Element {
+    showcase_frame(cx, child, lumen_layout::Align::Stretch)
+}
+
+fn showcase_frame(cx: &BuildCx, child: Element, cross: lumen_layout::Align) -> Element {
+    use lumen_layout::{Dim, Display, FlexDirection, LayoutStyle};
+    let win = cx.size();
+    Element {
+        role: lumen_core::semantics::Role::Generic,
+        elide_semantics: true,
+        style: LayoutStyle {
+            display: Display::Flex,
+            flex_direction: FlexDirection::Column,
+            align_items: Some(cross),
+            justify_content: Some(lumen_layout::Align::Center),
+            width: Dim::px(win.width as f32),
+            height: Dim::px(win.height as f32),
+            ..LayoutStyle::default()
+        },
+        children: vec![child],
+        ..Element::default()
+    }
+}
+
 /// An explicit renderer choice from the command line (`--wgpu` / `--tiny-skia`)
 /// or the `LUMEN_RENDERER=wgpu|tiny-skia` environment variable, ready to install
 /// with [`App::with_renderer`]. Returns `None` when nothing is specified, so the

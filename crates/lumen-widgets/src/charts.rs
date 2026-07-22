@@ -191,18 +191,25 @@ pub struct PieSlice {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::PieSlice;
-/// use lumen_widgets::{App, PieChart};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, PieChart, PieSlice, BuildCx, Element};
 /// use lumen_core::Color;
+/// use lumen_layout::Dim;
 ///
-/// let app = App::new(|_| {
-///     PieChart::element(vec![
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let mut chart = PieChart::element(vec![
 ///         PieSlice { label: "A".into(), value: 3.0, color: Color::srgb8(0x1a,0x73,0xe8,0xff) },
 ///         PieSlice { label: "B".into(), value: 2.0, color: Color::srgb8(0x2e,0xa0,0x43,0xff) },
 ///         PieSlice { label: "C".into(), value: 1.0, color: Color::srgb8(0xe8,0x40,0x4b,0xff) },
-///     ])
-/// });
-/// # lumen_widgets::doc_shot(app, 180.0, 180.0, "pie_chart");
+///     ]);
+///     // The chart leaf fills its box, so give it an explicit square and center
+///     // it — a larger frame keeps the whole circle visible with a margin.
+///     chart.style.width = Dim::px(150.0);
+///     chart.style.height = Dim::px(150.0);
+///     centered(cx, chart)
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 200.0, "pie_chart");
 /// ```
 ///
 /// Renders:

@@ -16,10 +16,14 @@ use lumen_text::TextStyle;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Button};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Button, BuildCx, Element};
 ///
-/// let app = App::new(|_| Button::new("Save").on_press(|_| {}).into());
-/// # lumen_widgets::doc_shot(app, 160.0, 60.0, "button");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Button::new("Save").on_press(|_| {}).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 160.0, 72.0, "button");
 /// ```
 ///
 /// Renders:
