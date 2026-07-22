@@ -223,24 +223,45 @@ re-touching `cx`. Namespace any tagged sub-nodes under `name` (`{name}-body`).
 ## Step 4b — a rendered doc example (mandatory)
 
 Every widget struct carries a `# Example` in its rustdoc that **compiles,
-runs, and screenshot-verifies itself**. Boilerplate is hidden with `#`; the
-visible lines show real usage (the `App::new(|cx| Foo::new(...).into())`
-pattern). The hidden last line renders + checks the screenshot against a
-committed PNG under `tests/golden/widgets/<name>.png`:
+runs, and screenshot-verifies itself**. The visible code is a `fn build(cx) ->
+Element` (plus its imports) — real usage a reader can copy; the `App`/`doc_shot`
+harness is hidden with `#`. The render must be **centred and fully visible**,
+so wrap the widget in a framing helper. The hidden last line renders + checks
+the screenshot against a committed PNG under `src/doc_shots/<name>.png`:
 
 ```rust
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Foo};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Foo, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Foo::new(cx, "name", "Label").into());
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Foo::new(cx, "name", "Label").into())
+/// }
+/// # let app = App::new(build);
 /// # lumen_widgets::doc_shot(app, 200.0, 60.0, "foo");
 /// ```
 ```
 
+- **Framing helpers** (a bare widget root is content-sized and pins top-left):
+  `centered(cx, el)` centres both axes (buttons, chips, pickers, charts);
+  `full_width(cx, el)` stretches horizontally, centred vertically (bars,
+  sliders, rules, tab strips, nav/app bars, split/pane grids, tables);
+  `top(cx, el)` centres horizontally but anchors to the top so an open
+  dropdown's absolute panel flows into view (combobox, pick_list). Widgets that
+  fill the window themselves (Sheet/Drawer/Modal) need no wrapper — but Modal
+  must be sized to `cx.size()` so its %-backdrop centres the dialog.
+- **Show a meaningful state, not the empty default.** Render checkboxes checked,
+  switches on, dropdowns/accordions/popovers open, trees expanded — via
+  `doc_shot_open` (bool signal) or by seeding the state signal in `build`
+  (`cx.signal(name, || HashSet::from([...]))`, since init runs once).
+- **Leaf widgets have no intrinsic size** and collapse to 0 when centred — give
+  them an explicit box first (`el.style.width/height = Dim::px(..)`) then centre
+  (pie/line charts, canvas without a fixed size).
 - `doc_shot(app, w, h, "name")` renders headless, screenshots, and asserts
-  byte-equality with `tests/golden/widgets/name.png`. A signal-gated overlay
+  byte-equality with `src/doc_shots/name.png`. Pick `w`×`h` so the widget is
+  centred with a margin and nothing is clipped. A signal-gated overlay
   (Sheet/Drawer-style, hidden until `{name}.open`) uses
   `doc_shot_open(app, w, h, "name", "name.open")` instead.
 - **Generate/re-approve the screenshot** with
