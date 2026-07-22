@@ -13,10 +13,14 @@ use std::rc::Rc;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Skeleton};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Skeleton, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Skeleton::new(cx, 160.0, 16.0).into());
-/// # lumen_widgets::doc_shot(app, 180.0, 36.0, "skeleton");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Skeleton::new(cx, 160.0, 16.0).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 56.0, "skeleton");
 /// ```
 ///
 /// Renders:
@@ -53,10 +57,14 @@ impl_common!(Skeleton);
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Avatar};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Avatar, BuildCx, Element};
 ///
-/// let app = App::new(|_| Avatar::new("Ada Lovelace", 40.0).into());
-/// # lumen_widgets::doc_shot(app, 56.0, 56.0, "avatar");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Avatar::new("Ada Lovelace", 40.0).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 72.0, 72.0, "avatar");
 /// ```
 ///
 /// Renders:
@@ -125,10 +133,14 @@ impl_common!(Avatar);
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Pagination};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Pagination, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Pagination::new(cx, "page", 5).into());
-/// # lumen_widgets::doc_shot(app, 240.0, 48.0, "pagination");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Pagination::new(cx, "page", 5).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 280.0, 60.0, "pagination");
 /// ```
 ///
 /// Renders:
@@ -206,11 +218,24 @@ impl_common!(Pagination);
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, AlignBox};
-/// use lumen_layout::Align;
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, AlignBox, BuildCx, Element};
+/// use lumen_core::Color;
+/// use lumen_layout::{Align, Dim};
 ///
-/// let app = App::new(|_| AlignBox::new(widgets::text("centered"), Align::Center, Align::Center).into());
-/// # lumen_widgets::doc_shot(app, 160.0, 60.0, "align_box");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     // AlignBox fills its parent and positions its child; give it a visible
+///     // sized box so you can see "centered" sitting in the middle of it.
+///     let mut box_el: Element =
+///         AlignBox::new(widgets::text("centered"), Align::Center, Align::Center).into();
+///     box_el.background = Some(Color::srgb8(0xec, 0xef, 0xf3, 0xff));
+///     box_el.corner_radius = 8.0;
+///     box_el.style.width = Dim::px(180.0);
+///     box_el.style.height = Dim::px(90.0);
+///     centered(cx, box_el)
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 220.0, 130.0, "align_box");
 /// ```
 ///
 /// Renders:

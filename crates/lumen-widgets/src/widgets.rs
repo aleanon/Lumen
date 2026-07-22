@@ -62,12 +62,17 @@ pub fn leaf(w: impl crate::LeafWidget + 'static) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Image, RgbaImage};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Image, RgbaImage, BuildCx, Element};
 ///
-/// # let px: Vec<u8> = (0..48 * 32).flat_map(|_| [0x2b, 0x6c, 0xff, 0xff]).collect();
-/// # let img = RgbaImage::from_raw(48, 32, px);
-/// let app = App::new(move |_| Image::new(img.clone()).into());
-/// # lumen_widgets::doc_shot(app, 60.0, 44.0, "image");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     // A 48x32 solid-blue image (real apps decode PNG/JPEG bytes instead).
+///     let px: Vec<u8> = (0..48 * 32).flat_map(|_| [0x2b, 0x6c, 0xff, 0xff]).collect();
+///     let img = RgbaImage::from_raw(48, 32, px);
+///     centered(cx, Image::new(img).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 96.0, 72.0, "image");
 /// ```
 ///
 /// Renders:
@@ -327,18 +332,22 @@ pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Canvas};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Canvas, BuildCx, Element};
 /// use lumen_core::Color;
 /// use lumen_render::Brush;
 ///
-/// let app = App::new(|_| {
-///     Canvas::new(80.0, 40.0, |f, size| {
-///         f.fill_rect(kurbo::Rect::new(0.0, 0.0, size.width, size.height),
-///                     Brush::Solid(Color::srgb8(0x18, 0xc2, 0x7d, 0xff)));
-///     })
-///     .into()
-/// });
-/// # lumen_widgets::doc_shot(app, 96.0, 56.0, "canvas");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let canvas = Canvas::new(80.0, 40.0, |f, size| {
+///         f.fill_rect(
+///             kurbo::Rect::new(0.0, 0.0, size.width, size.height),
+///             Brush::Solid(Color::srgb8(0x18, 0xc2, 0x7d, 0xff)),
+///         );
+///     });
+///     centered(cx, canvas.into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 120.0, 72.0, "canvas");
 /// ```
 ///
 /// Renders:

@@ -48,10 +48,14 @@ impl ToastKind {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Toast, ToastKind};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Toast, ToastKind, BuildCx, Element};
 ///
-/// let app = App::new(|_| Toast::new(ToastKind::Success, "Saved", "Changes stored").into());
-/// # lumen_widgets::doc_shot(app, 240.0, 72.0, "toast");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Toast::new(ToastKind::Success, "Saved", "Changes stored").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 320.0, 92.0, "toast");
 /// ```
 ///
 /// Renders:
@@ -112,10 +116,14 @@ impl_common!(Toast);
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Spinner};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Spinner, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Spinner::new(cx, 32.0).into());
-/// # lumen_widgets::doc_shot(app, 56.0, 56.0, "spinner");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Spinner::new(cx, 32.0).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 72.0, 72.0, "spinner");
 /// ```
 ///
 /// Renders:
@@ -164,10 +172,14 @@ impl_common!(Spinner);
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Chip};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Chip, BuildCx, Element};
 ///
-/// let app = App::new(|_| Chip::new("Filter").into());
-/// # lumen_widgets::doc_shot(app, 100.0, 40.0, "chip");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Chip::new("Filter").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 120.0, 52.0, "chip");
 /// ```
 ///
 /// Renders:

@@ -30,10 +30,14 @@ fn touch_style(extra_pad: f32) -> LayoutStyle {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, BottomNav};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{full_width, BottomNav, BuildCx, Element};
 ///
-/// let app = App::new(|cx| BottomNav::new(cx, "nav", &["Home", "Search", "Me"]).into());
-/// # lumen_widgets::doc_shot(app, 260.0, 56.0, "bottom_nav");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     full_width(cx, BottomNav::new(cx, "nav", &["Home", "Search", "Me"]).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 280.0, 64.0, "bottom_nav");
 /// ```
 ///
 /// Renders:
@@ -70,10 +74,14 @@ pub fn bottom_nav(cx: &BuildCx, name: &str, items: &[&str]) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, NavigationRail};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, NavigationRail, BuildCx, Element};
 ///
-/// let app = App::new(|cx| NavigationRail::new(cx, "rail", &["Home", "Files", "Cfg"]).into());
-/// # lumen_widgets::doc_shot(app, 80.0, 180.0, "navigation_rail");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, NavigationRail::new(cx, "rail", &["Home", "Files", "Cfg"]).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 110.0, 200.0, "navigation_rail");
 /// ```
 ///
 /// Renders:
@@ -166,10 +174,23 @@ fn nav(cx: &BuildCx, name: &str, items: &[&str], dir: FlexDirection) -> Element 
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, AppBar};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{widgets, AppBar, Button, BuildCx, Element};
+/// use lumen_core::Color;
+/// use lumen_layout::Dim;
 ///
-/// let app = App::new(|_| AppBar::new("Inbox", vec![]).into());
-/// # lumen_widgets::doc_shot(app, 260.0, 56.0, "app_bar");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let bar = AppBar::new("Inbox", vec![Button::new("Edit").ghost().into()]);
+///     // The bar's fill is white; sit it atop a tinted page so it reads as a bar.
+///     let mut page = widgets::column(vec![bar.into()]);
+///     page.background = Some(Color::srgb8(0xe9, 0xec, 0xf1, 0xff));
+///     let win = cx.size();
+///     page.style.width = Dim::px(win.width as f32);
+///     page.style.height = Dim::px(win.height as f32);
+///     page
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 280.0, 96.0, "app_bar");
 /// ```
 ///
 /// Renders:
@@ -244,12 +265,15 @@ pub fn app_bar(title: impl Into<String>, actions: Vec<Element>) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, PullToRefresh};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, PullToRefresh, BuildCx, Element};
 ///
-/// let app = App::new(|cx| {
-///     PullToRefresh::new(cx, "ptr", 60.0, |_| {}, vec![widgets::text("Pull me down")]).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 200.0, 100.0, "pull_to_refresh");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let ptr = PullToRefresh::new(cx, "ptr", 60.0, |_| {}, vec![widgets::text("Pull me down")]);
+///     centered(cx, ptr.into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 220.0, 110.0, "pull_to_refresh");
 /// ```
 ///
 /// Renders:
@@ -380,10 +404,14 @@ pub fn pull_to_refresh(
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, DatePicker};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, DatePicker, BuildCx, Element};
 ///
-/// let app = App::new(|cx| DatePicker::new(cx, "date").into());
-/// # lumen_widgets::doc_shot(app, 220.0, 80.0, "date_picker");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, DatePicker::new(cx, "date").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 240.0, 130.0, "date_picker");
 /// ```
 ///
 /// Renders:
@@ -426,10 +454,14 @@ pub fn date_picker(cx: &BuildCx, name: &str) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, TimePicker};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, TimePicker, BuildCx, Element};
 ///
-/// let app = App::new(|cx| TimePicker::new(cx, "time").into());
-/// # lumen_widgets::doc_shot(app, 180.0, 80.0, "time_picker");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, TimePicker::new(cx, "time").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 130.0, "time_picker");
 /// ```
 ///
 /// Renders:

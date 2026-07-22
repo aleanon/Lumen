@@ -38,13 +38,22 @@ fn tick_label(v: f64) -> String {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, LineChart};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, LineChart, BuildCx, Element};
+/// use lumen_layout::Dim;
 ///
-/// let app = App::new(|_| {
-///     LineChart::element(vec![3.0, 7.0, 5.0, 9.0, 6.0],
-///                        vec!["Mon".into(), "Tue".into(), "Wed".into(), "Thu".into(), "Fri".into()])
-/// });
-/// # lumen_widgets::doc_shot(app, 240.0, 140.0, "line_chart");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let mut chart = LineChart::element(
+///         vec![3.0, 7.0, 5.0, 9.0, 6.0],
+///         vec!["Mon".into(), "Tue".into(), "Wed".into(), "Thu".into(), "Fri".into()],
+///     );
+///     // The chart leaf fills its box — size it so the plot isn't clipped.
+///     chart.style.width = Dim::px(220.0);
+///     chart.style.height = Dim::px(120.0);
+///     centered(cx, chart)
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 260.0, 160.0, "line_chart");
 /// ```
 ///
 /// Renders:

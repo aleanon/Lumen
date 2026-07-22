@@ -33,12 +33,16 @@ fn cell(text: String, role: Role) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, DataGrid};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, DataGrid, BuildCx, Element};
 ///
-/// let app = App::new(|cx| {
-///     DataGrid::new(cx, "grid", &["Name", "Age"], 100, 24.0, 96.0, |r, c| format!("r{r}c{c}")).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 200.0, 120.0, "data_grid");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let grid =
+///         DataGrid::new(cx, "grid", &["Name", "Age"], 100, 24.0, 96.0, |r, c| format!("r{r}c{c}"));
+///     centered(cx, grid.into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 220.0, 140.0, "data_grid");
 /// ```
 ///
 /// Renders:
@@ -198,15 +202,22 @@ pub struct TreeRow<'a> {
 /// # Example
 ///
 /// ```
+/// # use lumen_widgets::App;
 /// use lumen_widgets::widgets_m4::TreeRow;
-/// use lumen_widgets::{App, Tree};
+/// use lumen_widgets::{centered, Tree, BuildCx, Element};
+/// use std::collections::HashSet;
 ///
-/// let rows = [
-///     TreeRow { id: "animals", label: "Animals", depth: 0, has_children: true },
-///     TreeRow { id: "cat", label: "Cat", depth: 1, has_children: false },
-/// ];
-/// let app = App::new(move |cx| Tree::new(cx, "tree", &rows).into());
-/// # lumen_widgets::doc_shot(app, 200.0, 100.0, "tree");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let rows = [
+///         TreeRow { id: "animals", label: "Animals", depth: 0, has_children: true },
+///         TreeRow { id: "cat", label: "Cat", depth: 1, has_children: false },
+///     ];
+///     // Seed the expanded-id set so "animals" starts open and "Cat" shows.
+///     cx.signal("tree", || HashSet::from(["animals".to_string()]));
+///     centered(cx, Tree::new(cx, "tree", &rows).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 110.0, "tree");
 /// ```
 ///
 /// Renders:
@@ -317,10 +328,14 @@ pub fn tree(cx: &BuildCx, name: &str, rows: &[TreeRow]) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, BarChart};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, BarChart, BuildCx, Element};
 ///
-/// let app = App::new(|_| BarChart::new(&[3.0, 7.0, 4.0, 8.0, 2.0], 160.0, 80.0).into());
-/// # lumen_widgets::doc_shot(app, 176.0, 96.0, "bar_chart");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, BarChart::new(&[3.0, 7.0, 4.0, 8.0, 2.0], 160.0, 80.0).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 116.0, "bar_chart");
 /// ```
 ///
 /// Renders:
@@ -403,16 +418,20 @@ pub struct Run<'a> {
 /// # Example
 ///
 /// ```
+/// # use lumen_widgets::App;
 /// use lumen_widgets::widgets_m4::Run;
-/// use lumen_widgets::{App, RichText};
+/// use lumen_widgets::{centered, RichText, BuildCx, Element};
 /// use lumen_core::Color;
 ///
-/// let runs = [
-///     Run { text: "Bold ", color: Color::BLACK, size: 16.0 },
-///     Run { text: "and blue", color: Color::srgb8(0x1a, 0x73, 0xe8, 0xff), size: 16.0 },
-/// ];
-/// let app = App::new(move |_| RichText::new(&runs).into());
-/// # lumen_widgets::doc_shot(app, 180.0, 40.0, "rich_text");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let runs = [
+///         Run { text: "Bold ", color: Color::BLACK, size: 16.0 },
+///         Run { text: "and blue", color: Color::srgb8(0x1a, 0x73, 0xe8, 0xff), size: 16.0 },
+///     ];
+///     centered(cx, RichText::new(&runs).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 220.0, 56.0, "rich_text");
 /// ```
 ///
 /// Renders:
@@ -479,10 +498,14 @@ pub fn rich_text(runs: &[Run]) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, RichTextEditor};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, RichTextEditor, BuildCx, Element};
 ///
-/// let app = App::new(|cx| RichTextEditor::new(cx, "doc", "# Title\nSome **bold** body").into());
-/// # lumen_widgets::doc_shot(app, 300.0, 120.0, "rich_text_editor");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, RichTextEditor::new(cx, "doc", "# Title\nSome **bold** body").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 320.0, 140.0, "rich_text_editor");
 /// ```
 ///
 /// Renders:
@@ -580,15 +603,18 @@ pub fn rich_text_editor(cx: &BuildCx, name: &str, initial: &str) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, FindReplaceBar, RichTextEditor};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, FindReplaceBar, RichTextEditor, BuildCx, Element};
 ///
-/// let app = App::new(|cx| {
-///     widgets::column(vec![
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let col = widgets::column(vec![
 ///         RichTextEditor::new(cx, "doc", "hello world").into(),
 ///         FindReplaceBar::new(cx, "fr", "doc").into(),
-///     ])
-/// });
-/// # lumen_widgets::doc_shot(app, 340.0, 140.0, "find_replace_bar");
+///     ]);
+///     centered(cx, col)
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 400.0, 170.0, "find_replace_bar");
 /// ```
 ///
 /// Renders:

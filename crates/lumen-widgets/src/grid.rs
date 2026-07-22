@@ -138,14 +138,22 @@ type HeaderFn = Rc<dyn Fn(u32) -> Element>;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Grid};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, Grid, BuildCx, Element};
+/// use lumen_layout::Dim;
 ///
-/// let app = App::new(|cx| {
-///     Grid::new("g", 2, 3, 48.0, 32.0)
+/// fn build(cx: &mut BuildCx) -> Element {
+///     // A grid fills its parent's height (it's built to live in a flex slot),
+///     // so give it an explicit box here or it collapses to zero height.
+///     let mut grid = Grid::new("g", 2, 3, 48.0, 32.0)
 ///         .cell(|_, c| Some(widgets::text(format!("{},{}", c.row, c.col))))
-///         .build(cx)
-/// });
-/// # lumen_widgets::doc_shot(app, 180.0, 100.0, "grid");
+///         .build(cx);
+///     grid.style.width = Dim::px(150.0);
+///     grid.style.height = Dim::px(72.0);
+///     centered(cx, grid)
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 190.0, 110.0, "grid");
 /// ```
 ///
 /// Renders:

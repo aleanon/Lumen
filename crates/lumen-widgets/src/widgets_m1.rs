@@ -57,10 +57,14 @@ pub fn padding(px: f32, child: Element) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Icon};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Icon, BuildCx, Element};
 ///
-/// let app = App::new(|_| Icon::new("gear").into());
-/// # lumen_widgets::doc_shot(app, 40.0, 40.0, "icon");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Icon::new("gear").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 56.0, 56.0, "icon");
 /// ```
 ///
 /// Renders:
@@ -108,10 +112,15 @@ pub fn icon(label: &str) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Switch};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Switch, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Switch::new(cx, "wifi", "Wi-Fi").into());
-/// # lumen_widgets::doc_shot(app, 120.0, 40.0, "switch");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Switch::new(cx, "wifi", "Wi-Fi").into())
+/// }
+/// # let app = App::new(build);
+/// # // Rendered on (`wifi`).
+/// # lumen_widgets::doc_shot_open(app, 140.0, 52.0, "switch", "wifi");
 /// ```
 ///
 /// Renders:
@@ -184,10 +193,14 @@ pub fn switch(cx: &BuildCx, name: &str, label: impl Into<String>) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Stepper};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Stepper, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Stepper::new(cx, "qty", 0, 10).into());
-/// # lumen_widgets::doc_shot(app, 120.0, 48.0, "stepper");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Stepper::new(cx, "qty", 0, 10).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 140.0, 64.0, "stepper");
 /// ```
 ///
 /// Renders:
@@ -245,10 +258,14 @@ pub fn stepper(cx: &BuildCx, name: &str, min: i64, max: i64) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Tabs};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{full_width, Tabs, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Tabs::new(cx, "tab", &["One", "Two", "Three"]).into());
-/// # lumen_widgets::doc_shot(app, 220.0, 44.0, "tabs");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     full_width(cx, Tabs::new(cx, "tab", &["One", "Two", "Three"]).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 240.0, 60.0, "tabs");
 /// ```
 ///
 /// Renders:
@@ -335,12 +352,16 @@ pub fn tabs(cx: &BuildCx, name: &str, labels: &[&str]) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, VirtualList};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, VirtualList, BuildCx, Element};
 ///
-/// let app = App::new(|cx| {
-///     VirtualList::new(cx, "vl", 1000, 24.0, 96.0, |i| widgets::text(format!("Row {i}"))).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 180.0, 100.0, "virtual_list");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let list =
+///         VirtualList::new(cx, "vl", 1000, 24.0, 96.0, |i| widgets::text(format!("Row {i}")));
+///     centered(cx, list.into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 120.0, "virtual_list");
 /// ```
 ///
 /// Renders:

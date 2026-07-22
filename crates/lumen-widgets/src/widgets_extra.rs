@@ -44,10 +44,14 @@ pub fn radio(cx: &BuildCx, group: &str, value: usize, label: impl Into<String>) 
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Select};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Select, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Select::new(cx, "sel", &["Red", "Green", "Blue"]).into());
-/// # lumen_widgets::doc_shot(app, 140.0, 48.0, "select");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Select::new(cx, "sel", &["Red", "Green", "Blue"]).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 160.0, 56.0, "select");
 /// ```
 ///
 /// Renders:
@@ -108,10 +112,14 @@ pub fn select(cx: &BuildCx, name: &str, options: &[&str]) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Tooltip};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, Tooltip, BuildCx, Element};
 ///
-/// let app = App::new(|_| Tooltip::new(widgets::text("hover me"), "A helpful hint").into());
-/// # lumen_widgets::doc_shot(app, 160.0, 48.0, "tooltip");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Tooltip::new(widgets::text("hover me"), "A helpful hint").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 180.0, 64.0, "tooltip");
 /// ```
 ///
 /// Renders:
@@ -175,10 +183,14 @@ pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Menu};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Menu, BuildCx, Element};
 ///
-/// let app = App::new(|_| Menu::new(&["New", "Open", "Save", "Quit"]).into());
-/// # lumen_widgets::doc_shot(app, 140.0, 140.0, "menu");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Menu::new(&["New", "Open", "Save", "Quit"]).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 160.0, 170.0, "menu");
 /// ```
 ///
 /// Renders:
@@ -253,12 +265,15 @@ pub fn grid(columns: usize, children: Vec<Element>) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Wrap};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, Wrap, BuildCx, Element};
 ///
-/// let app = App::new(|_| {
-///     Wrap::new(vec![widgets::text("alpha"), widgets::text("beta"), widgets::text("gamma")]).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 180.0, 60.0, "wrap");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let items = vec![widgets::text("alpha"), widgets::text("beta"), widgets::text("gamma")];
+///     centered(cx, Wrap::new(items).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 72.0, "wrap");
 /// ```
 ///
 /// Renders:
@@ -307,12 +322,30 @@ pub fn wrap(children: Vec<Element>) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, SplitPane};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{full_width, widgets, Container, SplitPane, BuildCx, Element};
+/// use lumen_core::Color;
+/// use lumen_layout::Dim;
 ///
-/// let app = App::new(|_| {
-///     SplitPane::new(widgets::text("left"), widgets::text("right"), 0.4).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 220.0, 80.0, "split_pane");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     // Tint the two panes so the 40/60 split is visible (SplitPane itself
+///     // draws no divider — it just allots width).
+///     let mut left: Element = Container::new(vec![widgets::text("left")])
+///         .padding(8.0)
+///         .background(Color::srgb8(0xdd, 0xe6, 0xf7, 0xff))
+///         .into();
+///     let mut right: Element = Container::new(vec![widgets::text("right")])
+///         .padding(8.0)
+///         .background(Color::srgb8(0xe4, 0xf0, 0xdd, 0xff))
+///         .into();
+///     left.style.width = Dim::pct(1.0); // fill the allotted pane width
+///     right.style.width = Dim::pct(1.0);
+///     let mut split: Element = SplitPane::new(left, right, 0.4).into();
+///     split.style.height = Dim::px(72.0);
+///     full_width(cx, split)
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 240.0, 100.0, "split_pane");
 /// ```
 ///
 /// Renders:
@@ -407,12 +440,26 @@ pub fn text_area(cx: &BuildCx, name: &str, initial: &str) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Modal};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{widgets, Container, Modal, BuildCx, Element};
+/// use lumen_core::Color;
+/// use lumen_layout::Dim;
 ///
-/// let app = App::new(|_| {
-///     Modal::new(widgets::text("Page behind"), widgets::text("Dialog"), true).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 220.0, 140.0, "modal");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let dialog = Container::new(vec![widgets::text("Dialog")])
+///         .padding(16.0)
+///         .background(Color::WHITE);
+///     let mut modal: Element =
+///         Modal::new(widgets::text("Page behind"), dialog.into(), true).into();
+///     // The modal stacks a full-bleed backdrop over the page, so size it to the
+///     // window — then the dialog centers over the whole frame.
+///     let win = cx.size();
+///     modal.style.width = Dim::px(win.width as f32);
+///     modal.style.height = Dim::px(win.height as f32);
+///     modal
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 240.0, 160.0, "modal");
 /// ```
 ///
 /// Renders:
@@ -472,12 +519,15 @@ pub fn modal(base: Element, dialog: Element, open: bool) -> Element {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, PaneGrid};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{full_width, widgets, PaneGrid, BuildCx, Element};
 ///
-/// let app = App::new(|cx| {
-///     PaneGrid::new(cx, "pg", widgets::text("Pane A"), widgets::text("Pane B")).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 240.0, 100.0, "pane_grid");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let pg = PaneGrid::new(cx, "pg", widgets::text("Pane A"), widgets::text("Pane B"));
+///     full_width(cx, pg.into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 260.0, 110.0, "pane_grid");
 /// ```
 ///
 /// Renders:

@@ -82,11 +82,16 @@ fn scrim_and_panel(
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Sheet};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{widgets, Sheet, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Sheet::new(cx, "sheet", widgets::text("Sheet content")).into());
+/// fn build(cx: &mut BuildCx) -> Element {
+///     // The sheet fills the window (scrim + panel), so no demo wrapper is needed.
+///     Sheet::new(cx, "sheet", widgets::text("Sheet content")).into()
+/// }
+/// # let app = App::new(build);
 /// # // The panel is hidden until `sheet.open` is set (see the module docs).
-/// # lumen_widgets::doc_shot_open(app, 220.0, 150.0, "sheet", "sheet.open");
+/// # lumen_widgets::doc_shot_open(app, 240.0, 160.0, "sheet", "sheet.open");
 /// ```
 ///
 /// Renders:
@@ -127,10 +132,14 @@ impl_common!(Sheet);
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Drawer};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{widgets, Drawer, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Drawer::new(cx, "drawer", widgets::text("Menu")).into());
-/// # lumen_widgets::doc_shot_open(app, 260.0, 150.0, "drawer", "drawer.open");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     Drawer::new(cx, "drawer", widgets::text("Menu")).into()
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot_open(app, 280.0, 160.0, "drawer", "drawer.open");
 /// ```
 ///
 /// Renders:
