@@ -19,10 +19,14 @@ use std::rc::Rc;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, TextField};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, TextField, BuildCx, Element};
 ///
-/// let app = App::new(|cx| TextField::new(cx, "bio", "Multi-line text…").into());
-/// # lumen_widgets::doc_shot(app, 280.0, 120.0, "text_field");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, TextField::new(cx, "bio", "Multi-line text…").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 300.0, 130.0, "text_field");
 /// ```
 ///
 /// Renders:

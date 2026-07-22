@@ -13,10 +13,14 @@ const THICKNESS: f32 = 1.0;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Rule};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{full_width, Rule, BuildCx, Element};
 ///
-/// let app = App::new(|_| Rule::horizontal().into());
-/// # lumen_widgets::doc_shot(app, 160.0, 20.0, "rule");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     full_width(cx, Rule::horizontal().into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 48.0, "rule");
 /// ```
 ///
 /// Renders:

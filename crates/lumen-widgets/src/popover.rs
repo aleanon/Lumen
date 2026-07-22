@@ -28,12 +28,17 @@ pub enum PopoverSide {
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Popover};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, Popover, BuildCx, Element};
 ///
-/// let app = App::new(|cx| {
-///     Popover::new(cx, "pop", widgets::button("Open", |_| {}), widgets::text("Panel")).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 160.0, 60.0, "popover");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let trigger = widgets::button("Open", |_| {});
+///     let panel = widgets::text("Panel");
+///     centered(cx, Popover::new(cx, "pop", trigger, panel).into())
+/// }
+/// # let app = App::new(build);
+/// # // Rendered with the panel shown (`pop.open`).
+/// # lumen_widgets::doc_shot_open(app, 200.0, 130.0, "popover", "pop.open");
 /// ```
 ///
 /// Renders:

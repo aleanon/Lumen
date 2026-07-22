@@ -12,13 +12,20 @@ use lumen_layout::{Dim, LayoutStyle};
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Space};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, Space, BuildCx, Element};
 ///
-/// // Space pushes siblings apart; shown here between two labels.
-/// let app = App::new(|_| {
-///     widgets::row(vec![widgets::text("left"), Space::horizontal(60.0).into(), widgets::text("right")])
-/// });
-/// # lumen_widgets::doc_shot(app, 200.0, 36.0, "space");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     // Space pushes siblings apart; shown here between two labels.
+///     let row = widgets::row(vec![
+///         widgets::text("left"),
+///         Space::horizontal(60.0).into(),
+///         widgets::text("right"),
+///     ]);
+///     centered(cx, row)
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 220.0, 52.0, "space");
 /// ```
 ///
 /// Renders:

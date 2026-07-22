@@ -15,10 +15,15 @@ const BOX: f64 = 20.0;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, CheckBox};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, CheckBox, BuildCx, Element};
 ///
-/// let app = App::new(|cx| CheckBox::new(cx, "agree", "I agree").into());
-/// # lumen_widgets::doc_shot(app, 160.0, 40.0, "check_box");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, CheckBox::new(cx, "agree", "I agree").into())
+/// }
+/// # let app = App::new(build);
+/// # // Rendered checked: doc_shot_open sets the `agree` boolean before shooting.
+/// # lumen_widgets::doc_shot_open(app, 170.0, 52.0, "check_box", "agree");
 /// ```
 ///
 /// Renders:

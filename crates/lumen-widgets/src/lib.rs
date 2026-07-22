@@ -163,18 +163,46 @@ fn verify_or_write_shot(shot: RgbaImage, name: &str) {
 /// single widget sit centered — used by the widget doc examples, and handy as a
 /// root for any "one widget on a screen" view.
 pub fn centered(cx: &BuildCx, child: Element) -> Element {
-    showcase_frame(cx, child, lumen_layout::Align::Center)
+    showcase_frame(
+        cx,
+        child,
+        lumen_layout::Align::Center,
+        lumen_layout::Align::Center,
+    )
 }
 
 /// Like [`centered`], but `child` spans the full window width (still centered
 /// vertically) — for bars, sliders, rows, tab strips, and list-like widgets
 /// that should stretch to the frame rather than sit at their natural width.
 pub fn full_width(cx: &BuildCx, child: Element) -> Element {
-    showcase_frame(cx, child, lumen_layout::Align::Stretch)
+    showcase_frame(
+        cx,
+        child,
+        lumen_layout::Align::Stretch,
+        lumen_layout::Align::Center,
+    )
 }
 
-fn showcase_frame(cx: &BuildCx, child: Element, cross: lumen_layout::Align) -> Element {
-    use lumen_layout::{Dim, Display, FlexDirection, LayoutStyle};
+/// Like [`centered`] horizontally, but anchored to the top of the frame — for
+/// widgets whose open state hangs an absolute panel *below* a trigger
+/// (dropdowns, combo boxes): centering the trigger would push the panel off the
+/// bottom, so the trigger sits near the top and the panel flows into view.
+pub fn top(cx: &BuildCx, child: Element) -> Element {
+    showcase_frame(
+        cx,
+        child,
+        lumen_layout::Align::Center,
+        lumen_layout::Align::Start,
+    )
+}
+
+fn showcase_frame(
+    cx: &BuildCx,
+    child: Element,
+    cross: lumen_layout::Align,
+    justify: lumen_layout::Align,
+) -> Element {
+    use lumen_layout::{Dim, Display, Edges, FlexDirection, LayoutStyle};
     let win = cx.size();
     Element {
         role: lumen_core::semantics::Role::Generic,
@@ -183,9 +211,12 @@ fn showcase_frame(cx: &BuildCx, child: Element, cross: lumen_layout::Align) -> E
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             align_items: Some(cross),
-            justify_content: Some(lumen_layout::Align::Center),
+            justify_content: Some(justify),
             width: Dim::px(win.width as f32),
             height: Dim::px(win.height as f32),
+            // A small inset so a full-width child (bar, slider) keeps a margin
+            // rather than bleeding to the frame edge.
+            padding: Edges::all(Dim::px(14.0)),
             ..LayoutStyle::default()
         },
         children: vec![child],

@@ -12,12 +12,15 @@ use std::rc::Rc;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Scrollable};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, Scrollable, BuildCx, Element};
 ///
-/// let app = App::new(|cx| {
-///     Scrollable::new(cx, "sc", 80.0, 400.0, vec![widgets::text("Tall content")]).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 180.0, 100.0, "scrollable");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let content = vec![widgets::text("Tall content")];
+///     centered(cx, Scrollable::new(cx, "sc", 80.0, 400.0, content).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 120.0, "scrollable");
 /// ```
 ///
 /// Renders:

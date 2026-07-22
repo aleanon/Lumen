@@ -12,12 +12,18 @@ use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Container};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, Container, BuildCx, Element};
 ///
-/// let app = App::new(|_| {
-///     Container::new(vec![widgets::text("A"), widgets::text("B")]).row().gap(8.0).padding(6.0).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 120.0, 48.0, "container");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let row = Container::new(vec![widgets::text("A"), widgets::text("B")])
+///         .row()
+///         .gap(8.0)
+///         .padding(6.0);
+///     centered(cx, row.into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 140.0, 60.0, "container");
 /// ```
 ///
 /// Renders:

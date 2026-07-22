@@ -14,10 +14,14 @@ use std::rc::Rc;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Radio};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Radio, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Radio::new(cx, "color", "red", "Red").into());
-/// # lumen_widgets::doc_shot(app, 120.0, 40.0, "radio");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Radio::new(cx, "color", "red", "Red").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 140.0, 52.0, "radio");
 /// ```
 ///
 /// Renders:

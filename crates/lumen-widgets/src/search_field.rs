@@ -16,10 +16,14 @@ use std::rc::Rc;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, SearchField};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, SearchField, BuildCx, Element};
 ///
-/// let app = App::new(|cx| SearchField::new(cx, "q", "Search…").into());
-/// # lumen_widgets::doc_shot(app, 220.0, 44.0, "search_field");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, SearchField::new(cx, "q", "Search…").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 260.0, 60.0, "search_field");
 /// ```
 ///
 /// Renders:

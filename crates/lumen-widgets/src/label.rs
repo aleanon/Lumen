@@ -12,10 +12,14 @@ use lumen_text::TextStyle;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Label};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Label, BuildCx, Element};
 ///
-/// let app = App::new(|_| Label::new("Hello, Lumen").into());
-/// # lumen_widgets::doc_shot(app, 140.0, 36.0, "label");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Label::new("Hello, Lumen").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 160.0, 56.0, "label");
 /// ```
 ///
 /// Renders:

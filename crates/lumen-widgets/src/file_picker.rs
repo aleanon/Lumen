@@ -12,10 +12,14 @@ use lumen_layout::Dim;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, FilePicker};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, FilePicker, BuildCx, Element};
 ///
-/// let app = App::new(|cx| FilePicker::new(cx, "file", "Choose file…", ["png", "jpg"]).into());
-/// # lumen_widgets::doc_shot(app, 240.0, 48.0, "file_picker");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, FilePicker::new(cx, "file", "Choose file…", ["png", "jpg"]).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 260.0, 64.0, "file_picker");
 /// ```
 ///
 /// Renders:

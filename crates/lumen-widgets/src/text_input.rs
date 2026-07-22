@@ -20,10 +20,14 @@ use std::rc::Rc;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, TextInput};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, TextInput, BuildCx, Element};
 ///
-/// let app = App::new(|cx| TextInput::new(cx, "name", "Ada").into());
-/// # lumen_widgets::doc_shot(app, 200.0, 44.0, "text_input");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, TextInput::new(cx, "name", "Ada").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 220.0, 60.0, "text_input");
 /// ```
 ///
 /// Renders:

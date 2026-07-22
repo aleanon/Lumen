@@ -16,10 +16,14 @@ const THUMB: f64 = 16.0;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, RangeSlider};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{full_width, RangeSlider, BuildCx, Element};
 ///
-/// let app = App::new(|cx| RangeSlider::new(cx, "range", 0.0, 100.0).into());
-/// # lumen_widgets::doc_shot(app, 200.0, 40.0, "range_slider");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     full_width(cx, RangeSlider::new(cx, "range", 0.0, 100.0).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 240.0, 56.0, "range_slider");
 /// ```
 ///
 /// Renders:

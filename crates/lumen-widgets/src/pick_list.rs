@@ -18,10 +18,15 @@ const ROW_H: f64 = 34.0;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, PickList};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{top, PickList, BuildCx, Element};
 ///
-/// let app = App::new(|cx| PickList::new(cx, "pick", "Select…", ["One", "Two", "Three"]).into());
-/// # lumen_widgets::doc_shot(app, 200.0, 60.0, "pick_list");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     top(cx, PickList::new(cx, "pick", "Select…", ["One", "Two", "Three"]).into())
+/// }
+/// # let app = App::new(build);
+/// # // Rendered with the dropdown open (`pick.open`).
+/// # lumen_widgets::doc_shot_open(app, 220.0, 200.0, "pick_list", "pick.open");
 /// ```
 ///
 /// Renders:

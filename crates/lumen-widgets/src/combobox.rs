@@ -18,10 +18,15 @@ const ROW_H: f64 = 32.0;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, Combobox};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{top, Combobox, BuildCx, Element};
 ///
-/// let app = App::new(|cx| Combobox::new(cx, "fruit", ["Apple", "Banana", "Cherry"]).into());
-/// # lumen_widgets::doc_shot(app, 200.0, 60.0, "combobox");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     top(cx, Combobox::new(cx, "fruit", ["Apple", "Banana", "Cherry"]).into())
+/// }
+/// # let app = App::new(build);
+/// # // Rendered with the option list open (`fruit.open`).
+/// # lumen_widgets::doc_shot_open(app, 220.0, 200.0, "combobox", "fruit.open");
 /// ```
 ///
 /// Renders:

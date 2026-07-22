@@ -21,12 +21,17 @@ use std::rc::Rc;
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{widgets, App, Accordion};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{full_width, widgets, Accordion, BuildCx, Element};
 ///
-/// let app = App::new(|cx| {
-///     Accordion::new(cx, "faq", "What is Lumen?").body([widgets::text("An AI-first GUI framework.")]).into()
-/// });
-/// # lumen_widgets::doc_shot(app, 260.0, 60.0, "accordion");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let acc = Accordion::new(cx, "faq", "What is Lumen?")
+///         .body([widgets::text("An AI-first GUI framework.")]);
+///     full_width(cx, acc.into())
+/// }
+/// # let app = App::new(build);
+/// # // Rendered expanded (`faq`).
+/// # lumen_widgets::doc_shot_open(app, 320.0, 120.0, "accordion", "faq");
 /// ```
 ///
 /// Renders:

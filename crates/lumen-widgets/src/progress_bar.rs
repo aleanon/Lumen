@@ -11,10 +11,14 @@ use lumen_layout::{Dim, LayoutStyle};
 /// # Example
 ///
 /// ```
-/// use lumen_widgets::{App, ProgressBar};
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{full_width, ProgressBar, BuildCx, Element};
 ///
-/// let app = App::new(|_| ProgressBar::new(0.65).into());
-/// # lumen_widgets::doc_shot(app, 220.0, 28.0, "progress_bar");
+/// fn build(cx: &mut BuildCx) -> Element {
+///     full_width(cx, ProgressBar::new(0.65).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 240.0, 56.0, "progress_bar");
 /// ```
 ///
 /// Renders:
