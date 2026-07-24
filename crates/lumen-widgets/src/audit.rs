@@ -10,15 +10,20 @@ use lumen_core::{codes, Diagnostic};
 /// structured diagnostics let an agent locate and fix layout bugs.
 pub fn check_overflow(root: &SemanticsNode) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    overflow(root, &mut out);
+    overflow(root, &mut out, false);
     out
 }
 
-fn overflow(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
+fn overflow(n: &SemanticsNode, out: &mut Vec<Diagnostic>, in_scroll: bool) {
+    // A scroll viewport's content overflows it by design — that is what the
+    // offset scrolls through (and the viewport clips). The overflow sits
+    // arbitrarily deep (the content wrapper flex-shrinks to the viewport and
+    // its rows spill past it), so the whole subtree is exempt.
+    let in_scroll = in_scroll || n.scroll.is_some();
     for c in &n.children {
         let b = c.bounds;
         let p = n.bounds;
-        if b.x1 > p.x1 + 0.5 || b.y1 > p.y1 + 0.5 {
+        if !in_scroll && (b.x1 > p.x1 + 0.5 || b.y1 > p.y1 + 0.5) {
             let who = c.id.as_ref().map(|i| i.as_str()).unwrap_or(&c.label);
             out.push(Diagnostic::new(
                 codes::W0103,
@@ -29,7 +34,7 @@ fn overflow(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
                 ),
             ));
         }
-        overflow(c, out);
+        overflow(c, out, in_scroll);
     }
 }
 
