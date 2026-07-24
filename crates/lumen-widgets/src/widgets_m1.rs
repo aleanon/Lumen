@@ -7,6 +7,7 @@
 
 use crate::element::{BuildCx, Element};
 use crate::widget::impl_common;
+use crate::Canvas;
 use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
 use lumen_core::Color;
 use lumen_layout::{Dim, Display, Edges, FlexDirection, LayoutStyle, Position};
@@ -53,7 +54,8 @@ pub fn padding(px: f32, child: Element) -> Element {
     }
 }
 
-/// [`Icon`] — a small labelled icon placeholder (typed form of [`icon`]).
+/// [`Icon`] — a small vector-glyph icon (Flutter `Icon` structure; typed form
+/// of [`icon`]).
 /// # Example
 ///
 /// ```
@@ -64,7 +66,7 @@ pub fn padding(px: f32, child: Element) -> Element {
 ///     centered(cx, Icon::new("gear").into())
 /// }
 /// # let app = App::new(build);
-/// # lumen_widgets::doc_shot(app, 56.0, 56.0, "icon");
+/// # lumen_widgets::doc_shot(app, 64.0, 64.0, "icon");
 /// ```
 ///
 /// Renders:
@@ -79,29 +81,141 @@ pub struct Icon {
 }
 
 impl Icon {
-    /// An icon placeholder (a small filled square; glyph icons land with RichText).
+    /// An icon drawn as a vector glyph (Flutter `Icon` structure). `label` picks
+    /// the symbol — `gear`/`settings`, `home`, `search`, `check`, `plus`/`add`,
+    /// `close`, `menu` — and any other name falls back to a star. The label is
+    /// also the accessible name.
     pub fn new(label: &str) -> Icon {
-        let el = {
-            Element {
-                role: Role::Image,
-                label: label.to_string(),
-                background: Some(Color::srgb8(0x55, 0x5a, 0x61, 0xff)),
-                corner_radius: 2.0,
-                style: LayoutStyle {
-                    width: Dim::px(16.0),
-                    height: Dim::px(16.0),
-                    ..LayoutStyle::default()
-                },
-                ..Element::default()
-            }
-        };
+        let color = Color::srgb8(0x33, 0x37, 0x3d, 0xff);
+        let name = label.to_lowercase();
+        let mut el: Element =
+            Canvas::new(26.0, 26.0, move |f, sz| draw_icon(f, &name, sz, color)).into();
+        el.label = label.to_string();
         Icon { el }
     }
 }
 
 impl_common!(Icon);
 
-/// An icon placeholder (a small filled square; glyph icons land with RichText).
+/// Paint a simple vector glyph named by `name` into the icon square.
+fn draw_icon(
+    f: &mut lumen_render::canvas::Frame,
+    name: &str,
+    size: lumen_core::geometry::Size,
+    color: Color,
+) {
+    use kurbo::{BezPath, Circle, Point, Rect, Shape};
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+    let s = size.width.min(size.height);
+    let (cx, cy) = (size.width / 2.0, size.height / 2.0);
+    let r = s * 0.40;
+    let line = s * 0.10;
+    let dot = |i: usize, n: usize, big: f64, small: f64, tilt: f64| {
+        let rr = if i.is_multiple_of(2) { big } else { small };
+        let a = tilt + i as f64 * PI / (n as f64 / 2.0);
+        Point::new(cx + rr * a.cos(), cy + rr * a.sin())
+    };
+    match name {
+        "search" => {
+            let lens = Point::new(cx - s * 0.06, cy - s * 0.06);
+            let lr = s * 0.24;
+            f.stroke(&Circle::new(lens, lr).to_path(0.1), color, line);
+            let mut h = BezPath::new();
+            h.move_to(Point::new(
+                lens.x + lr * FRAC_PI_4.cos(),
+                lens.y + lr * FRAC_PI_4.sin(),
+            ));
+            h.line_to(Point::new(cx + s * 0.34, cy + s * 0.34));
+            f.stroke(&h, color, line);
+        }
+        "check" | "done" => {
+            let mut p = BezPath::new();
+            p.move_to(Point::new(cx - r * 0.75, cy));
+            p.line_to(Point::new(cx - r * 0.1, cy + r * 0.6));
+            p.line_to(Point::new(cx + r * 0.85, cy - r * 0.55));
+            f.stroke(&p, color, line * 1.1);
+        }
+        "plus" | "add" => {
+            f.fill_rounded_rect(
+                Rect::new(cx - line * 0.6, cy - r, cx + line * 0.6, cy + r),
+                line * 0.5,
+                color,
+            );
+            f.fill_rounded_rect(
+                Rect::new(cx - r, cy - line * 0.6, cx + r, cy + line * 0.6),
+                line * 0.5,
+                color,
+            );
+        }
+        "close" | "x" => {
+            let mut a = BezPath::new();
+            a.move_to(Point::new(cx - r, cy - r));
+            a.line_to(Point::new(cx + r, cy + r));
+            let mut b = BezPath::new();
+            b.move_to(Point::new(cx + r, cy - r));
+            b.line_to(Point::new(cx - r, cy + r));
+            f.stroke(&a, color, line);
+            f.stroke(&b, color, line);
+        }
+        "menu" => {
+            for i in -1..=1 {
+                let yy = cy + i as f64 * s * 0.22;
+                f.fill_rounded_rect(
+                    Rect::new(cx - r, yy - line * 0.5, cx + r, yy + line * 0.5),
+                    line * 0.5,
+                    color,
+                );
+            }
+        }
+        "home" => {
+            let mut p = BezPath::new();
+            p.move_to(Point::new(cx, cy - r));
+            p.line_to(Point::new(cx + r, cy + r * 0.1));
+            p.line_to(Point::new(cx + r * 0.66, cy + r * 0.1));
+            p.line_to(Point::new(cx + r * 0.66, cy + r * 0.85));
+            p.line_to(Point::new(cx - r * 0.66, cy + r * 0.85));
+            p.line_to(Point::new(cx - r * 0.66, cy + r * 0.1));
+            p.line_to(Point::new(cx - r, cy + r * 0.1));
+            p.close_path();
+            f.fill(&p, color);
+        }
+        "gear" | "settings" => {
+            let teeth = 8;
+            let mut p = BezPath::new();
+            for i in 0..teeth * 2 {
+                let pt = dot(i, teeth * 2, r, r * 0.74, 0.0);
+                if i == 0 {
+                    p.move_to(pt);
+                } else {
+                    p.line_to(pt);
+                }
+            }
+            p.close_path();
+            f.stroke(&p, color, line * 0.8);
+            f.stroke(
+                &Circle::new(Point::new(cx, cy), r * 0.36).to_path(0.1),
+                color,
+                line * 0.8,
+            );
+        }
+        _ => {
+            // Default: a filled five-point star — a generic "icon" glyph.
+            let mut p = BezPath::new();
+            for i in 0..10 {
+                let pt = dot(i, 10, r, r * 0.42, -FRAC_PI_2);
+                if i == 0 {
+                    p.move_to(pt);
+                } else {
+                    p.line_to(pt);
+                }
+            }
+            p.close_path();
+            f.fill(&p, color);
+        }
+    }
+}
+
+/// A small vector-glyph icon (see [`Icon::new`] for the recognised names).
 /// *(Thin shim over [`Icon`] — the typed form is preferred.)*
 pub fn icon(label: &str) -> Element {
     Icon::new(label).into()

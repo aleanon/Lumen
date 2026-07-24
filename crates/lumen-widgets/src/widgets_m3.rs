@@ -7,9 +7,10 @@
 
 use crate::element::{BuildCx, Element};
 use crate::widget::impl_common;
+use crate::Canvas;
 use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
-use lumen_core::Color;
-use lumen_layout::{Dim, Display, Edges, FlexDirection, LayoutStyle};
+use lumen_core::{Color, Runtime};
+use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle, Position};
 use lumen_text::TextStyle;
 use std::rc::Rc;
 
@@ -399,8 +400,8 @@ pub fn pull_to_refresh(
     PullToRefresh::new(cx, name, threshold, on_refresh, content).into()
 }
 
-/// [`DatePicker`] — year/month/day spinners; ISO date under `name`
-/// (typed form of [`date_picker`]).
+/// [`DatePicker`] — a month-calendar picker (Flutter `showDatePicker`
+/// structure); ISO date under `name` (typed form of [`date_picker`]).
 /// # Example
 ///
 /// ```
@@ -411,7 +412,7 @@ pub fn pull_to_refresh(
 ///     centered(cx, DatePicker::new(cx, "date").into())
 /// }
 /// # let app = App::new(build);
-/// # lumen_widgets::doc_shot(app, 240.0, 130.0, "date_picker");
+/// # lumen_widgets::doc_shot(app, 250.0, 300.0, "date_picker");
 /// ```
 ///
 /// Renders:
@@ -426,31 +427,253 @@ pub struct DatePicker {
 }
 
 impl DatePicker {
-    /// A date picker: year / month / day spinners. `name` keys three signals.
-    /// Value serialises as `YYYY-MM-DD`.
+    /// A date picker rendered as a month calendar (Flutter `showDatePicker`
+    /// structure): a month/year header with prev/next arrows, a weekday row, and
+    /// a grid of day cells with the selected day highlighted. `name` keys three
+    /// signals (`.year`/`.month`/`.day`); value serialises as `YYYY-MM-DD`.
     pub fn new(cx: &BuildCx, name: &str) -> DatePicker {
-        let el = {
-            let y = spinner(cx, &format!("{name}.year"), "year", 1970, 2100, 2026);
-            let m = spinner(cx, &format!("{name}.month"), "month", 1, 12, 6);
-            let d = spinner(cx, &format!("{name}.day"), "day", 1, 31, 16);
-            let val = format!("{:04}-{:02}-{:02}", y.0, m.0, d.0);
-            picker_group(name, &val, vec![y.1, m.1, d.1])
-        };
-        DatePicker { el }
+        DatePicker {
+            el: calendar(cx, name),
+        }
     }
 }
 
 impl_common!(DatePicker);
 
-/// A date picker: year / month / day spinners. `name` keys three signals.
-/// Value serialises as `YYYY-MM-DD`.
+/// A month-calendar date picker. `name` keys three signals; value is `YYYY-MM-DD`.
 /// *(Thin shim over [`DatePicker`] — the typed form is preferred.)*
 pub fn date_picker(cx: &BuildCx, name: &str) -> Element {
     DatePicker::new(cx, name).into()
 }
 
-/// [`TimePicker`] — hour/minute spinners; `HH:MM` under `name` (typed
-/// form of [`time_picker`]).
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+fn is_leap(y: i64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn days_in_month(y: i64, m: i64) -> i64 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap(y) => 29,
+        2 => 28,
+        _ => 30,
+    }
+}
+
+/// Day-of-week (0 = Sunday) of the 1st of month `m` in year `y` (Sakamoto's).
+fn first_dow(y: i64, m: i64) -> i64 {
+    let t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let yy = if m < 3 { y - 1 } else { y };
+    (yy + yy / 4 - yy / 100 + yy / 400 + t[(m - 1) as usize] + 1).rem_euclid(7)
+}
+
+/// The month-calendar body of [`DatePicker`].
+fn calendar(cx: &BuildCx, name: &str) -> Element {
+    let accent = Color::srgb8(0x1a, 0x73, 0xe8, 0xff);
+    let year = cx.signal(&format!("{name}.year"), || 2026i64);
+    let month = cx.signal(&format!("{name}.month"), || 6i64);
+    let day = cx.signal(&format!("{name}.day"), || 16i64);
+    let (yv, mv, dv) = (
+        year.get(cx.runtime()),
+        month.get(cx.runtime()),
+        day.get(cx.runtime()),
+    );
+    let val = format!("{yv:04}-{mv:02}-{dv:02}");
+
+    // Header: ‹  Month YYYY  ›
+    let prev = nav_button("‹", "date-prev", move |rt| {
+        let m = month.get(rt);
+        if m <= 1 {
+            month.set(rt, 12);
+            year.update(rt, |y| *y -= 1);
+        } else {
+            month.set(rt, m - 1);
+        }
+    });
+    let next = nav_button("›", "date-next", move |rt| {
+        let m = month.get(rt);
+        if m >= 12 {
+            month.set(rt, 1);
+            year.update(rt, |y| *y += 1);
+        } else {
+            month.set(rt, m + 1);
+        }
+    });
+    let mut title =
+        crate::widgets::text(format!("{} {yv}", MONTHS[(mv - 1).clamp(0, 11) as usize]));
+    if let Some(ts) = title.text_style_mut() {
+        ts.font_size = 15.0;
+        ts.weight = 600.0;
+    }
+    title.style.flex_grow = 1.0;
+    let header = Element {
+        role: Role::Group,
+        style: LayoutStyle {
+            display: Display::Flex,
+            flex_direction: FlexDirection::Row,
+            align_items: Some(Align::Center),
+            column_gap: Dim::px(4.0),
+            padding: Edges::all(Dim::px(4.0)),
+            ..LayoutStyle::default()
+        },
+        children: vec![prev, title, next],
+        ..Element::default()
+    };
+
+    // Weekday label row.
+    let weekday_row = Element {
+        role: Role::Group,
+        style: cell_row_style(),
+        children: ["S", "M", "T", "W", "T", "F", "S"]
+            .iter()
+            .map(|d| dow_label(d))
+            .collect(),
+        ..Element::default()
+    };
+
+    // Day grid: 6 weeks × 7 days, blanks before the 1st.
+    let fdow = first_dow(yv, mv);
+    let dim = days_in_month(yv, mv);
+    let mut weeks: Vec<Element> = Vec::new();
+    let mut cells: Vec<Element> = Vec::new();
+    for slot in 0..42i64 {
+        let dnum = slot - fdow + 1;
+        cells.push(if (1..=dim).contains(&dnum) {
+            day_cell(dnum, dnum == dv, accent, move |rt| day.set(rt, dnum))
+        } else {
+            empty_cell()
+        });
+        if cells.len() == 7 {
+            weeks.push(Element {
+                role: Role::Group,
+                style: cell_row_style(),
+                children: std::mem::take(&mut cells),
+                ..Element::default()
+            });
+        }
+    }
+
+    let mut kids = vec![header, weekday_row];
+    kids.extend(weeks);
+    Element {
+        role: Role::Group,
+        label: val.clone(),
+        value: Some(val),
+        style: LayoutStyle {
+            display: Display::Flex,
+            flex_direction: FlexDirection::Column,
+            row_gap: Dim::px(2.0),
+            ..LayoutStyle::default()
+        },
+        children: kids,
+        ..Element::default()
+    }
+    .id(name)
+}
+
+fn cell_row_style() -> LayoutStyle {
+    LayoutStyle {
+        display: Display::Flex,
+        flex_direction: FlexDirection::Row,
+        ..LayoutStyle::default()
+    }
+}
+
+/// A centred fixed-size cell wrapping `text` (so the box, not the glyphs, sets
+/// the size — a text-bearing element ignores an explicit height).
+fn cell_box(text: Element, w: f32, h: f32, bg: Option<Color>, radius: f64) -> Element {
+    Element {
+        background: bg,
+        corner_radius: radius,
+        style: LayoutStyle {
+            width: Dim::px(w),
+            height: Dim::px(h),
+            display: Display::Flex,
+            align_items: Some(Align::Center),
+            justify_content: Some(Align::Center),
+            ..LayoutStyle::default()
+        },
+        children: vec![text],
+        ..Element::default()
+    }
+}
+
+fn dow_label(d: &str) -> Element {
+    let mut t = crate::widgets::text(d);
+    if let Some(ts) = t.text_style_mut() {
+        ts.font_size = 12.0;
+        ts.color = Color::srgb8(0x6b, 0x70, 0x78, 0xff);
+    }
+    cell_box(t, 30.0, 24.0, None, 0.0)
+}
+
+fn empty_cell() -> Element {
+    Element {
+        style: LayoutStyle {
+            width: Dim::px(30.0),
+            height: Dim::px(30.0),
+            ..LayoutStyle::default()
+        },
+        ..Element::default()
+    }
+}
+
+fn day_cell(dnum: i64, selected: bool, accent: Color, on: impl Fn(&Runtime) + 'static) -> Element {
+    let mut t = crate::widgets::text(format!("{dnum}"));
+    if let Some(ts) = t.text_style_mut() {
+        ts.font_size = 13.0;
+        ts.color = if selected {
+            Color::WHITE
+        } else {
+            Color::srgb8(0x20, 0x24, 0x2a, 0xff)
+        };
+    }
+    let mut cell = cell_box(t, 30.0, 30.0, selected.then_some(accent), 15.0);
+    cell.role = Role::Button;
+    cell.label = format!("{dnum}");
+    cell.focusable = true;
+    cell.actions = vec![Action::Click, Action::Focus];
+    cell.states = if selected {
+        vec![SemState::Selected]
+    } else {
+        vec![]
+    };
+    cell.on_click = Some(Rc::new(on));
+    cell
+}
+
+/// A small square icon button for calendar month navigation.
+fn nav_button(label: &str, id: &str, on: impl Fn(&Runtime) + 'static) -> Element {
+    let mut t = crate::widgets::text(label);
+    if let Some(ts) = t.text_style_mut() {
+        ts.font_size = 18.0;
+    }
+    let mut b = cell_box(t, 28.0, 28.0, None, 14.0);
+    b.role = Role::Button;
+    b.label = label.to_string();
+    b.focusable = true;
+    b.actions = vec![Action::Click, Action::Focus];
+    b.on_click = Some(Rc::new(on));
+    b.id(id)
+}
+
+/// [`TimePicker`] — a clock-dial picker (Flutter `showTimePicker` structure);
+/// `HH:MM` under `name` (typed form of [`time_picker`]).
 /// # Example
 ///
 /// ```
@@ -461,7 +684,7 @@ pub fn date_picker(cx: &BuildCx, name: &str) -> Element {
 ///     centered(cx, TimePicker::new(cx, "time").into())
 /// }
 /// # let app = App::new(build);
-/// # lumen_widgets::doc_shot(app, 200.0, 130.0, "time_picker");
+/// # lumen_widgets::doc_shot(app, 240.0, 300.0, "time_picker");
 /// ```
 ///
 /// Renders:
@@ -476,93 +699,172 @@ pub struct TimePicker {
 }
 
 impl TimePicker {
-    /// A time picker: hour / minute spinners. Value serialises as `HH:MM`.
+    /// A time picker rendered as a clock dial (Flutter `showTimePicker`
+    /// structure): a digital `HH:MM` header, a round dial of 1–12 with a hand to
+    /// the selected hour, and a compact minute control. Value serialises as
+    /// `HH:MM`; `name` keys `.hour`/`.minute`.
     pub fn new(cx: &BuildCx, name: &str) -> TimePicker {
-        let el = {
-            let h = spinner(cx, &format!("{name}.hour"), "hour", 0, 23, 9);
-            let m = spinner(cx, &format!("{name}.minute"), "minute", 0, 59, 30);
-            let val = format!("{:02}:{:02}", h.0, m.0);
-            picker_group(name, &val, vec![h.1, m.1])
-        };
-        TimePicker { el }
+        TimePicker {
+            el: clock(cx, name),
+        }
     }
 }
 
 impl_common!(TimePicker);
 
-/// A time picker: hour / minute spinners. Value serialises as `HH:MM`.
+/// A clock-dial time picker. Value serialises as `HH:MM`; `name` keys signals.
 /// *(Thin shim over [`TimePicker`] — the typed form is preferred.)*
 pub fn time_picker(cx: &BuildCx, name: &str) -> Element {
     TimePicker::new(cx, name).into()
 }
 
-fn picker_group(name: &str, value: &str, fields: Vec<Element>) -> Element {
-    Element {
+/// The clock-dial body of [`TimePicker`].
+fn clock(cx: &BuildCx, name: &str) -> Element {
+    let accent = Color::srgb8(0x1a, 0x73, 0xe8, 0xff);
+    let dark = Color::srgb8(0x20, 0x24, 0x2a, 0xff);
+    let hour = cx.signal(&format!("{name}.hour"), || 9i64);
+    let minute = cx.signal(&format!("{name}.minute"), || 30i64);
+    let hv = hour.get(cx.runtime());
+    let mnv = minute.get(cx.runtime());
+    let hd = if hv % 12 == 0 { 12 } else { hv % 12 };
+    let val = format!("{hv:02}:{mnv:02}");
+
+    // Digital header: HH : MM (hour emphasised).
+    let big = |s: String, color: Color| {
+        let mut t = crate::widgets::text(s);
+        if let Some(ts) = t.text_style_mut() {
+            ts.font_size = 30.0;
+            ts.weight = 500.0;
+            ts.color = color;
+        }
+        t
+    };
+    let header = Element {
         role: Role::Group,
-        label: value.to_string(),
-        value: Some(value.to_string()),
         style: LayoutStyle {
             display: Display::Flex,
             flex_direction: FlexDirection::Row,
-            column_gap: Dim::px(12.0),
+            align_items: Some(Align::Center),
+            justify_content: Some(Align::Center),
+            column_gap: Dim::px(2.0),
             ..LayoutStyle::default()
         },
-        children: fields,
+        children: vec![
+            big(format!("{hv:02}"), accent),
+            big(":".into(), dark),
+            big(format!("{mnv:02}"), dark),
+        ],
         ..Element::default()
-    }
-    .id(name)
-}
+    };
 
-/// One labelled +/- spinner field. Returns `(current_value, element)`. Buttons
-/// carry ids `<key>-dec` / `<key>-inc` so a picker's three fields stay unique.
-fn spinner(cx: &BuildCx, sig: &str, key: &str, min: i64, max: i64, init: i64) -> (i64, Element) {
-    let value = cx.signal(sig, || init);
-    let v = value.get(cx.runtime());
-    let dec = tap_button("−", &format!("{key}-dec"), move |rt| {
-        value.update(rt, |x| *x = (*x - 1).max(min))
-    });
-    let inc = tap_button("+", &format!("{key}-inc"), move |rt| {
-        value.update(rt, |x| *x = (*x + 1).min(max))
-    });
-    let el = Element {
+    // Dial face + hand (canvas leaf) under clickable hour-number overlays.
+    let hd_draw = hd;
+    let mut face: Element = Canvas::new(200.0, 200.0, move |f, size| {
+        let (cx0, cy0) = (size.width / 2.0, size.height / 2.0);
+        let r = cx0.min(cy0) - 6.0;
+        f.fill_circle(
+            kurbo::Point::new(cx0, cy0),
+            r,
+            Color::srgb8(0xef, 0xf1, 0xf4, 0xff),
+        );
+        let a = (hd_draw as f64 * 30.0).to_radians();
+        let r_hand = r - 22.0;
+        let tip = kurbo::Point::new(cx0 + r_hand * a.sin(), cy0 - r_hand * a.cos());
+        let mut p = kurbo::BezPath::new();
+        p.move_to((cx0, cy0));
+        p.line_to(tip);
+        f.stroke(&p, accent, 2.0);
+        f.fill_circle(kurbo::Point::new(cx0, cy0), 4.0, accent);
+    })
+    .into();
+    face.style.position = Position::Absolute;
+    face.style.inset = Edges {
+        left: Dim::px(0.0),
+        top: Dim::px(0.0),
+        ..Edges::AUTO
+    };
+
+    let mut children = vec![face];
+    for k in 1..=12i64 {
+        let a = (k as f64 * 30.0).to_radians();
+        let x = 100.0 + 74.0 * a.sin();
+        let y = 100.0 - 74.0 * a.cos();
+        let sel = k == hd;
+        let mut t = crate::widgets::text(format!("{k}"));
+        if let Some(ts) = t.text_style_mut() {
+            ts.font_size = 14.0;
+            ts.color = if sel { Color::WHITE } else { dark };
+        }
+        let mut b = cell_box(t, 28.0, 28.0, sel.then_some(accent), 14.0);
+        b.role = Role::Button;
+        b.label = format!("{k} o'clock");
+        b.focusable = true;
+        b.actions = vec![Action::Click, Action::Focus];
+        b.states = if sel {
+            vec![SemState::Selected]
+        } else {
+            vec![]
+        };
+        b.style.position = Position::Absolute;
+        b.style.inset = Edges {
+            left: Dim::px((x - 14.0) as f32),
+            top: Dim::px((y - 14.0) as f32),
+            ..Edges::AUTO
+        };
+        b.on_click = Some(Rc::new(move |rt| hour.set(rt, k)));
+        children.push(b.id(format!("hour-{k}")));
+    }
+    let dial = Element {
         role: Role::Group,
-        label: key.to_string(),
-        value: Some(format!("{v}")),
+        style: LayoutStyle {
+            position: Position::Relative,
+            width: Dim::px(200.0),
+            height: Dim::px(200.0),
+            ..LayoutStyle::default()
+        },
+        children,
+        ..Element::default()
+    };
+
+    // Compact minute control (the dial drives the hour).
+    let dec = nav_button("−", "min-dec", move |rt| {
+        minute.update(rt, |x| *x = (*x - 1).rem_euclid(60))
+    });
+    let inc = nav_button("+", "min-inc", move |rt| {
+        minute.update(rt, |x| *x = (*x + 1).rem_euclid(60))
+    });
+    let mut mlabel = crate::widgets::text(format!("{mnv:02} min"));
+    if let Some(ts) = mlabel.text_style_mut() {
+        ts.font_size = 13.0;
+        ts.color = dark;
+    }
+    let minute_row = Element {
+        role: Role::Group,
+        style: LayoutStyle {
+            display: Display::Flex,
+            flex_direction: FlexDirection::Row,
+            align_items: Some(Align::Center),
+            justify_content: Some(Align::Center),
+            column_gap: Dim::px(8.0),
+            ..LayoutStyle::default()
+        },
+        children: vec![dec, cell_box(mlabel, 56.0, 24.0, None, 0.0), inc],
+        ..Element::default()
+    };
+
+    Element {
+        role: Role::Group,
+        label: val.clone(),
+        value: Some(val),
         style: LayoutStyle {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
-            row_gap: Dim::px(2.0),
+            align_items: Some(Align::Center),
+            row_gap: Dim::px(8.0),
             ..LayoutStyle::default()
         },
-        children: vec![inc, Element::text(format!("{v}")).id(key), dec],
-        ..Element::default()
-    };
-    (v, el)
-}
-
-/// A ≥44px square button (a touch target).
-fn tap_button(label: &str, id: &str, on_click: impl Fn(&lumen_core::Runtime) + 'static) -> Element {
-    Element {
-        role: Role::Button,
-        label: label.to_string(),
-        focusable: true,
-        actions: vec![Action::Click, Action::Focus],
-        background: Some(Color::srgb8(0xe8, 0xea, 0xed, 0xff)),
-        corner_radius: 6.0,
-        style: touch_style(8.0),
-        content: crate::NodeContent::Text(
-            label.to_string(),
-            TextStyle {
-                font_size: 18.0,
-                weight: 400.0,
-                color: Color::BLACK,
-                line_height: None,
-                letter_spacing: 0.0,
-                family: None,
-            },
-        ),
-        on_click: Some(Rc::new(on_click)),
+        children: vec![header, dial, minute_row],
         ..Element::default()
     }
-    .id(id)
+    .id(name)
 }
