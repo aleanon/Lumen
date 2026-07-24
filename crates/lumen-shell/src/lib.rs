@@ -134,6 +134,7 @@ pub fn run(app: App, size: Size) {
         menu_rev_seen: 0,
         native_menu: None,
         a11y: None,
+        force_present: false,
         tray: None,
         secondary: std::collections::HashMap::new(),
         os_clipboard: arboard::Clipboard::new().ok(),
@@ -296,6 +297,14 @@ struct Shell {
     /// assistive technology subscribes; then the semantic tree — the same
     /// one the agent and tests read — is published after every frame.
     a11y: Option<accesskit_winit::Adapter>,
+    /// Present on the next `RedrawRequested` even if its pump paints nothing:
+    /// set by paths that already pumped (agent dispatch, AT actions, style
+    /// reload) so their frame reaches the surface. Without it, the pre-pump
+    /// consumes the damage and the redraw's painted-check skips the present —
+    /// on the direct-to-surface path the glass then never updates (hit live:
+    /// a completed login kept showing the stale login frame until real input
+    /// arrived).
+    force_present: bool,
     /// P.3d-2: realized secondary windows, keyed by their winit id. Each is
     /// an independent `Headless` pipeline over the shared `Runtime`
     /// (`Headless::open_window_with`); input routes here by window id, and
@@ -386,7 +395,9 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         .to_string()
                 };
                 // Reflect any state change the action caused in the window(s) —
-                // shared signals may re-render secondaries too (P.3d-2).
+                // shared signals may re-render secondaries too (P.3d-2). The
+                // dispatch already pumped, so force the present.
+                self.force_present = true;
                 self.redraw_all();
                 let _ = reply.send(resp);
             }
@@ -400,27 +411,23 @@ impl ApplicationHandler<ShellEvent> for Shell {
                             eprintln!("lumen reload: rejected ({} diagnostics)", d.len())
                         }
                     }
-                    if let Some(p) = &mut self.presenter {
-                        p.present(&h.screenshot());
-                    }
+                    self.force_present = true;
+                    self.redraw_all();
                 }
             }
             ShellEvent::Wake => {
-                // A background result is queued; pump applies it (drains the
-                // deferred-op queue) and we present the new frame. Secondary
-                // windows pick the change up via the fan-out redraw.
-                if let Some(h) = &mut self.headless {
-                    h.pump();
-                    if let Some(p) = &mut self.presenter {
-                        p.present(&h.screenshot());
-                    }
-                }
+                // A background result is queued. Do NOT pump here: the redraw's
+                // own pump must observe the damage, or its painted-check skips
+                // the present and the frame never reaches the surface (the
+                // presenter-only present this arm used to do was a no-op on the
+                // direct-to-surface path).
                 self.redraw_all();
             }
             ShellEvent::Menu(ev) => {
                 if let Some(h) = &mut self.headless {
                     h.activate_menu(ev.id().0.as_str());
                 }
+                self.force_present = true;
                 self.redraw_all();
             }
             ShellEvent::AccessKit(ev) => {
@@ -433,6 +440,8 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         if let Some(h) = &mut self.headless {
                             route_at_action(h, &req);
                         }
+                        // route_at_action pumped; force the present.
+                        self.force_present = true;
                         if let Some(w) = &self.window {
                             w.request_redraw();
                         }
@@ -766,7 +775,8 @@ impl ApplicationHandler<ShellEvent> for Shell {
                             }
                         }
                     }
-                    if stats.painted || resized {
+                    let force = std::mem::take(&mut self.force_present);
+                    if stats.painted || resized || force {
                         if self.direct {
                             // GPU → swapchain directly, no readback (1c).
                             h.present_to_surface();

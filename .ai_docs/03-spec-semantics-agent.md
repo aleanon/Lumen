@@ -87,7 +87,11 @@ Resolution semantics shared by tests and agent: a selector resolves to all match
 `LUMEN_AGENT_ADDR` is set (default `127.0.0.1:9230`; `just run-agent <name>`).
 One JSON object per line, one reply line per request; requests are bridged
 onto the UI thread and dispatched against the live runtime, and the window
-redraws after each action. **Web (P.2):** the same dispatch compiles to wasm
+redraws — and **presents** — after each action (paths that pump before the
+redraw, incl. agent dispatch, AT actions, background-wake application and
+tier-1 reload, set a force-present flag so the painted-only present gate
+cannot skip their frame; regression: a stale surface after async completions
+on the direct-to-surface path). **Web (P.2):** the same dispatch compiles to wasm
 and is exposed as `window.lumenAgent(json)`; in dev, `?agent=ws://…` opens a
 WebSocket to `scripts/web_agent_relay.py`, which re-serves the newline-TCP
 protocol so the desktop tooling drives a live browser unmodified. Auto-waits
