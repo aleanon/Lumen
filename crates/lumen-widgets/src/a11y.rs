@@ -69,11 +69,21 @@ fn apply_states(node: &mut Node, states: &[State]) {
 }
 
 /// Build an AccessKit [`TreeUpdate`] from a Lumen semantic tree (the elided
-/// tree). Node ids reuse the runtime node index.
+/// tree).
+///
+/// Node ids are `(path_salt << 32) | runtime_node_index`. The low half keeps
+/// AT action routing trivial (mask and compare against `SemanticsNode.node`);
+/// the high half is a hash of the node's structural path (sibling indexes +
+/// role) so that a runtime index reused by an unrelated node after a rebuild
+/// gets a *different* published id. Raw-index ids let a reused index carry a
+/// stale parent pointer into a pruned subtree, which panics
+/// `accesskit_consumer`'s diff (`updated` node missing from the new state) —
+/// hit live on the wallet's login→unlocked transition with AT-SPI active.
 pub fn build_tree(root: &SemanticsNode) -> TreeUpdate {
     let mut nodes = Vec::new();
-    let root_id = build_node(root, &mut nodes);
-    let focus = find_focus(root).unwrap_or(root_id);
+    let mut focus_id = None;
+    let root_id = build_node(root, root_salt(), &mut nodes, &mut focus_id);
+    let focus = focus_id.unwrap_or(root_id);
     let mut tree = Tree::new(root_id);
     // P.4: identify the app on the a11y bus (it showed as an empty-name
     // application in the AT-SPI registry without this). The binary name is
@@ -91,8 +101,34 @@ pub fn build_tree(root: &SemanticsNode) -> TreeUpdate {
     }
 }
 
-fn build_node(n: &SemanticsNode, out: &mut Vec<(NodeId, Node)>) -> NodeId {
-    let id = NodeId(n.node as u64);
+/// The structural-path salt of the root.
+fn root_salt() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    "lumen-a11y-root".hash(&mut h);
+    h.finish() & 0xFFFF_FFFF
+}
+
+/// Derive a child's path salt from its parent's: hash(parent salt, sibling
+/// index, role). Same position + role ⇒ same salt (stable announcements);
+/// different position ⇒ different id (no cross-rebuild aliasing).
+fn child_salt(parent: u64, index: usize, role: Role) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    (parent, index, role as u8).hash(&mut h);
+    h.finish() & 0xFFFF_FFFF
+}
+
+fn build_node(
+    n: &SemanticsNode,
+    salt: u64,
+    out: &mut Vec<(NodeId, Node)>,
+    focus_out: &mut Option<NodeId>,
+) -> NodeId {
+    let id = NodeId((salt << 32) | (n.node as u64 & 0xFFFF_FFFF));
+    if n.states.contains(&State::Focused) {
+        *focus_out = Some(id);
+    }
     let mut node = Node::new(role_to_accesskit(n.role));
     if !n.label.is_empty() {
         node.set_label(n.label.clone());
@@ -133,15 +169,14 @@ fn build_node(n: &SemanticsNode, out: &mut Vec<(NodeId, Node)>) -> NodeId {
             Action::Dismiss => {}
         }
     }
-    let kids: Vec<NodeId> = n.children.iter().map(|c| build_node(c, out)).collect();
+    let kids: Vec<NodeId> = n
+        .children
+        .iter()
+        .enumerate()
+        .map(|(i, c)| build_node(c, child_salt(salt, i, c.role), out, focus_out))
+        .collect();
     node.set_children(kids);
     out.push((id, node));
     id
 }
 
-fn find_focus(n: &SemanticsNode) -> Option<NodeId> {
-    if n.states.iter().any(|s| matches!(s, State::Focused)) {
-        return Some(NodeId(n.node as u64));
-    }
-    n.children.iter().find_map(find_focus)
-}

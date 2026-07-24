@@ -1202,7 +1202,9 @@ fn route_at_action<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner>(
         n.children.iter().find_map(|c| find_bounds(c, id))
     }
     let root = h.semantics_doc().root.elided();
-    let Some(bounds) = find_bounds(&root, req.target.0) else {
+    // Published ids carry a structural-path salt in the high 32 bits (see
+    // `lumen_widgets::a11y::build_tree`); the runtime index is the low half.
+    let Some(bounds) = find_bounds(&root, req.target.0 & 0xFFFF_FFFF) else {
         return;
     };
     if req.action == accesskit::Action::Click {
