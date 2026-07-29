@@ -305,6 +305,9 @@ pub struct SemanticsNode {
     pub deps: Option<Vec<String>>,
     /// Whether this node is elided (pure layout, no semantic contribution).
     pub elide: bool,
+    /// Whether this node is an overlay root (paints above the normal flow —
+    /// its bounds legitimately escape its structural parent).
+    pub overlay: bool,
     /// Children (raw, pre-elision).
     pub children: Vec<SemanticsNode>,
 }
@@ -329,6 +332,7 @@ impl SemanticsNode {
             type_name: String::new(),
             deps: None,
             elide: false,
+            overlay: false,
             children: Vec::new(),
         }
     }

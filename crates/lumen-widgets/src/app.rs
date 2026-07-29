@@ -3988,6 +3988,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             s.actions = m.actions.clone();
             s.type_name = format!("{:?}", m.role);
             s.elide = m.elide;
+            s.overlay = m.overlay;
             s.scroll = m.scroll;
             s.states = m.states.clone();
             let flags = self.tree.flags(node);

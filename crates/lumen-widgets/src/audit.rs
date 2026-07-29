@@ -23,7 +23,9 @@ fn overflow(n: &SemanticsNode, out: &mut Vec<Diagnostic>, in_scroll: bool) {
     for c in &n.children {
         let b = c.bounds;
         let p = n.bounds;
-        if !in_scroll && (b.x1 > p.x1 + 0.5 || b.y1 > p.y1 + 0.5) {
+        // Overlay roots (sheets, popups) paint above the flow and anchor to
+        // the window, not their structural parent — escaping it is by design.
+        if !in_scroll && !c.overlay && (b.x1 > p.x1 + 0.5 || b.y1 > p.y1 + 0.5) {
             let who = c.id.as_ref().map(|i| i.as_str()).unwrap_or(&c.label);
             out.push(Diagnostic::new(
                 codes::W0103,
