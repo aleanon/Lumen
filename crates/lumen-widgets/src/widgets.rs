@@ -323,6 +323,21 @@ pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
             let t = t.to_string();
             value.update(rt, |s| s.push_str(&t))
         })),
+        // The basic field has no caret — editing happens at the end, so
+        // Backspace pops the last character (with Ctrl: the whole value).
+        on_key: Some(Rc::new(move |rt, ev| {
+            if ev.key == lumen_core::events::Key::Named(lumen_core::events::NamedKey::Backspace) {
+                if ev.modifiers.contains(lumen_core::events::Modifiers::CTRL)
+                    || ev.modifiers.contains(lumen_core::events::Modifiers::META)
+                {
+                    value.set(rt, String::new());
+                } else {
+                    value.update(rt, |s| {
+                        s.pop();
+                    });
+                }
+            }
+        })),
         ..Element::default()
     }
 }

@@ -3626,17 +3626,42 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 });
             }
             // B.3: per-side borders — straight strips on top of the box
-            // fill (border-radius is ignored for per-side borders, v1).
+            // fill. Each strip is inset by the box's corner radii so it stops
+            // where the corner arc begins (a full-width strip on a rounded
+            // box reads as a line overshooting the corners).
             if let Some(sides) = css.map(|s| s.border_sides) {
                 for (i, sb) in sides.iter().enumerate() {
                     let Some(sb) = sb else { continue };
                     let w = sb.width as f64;
                     let r = match i {
-                        0 => Rect::new(bounds.x0, bounds.y0, bounds.x1, bounds.y0 + w),
-                        1 => Rect::new(bounds.x1 - w, bounds.y0, bounds.x1, bounds.y1),
-                        2 => Rect::new(bounds.x0, bounds.y1 - w, bounds.x1, bounds.y1),
-                        _ => Rect::new(bounds.x0, bounds.y0, bounds.x0 + w, bounds.y1),
+                        0 => Rect::new(
+                            bounds.x0 + radii.tl,
+                            bounds.y0,
+                            bounds.x1 - radii.tr,
+                            bounds.y0 + w,
+                        ),
+                        1 => Rect::new(
+                            bounds.x1 - w,
+                            bounds.y0 + radii.tr,
+                            bounds.x1,
+                            bounds.y1 - radii.br,
+                        ),
+                        2 => Rect::new(
+                            bounds.x0 + radii.bl,
+                            bounds.y1 - w,
+                            bounds.x1 - radii.br,
+                            bounds.y1,
+                        ),
+                        _ => Rect::new(
+                            bounds.x0,
+                            bounds.y0 + radii.tl,
+                            bounds.x0 + w,
+                            bounds.y1 - radii.bl,
+                        ),
                     };
+                    if r.width() <= 0.0 || r.height() <= 0.0 {
+                        continue;
+                    }
                     dl.push(DrawCmd::Rect {
                         rect: r,
                         brush: Brush::Solid(sb.color),
