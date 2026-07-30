@@ -26,8 +26,8 @@ B.3). `.lss` wins over the element's
 text in a child), and a state-part layout rule (`#x:hovered { width: … }`)
 relayouts through the normal rebuild path on pointer motion.
 
-Still Rust-only (parse-only in `.lss` until Phase B): per-side
-border, `flex-grow/shrink/basis/wrap`, `justify-*`/
+Still Rust-only (parse-only in `.lss` until Phase B):
+`flex-grow/shrink/basis/wrap`, `justify-*`/
 `align-*`, `min/max-*`, `aspect-ratio`, `grid-*` tracks,
 `Position::Absolute` + `inset`, `overflow`.
 
@@ -36,7 +36,7 @@ border, `flex-grow/shrink/basis/wrap`, `justify-*`/
 | Works (renders) | Notes |
 |---|---|
 | `background: <color>` | solid colors only — **no gradients** (gradients exist in Rust via `Frame`/element APIs) |
-| `border: 1px solid <color>` | shorthand only; per-side `border-top` etc. are no-ops |
+| `border: 1px solid <color>` | uniform border; per-side `border-top`/`-right`/`-bottom`/`-left` also render (B.3) — see the per-side row below |
 | `border-radius: 6px` (or 2–4 values) | CSS expansion to `[tl tr br bl]` per corner (B.3); the shadow shape uses the top-left value |
 | `color: <color>` | text color |
 | `backdrop-filter: blur(8px) saturate(1.2) refraction(2) specular(0.5)` | full glass stack (refraction/specular are Lumen extensions) |
