@@ -2448,7 +2448,24 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             layout.mirror_rtl(root_lnode);
         }
         for (node, lnode) in &built {
-            tree.set_bounds(*node, layout.bounds(*lnode));
+            let b = layout.bounds(*lnode);
+            tree.set_bounds(*node, b);
+            // Propagate clipping to the hit-test tree: a `clip: true` node (e.g. a
+            // Scrollable viewport) must reject pointer events on descendants that
+            // overflow its box. Otherwise scrolled-out rows — laid out *above* the
+            // viewport via negative margin, painted-clipped but still present —
+            // keep hittable bounds outside the box and steal clicks from widgets
+            // above the list. Mirrors the paint clip in `emit_pass`: `.lss` `clip`
+            // overrides the element flag (`none` disables it). Descendants inherit
+            // the intersected clip in `Tree::hit_test`, so only self-clipping nodes
+            // need it set.
+            let clip_on = self
+                .node_style
+                .get(node)
+                .and_then(|s| s.clip)
+                .map(|c| c != lumen_style::StyleClip::None)
+                .unwrap_or_else(|| meta.get(node).is_some_and(|m| m.clip));
+            tree.set_clip(*node, clip_on.then_some(b));
         }
 
         // B.2b: container queries resolved against the *previous* layout's

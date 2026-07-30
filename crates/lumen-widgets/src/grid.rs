@@ -670,13 +670,18 @@ mod tests {
     #[test]
     fn virtualizes_and_scrolls() {
         let mut h = App::new(|cx| {
-            Grid::new("g", 100_000, 100_000, 40.0, 20.0)
+            // A bare Grid root collapses to 0 height (it's built to fill a sized
+            // flex slot); give it the window height so its viewport — and thus
+            // its hit-test clip — matches the window space its cells are placed in.
+            let mut g = Grid::new("g", 100_000, 100_000, 40.0, 20.0)
                 .col_header(20.0, |_| Element::default())
                 .row_header(30.0, |_| Element::default())
                 .resizable(true)
                 .zoomable(true)
                 .cell(|_cx, _cell| Some(Element::default()))
-                .build(cx)
+                .build(cx);
+            g.style.height = lumen_layout::Dim::px(300.0);
+            g
         })
         .run_headless(Size::new(400.0, 300.0));
 
