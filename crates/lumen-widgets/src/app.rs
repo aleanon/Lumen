@@ -3645,10 +3645,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // a transparent fill); nodes with neither stay rect-free as before.
             // B.3: `.lss` gradient backgrounds — box-relative geometry maps
             // onto the renderer's absolute-point brush here, where bounds are
-            // known. A gradient beats the solid color (hover tint skips it).
+            // known. A gradient beats the solid color; hover feedback tints
+            // its stops the same way `hover_tint` treats a solid, so gradient
+            // buttons don't read as inert.
             let gradient = css
                 .and_then(|s| s.background_gradient.as_ref())
-                .map(|g| gradient_brush(g, bounds));
+                .map(|g| {
+                    let mut brush = gradient_brush(g, bounds);
+                    if m.on_click.is_some()
+                        && self.tree.flags(node).contains(NodeFlags::HOVERED)
+                    {
+                        hover_tint_brush(&mut brush);
+                    }
+                    brush
+                });
             if bg.is_some() || border.is_some() || gradient.is_some() {
                 dl.push(DrawCmd::Rect {
                     rect: bounds,
@@ -4356,6 +4366,20 @@ fn gradient_brush(g: &lumen_style::StyleGradient, bounds: Rect) -> Brush {
             stops,
             spread: lumen_render::SpreadMode::Pad,
         },
+    }
+}
+
+/// Hover feedback for gradient fills: tint every stop the way
+/// [`hover_tint`] treats a solid.
+fn hover_tint_brush(brush: &mut Brush) {
+    match brush {
+        Brush::Solid(c) => *c = hover_tint(*c),
+        Brush::LinearGradient { stops, .. } | Brush::RadialGradient { stops, .. } => {
+            for stop in stops {
+                stop.color = hover_tint(stop.color);
+            }
+        }
+        _ => {}
     }
 }
 
