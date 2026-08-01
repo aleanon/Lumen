@@ -45,8 +45,11 @@ impl Scrollable {
         children: impl Into<Vec<Element>>,
     ) -> Scrollable {
         let offset = cx.signal(name, || 0.0f64);
-        let y = offset.get(cx.runtime());
         let max_y = (content_h - viewport_h).max(0.0);
+        // Apply the stored offset clamped to the *current* extent: content
+        // can shrink between builds (a tab switch, a filter), and a stale
+        // offset must not push what's left out of the viewport.
+        let y = offset.get(cx.runtime()).clamp(0.0, max_y);
 
         let mut inner = Element::column(children);
         inner.style.margin.top = Dim::px(-(y as f32));
