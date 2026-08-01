@@ -21,6 +21,7 @@
 
 #[cfg(feature = "snapshot")]
 use crate::diagnostics::{codes, Diagnostic};
+use crate::identity::{fold_id, hash_id, IdHash, ROOT_ID};
 #[cfg(feature = "snapshot")]
 use serde::de::DeserializeOwned;
 #[cfg(feature = "snapshot")]
@@ -198,10 +199,14 @@ struct Inner {
     slots: HashMap<SignalId, Slot>,
     scopes: HashMap<ScopeId, ScopeData>,
 
-    // interning: stable string key <-> dense id
-    key_to_id: HashMap<String, SignalId>,
+    // Interning: folded key hash -> dense id (ADR-021). The *readable* name is
+    // kept alongside in `id_to_key` (indexed by `SignalId`) because snapshots
+    // (ADR-011) and agent dep reporting (ADR-009) are name-keyed — but it is
+    // only ever built on the cold path, so re-addressing an existing signal
+    // never allocates.
+    hash_to_id: HashMap<IdHash, SignalId>,
     id_to_key: Vec<String>,
-    scope_key_to_id: HashMap<String, ScopeId>,
+    scope_hash_to_id: HashMap<IdHash, ScopeId>,
     next_scope: u32,
 
     // reactive bookkeeping
@@ -419,11 +424,15 @@ impl Runtime {
     /// initializer. Returns how many slots were removed.
     pub fn evict_prefix(&self, prefix: &str) -> usize {
         let mut b = self.inner.borrow_mut();
+        // Scans the readable names (`id_to_key` is indexed by `SignalId`), since
+        // identity itself is a hash and cannot be prefix-matched. H1 replaces
+        // this with owner-scope eviction — see `docs/plan-hash-identity.md`.
         let ids: Vec<SignalId> = b
-            .key_to_id
+            .id_to_key
             .iter()
-            .filter(|(k, _)| k.starts_with(prefix))
-            .map(|(_, id)| *id)
+            .enumerate()
+            .filter(|(_, k)| k.starts_with(prefix))
+            .map(|(i, _)| SignalId(i as u32))
             .collect();
         let mut n = 0;
         for id in ids {
@@ -732,26 +741,45 @@ impl Runtime {
 
     // --- internals ----------------------------------------------------------
 
-    fn intern(&self, key: &str) -> SignalId {
+    /// Resolve a folded key hash to its dense [`SignalId`], creating the mapping
+    /// on first sight (ADR-021).
+    ///
+    /// `name` is called **only on the cold path** — when this hash has never
+    /// been seen. Re-addressing an existing signal is a hash-map hit with no
+    /// allocation, which is what lets a per-item key be rebuilt every frame for
+    /// free. The name it returns is the readable key snapshots and agent dep
+    /// reporting use.
+    fn intern_hashed(&self, hash: IdHash, name: impl FnOnce() -> String) -> SignalId {
         let mut b = self.inner.borrow_mut();
-        if let Some(&id) = b.key_to_id.get(key) {
+        if let Some(&id) = b.hash_to_id.get(&hash) {
             return id;
         }
         let id = SignalId(b.id_to_key.len() as u32);
-        b.id_to_key.push(key.to_string());
-        b.key_to_id.insert(key.to_string(), id);
+        b.id_to_key.push(name());
+        b.hash_to_id.insert(hash, id);
         id
     }
 
-    fn intern_scope(&self, key: &str) -> ScopeId {
+    fn intern(&self, key: &str) -> SignalId {
+        self.intern_hashed(fold_id(ROOT_ID, hash_id(key)), || key.to_string())
+    }
+
+    /// Resolve a folded key hash to its dense [`ScopeId`] (effects/memos).
+    /// Scope ids are never reported by name, so unlike [`Runtime::intern_hashed`]
+    /// this keeps no readable key at all.
+    fn intern_scope_hashed(&self, hash: IdHash) -> ScopeId {
         let mut b = self.inner.borrow_mut();
-        if let Some(&id) = b.scope_key_to_id.get(key) {
+        if let Some(&id) = b.scope_hash_to_id.get(&hash) {
             return id;
         }
         let id = ScopeId(b.next_scope);
         b.next_scope += 1;
-        b.scope_key_to_id.insert(key.to_string(), id);
+        b.scope_hash_to_id.insert(hash, id);
         id
+    }
+
+    fn intern_scope(&self, key: &str) -> ScopeId {
+        self.intern_scope_hashed(fold_id(ROOT_ID, hash_id(key)))
     }
 
     /// Subscribe the currently-running scope (if any) to `id`.
@@ -1174,5 +1202,78 @@ mod tests {
         let v = rt.signal("v", || vec![1, 2, 3]);
         v.update(&rt, |xs| xs.push(4));
         assert_eq!(v.get(&rt), vec![1, 2, 3, 4]);
+    }
+
+    // --- identity / interning (ADR-021) ------------------------------------
+
+    /// The point of hash identity: **re-addressing an existing signal must not
+    /// build its readable name.** That name is the only allocation left on the
+    /// path, so if it were built per call, a per-item key rebuilt every frame
+    /// (a list row) would allocate every frame — the cost this replaces.
+    #[test]
+    fn a_readable_name_is_built_only_when_the_id_is_new() {
+        let rt = Runtime::new();
+        let built = Cell::new(0);
+        let h = fold_id(ROOT_ID, hash_id("row-7"));
+
+        let first = rt.intern_hashed(h, || {
+            built.set(built.get() + 1);
+            "row-7".to_string()
+        });
+        assert_eq!(built.get(), 1, "a brand-new id must record its name");
+
+        for _ in 0..100 {
+            let again = rt.intern_hashed(h, || {
+                built.set(built.get() + 1);
+                "row-7".to_string()
+            });
+            assert_eq!(again, first, "the same key must resolve to the same id");
+        }
+        assert_eq!(
+            built.get(),
+            1,
+            "re-addressing an existing signal must not build its name"
+        );
+    }
+
+    #[test]
+    fn distinct_keys_get_distinct_slots() {
+        let rt = Runtime::new();
+        let a = rt.signal("a", || 1i32);
+        let b = rt.signal("b", || 2i32);
+        a.set(&rt, 10);
+        assert_eq!(a.get(&rt), 10);
+        assert_eq!(b.get(&rt), 2, "writing `a` must not touch `b`");
+    }
+
+    #[test]
+    fn re_creating_the_same_key_keeps_the_existing_value() {
+        let rt = Runtime::new();
+        let a = rt.signal("a", || 1i32);
+        a.set(&rt, 42);
+        // The initializer must not run again for an existing key.
+        let again: Signal<i32> = rt.signal("a", || 1i32);
+        assert_eq!(again.get(&rt), 42);
+    }
+
+    /// `evict_prefix` is the F5 list GC (a vanished keyed-list row sheds its
+    /// scope-local state). It was untested; H0 re-implemented it over the
+    /// readable names, so pin the behavior before H1 replaces it with
+    /// owner-scope eviction.
+    #[test]
+    fn evict_prefix_drops_only_the_matching_scope_local_signals() {
+        let rt = Runtime::new();
+        let keep = rt.signal("keep", || 1i32);
+        let _row1 = rt.signal("row-1/count", || 10i32);
+        let row2 = rt.signal("row-2/count", || 20i32);
+
+        assert_eq!(rt.evict_prefix("row-1/"), 1, "exactly the one row is shed");
+
+        // The evicted slot is gone, so re-creating the key runs its initializer
+        // afresh — while its neighbours are untouched.
+        let row1_again: Signal<i32> = rt.signal("row-1/count", || 99i32);
+        assert_eq!(row1_again.get(&rt), 99);
+        assert_eq!(row2.get(&rt), 20);
+        assert_eq!(keep.get(&rt), 1);
     }
 }
