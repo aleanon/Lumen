@@ -208,6 +208,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             tree: Tree::new(),
             meta: HashMap::new(),
             node_ink: HashMap::new(),
+            node_caret: HashMap::new(),
             node_text_metrics: HashMap::new(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
             sem_root: None,
@@ -552,6 +553,9 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// past the layout box via descenders/side bearings). Absent ⇒ ink == box.
     /// Drives the clipping audit (W0104) and `ui.getLayout`'s `ink`.
     node_ink: HashMap<NodeIndex, kurbo::Rect>,
+    /// The painted caret rectangle (window-space) per focused editor,
+    /// repopulated each display-list pass. Introspection for [`Headless::caret_rect`].
+    node_caret: HashMap<NodeIndex, kurbo::Rect>,
     /// Typographic metrics per text node from the last paint (diagnostic aid;
     /// surfaced on `SemanticsNode.text_metrics` and via `ui.getLayout`).
     node_text_metrics: HashMap<NodeIndex, lumen_text::TextMetrics>,
@@ -1869,6 +1873,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     pub fn node_bounds_by_id(&self, id: &str) -> Option<Rect> {
         let id: StableId = id.into();
         self.node_by_id(&id).map(|n| self.tree.bounds(n))
+    }
+
+    /// The painted caret rectangle (window-space) for the focused editor `id`, or
+    /// `None` if it isn't focused / has no caret. Introspection for asserting an
+    /// input's caret stays inside its (clipped) box.
+    #[doc(hidden)]
+    pub fn caret_rect(&self, id: &str) -> Option<Rect> {
+        let id: StableId = id.into();
+        self.node_by_id(&id)
+            .and_then(|n| self.node_caret.get(&n).copied())
     }
 
     fn move_focus(&mut self, forward: bool) {
@@ -3331,6 +3345,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let mut dl = DisplayList::new();
         let mut text_targets: Vec<lumen_render::TextTarget> = Vec::new();
         self.node_ink.clear(); // repopulated per node as text runs are emitted
+        self.node_caret.clear();
         self.node_text_metrics.clear();
         let order = self.tree.document_order();
         // Preorder depth of every node, and a partition into the main pass and the
@@ -3746,11 +3761,31 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // Text color is reused after `ts` is moved into layout (caret /
                 // run brush / analysis target); capture it (Color is Copy).
                 let text_color = ts.color;
-                // Paint at the padded (content-box) origin so a button label
-                // sits inside its padding (centred for symmetric padding) rather
-                // than jammed into the border-box corner. Plain text has no
-                // padding, so this is a no-op for it.
-                let tx = bounds.x0 + m.pad.0;
+                // Caret-follow horizontal scroll: a clipped editor has no scroll
+                // offset of its own, so a caret past the box width was clipped out
+                // of view (e.g. a masked password field once you type past its
+                // width). Shift the text left just enough to keep the caret inside
+                // the content box. Baked into `tx`, so glyphs, selection, and caret
+                // move together. Gated on `clip_on` (an unclipped field already
+                // shows the caret past its edge); genuinely wrapped content keeps
+                // `caret_x <= avail`, so this is a no-op there.
+                let scroll_x = match m.caret_byte {
+                    Some(caret) if focused && clip_on => {
+                        let avail = (bounds.width() - 2.0 * m.pad.0).max(0.0);
+                        let caret_x = self
+                            .text
+                            .shaped(txt, &ts, m.wrap_width, lumen_text::TextAlign::Start)
+                            .caret_pos(caret)
+                            .0 as f64;
+                        (caret_x - avail).max(0.0)
+                    }
+                    _ => 0.0,
+                };
+                // Paint at the padded (content-box) origin, minus any caret
+                // scroll, so a label sits inside its padding (centred for
+                // symmetric padding) rather than jammed into the border-box
+                // corner. Plain text has no padding/scroll, so this is a no-op.
+                let tx = bounds.x0 + m.pad.0 - scroll_x;
                 let ty = bounds.y0 + m.pad.1;
                 // R3.4: emit a glyph run (positioned glyphs + atlas-bound coverage
                 // bitmaps from the per-glyph cache) instead of a whole-string
@@ -3827,13 +3862,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                             .shaped(txt, &ts, m.wrap_width, lumen_text::TextAlign::Start);
                     let (cx, cy, ch) = block.caret_pos(caret);
                     let w = 1.5;
+                    let cr = Rect::new(
+                        tx + cx as f64,
+                        ty + cy as f64,
+                        tx + cx as f64 + w,
+                        ty + cy as f64 + ch as f64,
+                    );
+                    self.node_caret.insert(node, cr);
                     dl.push(DrawCmd::Rect {
-                        rect: Rect::new(
-                            tx + cx as f64,
-                            ty + cy as f64,
-                            tx + cx as f64 + w,
-                            ty + cy as f64 + ch as f64,
-                        ),
+                        rect: cr,
                         brush: Brush::Solid(text_color),
                         radii: CornerRadii::all(0.0),
                         border: None,
