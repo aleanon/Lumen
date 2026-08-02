@@ -26,6 +26,41 @@ pub struct StableId(pub SmolStr);
 
 Every node also has an **identity path**: the sequence of (component type, slot index or explicit key) from the root. `StableId`s set via `.id("...")` must be unique within their window; duplicates are a runtime diagnostic (`W0001`), first match wins for selectors.
 
+**Reactive identity** (ADR-021) is a third notion, distinct from both above: what
+addresses a signal/scope in the store.
+
+```rust
+/// The folded identity of a signal/scope key. 128-bit: a collision would alias
+/// two signals and corrupt a snapshot, so the width removes the case entirely.
+pub type IdHash = u128;
+
+pub fn hash_id<K: Hash + ?Sized>(key: &K) -> IdHash;      // a bare key
+pub fn fold_id(parent: IdHash, local: IdHash) -> IdHash;  // key under a scope
+pub fn key_name<K: Debug + ?Sized>(key: &K) -> String;    // the readable name
+pub struct ScopePath(/* … */);   // ScopePath::root().child("list").child(3)
+```
+
+A key is **anything `Hash + Debug`** — `&str`, an index, a tuple, or a typed
+`enum Field { Row(u32) }`. Identity is hierarchical by *folding*, not by joining
+strings: a scope hands its children its own `IdHash` and each child folds its
+local key in. Re-addressing an existing signal therefore allocates nothing,
+which is what makes per-item state in a list cheap to rebuild every frame
+(measured: 1 000 rows/frame, 51.0 µs and 1 000 allocations by `format!` key →
+18.2 µs and **0** by typed key).
+
+A **readable name** is still recorded for each key, but only the first time it is
+seen — snapshots (ADR-011) and agent dep reporting (ADR-009) are name-keyed.
+`key_name` strips the quotes `Debug` puts around a string key, so a `&str` key
+keeps the exact spelling it had before ADR-021.
+
+Two consequences worth knowing:
+
+- **Hashes are not prefix-enumerable.** Scope-local state is shed by recorded
+  ownership (`Runtime::evict_scope`), never by matching a key prefix.
+- **Addressing scoped state from outside a build needs the same folding.**
+  `rt.signal("row-3/v")` is a *different, root-level* signal from the `v` inside
+  `cx.scope("row-3")` — use `ScopePath` (or an accessor the widget exposes).
+
 ## 3. Elements, widgets, components
 
 The widget model (**amended per ADR-W1**, replacing the earlier unified
@@ -96,10 +131,14 @@ impl<T: State> Signal<T> {
 }
 
 impl BuildCx {
-    /// Creates or re-attaches state. Key = scope prefix + `name`.
-    pub fn signal<T: State>(&self, name: &str, init: impl FnOnce() -> T) -> Signal<T>;
+    /// Creates or re-attaches state. Identity = enclosing scope folded with
+    /// `key` (ADR-021); `key` is any `Hash + Debug` — `&str`, an index, a
+    /// tuple, or a typed `Field::Row(id)`.
+    pub fn signal<T: State, K: Hash + Debug>(&self, key: K, init: impl FnOnce() -> T) -> Signal<T>;
     /// Signal-read-memoized subtree (the shipped memoization primitive).
-    pub fn scope(&mut self, name: &str, f: impl FnOnce(&mut BuildCx) -> Element) -> Element;
+    /// A memo *hit* needs identity only — no name is built, so an unchanged
+    /// row costs zero allocations.
+    pub fn scope<K: Hash + Debug>(&mut self, key: K, f: impl FnOnce(&mut BuildCx) -> Element) -> Element;
     /// Async data keyed by (name, deps): re-fetches when deps change.
     pub fn resource<T, E>(&self, name: &str, deps: …, fetch: …) -> Resource<T, E>; // value + error + loading
 }

@@ -91,9 +91,10 @@ P.4), `LineChart::element(values, labels)` / `PieChart::element(slices)`,
 
 ## Step 4 — state rules (the ones that bite)
 
-- State lives in `cx.signal(name, init)`, read at build, mutated **only in
+- State lives in `cx.signal(key, init)`, read at build, mutated **only in
   handlers** via `sig.update(rt, |v| …)` (in-place, pure closure — never
-  re-enter the runtime inside it).
+  re-enter the runtime inside it). `key` is anything `Hash + Debug` (ADR-021):
+  a `&str`, an index, a tuple, or a typed `enum Field { Row(u32) }`.
 - **Handlers capture only `Copy` state** (signal handles, scalars) — an
   owned `String`/`Vec`/clone goes stale (ADR-013). `stable_handler!` makes
   violations fail to compile.
@@ -101,8 +102,17 @@ P.4), `LineChart::element(values, labels)` / `PieChart::element(slices)`,
 - Memoize expensive subtrees with `cx.scope(name, |cx| …)`; **every signal
   the subtree depends on must be read inside the scope**, or invalidation
   misses it.
-- Keyed dynamic lists: `widgets::keyed(...)`; namespace per-item signals
-  (`format!("todo-{id}.done")` — dashes only, see Step 6).
+- Keyed dynamic lists: `widgets::keyed(...)`. Key per-item signals with a
+  **typed key, not a built string** — `cx.signal((Todo::Done, id), …)` or
+  `cx.scope(("todo", id), …)`. `format!("todo-{id}.done")` still compiles but
+  allocates once per item *per frame*; a typed key allocates nothing (measured:
+  1 000 rows/frame, 51.0 µs + 1 000 allocations → 18.2 µs + **0**).
+- ⚠️ **Reading scoped state from outside the build**: identity *folds*, it does
+  not concatenate. `rt.signal("todo-3/done")` is a **different, root-level**
+  signal from the `done` created inside `cx.scope(("todo", 3))`. Use
+  `ScopePath::root().child(("todo", 3))` + `rt.signal_at(…)`, or an accessor the
+  widget exposes. This fails *silently* — the write lands on a signal nothing
+  reads, so the UI just doesn't update.
 - State types stay serializable (default `snapshot` feature): prefer
   sorted `Vec<(K, V)>` over maps with non-string keys. `Box<dyn Trait>`
   is storable via `#[lumen_macros::state_registry]` on the trait +

@@ -232,7 +232,7 @@ invalidation. Fixed to fold identity via `ScopePath`. Flat-string addressing of
 scoped state is the one real migration hazard; it fails loudly only where a test
 asserts on the effect.
 
-### H4 — docs (doc-currency rule, AGENT.md)
+### H4 — docs (doc-currency rule, AGENT.md) — ☑ DONE 2026-08-02
 - ADR-007 identity clause: note the refinement (→ ADR-021).
 - `.ai_docs/02-spec-core.md` §4 (signals/identity): document `impl Hash + Debug`
   keys, composition, and the readable-name/snapshot contract.

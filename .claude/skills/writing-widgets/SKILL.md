@@ -110,9 +110,30 @@ impl_common!(Toggle);   // adds .id/.class/.background/.style/.element[_mut] + F
 
 Config setters take `mut self`, return `Self`; store callbacks as
 `Rc<dyn Fn(...)>`; a final `build(self, cx: &BuildCx) -> Element` does the work.
-Namespace all sub-state under `name` (`{name}.sx`, `{name}.text`, …) so multiple
-instances don't collide. See `grid.rs` end-to-end. Expose read accessors as
-statics when the app needs them (`Grid::zoom_of(cx, name)`).
+See `grid.rs` end-to-end.
+
+**Namespace sub-state with a typed `(name, Part)` key, not a built string**
+(ADR-021). A key is anything `Hash + Debug`, and a tuple key costs no allocation
+to re-address — where `format!("{name}.sx")` allocated on every build:
+
+```rust
+/// Which piece of this widget's state a signal holds.
+#[derive(Hash, Debug, Clone, Copy, PartialEq, Eq)]
+enum Part { Sx, Sy, Zoom }
+
+let sx = cx.signal((name, Part::Sx), || 0.0f64);   // no per-build key string
+```
+
+⚠️ A typed key makes sub-state **private by construction** — outside code can no
+longer reach it by guessing `"sheet.sx"`. That is the intent, but it means **a
+widget whose sub-state is observable from outside must expose accessors**, or
+tests and the app lose access. Take `&Runtime` (not `&BuildCx`) so they work from
+tests, handlers, and the agent:
+
+```rust
+pub fn scroll_of(rt: &Runtime, name: &str) -> (f64, f64) { … }   // Grid
+pub fn zoom_at(rt: &Runtime, name: &str) -> f64 { … }
+```
 
 ## Step 3 — the rules (non-negotiable)
 
@@ -154,6 +175,12 @@ statics when the app needs them (`Grid::zoom_of(cx, name)`).
   `Vec<(K, V)>` over `HashMap`/`BTreeMap` with tuple keys (JSON needs string map
   keys). Keep an external-reader **mirror** if handy (TextInput publishes
   `{name}.text` alongside its editor state).
+- **Never address *scoped* state by a flat string from outside the build.**
+  `rt.signal("row-3/v")` is a **different, root-level** signal from the `v`
+  created inside `cx.scope("row-3")` — identity folds, it doesn't concatenate
+  (ADR-021). Use `ScopePath::root().child("row-3")` + `signal_at`, or (better)
+  the accessor the widget exposes. This fails silently: the write lands on a
+  signal nothing reads.
 
 ## Handler signatures (exact)
 
@@ -189,7 +216,8 @@ function of the signal, so the coherence oracle covers the toggle.
 **Builder that needs the state to shape later setters** (e.g. `.body(children)`
 mounting content only when open): snapshot the read value into the struct in
 `new` (`Accordion { el, name, is_open }`) so the later setter uses it without
-re-touching `cx`. Namespace any tagged sub-nodes under `name` (`{name}-body`).
+re-touching `cx`. Namespace any tagged sub-nodes under `name` (`{name}-body`) — element **ids**
+are still strings (they're selectors, not reactive keys).
 
 ## Gotchas (hard-won — check every one)
 
