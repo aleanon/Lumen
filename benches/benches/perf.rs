@@ -6,6 +6,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use kurbo::{Point, Rect, Size, Vec2};
 use lumen_core::events::{Event, Modifiers, WheelEvent};
+use lumen_core::identity::{fold_id, hash_id, ScopePath};
 use lumen_core::state::Runtime;
 use lumen_layout::{Dim, LayoutStyle, LayoutTree};
 use lumen_render::scene::cull_visible;
@@ -125,8 +126,8 @@ fn scope_memo_one_of_many(c: &mut Criterion) {
     let app = App::new(|cx| {
         let rows: Vec<_> = (0..N)
             .map(|i| {
-                cx.scope(&format!("row-{i}"), move |cx| {
-                    let s: Signal<i64> = cx.signal(&format!("v-{i}"), || 0);
+                cx.scope(("row", i), move |cx| {
+                    let s: Signal<i64> = cx.signal("v", || 0);
                     widgets::text(format!("row {i}: {}", s.get(cx.runtime())))
                 })
             })
@@ -140,7 +141,17 @@ fn scope_memo_one_of_many(c: &mut Criterion) {
             // Flip one row's signal (namespaced under its scope), then pump —
             // only that scope re-runs; the other 199 reuse cached subtrees.
             let j = i % N;
-            let s: Signal<i64> = h.runtime().signal(&format!("row-{j}/v-{j}"), || 0);
+            // Address the row's scope-local signal the way the build folded it
+            // (ADR-021). A flat "row-j/v-j" string would resolve to a *different*
+            // (root-level) signal that no scope reads, turning this bench into a
+            // no-op rebuild.
+            let row = ScopePath::root().child(("row", j));
+            let s: Signal<i64> = h.runtime().signal_at(
+                fold_id(row.hash(), hash_id("v")),
+                row.hash(),
+                || format!("row-{j}/v"),
+                || 0,
+            );
             s.update(h.runtime(), |v| *v += 1);
             h.pump();
             i += 1;

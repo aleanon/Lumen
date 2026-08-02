@@ -36,6 +36,26 @@ use lumen_layout::{Dim, Edges, LayoutStyle, Position};
 
 use crate::{BuildCx, Element};
 
+/// Which piece of a [`Grid`]'s state a signal holds.
+///
+/// Sub-state is keyed by `(name, Part)` rather than a built-up string like
+/// `format!("{name}.sx")` (ADR-021): the tuple is a `Hash` key, so re-addressing
+/// it every build costs no allocation, and the variants are checked by the
+/// compiler instead of spelled out at each site.
+#[derive(Hash, Debug, Clone, Copy, PartialEq, Eq)]
+enum Part {
+    /// Horizontal scroll offset.
+    Sx,
+    /// Vertical scroll offset.
+    Sy,
+    /// Per-column widths the user has resized.
+    ColWidths,
+    /// Per-row heights the user has resized.
+    RowHeights,
+    /// Zoom factor.
+    Zoom,
+}
+
 // --- resizable axis: a default size + sparse per-index overrides (content units)
 
 fn size_of(over: &[(u32, f64)], def: f64, i: u32) -> f64 {
@@ -273,8 +293,32 @@ impl Grid {
 
     /// The current zoom of the grid named `name` (1.0 if never zoomed).
     pub fn zoom_of(cx: &BuildCx, name: &str) -> f64 {
-        cx.signal(format!("{name}.zoom"), || 1.0f64)
-            .get(cx.runtime())
+        Self::zoom_at(cx.runtime(), name)
+    }
+
+    /// [`Grid::zoom_of`] against a bare [`Runtime`] (outside a build — tests,
+    /// the agent, event handlers).
+    pub fn zoom_at(rt: &Runtime, name: &str) -> f64 {
+        let z: Signal<f64> = rt.signal((name, Part::Zoom), || 1.0f64);
+        z.get(rt)
+    }
+
+    /// The user-resized column widths of the grid named `name`, as
+    /// `(column index, width)` pairs. Empty until a column is resized.
+    pub fn col_widths_of(rt: &Runtime, name: &str) -> Vec<(u32, f64)> {
+        let cw: Signal<Vec<(u32, f64)>> = rt.signal((name, Part::ColWidths), Vec::new);
+        cw.get(rt)
+    }
+
+    /// The current scroll offset `(x, y)` of the grid named `name`.
+    ///
+    /// Sub-state is keyed by a private typed key (ADR-021), so this accessor is
+    /// how outside code reads it — the widget's own contract rather than a
+    /// guessable string key.
+    pub fn scroll_of(rt: &Runtime, name: &str) -> (f64, f64) {
+        let sx: Signal<f64> = rt.signal((name, Part::Sx), || 0.0f64);
+        let sy: Signal<f64> = rt.signal((name, Part::Sy), || 0.0f64);
+        (sx.get(rt), sy.get(rt))
     }
 
     /// Build the grid into an [`Element`] (a clipped viewport that fills its
@@ -285,11 +329,11 @@ impl Grid {
         let (zmin, zmax) = (s.zoom_min, s.zoom_max);
         let name = &self.name;
 
-        let sx = cx.signal(format!("{name}.sx"), || 0.0f64);
-        let sy = cx.signal(format!("{name}.sy"), || 0.0f64);
-        let cw = cx.signal(format!("{name}.cw"), Vec::<(u32, f64)>::new);
-        let rh = cx.signal(format!("{name}.rh"), Vec::<(u32, f64)>::new);
-        let zoom = cx.signal(format!("{name}.zoom"), || 1.0f64);
+        let sx = cx.signal((name, Part::Sx), || 0.0f64);
+        let sy = cx.signal((name, Part::Sy), || 0.0f64);
+        let cw = cx.signal((name, Part::ColWidths), Vec::<(u32, f64)>::new);
+        let rh = cx.signal((name, Part::RowHeights), Vec::<(u32, f64)>::new);
+        let zoom = cx.signal((name, Part::Zoom), || 1.0f64);
 
         let z = if self.zoomable {
             zoom.get(cx.runtime()).clamp(zmin, zmax)
@@ -695,8 +739,8 @@ mod tests {
             modifiers: Modifiers::empty(),
         }));
         h.pump();
-        let sy: lumen_core::state::Signal<f64> = h.runtime().signal("g.sy", || 0.0);
-        assert!(sy.get(h.runtime()) > 100.0, "wheel scrolled the grid");
+        let (_, sy) = Grid::scroll_of(h.runtime(), "g");
+        assert!(sy > 100.0, "wheel scrolled the grid");
         assert!(h.pump().node_count < 900, "still bounded after scroll");
         h.assert_view_coherent();
     }

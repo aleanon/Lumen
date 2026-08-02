@@ -34,9 +34,10 @@ fn list_app(n: usize) -> Headless {
 }
 
 fn col(children: Vec<Element>) -> Element {
-    let mut el = Element::default();
-    el.children = children;
-    el
+    Element {
+        children,
+        ..Element::default()
+    }
 }
 
 #[test]

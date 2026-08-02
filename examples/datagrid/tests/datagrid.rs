@@ -7,7 +7,16 @@ use lumen_core::events::{
     Event, Modifiers, PointerButton, PointerEvent, PointerKind, TextInputEvent, WheelEvent,
 };
 use lumen_core::geometry::{Point, Size, Vec2};
-use lumen_widgets::Headless;
+use lumen_widgets::{Grid, Headless};
+
+// The grid's sub-state is private typed state (ADR-021); read it through the
+// widget's accessors rather than guessing a string key.
+fn sx(h: &Headless) -> f64 {
+    Grid::scroll_of(h.runtime(), "sheet").0
+}
+fn sy(h: &Headless) -> f64 {
+    Grid::scroll_of(h.runtime(), "sheet").1
+}
 
 fn pe(x: f64, y: f64) -> PointerEvent {
     PointerEvent {
@@ -47,14 +56,13 @@ fn virtualized_bounded_and_scrolls() {
         (300..2000).contains(&n),
         "viewport node count bounded, got {n}"
     );
-    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sy", || 0.0);
-    assert_eq!(sy.get(h.runtime()), 0.0, "starts at the top");
+    assert_eq!(sy(&h), 0.0, "starts at the top");
     h.assert_view_coherent();
 
     // Wheel down → the offset moves and the node count stays bounded.
     wheel(&mut h, 0.0, 4000.0);
     let after = h.pump().node_count;
-    assert!(sy.get(h.runtime()) > 100.0, "scrolled off the top");
+    assert!(sy(&h) > 100.0, "scrolled off the top");
     assert!(
         (300..2000).contains(&after),
         "still bounded after scroll, got {after}"
@@ -63,7 +71,7 @@ fn virtualized_bounded_and_scrolls() {
 
     // Wheel back to the top.
     wheel(&mut h, 0.0, -9000.0);
-    assert_eq!(sy.get(h.runtime()), 0.0, "scrolled back to the top");
+    assert_eq!(sy(&h), 0.0, "scrolled back to the top");
     h.assert_view_coherent();
 }
 
@@ -74,11 +82,7 @@ fn scrolls_past_the_old_u16_ceiling() {
     // Scroll far past where a u16 (65535) grid would have run out of rows.
     let deep = 70_000.0 * 24.0; // ≈ row 70000, well beyond u16::MAX
     wheel(&mut h, 0.0, deep);
-    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sy", || 0.0);
-    assert!(
-        sy.get(h.runtime()) >= 65535.0 * 24.0,
-        "scrolled into u32 territory"
-    );
+    assert!(sy(&h) >= 65535.0 * 24.0, "scrolled into u32 territory");
     let n = h.pump().node_count;
     assert!(
         (300..2000).contains(&n),
@@ -145,10 +149,8 @@ fn shift_wheel_scrolls_horizontally() {
         modifiers: Modifiers::SHIFT,
     }));
     h.pump();
-    let sx: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sx", || 0.0);
-    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sy", || 0.0);
-    assert!(sx.get(h.runtime()) > 100.0, "shift+wheel scrolled right");
-    assert_eq!(sy.get(h.runtime()), 0.0, "vertical offset unchanged");
+    assert!(sx(&h) > 100.0, "shift+wheel scrolled right");
+    assert_eq!(sy(&h), 0.0, "vertical offset unchanged");
     h.assert_view_coherent();
 }
 
@@ -156,8 +158,7 @@ fn shift_wheel_scrolls_horizontally() {
 fn ctrl_wheel_zooms() {
     let mut h = datagrid::main_app().run_headless(Size::new(1000.0, 700.0));
     h.pump();
-    let zoom: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.zoom", || 1.0);
-    assert_eq!(zoom.get(h.runtime()), 1.0);
+    assert_eq!(Grid::zoom_at(h.runtime(), "sheet"), 1.0);
 
     // Ctrl + wheel-up zooms in; a plain wheel does not.
     h.inject(Event::Wheel(WheelEvent {
@@ -166,7 +167,10 @@ fn ctrl_wheel_zooms() {
         modifiers: Modifiers::CTRL,
     }));
     h.pump();
-    assert!(zoom.get(h.runtime()) > 1.1, "ctrl+wheel zoomed in");
+    assert!(
+        Grid::zoom_at(h.runtime(), "sheet") > 1.1,
+        "ctrl+wheel zoomed in"
+    );
     assert!(info(&h).contains('%'), "toolbar shows the zoom level");
     h.assert_view_coherent();
 }
@@ -186,8 +190,7 @@ fn dragging_the_vertical_thumb_scrolls() {
     h.inject(Event::PointerUp(pe(cx, cy + 200.0)));
     h.pump();
 
-    let sy: lumen_core::state::Signal<f64> = h.runtime().signal("sheet.sy", || 0.0);
-    assert!(sy.get(h.runtime()) > 100.0, "thumb drag scrolled down");
+    assert!(sy(&h) > 100.0, "thumb drag scrolled down");
     h.assert_view_coherent();
 }
 
@@ -243,8 +246,7 @@ fn dragging_a_column_header_edge_resizes_it() {
     h.pump();
 
     // Column 2 now has a width override (wider than the 64px default)...
-    let cw: lumen_core::state::Signal<Vec<(u32, f64)>> = h.runtime().signal("sheet.cw", Vec::new);
-    let over = cw.get(h.runtime());
+    let over = Grid::col_widths_of(h.runtime(), "sheet");
     let w = over.iter().find(|(k, _)| *k == 2).map(|(_, w)| *w);
     assert!(
         w.is_some_and(|w| w > 70.0),

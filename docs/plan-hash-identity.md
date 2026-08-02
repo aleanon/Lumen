@@ -189,7 +189,7 @@ Land the hash-folded interner with **no call-site change** (public fns still tak
 - **Gate:** `snapshot` build + lean build both green; agent introspection tests
   green.
 
-### H3 — measure + wire into keyed lists (F5 groundwork)
+### H3 — measure + wire into keyed lists (F5 groundwork) — ☑ DONE 2026-08-02
 - Add a criterion bench: build a 1 000-row list with per-row signal + scope,
   (a) `&str` `format!` keys vs (b) enum keys — report allocations/frame and
   build time. Record the delta in the plan/decision log.
@@ -202,6 +202,35 @@ Land the hash-folded interner with **no call-site change** (public fns still tak
   separate F5 task that consumes it.
 - **Gate:** bench shows the steady-state per-frame allocation for the list drops
   to ~0 (only new rows allocate).
+
+**Measured** (`benches/benches/identity.rs`, re-addressing 1 000 per-row signals
+for one frame — i.e. the steady state, after interning):
+
+| Key | Time | Allocations/frame |
+|---|---|---|
+| `format!("row-{i}")` (pre-ADR-021) | 51.0 µs | **1 000** |
+| `Row::Hits(i)` (typed) | 18.2 µs | **0** |
+
+2.8× faster and allocation-free. The zero is *asserted* in the bench, not just
+reported, so reintroducing per-frame key building fails rather than quietly
+costing 1 000 allocations a frame.
+
+**Migration finding:** moving `Grid`'s sub-state from `format!("{name}.sx")` to a
+typed `(name, Part)` key broke every out-of-widget reader that addressed it by
+string (the `datagrid` example's tests). That is the intended consequence —
+typed keys make sub-state private by construction — but it means **a widget with
+externally-observable sub-state needs accessors**. `Grid` gained
+`scroll_of`/`zoom_at`/`col_widths_of` (`&Runtime`-based, usable from tests, the
+agent, and handlers) and the example now reads through them. This is the pattern
+the `writing-widgets` skill should teach (H4).
+
+**Correctness catch:** `benches/perf.rs`'s `scope_memo_one_of_many` addressed a
+*scope-local* signal by the flat string `"row-{j}/v-{j}"`. Under hash identity
+that resolves to a **different, root-level** signal no scope reads — the bench
+would have silently measured a no-op rebuild instead of a targeted
+invalidation. Fixed to fold identity via `ScopePath`. Flat-string addressing of
+scoped state is the one real migration hazard; it fails loudly only where a test
+asserts on the effect.
 
 ### H4 — docs (doc-currency rule, AGENT.md)
 - ADR-007 identity clause: note the refinement (→ ADR-021).
