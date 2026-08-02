@@ -530,7 +530,7 @@ impl RichTextEditor {
         let el = {
             use lumen_text::TextEditor;
             let editor = cx.signal(name, || TextEditor::new(initial));
-            let mirror = cx.signal(&format!("{name}.text"), || initial.to_string());
+            let mirror = cx.signal(format!("{name}.text"), || initial.to_string());
             let ed = editor.get(cx.runtime());
             let src = ed.text().to_string();
             let shown = if src.is_empty() {
@@ -637,12 +637,12 @@ impl FindReplaceBar {
         let el = {
             use lumen_text::TextEditor;
             let editor = cx.signal(editor_name, || TextEditor::new(""));
-            let mirror = cx.signal(&format!("{editor_name}.text"), String::new);
-            let find = cx.signal(&format!("{name}.find"), String::new);
+            let mirror = cx.signal(format!("{editor_name}.text"), String::new);
+            let find = cx.signal(format!("{name}.find"), String::new);
             let needle = find.get(cx.runtime());
             let count = crate::richdoc::RichDoc::find(&mirror.get(cx.runtime()), &needle).len();
 
-            let replace = cx.signal(&format!("{name}.replace"), String::new);
+            let replace = cx.signal(format!("{name}.replace"), String::new);
             let apply = {
                 move |rt: &lumen_core::state::Runtime| {
                     let needle = find.get(rt);

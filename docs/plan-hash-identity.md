@@ -140,7 +140,7 @@ Land the hash-folded interner with **no call-site change** (public fns still tak
 - **Gate:** full `lumen-core` + `lumen-widgets` suites green; `assert_view_coherent`
   unaffected; no golden changes.
 
-### H1 — `BuildCx` threading + `impl Hash + Debug` surface
+### H1 — `BuildCx` threading + `impl Hash + Debug` surface — ☑ DONE 2026-08-02
 - `BuildCx`: replace `prefix: RefCell<String>` (`element.rs:562`) with
   `prefix_hash: u64` (Copy) + `prefix_name: Option<Rc<str>>` built **on scope
   re-run** (see the readable-name section — skipped scopes build nothing; a cold

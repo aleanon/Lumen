@@ -56,7 +56,7 @@ impl Popover {
     /// A popover whose open flag is stored under `{name}.open`. `trigger`
     /// toggles it; `content` renders inside the floating panel while open.
     pub fn new(cx: &BuildCx, name: &str, mut trigger: Element, content: Element) -> Popover {
-        let open = cx.signal(&format!("{name}.open"), || false);
+        let open = cx.signal(format!("{name}.open"), || false);
         let is_open = open.get(cx.runtime());
 
         if trigger.role == Role::Generic {

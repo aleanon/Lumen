@@ -297,9 +297,9 @@ fn fuzz_mixed_bindings_and_scopes_stay_coherent() {
     let app = App::new(|cx: &mut BuildCx| {
         let rows: Vec<_> = (0..N)
             .map(|i| {
-                cx.scope(&format!("row-{i}"), move |cx| {
-                    let t: Signal<i64> = cx.signal(&format!("t-{i}"), || 0);
-                    let g: Signal<i64> = cx.signal(&format!("g-{i}"), || 0);
+                cx.scope(format!("row-{i}"), move |cx| {
+                    let t: Signal<i64> = cx.signal(format!("t-{i}"), || 0);
+                    let g: Signal<i64> = cx.signal(format!("g-{i}"), || 0);
                     widgets::text("row")
                         .id("row")
                         .bind_text(Dynamic::new(move |rt| format!("row {i}: {}", t.get(rt))))

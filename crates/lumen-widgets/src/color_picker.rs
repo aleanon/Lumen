@@ -45,7 +45,7 @@ impl ColorPicker {
     /// A picker storing the chosen hex under `name` (default `#1a73e8`).
     pub fn new(cx: &BuildCx, name: &str) -> ColorPicker {
         let value = cx.signal(name, || "#1a73e8".to_string());
-        let open = cx.signal(&format!("{name}.open"), || false);
+        let open = cx.signal(format!("{name}.open"), || false);
         let current = value.get(cx.runtime());
         let is_open = open.get(cx.runtime());
 

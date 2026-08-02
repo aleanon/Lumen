@@ -27,7 +27,7 @@ fn scrim_and_panel(
     content: Element,
     panel_style: LayoutStyle,
 ) -> Element {
-    let open = cx.signal(&format!("{name}.open"), || false);
+    let open = cx.signal(format!("{name}.open"), || false);
     if !open.get(cx.runtime()) {
         // Closed: a zero-size placeholder keeps the widget's identity stable
         // without occupying layout.

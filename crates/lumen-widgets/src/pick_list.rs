@@ -72,7 +72,7 @@ impl PickList {
     ) -> PickList {
         let options: Vec<String> = options.into_iter().map(Into::into).collect();
         let selected = cx.signal(name, String::new);
-        let open = cx.signal(&format!("{name}.open"), || false);
+        let open = cx.signal(format!("{name}.open"), || false);
         let sel = selected.get(cx.runtime());
         let is_open = open.get(cx.runtime());
         let placeholder = placeholder.into();

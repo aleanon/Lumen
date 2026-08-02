@@ -300,8 +300,8 @@ impl PullToRefresh {
         content: Vec<Element>,
     ) -> PullToRefresh {
         let el = {
-            let offset = cx.signal(&format!("{name}.offset"), || 0.0f64);
-            let refreshing = cx.signal(&format!("{name}.refreshing"), || false);
+            let offset = cx.signal(format!("{name}.offset"), || 0.0f64);
+            let refreshing = cx.signal(format!("{name}.refreshing"), || false);
             let y = offset.get(cx.runtime());
             let busy = refreshing.get(cx.runtime());
             let on_refresh = Rc::new(on_refresh);
@@ -485,9 +485,9 @@ fn first_dow(y: i64, m: i64) -> i64 {
 /// The month-calendar body of [`DatePicker`].
 fn calendar(cx: &BuildCx, name: &str) -> Element {
     let accent = Color::srgb8(0x1a, 0x73, 0xe8, 0xff);
-    let year = cx.signal(&format!("{name}.year"), || 2026i64);
-    let month = cx.signal(&format!("{name}.month"), || 6i64);
-    let day = cx.signal(&format!("{name}.day"), || 16i64);
+    let year = cx.signal(format!("{name}.year"), || 2026i64);
+    let month = cx.signal(format!("{name}.month"), || 6i64);
+    let day = cx.signal(format!("{name}.day"), || 16i64);
     let (yv, mv, dv) = (
         year.get(cx.runtime()),
         month.get(cx.runtime()),
@@ -722,8 +722,8 @@ pub fn time_picker(cx: &BuildCx, name: &str) -> Element {
 fn clock(cx: &BuildCx, name: &str) -> Element {
     let accent = Color::srgb8(0x1a, 0x73, 0xe8, 0xff);
     let dark = Color::srgb8(0x20, 0x24, 0x2a, 0xff);
-    let hour = cx.signal(&format!("{name}.hour"), || 9i64);
-    let minute = cx.signal(&format!("{name}.minute"), || 30i64);
+    let hour = cx.signal(format!("{name}.hour"), || 9i64);
+    let minute = cx.signal(format!("{name}.minute"), || 30i64);
     let hv = hour.get(cx.runtime());
     let mnv = minute.get(cx.runtime());
     let hd = if hv % 12 == 0 { 12 } else { hv % 12 };

@@ -182,6 +182,72 @@ pub fn fold_id(parent: IdHash, local: IdHash) -> IdHash {
     ((b as u128) << 64) | a as u128
 }
 
+/// The readable name recorded for a key the first time it is interned.
+///
+/// Identity itself is [`hash_id`]; this is only what snapshots (ADR-011) and
+/// agent dep reporting (ADR-009) display, so it is built **once per new key**,
+/// never on the hot path.
+///
+/// A `&str`/`String` key `Debug`-formats as `"foo"` — *with* quotes. Those are
+/// stripped so string keys keep the exact spelling they had before ADR-021 and
+/// existing snapshots keep matching. Keys whose contents would make stripping
+/// ambiguous (embedded quote or backslash) keep the quoted form.
+///
+/// ```
+/// use lumen_core::identity::key_name;
+/// #[derive(Debug)]
+/// enum Field { Row(u32) }
+/// assert_eq!(key_name("filter"), "filter");        // unchanged by ADR-021
+/// assert_eq!(key_name(&Field::Row(3)), "Row(3)");  // typed keys stay readable
+/// ```
+pub fn key_name<K: std::fmt::Debug + ?Sized>(key: &K) -> String {
+    let s = format!("{key:?}");
+    let inner = s.strip_prefix('"').and_then(|s| s.strip_suffix('"'));
+    match inner {
+        Some(i) if !i.contains('"') && !i.contains('\\') => i.to_string(),
+        _ => s,
+    }
+}
+
+/// A path to a nested reactive scope, folded the same way a build folds it.
+///
+/// Inside a build, scope identity is threaded automatically (each
+/// `cx.scope` folds its key into the enclosing one). This is the way to name
+/// the *same* scope from **outside** a build — introspection, tests, eviction —
+/// where there is no `BuildCx` to inherit from.
+///
+/// ```
+/// use lumen_core::identity::ScopePath;
+/// // Addresses the scope `cx.scope("inner", …)` nested inside `cx.scope("outer", …)`.
+/// let p = ScopePath::root().child("outer").child("inner");
+/// assert_ne!(p.hash(), ScopePath::root().child("inner").hash());
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ScopePath(IdHash);
+
+impl Default for ScopePath {
+    fn default() -> Self {
+        Self::root()
+    }
+}
+
+impl ScopePath {
+    /// The root (unscoped) namespace.
+    pub const fn root() -> ScopePath {
+        ScopePath(ROOT_ID)
+    }
+
+    /// Descend into the scope keyed by `key` within this one.
+    pub fn child<K: Hash>(self, key: K) -> ScopePath {
+        ScopePath(fold_id(self.0, hash_id(&key)))
+    }
+
+    /// The folded identity this path denotes.
+    pub const fn hash(self) -> IdHash {
+        self.0
+    }
+}
+
 /// Runtime identity of a live node: a slot `index` plus a `generation` stamp.
 ///
 /// Dense and reused after removal. The generation is bumped each time a slot is

@@ -49,8 +49,8 @@ impl Combobox {
     ) -> Combobox {
         let options: Vec<String> = options.into_iter().map(Into::into).collect();
         let editor = cx.signal(name, || TextEditor::new(""));
-        let open = cx.signal(&format!("{name}.open"), || false);
-        let selected = cx.signal(&format!("{name}.selected"), String::new);
+        let open = cx.signal(format!("{name}.open"), || false);
+        let selected = cx.signal(format!("{name}.selected"), String::new);
         let query = editor.get(cx.runtime()).text().to_string();
         let is_open = open.get(cx.runtime());
 

@@ -47,7 +47,7 @@ impl TextInput {
     /// A text input with `initial` contents, state stored under `name`.
     pub fn new(cx: &BuildCx, name: &str, initial: &str) -> TextInput {
         let editor = cx.signal(name, || TextEditor::new(initial));
-        let mirror = cx.signal(&mirror_key(name), || initial.to_string());
+        let mirror = cx.signal(mirror_key(name), || initial.to_string());
         let ed = editor.get(cx.runtime());
         let text = ed.text().to_string();
         // Keep a non-empty glyph box so an empty field still lays out with height.
@@ -110,7 +110,10 @@ impl TextInput {
     /// The current text of the field named `name`, readable from any handler
     /// (e.g. a sibling button) without holding the `TextInput`'s signal handle.
     pub fn text_of(rt: &Runtime, name: &str) -> String {
-        rt.signal::<String>(&mirror_key(name), String::new).get(rt)
+        {
+            let sig: Signal<String> = rt.signal(mirror_key(name), String::new);
+            sig.get(rt)
+        }
     }
 }
 

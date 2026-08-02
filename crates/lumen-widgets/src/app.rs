@@ -9,6 +9,7 @@
 use crate::element::{BuildCx, Element, Handler, NodeContent};
 use kurbo::{Point, Rect, Size};
 use lumen_core::events::{Event, InputQueue, Key, NamedKey, PointerState};
+use lumen_core::identity::{IdHash, ScopePath};
 use lumen_core::semantics::{
     Action, Role, SemanticsDoc, SemanticsNode, State as SemState, WindowInfo,
 };
@@ -578,11 +579,11 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     style_env: Option<StyleEnv>,
     /// A.3.1: per-rebuild scope→node-span map (scope key → subtree root +
     /// preorder node count). The retained-graph splice replaces these spans.
-    scope_spans: HashMap<String, SpanRec>,
+    scope_spans: HashMap<IdHash, SpanRec>,
     /// Last build's spans/tree/per-node work (A.3.2 copy-forward). A memo-hit
     /// scope whose recorded context hash matches copies its span's retained
     /// work (meta, styles, layout styles, flags) instead of re-lowering.
-    prev_spans: HashMap<String, SpanRec>,
+    prev_spans: HashMap<IdHash, SpanRec>,
     prev_tree: Tree,
     prev_meta: HashMap<NodeIndex, NodeMeta>,
     prev_node_style: HashMap<NodeIndex, lumen_style::Style>,
@@ -686,7 +687,7 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     scope_cache: RefCell<crate::element::ScopeCache>,
     /// Scope keys accessed during the current build (F5 GC). After the build,
     /// cached scopes + scope-local signals whose key is absent are swept.
-    scope_live: RefCell<std::collections::HashSet<String>>,
+    scope_live: RefCell<std::collections::HashSet<IdHash>>,
     /// Retained paint-only prop bindings from the last build (F3.4). A change to
     /// one binding's deps patches its node + repaints, skipping the rebuild.
     bg_bindings: Vec<BoundBg>,
@@ -2007,18 +2008,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// list bounded; correct because an absent scope isn't in the view, so a
     /// fresh rebuild wouldn't produce it either (coherence preserved).
     fn sweep_dead_scopes(&mut self) {
-        let dead: Vec<String> = {
+        let dead: Vec<IdHash> = {
             let live = self.scope_live.borrow();
             let cache = self.scope_cache.borrow();
             cache
                 .keys()
                 .filter(|k| !live.contains(*k))
-                .cloned()
+                .copied()
                 .collect()
         };
         for k in dead {
             self.scope_cache.borrow_mut().remove(&k);
-            self.rt.evict_prefix(&format!("{k}/"));
+            // Sheds the scope's own signals *and* any nested scope's (ADR-021:
+            // identity is a hash, so this walks recorded ownership rather than
+            // matching a key prefix).
+            self.rt.evict_scope(k);
         }
     }
 
@@ -2579,7 +2583,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     #[allow(clippy::too_many_arguments)]
     fn copy_span(
         &mut self,
-        key: &str,
+        key: IdHash,
         span: SpanRec,
         hash: u64,
         tree: &mut Tree,
@@ -2610,17 +2614,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         // Nested scopes inside this span keep working on the next build:
         // remap their span records onto the copied nodes as we go.
-        let nested: Vec<(String, SpanRec)> = self
+        let nested: Vec<(IdHash, SpanRec)> = self
             .prev_spans
             .iter()
-            .filter(|(k, r)| *k != key && prev_nodes.contains(&r.root))
-            .map(|(k, r)| (k.clone(), *r))
+            .filter(|(k, r)| **k != key && prev_nodes.contains(&r.root))
+            .map(|(k, r)| (*k, *r))
             .collect();
         let mut root_map: HashMap<NodeIndex, NodeIndex> = HashMap::new();
         let (node, lnode) =
             self.copy_node(span.root, parent, tree, layout, meta, built, &mut root_map);
         self.scope_spans.insert(
-            key.to_string(),
+            key,
             SpanRec {
                 root: node,
                 count: span.count,
@@ -2709,11 +2713,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     }
 
     /// The node span a [`BuildCx::scope`](crate::BuildCx::scope) produced this
-    /// build: its subtree-root node and preorder node count (A.3.1). `key` is
-    /// the full scope key (the `id` passed to `scope`, prefixed by enclosing
-    /// scopes). Introspection for the retained-pipeline work and tests.
-    pub fn scope_span(&self, key: &str) -> Option<(NodeIndex, u32)> {
-        self.scope_spans.get(key).map(|r| (r.root, r.count))
+    /// build: its subtree-root node and preorder node count (A.3.1).
+    /// Introspection for the retained-pipeline work and tests.
+    ///
+    /// `path` names the scope the way the build folded it (ADR-021) — a scope
+    /// nested inside another is addressed by descending, not by spelling out a
+    /// joined string key:
+    ///
+    /// ```ignore
+    /// h.scope_span(ScopePath::root().child("list"));            // top-level
+    /// h.scope_span(ScopePath::root().child("list").child("row-3")); // nested
+    /// ```
+    pub fn scope_span(&self, path: ScopePath) -> Option<(NodeIndex, u32)> {
+        self.scope_spans
+            .get(&path.hash())
+            .map(|r| (r.root, r.count))
     }
 
     /// Set/replace the app stylesheet at runtime (tier-1 hot reload). A broken
@@ -2940,13 +2954,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // matches and the span had no per-node side work), or materialize an
         // owned clone of the cached subtree and lower it normally.
         if let Some(rc) = el.shared.take() {
-            let key = el.scope_key.clone().expect("shared stub carries its key");
+            let key = el.scope_key.expect("shared stub carries its key");
             let hash = self.span_ctx_hash(in_overlay);
             if self.allow_copy_forward {
                 if let Some(span) = self.prev_spans.get(&key).copied() {
                     if !span.impure && span.ctx_hash == hash {
                         if let Some(res) =
-                            self.copy_span(&key, span, hash, tree, layout, meta, built, parent)
+                            self.copy_span(key, span, hash, tree, layout, meta, built, parent)
                         {
                             return res;
                         }
@@ -2959,7 +2973,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         let span_key = el.scope_key.take();
         let span_hash = span_key
-            .as_ref()
             .map(|_| self.span_ctx_hash(in_overlay))
             .unwrap_or(0);
         let impure_at = self.impure_seen;
@@ -3648,17 +3661,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // known. A gradient beats the solid color; hover feedback tints
             // its stops the same way `hover_tint` treats a solid, so gradient
             // buttons don't read as inert.
-            let gradient = css
-                .and_then(|s| s.background_gradient.as_ref())
-                .map(|g| {
-                    let mut brush = gradient_brush(g, bounds);
-                    if m.on_click.is_some()
-                        && self.tree.flags(node).contains(NodeFlags::HOVERED)
-                    {
-                        hover_tint_brush(&mut brush);
-                    }
-                    brush
-                });
+            let gradient = css.and_then(|s| s.background_gradient.as_ref()).map(|g| {
+                let mut brush = gradient_brush(g, bounds);
+                if m.on_click.is_some() && self.tree.flags(node).contains(NodeFlags::HOVERED) {
+                    hover_tint_brush(&mut brush);
+                }
+                brush
+            });
             if bg.is_some() || border.is_some() || gradient.is_some() {
                 dl.push(DrawCmd::Rect {
                     rect: bounds,

@@ -159,7 +159,7 @@ impl Pagination {
     /// `{name}.page` signal (`i64`, clamped).
     pub fn new(cx: &BuildCx, name: &str, pages: i64) -> Pagination {
         let pages = pages.max(1);
-        let page = cx.signal(&format!("{name}.page"), || 1i64);
+        let page = cx.signal(format!("{name}.page"), || 1i64);
         let cur = page.get(cx.runtime()).clamp(1, pages);
 
         let btn = |label: String, target: i64, active: bool, enabled: bool| {

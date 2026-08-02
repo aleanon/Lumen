@@ -4,6 +4,7 @@
 //! and refresh when the scope re-runs.
 
 use kurbo::Size;
+use lumen_core::identity::ScopePath;
 use lumen_core::state::Signal;
 use lumen_widgets::{col, widgets, App};
 
@@ -32,7 +33,9 @@ fn scope_spans_cover_exactly_the_subtree() {
     h.pump();
 
     // The scope subtree: outer col + label + inner column + 2 items = 5.
-    let (_root, nodes) = h.scope_span("list").expect("span recorded");
+    let (_root, nodes) = h
+        .scope_span(ScopePath::root().child("list"))
+        .expect("span recorded");
     assert_eq!(nodes, 5, "span counts the whole subtree");
     h.assert_view_coherent();
 }
@@ -53,13 +56,17 @@ fn scope_span_refreshes_when_the_scope_reruns() {
     })
     .run_headless(Size::new(300.0, 300.0));
     h.pump();
-    let (_, before) = h.scope_span("items").expect("span recorded");
+    let (_, before) = h
+        .scope_span(ScopePath::root().child("items"))
+        .expect("span recorded");
     assert_eq!(before, 2, "column + 1 row");
 
     let n: Signal<usize> = h.runtime().signal("n", || 1usize);
     n.set(h.runtime(), 3);
     h.pump();
-    let (_, after) = h.scope_span("items").expect("span survives re-run");
+    let (_, after) = h
+        .scope_span(ScopePath::root().child("items"))
+        .expect("span survives re-run");
     assert_eq!(after, 4, "column + 3 rows after the signal write");
     h.assert_view_coherent();
 }

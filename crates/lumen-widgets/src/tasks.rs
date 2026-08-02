@@ -173,7 +173,7 @@ impl BuildCx<'_> {
         D: Hash,
     {
         let dh = hash_deps(&deps);
-        let sig = self.signal::<ResourceCell<T, E>>(key, ResourceCell::default);
+        let sig: Signal<ResourceCell<T, E>> = self.signal(key, ResourceCell::default);
         let (changed, gen) = sig.with(self.runtime(), |c| (!c.started || c.deps_hash != dh, c.gen));
         if changed {
             let new_gen = gen + 1;
@@ -229,7 +229,7 @@ impl BuildCx<'_> {
         D: Hash,
     {
         let dh = hash_deps(&deps);
-        let sig = self.signal::<TaskTracker>(key, TaskTracker::default);
+        let sig: Signal<TaskTracker> = self.signal(key, TaskTracker::default);
         let changed = sig.with(self.runtime(), |t| !t.started || t.deps_hash != dh);
         if changed {
             sig.update(self.runtime(), move |t| {

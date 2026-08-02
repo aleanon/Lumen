@@ -40,8 +40,8 @@ pub struct RangeSlider {
 impl RangeSlider {
     /// A range slider storing its ends under `{name}.lo` / `{name}.hi`.
     pub fn new(cx: &crate::BuildCx, name: &str, min: f64, max: f64) -> RangeSlider {
-        let lo = cx.signal(&format!("{name}.lo"), || min);
-        let hi = cx.signal(&format!("{name}.hi"), || max);
+        let lo = cx.signal(format!("{name}.lo"), || min);
+        let hi = cx.signal(format!("{name}.hi"), || max);
         let (lo_v, hi_v) = (lo.get(cx.runtime()), hi.get(cx.runtime()));
         let span = (max - min).max(f64::EPSILON);
         let frac = |v: f64| ((v - min) / span).clamp(0.0, 1.0);

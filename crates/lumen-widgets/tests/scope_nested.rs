@@ -96,8 +96,8 @@ fn fuzz_random_writes_stay_coherent() {
     let app = App::new(|cx: &mut BuildCx| {
         let rows: Vec<_> = (0..N)
             .map(|i| {
-                cx.scope(&format!("row-{i}"), move |cx| {
-                    let s: Signal<i64> = cx.signal(&format!("v-{i}"), || 0);
+                cx.scope(format!("row-{i}"), move |cx| {
+                    let s: Signal<i64> = cx.signal(format!("v-{i}"), || 0);
                     widgets::text(format!("row {i} = {}", s.get(cx.runtime()))).id("row")
                 })
             })
@@ -112,7 +112,7 @@ fn fuzz_random_writes_stay_coherent() {
         let k = (lcg(&mut seed) % 3) as usize;
         for _ in 0..k {
             let i = (lcg(&mut seed) as i64) % N;
-            let s: Signal<i64> = h.runtime().signal(&format!("v-{i}"), || 0);
+            let s: Signal<i64> = h.runtime().signal(format!("v-{i}"), || 0);
             s.update(h.runtime(), |v| *v += 1);
         }
         h.pump();

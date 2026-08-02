@@ -127,7 +127,7 @@ pub fn doc_shot(app: App, w: f64, h: f64, name: &str) {
 pub fn doc_shot_open(app: App, w: f64, h: f64, name: &str, open_key: &str) {
     let mut hl = app.run_headless(lumen_core::geometry::Size::new(w, h));
     hl.pump();
-    let sig = hl.runtime().signal::<bool>(open_key, || false);
+    let sig: lumen_core::Signal<bool> = hl.runtime().signal(open_key, || false);
     sig.set(hl.runtime(), true);
     hl.pump();
     verify_or_write_shot(hl.screenshot(), name);

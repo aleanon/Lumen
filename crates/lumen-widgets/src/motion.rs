@@ -8,6 +8,7 @@
 //! `lumen-style` spring scheduler (04 §3).
 
 use crate::element::BuildCx;
+use lumen_core::Signal;
 use lumen_style::anim::spring_progress;
 
 /// Animate a scalar toward `target` with a spring (`stiffness`, `damping`).
@@ -17,9 +18,9 @@ use lumen_style::anim::spring_progress;
 pub fn spring(cx: &BuildCx, name: &str, target: f64, stiffness: f32, damping: f32) -> f64 {
     let rt = cx.runtime();
     let now = cx.now_ms();
-    let from = cx.signal(&format!("{name}.spring.from"), || target);
-    let tgt = cx.signal(&format!("{name}.spring.tgt"), || target);
-    let t0 = cx.signal(&format!("{name}.spring.t0"), || now);
+    let from = cx.signal(format!("{name}.spring.from"), || target);
+    let tgt = cx.signal(format!("{name}.spring.tgt"), || target);
+    let t0 = cx.signal(format!("{name}.spring.t0"), || now);
 
     let at = |from: f64, to: f64, start: f64| -> f64 {
         let p = spring_progress(((now - start) / 1000.0) as f32, stiffness, damping) as f64;
@@ -75,7 +76,7 @@ pub fn shared_bounds(
         kurbo::Rect::new(t.0, t.1, t.2, t.3)
     }
     let now = cx.now_ms();
-    let sig = cx.signal::<Morph>(name, Morph::default);
+    let sig: Signal<Morph> = cx.signal(name, Morph::default);
     let m = sig.get(cx.runtime());
     let cur = |m: &Morph| {
         let t = if duration_ms <= 0.0 {
@@ -135,7 +136,7 @@ pub fn route_progress(cx: &BuildCx, name: &str, route: &str, duration_ms: f64) -
         start_ms: f64,
     }
     let now = cx.now_ms();
-    let sig = cx.signal::<Tr>(name, Tr::default);
+    let sig: Signal<Tr> = cx.signal(name, Tr::default);
     let t = sig.get(cx.runtime());
     if !t.started || t.route != route {
         let first = !t.started;
@@ -171,7 +172,7 @@ pub fn route_progress(cx: &BuildCx, name: &str, route: &str, duration_ms: f64) -
 /// `SharedElement::bounds_at_fraction` / [`shared_bounds`] targets — the
 /// gesture *is* the timeline.
 pub fn drag_surface(cx: &BuildCx, name: &str, mut el: crate::Element) -> crate::Element {
-    let sig = cx.signal::<f64>(name, || 0.0);
+    let sig: Signal<f64> = cx.signal(name, || 0.0);
     el.on_drag = Some(std::rc::Rc::new(move |rt, fx, _fy, _pos| {
         sig.set(rt, fx.clamp(0.0, 1.0));
     }));
@@ -180,5 +181,8 @@ pub fn drag_surface(cx: &BuildCx, name: &str, mut el: crate::Element) -> crate::
 
 /// The current gesture fraction written by [`drag_surface`].
 pub fn drag_fraction(cx: &BuildCx, name: &str) -> f64 {
-    cx.signal::<f64>(name, || 0.0).get(cx.runtime())
+    {
+        let sig: Signal<f64> = cx.signal(name, || 0.0);
+        sig.get(cx.runtime())
+    }
 }

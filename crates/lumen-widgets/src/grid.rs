@@ -273,7 +273,7 @@ impl Grid {
 
     /// The current zoom of the grid named `name` (1.0 if never zoomed).
     pub fn zoom_of(cx: &BuildCx, name: &str) -> f64 {
-        cx.signal(&format!("{name}.zoom"), || 1.0f64)
+        cx.signal(format!("{name}.zoom"), || 1.0f64)
             .get(cx.runtime())
     }
 
@@ -285,11 +285,11 @@ impl Grid {
         let (zmin, zmax) = (s.zoom_min, s.zoom_max);
         let name = &self.name;
 
-        let sx = cx.signal(&format!("{name}.sx"), || 0.0f64);
-        let sy = cx.signal(&format!("{name}.sy"), || 0.0f64);
-        let cw = cx.signal(&format!("{name}.cw"), Vec::<(u32, f64)>::new);
-        let rh = cx.signal(&format!("{name}.rh"), Vec::<(u32, f64)>::new);
-        let zoom = cx.signal(&format!("{name}.zoom"), || 1.0f64);
+        let sx = cx.signal(format!("{name}.sx"), || 0.0f64);
+        let sy = cx.signal(format!("{name}.sy"), || 0.0f64);
+        let cw = cx.signal(format!("{name}.cw"), Vec::<(u32, f64)>::new);
+        let rh = cx.signal(format!("{name}.rh"), Vec::<(u32, f64)>::new);
+        let zoom = cx.signal(format!("{name}.zoom"), || 1.0f64);
 
         let z = if self.zoomable {
             zoom.get(cx.runtime()).clamp(zmin, zmax)

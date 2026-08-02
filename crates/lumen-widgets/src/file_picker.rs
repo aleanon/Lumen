@@ -42,7 +42,7 @@ impl FilePicker {
         label: impl Into<String>,
         filters: impl IntoIterator<Item = impl Into<String>>,
     ) -> FilePicker {
-        cx.signal(&format!("{name}.path"), String::new);
+        cx.signal(format!("{name}.path"), String::new);
         let filters: Vec<String> = filters.into_iter().map(Into::into).collect();
         let reply = format!("{name}.path");
         let mut el: Element = widgets::button(label, move |rt| {

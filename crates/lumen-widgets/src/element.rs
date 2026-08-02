@@ -4,6 +4,7 @@
 //! arrives in T0.10). It carries everything the headless runtime needs to lay
 //! out, paint, route events, and emit semantics for one node.
 
+use lumen_core::identity::{fold_id, hash_id, key_name, IdHash, ROOT_ID};
 use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
 use lumen_core::state::{Runtime, State};
 use lumen_core::{Color, Dynamic, Signal, StableId};
@@ -12,6 +13,8 @@ use lumen_render::RgbaImage;
 use lumen_text::TextStyle;
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::rc::Rc;
 
 /// A click/activate handler. Re-registered every build; never stored (ADR-013).
@@ -199,8 +202,9 @@ pub struct Element {
     /// The full scope key when this element is a [`BuildCx::scope`] root
     /// (A.3.1, docs/plan-retained-pipeline.md): lets `build_node` record the
     /// scope's node span — the anchor the retained-graph splice will replace.
-    /// Set by `scope`; not authored.
-    pub scope_key: Option<String>,
+    /// Set by `scope`; not authored. `Copy` identity (ADR-021) — a scope root
+    /// no longer clones a key string per build.
+    pub scope_key: Option<IdHash>,
     /// A memo-hit stub (A.3.2): the real subtree lives behind this `Rc` (the
     /// scope cache's copy). `build_node` copies the scope's retained per-node
     /// work forward when sound, else materializes an owned clone and lowers
@@ -533,7 +537,7 @@ pub(crate) struct CachedScope {
 
 /// Per-app store of memoized scope subtrees, keyed by scope identity path. Owned
 /// by `Headless`, persists across builds, threaded into `BuildCx`.
-pub(crate) type ScopeCache = std::collections::HashMap<String, CachedScope>;
+pub(crate) type ScopeCache = std::collections::HashMap<IdHash, CachedScope>;
 
 /// The build context handed to the root closure and components. Exposes signal
 /// creation, the (virtual) clock, time-driven animation, and background tasks.
@@ -555,10 +559,14 @@ pub struct BuildCx<'a> {
     /// Scope keys accessed this build (F5 GC): after the build, cached scopes +
     /// scope-local signals whose key is absent are swept, bounding a churning
     /// keyed list's memory.
-    scope_live: &'a RefCell<std::collections::HashSet<String>>,
-    /// Identity-path prefix of the enclosing `scope` (empty at the root). Signal
-    /// keys created inside a scope are namespaced under it, so a reused component
-    /// gets its own state.
+    scope_live: &'a RefCell<std::collections::HashSet<IdHash>>,
+    /// Identity of the enclosing `scope` ([`ROOT_ID`] at the root). Keys created
+    /// inside a scope fold into this, so a reused component gets its own state.
+    /// `Copy`, so re-addressing a signal costs no allocation (ADR-021).
+    prefix_hash: Cell<IdHash>,
+    /// *Readable* name prefix matching `prefix_hash`, for the names snapshots
+    /// and agent dep reporting show. Built when a scope **re-runs**, never on a
+    /// memo hit — so a skipped subtree allocates nothing.
     prefix: RefCell<String>,
     /// Logical surface size at build time. A resize forces a rebuild, so a view
     /// that materializes only what fits (a virtualized grid) can read this to
@@ -571,7 +579,7 @@ impl<'a> BuildCx<'a> {
         rt: &'a Runtime,
         now_ms: f64,
         scope_cache: &'a RefCell<ScopeCache>,
-        scope_live: &'a RefCell<std::collections::HashSet<String>>,
+        scope_live: &'a RefCell<std::collections::HashSet<IdHash>>,
         size: lumen_core::geometry::Size,
     ) -> BuildCx<'a> {
         BuildCx {
@@ -585,6 +593,7 @@ impl<'a> BuildCx<'a> {
             menu: RefCell::new(None),
             scope_cache,
             scope_live,
+            prefix_hash: Cell::new(ROOT_ID),
             prefix: RefCell::new(String::new()),
             size,
         }
@@ -596,10 +605,21 @@ impl<'a> BuildCx<'a> {
         self.size
     }
 
-    /// Create or re-attach a signal keyed by `name` (02 §4), namespaced under the
+    /// Create or re-attach a signal keyed by `key` (02 §4), namespaced under the
     /// enclosing [`scope`](Self::scope) so a reused component gets its own state.
-    pub fn signal<T: State>(&self, name: &str, init: impl FnOnce() -> T) -> Signal<T> {
-        self.rt.signal(&self.scoped_key(name), init)
+    ///
+    /// `key` is anything `Hash + Debug` (ADR-021): a `&str`, an index, or a
+    /// typed key like `Field::Row(id)`. Re-addressing an existing signal
+    /// allocates nothing, so per-item state in a list is cheap to rebuild every
+    /// frame.
+    pub fn signal<T: State, K: Hash + Debug>(&self, key: K, init: impl FnOnce() -> T) -> Signal<T> {
+        let owner = self.prefix_hash.get();
+        self.rt.signal_at(
+            fold_id(owner, hash_id(&key)),
+            owner,
+            || self.scoped_name(&key),
+            init,
+        )
     }
 
     /// A memoized view region (F1). Runs `f` inside a read-tracking window and
@@ -612,26 +632,36 @@ impl<'a> BuildCx<'a> {
     ///
     /// Scopes that emit a frame-request (read the clock, `animate`, `wake_*`, or
     /// spawn a task) are never cached — they re-run every build, as they must.
-    pub fn scope(&mut self, id: &str, f: impl FnOnce(&mut BuildCx) -> Element) -> Element {
-        let key = self.scoped_key(id);
-        self.scope_live.borrow_mut().insert(key.clone());
-        if let Some(el) = self.cached_if_current(&key) {
+    pub fn scope<K: Hash + Debug>(
+        &mut self,
+        id: K,
+        f: impl FnOnce(&mut BuildCx) -> Element,
+    ) -> Element {
+        let parent = self.prefix_hash.get();
+        let key = fold_id(parent, hash_id(&id));
+        self.scope_live.borrow_mut().insert(key);
+        // The memo-hit path needs identity only — no name, no allocation. This
+        // is the steady state for an unchanged list row.
+        if let Some(el) = self.cached_if_current(key) {
             return el;
         }
-        // Re-run: establish this scope's key prefix, collect its reads, and note
-        // whether it emitted any frame-request (⇒ not cacheable).
+        // Re-run: establish this scope's identity + name prefix, collect its
+        // reads, and note whether it emitted any frame-request (⇒ not cacheable).
         let rt = self.rt.clone();
-        let prev = self.prefix.replace(format!("{key}/"));
+        rt.note_scope(key, parent);
+        self.prefix_hash.set(key);
+        let prev = self.prefix.replace(format!("{}/", self.scoped_name(&id)));
         let before = self.request_fingerprint();
         let (mut element, reads) = rt.collect_reads(|| f(self));
         let cacheable = self.request_fingerprint() == before;
         self.prefix.replace(prev);
+        self.prefix_hash.set(parent);
         // Project the scope's signal dependencies onto its subtree root, for
         // observability (F2) — the agent sees why this subtree updates.
         element.scope_deps = Some(reads.dep_keys(self.rt));
         // A.3.1: tag the root with its scope key so `build_node` records the
         // node span (cached clones inherit the tag).
-        element.scope_key = Some(key.clone());
+        element.scope_key = Some(key);
         if cacheable {
             self.scope_cache.borrow_mut().insert(
                 key,
@@ -650,15 +680,15 @@ impl<'a> BuildCx<'a> {
     /// A skipped scope replays its deps into the enclosing collectors so they
     /// still count as structural (F1 × F3.4) — otherwise a change to a memoized
     /// scope's signal would go unnoticed.
-    fn cached_if_current(&self, key: &str) -> Option<Element> {
+    fn cached_if_current(&self, key: IdHash) -> Option<Element> {
         let cache = self.scope_cache.borrow();
-        let cached = cache.get(key)?;
+        let cached = cache.get(&key)?;
         if cached.reads.is_current(self.rt) {
             self.rt.replay_reads(&cached.reads);
             // A.3.2: hand out a lightweight stub — an `Rc` bump, not a deep
             // clone. `build_node` resolves it (copy-forward or materialize).
             Some(Element {
-                scope_key: Some(key.to_string()),
+                scope_key: Some(key),
                 shared: Some(std::rc::Rc::clone(&cached.element)),
                 ..Element::default()
             })
@@ -690,27 +720,38 @@ impl<'a> BuildCx<'a> {
     /// notifying subscribers only when the value actually changes
     /// (`PartialEq`). Keyed like a signal — the enclosing `cx.scope`
     /// prefixes `name`.
-    pub fn memo<T: PartialEq + lumen_core::state::State>(
+    pub fn memo<T: PartialEq + lumen_core::state::State, K: Hash + Debug>(
         &self,
-        name: &str,
+        key: K,
         f: impl Fn(&lumen_core::state::ReadScope) -> T + 'static,
     ) -> lumen_core::state::Memo<T> {
-        self.rt.memo(&self.scoped_key(name), f)
+        let owner = self.prefix_hash.get();
+        self.rt.memo_at(
+            fold_id(owner, hash_id(&key)),
+            owner,
+            || self.scoped_name(&key),
+            f,
+        )
     }
 
     /// Register (or replace) an effect (02 §4, W.3): re-runs whenever any
     /// signal it read changes; runs once immediately to establish
     /// subscriptions. Keyed like a signal.
-    pub fn effect(&self, name: &str, f: impl Fn(&lumen_core::state::ReadScope) + 'static) {
-        self.rt.effect(&self.scoped_key(name), f)
+    pub fn effect<K: Hash>(&self, key: K, f: impl Fn(&lumen_core::state::ReadScope) + 'static) {
+        self.rt
+            .effect_at(fold_id(self.prefix_hash.get(), hash_id(&key)), f)
     }
 
-    /// `name` prefixed by the enclosing scope's identity path (identity for
-    /// signals + nested scopes).
-    fn scoped_key(&self, name: &str) -> String {
+    /// The readable name for `key` under the enclosing scope — what snapshots
+    /// and agent dep reporting display.
+    ///
+    /// Only ever called on the cold path (a key seen for the first time), which
+    /// is what keeps re-addressing allocation-free.
+    fn scoped_name<K: Debug + ?Sized>(&self, key: &K) -> String {
         let p = self.prefix.borrow();
+        let name = key_name(key);
         if p.is_empty() {
-            name.to_string()
+            name
         } else {
             format!("{p}{name}")
         }

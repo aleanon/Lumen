@@ -21,7 +21,7 @@
 
 #[cfg(feature = "snapshot")]
 use crate::diagnostics::{codes, Diagnostic};
-use crate::identity::{fold_id, hash_id, IdHash, ROOT_ID};
+use crate::identity::{fold_id, hash_id, key_name, IdHash, ROOT_ID};
 #[cfg(feature = "snapshot")]
 use serde::de::DeserializeOwned;
 #[cfg(feature = "snapshot")]
@@ -29,6 +29,8 @@ use serde::Serialize;
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
@@ -92,6 +94,10 @@ impl<T: State> StoredValue for T {
         Ok(diags)
     }
 }
+
+/// Folded into a memo's value identity to derive its recompute-scope identity,
+/// so the two never collide with a user key.
+const MEMO_SCOPE_TAG: &str = "\u{0}lumen.memo";
 
 /// Interned identity of a stored value (signal or memo). `Copy` so [`Signal`]
 /// can be a cheap copyable handle.
@@ -175,6 +181,11 @@ struct Slot {
     /// scope can tell whether *its* deps changed — finer than the global
     /// `write_gen`, which only says *something* changed.
     version: u64,
+    /// The reactive scope this value was created under ([`ROOT_ID`] if none) —
+    /// what [`Runtime::evict_scope`] sheds when that scope disappears (F5 list
+    /// GC). Recorded per slot because identity is a hash: unlike the string
+    /// keys this replaced, a scope's descendants cannot be found by prefix.
+    owner: IdHash,
 }
 
 impl Slot {
@@ -208,6 +219,11 @@ struct Inner {
     id_to_key: Vec<String>,
     scope_hash_to_id: HashMap<IdHash, ScopeId>,
     next_scope: u32,
+    /// Reactive-scope tree (child hash -> parent hash), recorded as each
+    /// `BuildCx::scope` runs. [`Runtime::evict_scope`] walks it so shedding a
+    /// scope also sheds the scopes nested inside it — the transitivity the old
+    /// string-prefix match gave for free.
+    scope_parent: HashMap<IdHash, IdHash>,
 
     // reactive bookkeeping
     stack: Vec<ScopeId>,
@@ -417,22 +433,38 @@ impl Runtime {
         self.inner.borrow().dirty.is_empty()
     }
 
-    /// Drop every stored signal whose key starts with `prefix` (F5 list GC): a
-    /// keyed scope that vanished this build sheds its scope-local state, so a
-    /// churning list doesn't leak slots. The interned key↔id mapping is kept
-    /// (cheap), so re-adding the same key re-creates the slot from its
-    /// initializer. Returns how many slots were removed.
-    pub fn evict_prefix(&self, prefix: &str) -> usize {
+    /// Drop every stored signal owned by `scope` **or by a scope nested inside
+    /// it** (F5 list GC): a keyed scope that vanished this build sheds its
+    /// scope-local state, so a churning list doesn't leak slots. The interned
+    /// key↔id mapping is kept (cheap), so re-adding the same key re-creates the
+    /// slot from its initializer. Returns how many slots were removed.
+    pub fn evict_scope(&self, scope: IdHash) -> usize {
         let mut b = self.inner.borrow_mut();
-        // Scans the readable names (`id_to_key` is indexed by `SignalId`), since
-        // identity itself is a hash and cannot be prefix-matched. H1 replaces
-        // this with owner-scope eviction — see `docs/plan-hash-identity.md`.
+
+        // Everything nested under `scope` goes too. Identity is a hash, so
+        // descendants can't be found by prefix the way string keys allowed —
+        // they're walked from the recorded scope tree instead. Iterating to a
+        // fixed point over `scope_parent` (scopes, not signals — a small map)
+        // keeps eviction transitive regardless of nesting depth or order.
+        let mut dead: HashSet<IdHash> = HashSet::new();
+        dead.insert(scope);
+        loop {
+            let mut grew = false;
+            for (child, parent) in b.scope_parent.iter() {
+                if dead.contains(parent) && dead.insert(*child) {
+                    grew = true;
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+
         let ids: Vec<SignalId> = b
-            .id_to_key
+            .slots
             .iter()
-            .enumerate()
-            .filter(|(_, k)| k.starts_with(prefix))
-            .map(|(i, _)| SignalId(i as u32))
+            .filter(|(_, slot)| dead.contains(&slot.owner))
+            .map(|(id, _)| *id)
             .collect();
         let mut n = 0;
         for id in ids {
@@ -440,7 +472,17 @@ impl Runtime {
                 n += 1;
             }
         }
+        b.scope_parent.retain(|child, _| !dead.contains(child));
         n
+    }
+
+    /// Record that reactive scope `child` is nested directly inside `parent`.
+    ///
+    /// Called as each `BuildCx::scope` runs; it is what lets
+    /// [`Runtime::evict_scope`] shed nested scopes transitively.
+    #[doc(hidden)]
+    pub fn note_scope(&self, child: IdHash, parent: IdHash) {
+        self.inner.borrow_mut().scope_parent.insert(child, parent);
     }
 
     /// Run `f`, recording every signal it reads, and return the result plus a
@@ -521,29 +563,71 @@ impl Runtime {
 
     // --- creation -----------------------------------------------------------
 
-    /// Create or re-attach a signal. The key is the identity path + name (02
-    /// §4); on restore, a staged snapshot value is adopted instead of `init`.
+    /// Create or re-attach a signal keyed by `key` (02 §4); on restore, a staged
+    /// snapshot value is adopted instead of `init`.
+    ///
+    /// `key` is anything `Hash + Debug` (ADR-021) — a `&str`, an index, or a
+    /// typed key like `Field::Row(id)`. A typed key costs no allocation to
+    /// re-address, which is what makes per-item state cheap in a list:
+    ///
+    /// ```
+    /// # use lumen_core::state::Runtime;
+    /// #[derive(Hash, Debug)]
+    /// enum Field { Filter, Row(u32) }
+    /// let rt = Runtime::new();
+    /// let filter = rt.signal(Field::Filter, String::new);
+    /// let row_3 = rt.signal(Field::Row(3), || false);
+    /// let by_name = rt.signal("legacy-key", || 0i32);   // `&str` still works
+    /// # let _ = (filter, row_3, by_name);
+    /// ```
+    ///
+    /// `T` is first in the generic list so an explicit `signal::<MyState>(key, …)`
+    /// keeps working.
+    pub fn signal<T: State, K: Hash + Debug>(&self, key: K, init: impl FnOnce() -> T) -> Signal<T> {
+        self.signal_at(
+            fold_id(ROOT_ID, hash_id(&key)),
+            ROOT_ID,
+            || key_name(&key),
+            init,
+        )
+    }
+
+    /// [`Runtime::signal`] at an already-folded identity, owned by scope
+    /// `owner`. The plumbing `BuildCx` uses to thread its enclosing scope; `name`
+    /// is invoked only if this key has never been seen.
     // Not the `entry` pattern: the slot value is built from `init`/`pending`,
     // and `b` is borrowed for the pending map in between.
     #[allow(clippy::map_entry)]
-    pub fn signal<T: State>(&self, key: &str, init: impl FnOnce() -> T) -> Signal<T> {
-        let id = self.intern(key);
+    #[doc(hidden)]
+    pub fn signal_at<T: State>(
+        &self,
+        hash: IdHash,
+        owner: IdHash,
+        name: impl FnOnce() -> String,
+        init: impl FnOnce() -> T,
+    ) -> Signal<T> {
+        let id = self.intern_hashed(hash, name);
         let mut b = self.inner.borrow_mut();
         if !b.slots.contains_key(&id) {
             // On restore, adopt a staged snapshot value instead of `init`.
+            // Snapshots are keyed by the readable name (ADR-011), which the
+            // intern above has recorded by now.
             #[cfg(feature = "snapshot")]
-            let value: Box<dyn StoredValue> = match b.pending.remove(key) {
-                Some(json) => match deser_lenient::<T>(key, &json) {
-                    Ok((t, diags)) => {
-                        b.restore_diags.extend(diags);
-                        Box::new(t)
-                    }
-                    Err(d) => {
-                        b.restore_diags.push(d);
-                        Box::new(init())
-                    }
-                },
-                None => Box::new(init()),
+            let value: Box<dyn StoredValue> = {
+                let key = b.id_to_key[id.0 as usize].clone();
+                match b.pending.remove(&key) {
+                    Some(json) => match deser_lenient::<T>(&key, &json) {
+                        Ok((t, diags)) => {
+                            b.restore_diags.extend(diags);
+                            Box::new(t)
+                        }
+                        Err(d) => {
+                            b.restore_diags.push(d);
+                            Box::new(init())
+                        }
+                    },
+                    None => Box::new(init()),
+                }
             };
             #[cfg(not(feature = "snapshot"))]
             let value: Box<dyn StoredValue> = Box::new(init());
@@ -553,6 +637,7 @@ impl Runtime {
                     value,
                     subs: HashSet::new(),
                     version: 0,
+                    owner,
                 },
             );
         }
@@ -564,8 +649,16 @@ impl Runtime {
 
     /// Register (or replace) an effect: a scope that re-runs whenever any signal
     /// it read changes. Runs once immediately to establish subscriptions.
-    pub fn effect(&self, key: &str, f: impl Fn(&ReadScope) + 'static) {
-        let id = self.intern_scope(key);
+    ///
+    /// `key` is anything `Hash` (ADR-021) — see [`Runtime::signal`].
+    pub fn effect<K: Hash>(&self, key: K, f: impl Fn(&ReadScope) + 'static) {
+        self.effect_at(fold_id(ROOT_ID, hash_id(&key)), f)
+    }
+
+    /// [`Runtime::effect`] at an already-folded identity (the `BuildCx` seam).
+    #[doc(hidden)]
+    pub fn effect_at(&self, hash: IdHash, f: impl Fn(&ReadScope) + 'static) {
+        let id = self.intern_scope_hashed(hash);
         {
             let mut b = self.inner.borrow_mut();
             b.scopes.insert(
@@ -582,17 +675,39 @@ impl Runtime {
     /// Create or re-attach a memo: a derived value recomputed when its
     /// dependencies change, notifying *its* subscribers only when the value
     /// actually changes (`PartialEq`).
-    pub fn memo<T: PartialEq + State>(
+    ///
+    /// `key` is anything `Hash + Debug` (ADR-021) — see [`Runtime::signal`].
+    pub fn memo<T: PartialEq + State, K: Hash + Debug>(
         &self,
-        key: &str,
+        key: K,
         f: impl Fn(&ReadScope) -> T + 'static,
     ) -> Memo<T> {
-        let value_id = self.intern(key);
-        let scope_id = self.intern_scope(&format!("memo:{key}"));
+        self.memo_at(
+            fold_id(ROOT_ID, hash_id(&key)),
+            ROOT_ID,
+            || key_name(&key),
+            f,
+        )
+    }
+
+    /// [`Runtime::memo`] at an already-folded identity, owned by `owner` (the
+    /// `BuildCx` seam).
+    #[doc(hidden)]
+    pub fn memo_at<T: PartialEq + State>(
+        &self,
+        hash: IdHash,
+        owner: IdHash,
+        name: impl FnOnce() -> String,
+        f: impl Fn(&ReadScope) -> T + 'static,
+    ) -> Memo<T> {
+        let value_id = self.intern_hashed(hash, name);
+        // The recompute scope is a sibling identity of the value, not a string
+        // tag spliced onto the key.
+        let scope_id = self.intern_scope_hashed(fold_id(hash, hash_id(&MEMO_SCOPE_TAG)));
         let rt = self.clone();
         let run = move |scope: &ReadScope| {
             let v = f(scope);
-            rt.update_memo_value::<T>(value_id, v);
+            rt.update_memo_value::<T>(value_id, owner, v);
         };
         {
             let mut b = self.inner.borrow_mut();
@@ -760,10 +875,6 @@ impl Runtime {
         id
     }
 
-    fn intern(&self, key: &str) -> SignalId {
-        self.intern_hashed(fold_id(ROOT_ID, hash_id(key)), || key.to_string())
-    }
-
     /// Resolve a folded key hash to its dense [`ScopeId`] (effects/memos).
     /// Scope ids are never reported by name, so unlike [`Runtime::intern_hashed`]
     /// this keeps no readable key at all.
@@ -776,10 +887,6 @@ impl Runtime {
         b.next_scope += 1;
         b.scope_hash_to_id.insert(hash, id);
         id
-    }
-
-    fn intern_scope(&self, key: &str) -> ScopeId {
-        self.intern_scope_hashed(fold_id(ROOT_ID, hash_id(key)))
     }
 
     /// Subscribe the currently-running scope (if any) to `id`.
@@ -855,7 +962,7 @@ impl Runtime {
         }
     }
 
-    fn update_memo_value<T: PartialEq + State>(&self, id: SignalId, value: T) {
+    fn update_memo_value<T: PartialEq + State>(&self, id: SignalId, owner: IdHash, value: T) {
         // Memo recompute runs mid-flush: enqueue dependents but never flush here.
         let mut b = self.inner.borrow_mut();
         let changed = match b.slots.get(&id) {
@@ -884,6 +991,7 @@ impl Runtime {
                         value: Box::new(value),
                         subs: HashSet::new(),
                         version: ver,
+                        owner,
                     },
                 );
                 Vec::new()
@@ -1041,6 +1149,7 @@ fn deser_lenient<T: State>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::identity::ScopePath;
     #[cfg(feature = "snapshot")]
     use serde::Deserialize;
     use std::cell::Cell;
@@ -1061,11 +1170,11 @@ mod tests {
     fn write_one_of_many_reruns_exactly_one_scope() {
         let rt = Runtime::new();
         const N: usize = 10_000;
-        let sigs: Vec<Signal<i32>> = (0..N).map(|i| rt.signal(&format!("s{i}"), || 0)).collect();
+        let sigs: Vec<Signal<i32>> = (0..N).map(|i| rt.signal(format!("s{i}"), || 0)).collect();
         let counter = Rc::new(Cell::new(0u64));
         for (i, &s) in sigs.iter().enumerate() {
             let c = counter.clone();
-            rt.effect(&format!("e{i}"), move |scope| {
+            rt.effect(format!("e{i}"), move |scope| {
                 let _ = s.get(scope); // subscribe to exactly this signal
                 c.set(c.get() + 1);
             });
@@ -1117,14 +1226,14 @@ mod tests {
         let rt = Runtime::new();
         const N: i64 = 1000;
         for i in 0..N {
-            rt.signal(&format!("k{i}"), || i * 3);
+            rt.signal(format!("k{i}"), || i * 3);
         }
         let snap = rt.snapshot();
 
         let rt2 = Runtime::new();
         rt2.load_pending(snap);
         let restored: Vec<Signal<i64>> = (0..N)
-            .map(|i| rt2.signal(&format!("k{i}"), || -1)) // init must be ignored
+            .map(|i| rt2.signal(format!("k{i}"), || -1)) // init must be ignored
             .collect();
         for (i, &s) in restored.iter().enumerate() {
             assert_eq!(
@@ -1256,24 +1365,73 @@ mod tests {
         assert_eq!(again.get(&rt), 42);
     }
 
-    /// `evict_prefix` is the F5 list GC (a vanished keyed-list row sheds its
-    /// scope-local state). It was untested; H0 re-implemented it over the
-    /// readable names, so pin the behavior before H1 replaces it with
-    /// owner-scope eviction.
+    /// `evict_scope` is the F5 list GC (a vanished keyed-list row sheds its
+    /// scope-local state). Under string keys this was a prefix match; identity
+    /// is a hash now, so it walks recorded slot ownership instead. Untested
+    /// before H0 — which is why the hazard was invisible.
     #[test]
-    fn evict_prefix_drops_only_the_matching_scope_local_signals() {
+    fn evict_scope_drops_only_the_signals_that_scope_owns() {
         let rt = Runtime::new();
-        let keep = rt.signal("keep", || 1i32);
-        let _row1 = rt.signal("row-1/count", || 10i32);
-        let row2 = rt.signal("row-2/count", || 20i32);
+        let row1 = ScopePath::root().child("row-1").hash();
+        let row2 = ScopePath::root().child("row-2").hash();
 
-        assert_eq!(rt.evict_prefix("row-1/"), 1, "exactly the one row is shed");
+        let keep = rt.signal("keep", || 1i32);
+        let _r1 = rt.signal_at(
+            fold_id(row1, hash_id("count")),
+            row1,
+            || "c".into(),
+            || 10i32,
+        );
+        let r2 = rt.signal_at(
+            fold_id(row2, hash_id("count")),
+            row2,
+            || "c".into(),
+            || 20i32,
+        );
+
+        assert_eq!(rt.evict_scope(row1), 1, "exactly the one row is shed");
 
         // The evicted slot is gone, so re-creating the key runs its initializer
         // afresh — while its neighbours are untouched.
-        let row1_again: Signal<i32> = rt.signal("row-1/count", || 99i32);
-        assert_eq!(row1_again.get(&rt), 99);
-        assert_eq!(row2.get(&rt), 20);
-        assert_eq!(keep.get(&rt), 1);
+        let again: Signal<i32> = rt.signal_at(
+            fold_id(row1, hash_id("count")),
+            row1,
+            || "c".into(),
+            || 99i32,
+        );
+        assert_eq!(again.get(&rt), 99);
+        assert_eq!(r2.get(&rt), 20, "a sibling scope keeps its state");
+        assert_eq!(keep.get(&rt), 1, "root-level state is untouched");
+    }
+
+    /// Prefix matching used to make eviction transitive for free: dropping
+    /// `row-1/` also dropped `row-1/inner/`. Hashes can't be prefix-matched, so
+    /// the scope tree has to reproduce it — a nested scope's state must not
+    /// survive its parent.
+    #[test]
+    fn evict_scope_is_transitive_through_nested_scopes() {
+        let rt = Runtime::new();
+        let row = ScopePath::root().child("row-1").hash();
+        let inner = ScopePath::root().child("row-1").child("editor").hash();
+        let deep = ScopePath::root()
+            .child("row-1")
+            .child("editor")
+            .child("undo")
+            .hash();
+        rt.note_scope(inner, row);
+        rt.note_scope(deep, inner);
+
+        rt.signal_at(fold_id(row, hash_id("a")), row, || "a".into(), || 1i32);
+        rt.signal_at(fold_id(inner, hash_id("b")), inner, || "b".into(), || 2i32);
+        rt.signal_at(fold_id(deep, hash_id("c")), deep, || "c".into(), || 3i32);
+        let survivor = rt.signal("outside", || 4i32);
+
+        assert_eq!(
+            rt.evict_scope(row),
+            3,
+            "the scope and everything nested inside it are shed"
+        );
+        assert_eq!(survivor.get(&rt), 4);
+        assert_eq!(rt.len(), 1, "only the unrelated signal remains");
     }
 }

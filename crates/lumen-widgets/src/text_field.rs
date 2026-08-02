@@ -46,7 +46,7 @@ impl TextField {
     /// or [`width`](TextField::width).
     pub fn new(cx: &BuildCx, name: &str, initial: &str) -> TextField {
         let editor = cx.signal(name, || TextEditor::new(initial));
-        let mirror = cx.signal(&format!("{name}.text"), || initial.to_string());
+        let mirror = cx.signal(format!("{name}.text"), || initial.to_string());
         let ed = editor.get(cx.runtime());
         let text = ed.text().to_string();
         let shown = if text.is_empty() {
