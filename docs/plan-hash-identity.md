@@ -176,14 +176,16 @@ Land the hash-folded interner with **no call-site change** (public fns still tak
   GC test** (add N rows, drop them, assert the slot count returns to baseline)
   proves the eviction replacement; no golden changes (identity is internal).
 
-### H2 — snapshot + agent observability parity
+### H2 — snapshot + agent observability parity — ☑ DONE 2026-08-02
 - Confirm `StateSnapshot` (`state.rs`) still serializes by readable name and
   `run_headless_restored` round-trips a scoped-signal snapshot (new test:
   snapshot an app with `cx.scope(Field::Row(i))` rows, restore, assert values).
 - `dep_keys` (`state.rs:274`) / `ui.getDeps` / `whatDependsOn` return the same
   readable names as before for `&str` keys, and `"{parent}Row(5)"`-style names
   for enum keys (new conformance assertion in `crates/lumen-agent/tests`).
-- Register `W0xxx` in `lumen-core/diagnostics.md` (ADR-019 stable codes).
+- ~~Register `W0xxx`~~ — **not needed**: the 128-bit identity adopted in H0
+  removes the collision case the code would have reported (see the collision
+  section). No new diagnostic code is allocated.
 - **Gate:** `snapshot` build + lean build both green; agent introspection tests
   green.
 
