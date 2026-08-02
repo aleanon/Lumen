@@ -15,6 +15,15 @@ fn sem(h: &Headless) -> SemanticsNode {
     h.semantics_doc().root.elided()
 }
 
+/// The first node with `role` whose label is exactly `label` — how a calendar
+/// day or a dial hour is addressed (they carry a role + label, not an id).
+fn by_label<'a>(n: &'a SemanticsNode, role: Role, label: &str) -> Option<&'a SemanticsNode> {
+    if n.role == role && n.label == label {
+        return Some(n);
+    }
+    n.children.iter().find_map(|c| by_label(c, role, label))
+}
+
 fn by_id<'a>(n: &'a SemanticsNode, id: &str) -> Option<&'a SemanticsNode> {
     if n.id.as_ref().map(|i| i.as_str()) == Some(id) {
         return Some(n);
@@ -100,32 +109,67 @@ fn pull_to_refresh_triggers_on_overpull() {
 }
 
 #[test]
-fn date_picker_increments_a_field() {
-    let mut h = run(360.0, 200.0, |cx| widgets_m3::date_picker(cx, "dob"));
+fn date_picker_selects_a_day_from_the_calendar() {
+    // Tall enough for the whole month grid (6 weeks of 44px touch targets).
+    let mut h = run(360.0, 420.0, |cx| widgets_m3::date_picker(cx, "dob"));
     let before = by_id(&sem(&h), "dob").unwrap().value.clone().unwrap();
     assert_eq!(before, "2026-06-16");
-    // Bump the day.
-    let day_inc = center(by_id(&sem(&h), "day-inc").unwrap());
-    click(&mut h, day_inc);
+
+    // The 16th starts selected; picking the 17th moves the selection.
+    let day_17 = center(by_label(&sem(&h), Role::Button, "17").expect("day 17 cell"));
+    click(&mut h, day_17);
     assert_eq!(
         by_id(&sem(&h), "dob").unwrap().value.as_deref(),
         Some("2026-06-17")
+    );
+    assert!(
+        by_label(&sem(&h), Role::Button, "17")
+            .unwrap()
+            .states
+            .contains(&State::Selected),
+        "the picked day reports itself selected"
     );
     assert_eq!(audit_touch_targets(&sem(&h), 44.0), vec![]);
 }
 
 #[test]
+fn date_picker_navigates_months() {
+    let mut h = run(360.0, 420.0, |cx| widgets_m3::date_picker(cx, "dob"));
+    let next = center(by_id(&sem(&h), "date-next").expect("next-month button"));
+    click(&mut h, next);
+    assert_eq!(
+        by_id(&sem(&h), "dob").unwrap().value.as_deref(),
+        Some("2026-07-16"),
+        "the month advanced, keeping the selected day"
+    );
+}
+
+#[test]
 fn time_picker_value_and_targets() {
-    let mut h = run(280.0, 200.0, |cx| widgets_m3::time_picker(cx, "alarm"));
+    // Tall enough for the digital header + the 240px dial + the minute row.
+    let mut h = run(300.0, 400.0, |cx| widgets_m3::time_picker(cx, "alarm"));
     assert_eq!(
         by_id(&sem(&h), "alarm").unwrap().value.as_deref(),
         Some("09:30")
     );
-    let min_dec = center(by_id(&sem(&h), "minute-dec").unwrap());
+    let min_dec = center(by_id(&sem(&h), "min-dec").expect("minute decrement"));
     click(&mut h, min_dec);
     assert_eq!(
         by_id(&sem(&h), "alarm").unwrap().value.as_deref(),
         Some("09:29")
     );
     assert_eq!(audit_touch_targets(&sem(&h), 44.0), vec![]);
+}
+
+#[test]
+fn time_picker_dial_sets_the_hour() {
+    let mut h = run(300.0, 400.0, |cx| widgets_m3::time_picker(cx, "alarm"));
+    // The dial drives the hour: tap "4 o'clock".
+    let four = center(by_id(&sem(&h), "hour-4").expect("dial hour 4"));
+    click(&mut h, four);
+    assert_eq!(
+        by_id(&sem(&h), "alarm").unwrap().value.as_deref(),
+        Some("04:30"),
+        "tapping a dial number set the hour"
+    );
 }

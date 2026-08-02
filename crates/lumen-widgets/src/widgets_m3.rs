@@ -412,7 +412,7 @@ pub fn pull_to_refresh(
 ///     centered(cx, DatePicker::new(cx, "date").into())
 /// }
 /// # let app = App::new(build);
-/// # lumen_widgets::doc_shot(app, 250.0, 300.0, "date_picker");
+/// # lumen_widgets::doc_shot(app, 360.0, 420.0, "date_picker");
 /// ```
 ///
 /// Renders:
@@ -596,6 +596,23 @@ fn cell_row_style() -> LayoutStyle {
 
 /// A centred fixed-size cell wrapping `text` (so the box, not the glyphs, sets
 /// the size — a text-bearing element ignores an explicit height).
+/// Clock-dial diameter. Sized so twelve [`TOUCH_MIN`] hour targets fit around
+/// the ring without overlapping: the ring circumference `2·π·r` must exceed
+/// `12·TOUCH_MIN` (≈528 px), so `r ≥ 84`.
+const DIAL: f64 = 240.0;
+/// Radius the hour numbers sit at — inset from the rim by half a target.
+const DIAL_R_NUMBERS: f64 = DIAL / 2.0 - TOUCH_MIN / 2.0 - 4.0;
+
+/// Wrap `visual` in a transparent [`TOUCH_MIN`]-square hit box.
+///
+/// Material (and Flutter) draw a calendar day / clock number smaller than the
+/// area you can actually hit: the circle is ~36 px but the touch target is
+/// ≥44 px. Semantics and `on_click` belong on the **target**, so the audited
+/// bounds and the hit box are the target, not the circle.
+fn touch_target(visual: Element) -> Element {
+    cell_box(visual, TOUCH_MIN as f32, TOUCH_MIN as f32, None, 0.0)
+}
+
 fn cell_box(text: Element, w: f32, h: f32, bg: Option<Color>, radius: f64) -> Element {
     Element {
         background: bg,
@@ -643,7 +660,8 @@ fn day_cell(dnum: i64, selected: bool, accent: Color, on: impl Fn(&Runtime) + 's
             Color::srgb8(0x20, 0x24, 0x2a, 0xff)
         };
     }
-    let mut cell = cell_box(t, 30.0, 30.0, selected.then_some(accent), 15.0);
+    let visual = cell_box(t, 36.0, 36.0, selected.then_some(accent), 18.0);
+    let mut cell = touch_target(visual);
     cell.role = Role::Button;
     cell.label = format!("{dnum}");
     cell.focusable = true;
@@ -663,7 +681,8 @@ fn nav_button(label: &str, id: &str, on: impl Fn(&Runtime) + 'static) -> Element
     if let Some(ts) = t.text_style_mut() {
         ts.font_size = 18.0;
     }
-    let mut b = cell_box(t, 28.0, 28.0, None, 14.0);
+    let visual = cell_box(t, 28.0, 28.0, None, 14.0);
+    let mut b = touch_target(visual);
     b.role = Role::Button;
     b.label = label.to_string();
     b.focusable = true;
@@ -684,7 +703,7 @@ fn nav_button(label: &str, id: &str, on: impl Fn(&Runtime) + 'static) -> Element
 ///     centered(cx, TimePicker::new(cx, "time").into())
 /// }
 /// # let app = App::new(build);
-/// # lumen_widgets::doc_shot(app, 240.0, 300.0, "time_picker");
+/// # lumen_widgets::doc_shot(app, 300.0, 400.0, "time_picker");
 /// ```
 ///
 /// Renders:
@@ -759,7 +778,7 @@ fn clock(cx: &BuildCx, name: &str) -> Element {
 
     // Dial face + hand (canvas leaf) under clickable hour-number overlays.
     let hd_draw = hd;
-    let mut face: Element = Canvas::new(200.0, 200.0, move |f, size| {
+    let mut face: Element = Canvas::new(DIAL, DIAL, move |f, size| {
         let (cx0, cy0) = (size.width / 2.0, size.height / 2.0);
         let r = cx0.min(cy0) - 6.0;
         f.fill_circle(
@@ -787,15 +806,16 @@ fn clock(cx: &BuildCx, name: &str) -> Element {
     let mut children = vec![face];
     for k in 1..=12i64 {
         let a = (k as f64 * 30.0).to_radians();
-        let x = 100.0 + 74.0 * a.sin();
-        let y = 100.0 - 74.0 * a.cos();
+        let x = DIAL / 2.0 + DIAL_R_NUMBERS * a.sin();
+        let y = DIAL / 2.0 - DIAL_R_NUMBERS * a.cos();
         let sel = k == hd;
         let mut t = crate::widgets::text(format!("{k}"));
         if let Some(ts) = t.text_style_mut() {
             ts.font_size = 14.0;
             ts.color = if sel { Color::WHITE } else { dark };
         }
-        let mut b = cell_box(t, 28.0, 28.0, sel.then_some(accent), 14.0);
+        let visual = cell_box(t, 32.0, 32.0, sel.then_some(accent), 16.0);
+        let mut b = touch_target(visual);
         b.role = Role::Button;
         b.label = format!("{k} o'clock");
         b.focusable = true;
@@ -807,8 +827,8 @@ fn clock(cx: &BuildCx, name: &str) -> Element {
         };
         b.style.position = Position::Absolute;
         b.style.inset = Edges {
-            left: Dim::px((x - 14.0) as f32),
-            top: Dim::px((y - 14.0) as f32),
+            left: Dim::px((x - TOUCH_MIN / 2.0) as f32),
+            top: Dim::px((y - TOUCH_MIN / 2.0) as f32),
             ..Edges::AUTO
         };
         b.on_click = Some(Rc::new(move |rt| hour.set(rt, k)));
@@ -818,8 +838,8 @@ fn clock(cx: &BuildCx, name: &str) -> Element {
         role: Role::Group,
         style: LayoutStyle {
             position: Position::Relative,
-            width: Dim::px(200.0),
-            height: Dim::px(200.0),
+            width: Dim::px(DIAL as f32),
+            height: Dim::px(DIAL as f32),
             ..LayoutStyle::default()
         },
         children,

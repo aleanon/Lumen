@@ -121,23 +121,32 @@ fn adapter_tree_equals_semantics_tree_node_for_node() {
         update.nodes.iter().map(|(id, n)| (id.0, n)).collect();
     assert_eq!(by_id.len(), update.nodes.len(), "no duplicate node ids");
 
-    fn walk(n: &lumen_core::semantics::SemanticsNode, by_id: &HashMap<u64, &accesskit::Node>) {
-        let ak = by_id
-            .get(&u64::from(n.node))
-            .unwrap_or_else(|| panic!("node-{} missing from adapter tree", n.node));
+    // Walk both trees in parallel from their roots. Adapter ids are salted by
+    // structural path (`(salt << 32) | node`) and deliberately do NOT equal the
+    // semantics node index, so the trees are matched by *position* — which is
+    // what "faithful projection" means — rather than by reconstructing the id
+    // derivation.
+    fn walk(
+        n: &lumen_core::semantics::SemanticsNode,
+        ak: &accesskit::Node,
+        by_id: &HashMap<u64, &accesskit::Node>,
+    ) {
         assert_eq!(
             ak.role(),
             role_to_accesskit(n.role),
             "role of node-{}",
             n.node
         );
-        if n.label.is_empty() {
-            // Only the Invalid-state substitute may set a label here.
-        } else {
-            assert_eq!(ak.label(), Some(n.label.as_str()));
+        if !n.label.is_empty() {
+            assert_eq!(
+                ak.label(),
+                Some(n.label.as_str()),
+                "label of node-{}",
+                n.node
+            );
         }
         if let Some(v) = &n.value {
-            assert_eq!(ak.value(), Some(v.as_str()));
+            assert_eq!(ak.value(), Some(v.as_str()), "value of node-{}", n.node);
         }
         let b = ak.bounds().expect("bounds published");
         assert_eq!(
@@ -146,13 +155,23 @@ fn adapter_tree_equals_semantics_tree_node_for_node() {
             "bounds of node-{}",
             n.node
         );
-        // Child identity and order.
-        let kids: Vec<u64> = ak.children().iter().map(|c| c.0).collect();
-        let sem_kids: Vec<u64> = n.children.iter().map(|c| u64::from(c.node)).collect();
-        assert_eq!(kids, sem_kids, "children of node-{}", n.node);
-        for c in &n.children {
-            walk(c, by_id);
+        // Child count and order.
+        let kids = ak.children();
+        assert_eq!(
+            kids.len(),
+            n.children.len(),
+            "child count of node-{}",
+            n.node
+        );
+        for (c, ak_child_id) in n.children.iter().zip(kids) {
+            let ak_child = by_id
+                .get(&ak_child_id.0)
+                .unwrap_or_else(|| panic!("child of node-{} missing from adapter tree", n.node));
+            walk(c, ak_child, by_id);
         }
     }
-    walk(&elided, &by_id);
+
+    let root_id = update.tree.as_ref().expect("tree published").root;
+    let ak_root = by_id.get(&root_id.0).expect("root present in adapter tree");
+    walk(&elided, ak_root, &by_id);
 }
