@@ -432,12 +432,14 @@ impl Tabs {
         let el = {
             let selected = cx.signal(name, || 0usize);
             let cur = selected.get(cx.runtime());
+            let n = labels.len().max(1);
             let tabs: Vec<Element> = labels
                 .iter()
                 .enumerate()
                 .map(|(i, label)| {
                     let on = i == cur;
                     Element {
+                        id: Some(format!("{name}-tab-{i}").into()),
                         role: Role::Tab,
                         label: (*label).to_string(),
                         focusable: true,
@@ -465,6 +467,26 @@ impl Tabs {
                             },
                         ),
                         on_click: Some(Rc::new(move |rt| selected.set(rt, i))),
+                        // W3: the WAI-ARIA tablist keys — ←/→ move the
+                        // selection, Home/End jump to the ends.
+                        //
+                        // Movement is relative to the *current selection*, not
+                        // to this tab's own index: focus does not rove with the
+                        // selection (it is keyed by StableId and only Tab moves
+                        // it), so keying off `i` would make ← / → depend on
+                        // which tab happens to hold focus.
+                        on_key: Some(Rc::new(move |rt, ke| {
+                            let cur = selected.get(rt);
+                            match ke.key {
+                                Key::Named(NamedKey::ArrowRight) => selected.set(rt, (cur + 1) % n),
+                                Key::Named(NamedKey::ArrowLeft) => {
+                                    selected.set(rt, (cur + n - 1) % n)
+                                }
+                                Key::Named(NamedKey::Home) => selected.set(rt, 0),
+                                Key::Named(NamedKey::End) => selected.set(rt, n - 1),
+                                _ => {}
+                            }
+                        })),
                         ..Element::default()
                     }
                 })

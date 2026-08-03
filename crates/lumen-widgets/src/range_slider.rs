@@ -4,6 +4,7 @@
 
 use crate::widget::impl_common;
 use crate::Element;
+use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role};
 use lumen_core::Color;
 use lumen_layout::{Dim, Edges, LayoutStyle, Position};
@@ -109,7 +110,7 @@ impl RangeSlider {
             role: Role::Slider,
             focusable: true,
             value: Some(format!("{lo_v:.0}–{hi_v:.0}")),
-            actions: vec![Action::SetValue],
+            actions: vec![Action::SetValue, Action::Increment, Action::Decrement],
             children: vec![
                 track,
                 fill,
@@ -130,6 +131,51 @@ impl RangeSlider {
                 lo.set(rt, v.min(h));
             } else {
                 hi.set(rt, v.max(l));
+            }
+        }));
+        // W2/W3: implement the actions this declares, and give the range the
+        // keyboard. Plain arrows move the *upper* end (the common adjustment);
+        // Shift+arrows move the lower one. Ends clamp so they cannot cross.
+        let step = span / 100.0;
+        let bump = move |rt: &lumen_core::state::Runtime, delta: f64, lower: bool| {
+            let (l, h) = (lo.get(rt), hi.get(rt));
+            if lower {
+                lo.set(rt, (l + delta).clamp(min, h));
+            } else {
+                hi.set(rt, (h + delta).clamp(l, max));
+            }
+        };
+        el.on_increment = Some(Rc::new(move |rt| bump(rt, step, false)));
+        el.on_decrement = Some(Rc::new(move |rt| bump(rt, -step, false)));
+        el.on_set_value = Some(Rc::new(move |rt, v| {
+            // "lo,hi" sets both ends; a bare number moves the nearer end.
+            if let Some((a, b)) = v.split_once(',') {
+                if let (Ok(a), Ok(b)) = (a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
+                    let (a, b) = if a <= b { (a, b) } else { (b, a) };
+                    lo.set(rt, a.clamp(min, max));
+                    hi.set(rt, b.clamp(a.clamp(min, max), max));
+                }
+            } else if let Ok(n) = v.trim().parse::<f64>() {
+                let (l, h) = (lo.get(rt), hi.get(rt));
+                if (n - l).abs() <= (n - h).abs() {
+                    lo.set(rt, n.clamp(min, h));
+                } else {
+                    hi.set(rt, n.clamp(l, max));
+                }
+            }
+        }));
+        el.on_key = Some(Rc::new(move |rt, ke| {
+            let lower = ke.modifiers.contains(lumen_core::events::Modifiers::SHIFT);
+            match ke.key {
+                Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowUp) => {
+                    bump(rt, step, lower)
+                }
+                Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowDown) => {
+                    bump(rt, -step, lower)
+                }
+                Key::Named(NamedKey::Home) if lower => lo.set(rt, min),
+                Key::Named(NamedKey::End) if !lower => hi.set(rt, max),
+                _ => {}
             }
         }));
         RangeSlider { el }

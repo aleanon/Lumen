@@ -4,6 +4,7 @@
 
 use crate::widget::impl_common;
 use crate::{widgets, BuildCx, Element};
+use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::Role;
 use lumen_core::Color;
 use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle, Position};
@@ -88,6 +89,10 @@ impl PickList {
         let mut trigger = widgets::row(vec![label, chevron()]);
         trigger.role = Role::Button;
         trigger.focusable = true;
+        // Focus is keyed by StableId, so a focusable node needs one or it can
+        // never hold focus (and never receives keys). Namespaced under `name`
+        // so two dropdowns don't collide (W4).
+        trigger.id = Some(format!("{name}-trigger").into());
         trigger.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
         trigger.corner_radius = 8.0;
         trigger.style.align_items = Some(Align::Center);
@@ -100,6 +105,46 @@ impl PickList {
             bottom: Dim::px(0.0),
         };
         trigger.on_click = Some(Rc::new(move |rt| open.update(rt, |o| *o = !*o)));
+        // W3: the WAI-ARIA combobox/listbox keys. ↑/↓ move the selection
+        // directly (and open a closed list), Home/End jump to the ends, Escape
+        // closes. Keyboard users no longer need the pointer to choose.
+        {
+            let opts: Vec<String> = options.clone();
+            trigger.on_key = Some(Rc::new(move |rt, ke| {
+                if opts.is_empty() {
+                    return;
+                }
+                let cur = selected.get(rt);
+                let at = opts.iter().position(|o| *o == cur);
+                let pick = |rt: &lumen_core::state::Runtime, i: usize| {
+                    selected.set(rt, opts[i].clone());
+                };
+                match ke.key {
+                    Key::Named(NamedKey::ArrowDown) => {
+                        open.set(rt, true);
+                        let i = match at {
+                            Some(i) if i + 1 < opts.len() => i + 1,
+                            Some(i) => i,
+                            None => 0,
+                        };
+                        pick(rt, i);
+                    }
+                    Key::Named(NamedKey::ArrowUp) => {
+                        open.set(rt, true);
+                        let i = match at {
+                            Some(i) if i > 0 => i - 1,
+                            Some(i) => i,
+                            None => opts.len() - 1,
+                        };
+                        pick(rt, i);
+                    }
+                    Key::Named(NamedKey::Home) => pick(rt, 0),
+                    Key::Named(NamedKey::End) => pick(rt, opts.len() - 1),
+                    Key::Named(NamedKey::Escape) => open.set(rt, false),
+                    _ => {}
+                }
+            }));
+        }
 
         let mut children = vec![trigger];
 

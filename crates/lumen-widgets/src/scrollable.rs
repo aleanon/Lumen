@@ -4,6 +4,7 @@
 
 use crate::widget::impl_common;
 use crate::{BuildCx, Element};
+use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role, ScrollInfo};
 use lumen_layout::{Dim, LayoutStyle};
 use std::rc::Rc;
@@ -74,6 +75,30 @@ impl Scrollable {
             // the OS sign so wheel-down moves the content down).
             on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
                 offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
+            })),
+            // W3: keyboard scrolling. Focusable so Tab can reach the viewport —
+            // a scroll region a keyboard user cannot move is a real a11y gap
+            // (WAI-ARIA: a scrollable region must be keyboard operable).
+            focusable: true,
+            on_key: Some(Rc::new(move |rt, ke| {
+                let line = 40.0;
+                let page = (viewport_h - line).max(line);
+                let step = match ke.key {
+                    Key::Named(NamedKey::ArrowDown) => line,
+                    Key::Named(NamedKey::ArrowUp) => -line,
+                    Key::Named(NamedKey::PageDown) => page,
+                    Key::Named(NamedKey::PageUp) => -page,
+                    Key::Named(NamedKey::Home) => {
+                        offset.set(rt, 0.0);
+                        return;
+                    }
+                    Key::Named(NamedKey::End) => {
+                        offset.set(rt, max_y);
+                        return;
+                    }
+                    _ => return,
+                };
+                offset.update(rt, |o| *o = (*o + step).clamp(0.0, max_y));
             })),
             children: vec![inner],
             ..Element::default()
