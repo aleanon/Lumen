@@ -107,9 +107,16 @@ claims falsifiable.
   measured value + 15 %** so any regression trips before the next phase lands.
 - **N0.4** Record the baseline table above into the gate script's comment block so
   the numbers travel with the code.
+- **N0.5 — Gate memory, not only time.** Every phase below trades RAM or VRAM for
+  speed, and several are *monotonic* (caches that grow and never shrink). Report
+  **peak RSS** and **VRAM high-water** alongside the timings, and give both a budget
+  in `perf_gate.sh`. Without this, N1–N5 can each regress memory invisibly — the
+  same blind spot that let the per-frame `create_buffer_init` churn (N2) survive,
+  because the headless benches never saw it.
 
-*Acceptance:* `cargo bench` reports a per-phase breakdown; `perf_gate.sh` fails on
-a ≥15 % regression in any of the four; the baseline in this doc is reproducible.
+*Acceptance:* `cargo bench` reports a per-phase breakdown **plus peak RSS and VRAM**;
+`perf_gate.sh` fails on a ≥15 % regression in any timing **or memory** budget; the
+baseline in this doc is reproducible.
 
 ---
 
@@ -144,27 +151,49 @@ dense slot index. **Use to address SoA arrays**."* The tree is SoA; the app-leve
 side tables simply never followed it.
 
 ## Steps (each independently green)
-- **N1.1 — `Vec` in place of `HashMap`.** Convert each side table to a
-  `Vec<Option<T>>` (or a dense `Vec<T>` + a validity bitset) indexed by
-  `NodeIndex::index()`. Nodes allocate preorder into a fresh tree, so indices are
-  dense and contiguous by construction (per the `build_node` span comment).
-  **Generation check:** keep a parallel `Vec<u32>` of generations and assert the
-  stamp matches on read, so a stale `NodeIndex` faults loudly instead of aliasing.
-  Reuse the allocation across pumps (`clear()`, not re-`new()`).
-- **N1.2 — Interned strings.** `label: SmolStr`, `value: Option<SmolStr>`,
+- **N1.1 — Classify the tables dense vs sparse *before* converting any of them.**
+  A `Vec<Option<T>>` allocates a slot for **every** node index, so it is a memory
+  *regression* for a sparse table. `node_caret` typically holds one entry (the
+  focused text field); as a `Vec<Option<Rect>>` over a 10 000-node tree that is
+  ~400 KB standing in for one live value. Convert only the tables that are
+  genuinely dense (`meta`, `node_style`, `node_computed`, `node_layout_style`).
+  Leave sparse tables (`node_caret`, and `node_text_metrics` on non-text-heavy
+  trees) as maps, or move them to a sparse-set / sorted `Vec<(NodeIndex, T)>`.
+  Measure occupancy in N0 first — do not guess which is which.
+- **N1.2 — `Vec` conversion for the dense tables.** `Vec<Option<T>>` (or a dense
+  `Vec<T>` + validity bitset) indexed by `NodeIndex::index()`. Nodes allocate
+  preorder into a fresh tree, so indices are dense and contiguous by construction
+  (per the `build_node` span comment). **Generation check:** keep a parallel
+  `Vec<u32>` of generations and assert the stamp matches on read, so a stale
+  `NodeIndex` faults loudly instead of aliasing.
+  **Allocation reuse is a deliberate RAM-for-time trade.** Today
+  `std::mem::take(&mut self.meta)` (`app.rs:2496`) moves the table into `prev_*` and
+  builds a fresh one, so the allocator reclaims each cycle. Reusing capacity
+  (`clear()`, not re-`new()`) removes that churn but pins steady-state RSS at the
+  **high-water** tree size for the session. Acceptable only with N0.5's memory gate
+  and a shrink trigger: if occupancy stays below 25 % for N consecutive pumps,
+  `shrink_to_fit`.
+- **N1.3 — Interned strings.** `label: SmolStr`, `value: Option<SmolStr>`,
   `classes: Rc<[SmolStr]>`. `smol_str 0.3` is already a workspace dependency and
-  ADR-003-whitelisted — no escalation.
-- **N1.3 — Shared empty slices.** `actions: Rc<[Action]>`, `states: Rc<[SemState]>`
+  ADR-003-whitelisted — no escalation. Strictly reduces memory: `SmolStr` stores
+  up to 22 bytes inline, so short labels stop heap-allocating entirely.
+- **N1.4 — Shared empty slices.** `actions: Rc<[Action]>`, `states: Rc<[SemState]>`
   with a shared static empty. Most nodes have neither.
-- **N1.4 — Box the handler bundle.** Move the thirteen `Option<Handler>` fields
+- **N1.5 — Box the handler bundle.** Move the thirteen `Option<Handler>` fields
   into `struct NodeHandlers { … }` behind `handlers: Option<Box<NodeHandlers>>`.
-  A handler-free node becomes one null pointer.
-- **N1.5 — `node_computed` keys.** Replace `HashMap<String, Computed>` with a
-  sorted `Vec<(PropId, Computed)>` or an `Rc<[…]>` shared across nodes with an
-  identical computed set (very common — every row of a list shares one). Property
-  names are a closed set; intern them to a `u16` `PropId` at parse time in
-  `lumen-style`.
-- **N1.6 — Re-measure** against N0.2's `lower_500_nodes`.
+  `Handler` is `Rc<dyn Fn(&Runtime)>` — a 16-byte fat pointer — so thirteen inline
+  is **208 bytes per node**, almost always `None`. A handler-free node becomes one
+  null pointer; a node *with* handlers pays 8 bytes plus one boxed allocation.
+  Large net reduction, since handler-bearing nodes are a small minority.
+- **N1.6 — `node_computed` keys.** The heaviest table by far: today a `String`-keyed
+  `HashMap` **per node**, i.e. roughly one outer entry + one inner map allocation +
+  one `String` allocation per property, per node. Replace with a sorted
+  `Vec<(PropId, Computed)>`, and share it as `Rc<[…]>` across nodes with an
+  identical computed set — very common, since every row of a list resolves the same
+  cascade. Property names are a closed set; intern them to a `u16` `PropId` at parse
+  time in `lumen-style`. Expected to be the single biggest memory reduction in the
+  plan.
+- **N1.7 — Re-measure** against N0.2's `lower_500_nodes` **and N0.5's RSS budget**.
 
 ## Guards
 F0 `assert_view_coherent` + the full golden suite + `introspection_f4.rs`
@@ -195,8 +224,13 @@ it only shows on the windowed path.
   fields with `(offset: u64, count: u32)` into the pool. Respect
   `wgpu::COPY_BUFFER_ALIGNMENT` (4) when advancing, and 256-byte alignment for
   anything bound with a dynamic offset.
-- **N2.3 — Grow policy.** Double on overflow, never shrink within a session,
-  reallocate at frame boundaries only (never mid-pass).
+- **N2.3 — Grow policy with decay.** Double on overflow; reallocate at frame
+  boundaries only, never mid-pass. **Do not adopt a never-shrink policy:** the pool
+  would be pinned at the session's worst frame forever, so one complex canvas or SVG
+  tessellation permanently doubles resident VRAM. Track a high-water mark over a
+  sliding window (~120 frames) and shrink to `2 × window_peak` when the pool has
+  been under 25 % utilized for the whole window. Log pool size at
+  `app.perf` so growth is observable.
 - **N2.4 — Apply across all 13 sites** — rects, paths, glyphs, gradients, images,
   composites.
 - **N2.5 — Windowed benchmark.** This box has an RTX 4070 + `DISPLAY=:0`, so
@@ -248,8 +282,19 @@ On rebuild, splice only the spans belonging to dirty `cx.scope`s.
 
 ## Steps (each independently green)
 - **N3.1 — Spike the two splice designs** against `lower_500_nodes` with a
-  synthetic "one row changes in 500" workload. Write up the choice here before
-  building.
+  synthetic "one row changes in 500" workload. **Score both on RSS as well as
+  time** — design (a) buys speed with slack, and 1.5–2× on the node arrays is a
+  plausible cost; design (b) adds a stable-id indirection (~8–16 B/node) and leaves
+  dead slots until compaction. Write up the choice here before building.
+  Note the offsetting *reduction*: a retained graph knows what it spliced, so the
+  `prev_meta` / `prev_node_style` / `prev_node_computed` mirrors (`app.rs:593–595`)
+  — a full second generation of the three heaviest tables — may become unnecessary.
+  Net direction is genuinely unclear until measured; do not assume it is a
+  regression *or* a win.
+- **N3.1b — Retention policy.** A retained graph holds the peak tree ever built,
+  not the current one. Navigating away from a large view must release it: compact
+  on scope eviction (`evict_scope` already tracks ownership) and shrink the arenas
+  when live-node count drops below half of capacity.
 - **N3.2 — Stable node identity.** `(scope_key, ordinal)` keying + generation
   validation. No behavior change; proven by asserting the retained tree's identity
   map matches a fresh rebuild's preorder.
@@ -300,9 +345,15 @@ and clip layers), so the blit machinery is present. Nothing derives caching.
   it is not impure (`dyn_text`/`dyn_bg`/`dyn_classes`/`Canvas`/`Custom`/any
   frame-request — `build_node` already tracks this as `impure_seen`); and its pixel
   area exceeds a threshold below which redrawing beats blitting.
-- **N4.2 — Cache + eviction.** One offscreen texture per cached scope, keyed by
-  `(scope_key, size, scale)`. LRU under a total-area budget. Invalidate on scope
-  re-run, resize, scale change, theme or stylesheet generation bump.
+- **N4.2 — Cache + eviction under a hard VRAM cap.** One offscreen texture per
+  cached scope, keyed by `(scope_key, size, scale)`. Invalidate on scope re-run,
+  resize, scale change, theme or stylesheet generation bump.
+  **This is the largest resource increase in the plan and the budget must be a hard
+  cap, not advisory.** A 280×1080 logical sidebar at 2× DPI is 560×2160×4 B ≈
+  **4.8 MB** of VRAM; ten cached subtrees is ~48 MB. Set a conservative default
+  (suggest 32 MB, configurable), evict LRU by area, and **degrade gracefully to
+  direct rendering** when the cap is hit or an allocation fails — never fail a
+  frame. Report cache size and hit rate through `app.perf`.
 - **N4.3 — Blit path.** Emit a `Composite` of the cached texture in place of the
   subtree's draws.
 - **N4.4 — New differential oracle.** R0's `cpu_vs_gpu` does **not** cover this —
@@ -360,6 +411,32 @@ starts. N3 is the only phase that needs a design spike before estimation.
 | N3 | XL | lowering + semantics → O(changed); unblocks A.4 |
 | N4 | M | stable-subtree blit; conditional |
 | N5 | L | non-text DL emission → O(changed); conditional |
+
+## Resource budget (cross-cutting — read before starting any phase)
+
+Every phase in this plan buys time with memory, and five of them do it by adding
+something that persists across frames. Left to individual judgement that becomes
+five ad-hoc growth policies; stated once, it is a single reviewable trade.
+
+| phase | direction | magnitude | why |
+|---|---|---|---|
+| N0 | ~neutral | a few dozen bytes/frame | per-phase counters on `FrameStats` |
+| N1 | **large reduction**, with one trap | `node_computed` dominates the win | interning + `Rc`-sharing + boxing 208 B of mostly-`None` handlers; the trap is `Vec<Option<T>>` over *sparse* tables (N1.1) |
+| N2 | **increase (VRAM)** | pool ≈ 2 × peak frame | persistent buffers; bounded by N2.3's decay |
+| N3 | **unclear until measured** | arena slack up to ~2 ×, offset by dropping `prev_*` | retained graph vs. today's two generations |
+| N4 | **increase (VRAM), largest** | ~4.8 MB per cached sidebar | offscreen textures; bounded by N4.2's hard cap |
+| N5 | modest increase | bounded by tree size | retained DL fragments |
+
+Three rules, binding on every phase:
+
+1. **No unbounded cache.** Every retained structure has an explicit cap and an
+   eviction path. A cache without a cap is a leak with good intentions.
+2. **No monotonic growth.** Anything that grows must be able to shrink — high-water
+   decay (N2.3), compaction on eviction (N3.1b), LRU under a cap (N4.2).
+3. **Degrade, never fail.** Hitting a memory cap disables the optimization for that
+   frame; it never drops a frame or panics.
+
+N0.5 is what makes these enforceable rather than aspirational.
 
 ## ADR-003 / determinism
 
