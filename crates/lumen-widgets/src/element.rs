@@ -148,6 +148,10 @@ pub struct Element {
     pub content: NodeContent,
     /// Whether the node is keyboard-focusable.
     pub focusable: bool,
+    /// Claim focus after a rebuild when nothing is focused yet (e.g. the
+    /// primary input of a screen). First autofocus node in document order
+    /// wins; it never steals focus the user has placed elsewhere.
+    pub autofocus: bool,
     /// Whether the node is elided from semantics (pure layout).
     pub elide_semantics: bool,
     /// Explicit semantic states (e.g. checked/disabled).
@@ -239,6 +243,7 @@ impl Default for Element {
             corner_radius: 0.0,
             content: NodeContent::None,
             focusable: false,
+            autofocus: false,
             elide_semantics: false,
             states: Vec::new(),
             scroll: None,

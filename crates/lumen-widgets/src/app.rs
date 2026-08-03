@@ -460,6 +460,7 @@ struct NodeMeta {
     states: Vec<SemState>,
     scroll: Option<lumen_core::semantics::ScrollInfo>,
     focusable: bool,
+    autofocus: bool,
     elide: bool,
     /// Per-prop signal dependencies (F2 union → semantics; F4 breakdown).
     deps: NodeDeps,
@@ -2279,7 +2280,28 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.rebuild_inner()));
         match result {
-            Ok(()) => self.build_panic = None,
+            Ok(()) => {
+                self.build_panic = None;
+                // Autofocus: after a good build with no focus placed, the
+                // first autofocus node (document order) takes it.
+                if self.focused_id.is_none() {
+                    let mut stack = vec![self.tree.root()];
+                    while let Some(node) = stack.pop() {
+                        if !node.is_some() {
+                            continue;
+                        }
+                        if let Some(m) = self.meta.get(&node) {
+                            if m.autofocus && m.focusable && m.id.is_some() {
+                                self.focused_id = m.id.clone();
+                                break;
+                            }
+                        }
+                        // Sibling below child on the stack ⇒ document order.
+                        stack.push(self.tree.next_sibling(node));
+                        stack.push(self.tree.first_child(node));
+                    }
+                }
+            }
             Err(payload) => {
                 let msg = panic_msg(&payload);
                 // C.2: panics reach the agent's `app.logs` too, not just
@@ -3313,6 +3335,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 states: el.states,
                 scroll: el.scroll,
                 focusable: el.focusable,
+                autofocus: el.autofocus,
                 elide: el.elide_semantics,
                 deps: node_deps,
                 on_click: el.on_click,
