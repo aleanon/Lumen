@@ -20,6 +20,11 @@ use std::rc::Rc;
 /// A click/activate handler. Re-registered every build; never stored (ADR-013).
 pub type Handler = Rc<dyn Fn(&Runtime)>;
 
+/// Root-level key holding the stable id currently under the pointer (empty when
+/// nothing is). Signal-backed so [`BuildCx::is_hovered`] is a *tracked* read —
+/// see that method for why that matters.
+pub(crate) const HOVER_SIGNAL: &str = "lumen.hover";
+
 /// A handler that receives a value (W2) — backs [`Action::SetValue`], which the
 /// widget parses from the string.
 pub type ValueHandler = Rc<dyn Fn(&Runtime, &str)>;
@@ -652,6 +657,23 @@ impl<'a> BuildCx<'a> {
     /// reading this keeps a virtualized view sized to the current window).
     pub fn size(&self) -> lumen_core::geometry::Size {
         self.size
+    }
+
+    /// Whether the pointer is currently over the node with stable id `id`.
+    ///
+    /// Lets a widget *build* hover-dependent structure — a tooltip, a
+    /// reveal-on-hover row action — instead of only restyling through `.lss
+    /// :hovered`.
+    ///
+    /// **Signal-backed on purpose.** Visual state is normally applied *after*
+    /// the view closures run, precisely so pointer motion gets memoized
+    /// rebuilds (`tests/hover_memo.rs`). Reading hover through a signal keeps
+    /// that property honest: only the scopes that actually call this record the
+    /// dependency and re-run, while the rest stay memoized. Reading it any
+    /// other way would let a memoized subtree go stale.
+    pub fn is_hovered(&self, id: &str) -> bool {
+        let cur: Signal<String> = self.rt.signal(HOVER_SIGNAL, String::new);
+        cur.with(self.rt, |h| h == id)
     }
 
     /// Create or re-attach a signal keyed by `key` (02 §4), namespaced under the

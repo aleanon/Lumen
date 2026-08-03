@@ -1746,7 +1746,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     let p = self.tree.parent(node);
                     n = p.is_some().then_some(p);
                 }
-                self.hovered_id = id;
+                if self.hovered_id != id {
+                    self.hovered_id = id.clone();
+                    // Publish hover as state so `BuildCx::is_hovered` is a
+                    // tracked read (see its docs): only scopes that read it are
+                    // invalidated, so pointer motion keeps its memoized
+                    // rebuilds. Written only on change, so idle motion within
+                    // one node costs nothing.
+                    let s: lumen_core::Signal<String> =
+                        self.rt.signal(crate::element::HOVER_SIGNAL, String::new);
+                    s.set(
+                        &self.rt,
+                        id.as_ref()
+                            .map(|i| i.as_str().to_string())
+                            .unwrap_or_default(),
+                    );
+                }
                 if let Some((idx, drag_id)) = self.pressed.clone() {
                     // Re-resolve by stable id so a rebuild that renumbered nodes
                     // doesn't drag the wrong (or a stale) node; fall back to the

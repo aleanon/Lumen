@@ -5,7 +5,7 @@
 
 use crate::widget::impl_common;
 use crate::{widgets, BuildCx, Element};
-use lumen_core::semantics::Role;
+use lumen_core::semantics::{Action, Role, State as SemState};
 use lumen_core::Color;
 use lumen_layout::{Align, Dim, Edges};
 use std::rc::Rc;
@@ -107,6 +107,49 @@ impl Toast {
         };
         row.style.width = Dim::px(360.0);
         Toast { el: row }
+    }
+
+    /// Add a trailing action (Material's snackbar action — "Undo", "Retry").
+    pub fn action(
+        mut self,
+        label: impl Into<String>,
+        f: impl Fn(&lumen_core::state::Runtime) + 'static,
+    ) -> Toast {
+        let mut btn = widgets::text(label.into());
+        if let Some(ts) = btn.text_style_mut() {
+            ts.font_size = 13.0;
+            ts.weight = 600.0;
+            ts.color = Color::srgb8(0x1a, 0x73, 0xe8, 0xff);
+        }
+        btn.role = Role::Button;
+        btn.focusable = true;
+        btn.actions = vec![Action::Click, Action::Focus];
+        btn.on_click = Some(Rc::new(f));
+        btn.style.flex_shrink = 0.0;
+        self.el.children.push(btn);
+        self
+    }
+
+    /// Disappear on its own after `ms` — Material's snackbar timeout, the
+    /// behaviour that makes a toast a toast rather than a banner.
+    ///
+    /// `name` keys the moment this toast first appeared, so the countdown
+    /// survives rebuilds. Expiry is a **pure function of the clock**: once
+    /// `ms` have passed the widget renders nothing. No side effect runs during
+    /// build, and because the clock is virtual the behaviour is deterministic —
+    /// a test advances the clock instead of sleeping.
+    pub fn auto_dismiss(mut self, cx: &BuildCx, name: &str, ms: f64) -> Toast {
+        let now = cx.now_ms();
+        let shown_at: lumen_core::Signal<f64> = cx.signal(name, || now);
+        let started = shown_at.get(cx.runtime());
+        let deadline = started + ms;
+        if now >= deadline {
+            // Expired: collapse to nothing (and stop asking for frames).
+            self.el = Element::default();
+        } else {
+            cx.wake_at(deadline);
+        }
+        self
     }
 }
 
@@ -213,6 +256,43 @@ impl Chip {
             bottom: Dim::px(4.0),
         };
         Chip { el: row }
+    }
+
+    /// Make the chip selectable, reporting `Selected` while on and calling `f`
+    /// when toggled — Material's *filter* and *choice* chips.
+    ///
+    /// Selection is visual **and** semantic, so the agent and assistive tech can
+    /// tell which filters are active.
+    pub fn selected(mut self, on: bool, f: impl Fn(&lumen_core::state::Runtime) + 'static) -> Self {
+        self.el.role = Role::Button;
+        self.el.focusable = true;
+        // Built from `widgets::row`, which marks itself structural and would
+        // splice the node — and its id — out of the semantic tree. A selectable
+        // chip IS the control, so it has to be addressable.
+        self.el.elide_semantics = false;
+        self.el.actions = vec![Action::Click, Action::Focus];
+        // `Selected` or nothing — the closed state vocabulary has no
+        // `Unselected`, and the rest of the widget set uses the same convention.
+        self.el.states = if on { vec![SemState::Selected] } else { vec![] };
+        self.el.on_click = Some(Rc::new(f));
+        if on {
+            self.el.background = Some(Color::srgb8(0xd7, 0xe6, 0xff, 0xff));
+            if let Some(t) = self.el.children.first_mut() {
+                if let Some(ts) = t.text_style_mut() {
+                    ts.color = Color::srgb8(0x0b, 0x47, 0xa1, 0xff);
+                }
+            }
+        }
+        self
+    }
+
+    /// Add a leading icon (Material's *input* chip with an avatar/icon).
+    pub fn icon(mut self, glyph: &str) -> Self {
+        let mut ic: Element = crate::Icon::new(glyph).into();
+        ic.style.width = Dim::px(14.0);
+        ic.style.height = Dim::px(14.0);
+        self.el.children.insert(0, ic);
+        self
     }
 
     /// Add a remove (×) affordance calling `f` when clicked.

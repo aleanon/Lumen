@@ -117,7 +117,9 @@ pub fn select(cx: &BuildCx, name: &str, options: &[&str]) -> Element {
 /// use lumen_widgets::{centered, widgets, Tooltip, BuildCx, Element};
 ///
 /// fn build(cx: &mut BuildCx) -> Element {
-///     centered(cx, Tooltip::new(widgets::text("hover me"), "A helpful hint").into())
+///     // The tip is transient: it appears while `#tip-tip-host` is hovered, so
+///     // the doc render shows the resting state.
+///     centered(cx, Tooltip::new(cx, "tip", widgets::text("hover me"), "A helpful hint").into())
 /// }
 /// # let app = App::new(build);
 /// # lumen_widgets::doc_shot(app, 180.0, 64.0, "tooltip");
@@ -135,38 +137,79 @@ pub struct Tooltip {
 }
 
 impl Tooltip {
-    /// Wrap `target` with a tooltip whose `text` is exposed to assistive tech.
-    pub fn new(target: Element, text: impl Into<String>) -> Tooltip {
-        let el = {
-            let text = text.into();
-            Element {
-                role: Role::Group,
+    /// Wrap `target` with a tooltip that appears **while the target is
+    /// hovered**, floating above the content.
+    ///
+    /// The previous implementation stacked the tip permanently in a column
+    /// under the target: always visible, and it displaced whatever came after
+    /// it. A tooltip is transient and must not affect layout, so the tip is an
+    /// absolutely-positioned overlay rendered only on hover — matching every
+    /// other toolkit, and leaving `target`'s own box untouched.
+    ///
+    /// `name` keys the hover test, so the target gets a stable id.
+    pub fn new(cx: &BuildCx, name: &str, target: Element, text: impl Into<String>) -> Tooltip {
+        let text = text.into();
+        let host_id = format!("{name}-tip-host");
+        let showing = cx.is_hovered(&host_id);
+
+        let mut host = target;
+        host.id = Some(host_id.clone().into());
+        // The tip describes the target, so the target carries the description
+        // for assistive tech whether or not the tip is currently painted.
+        if host.label.is_empty() {
+            host.label = text.clone();
+        }
+
+        let mut children = vec![host];
+        if showing {
+            let tip = Element {
+                role: Role::Tooltip,
+                label: text.clone(),
+                overlay: true,
+                background: Some(Color::srgb8(0x20, 0x24, 0x2a, 0xff)),
+                corner_radius: 6.0,
                 style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Column,
+                    position: lumen_layout::Position::Absolute,
+                    inset: Edges {
+                        top: Dim::px(-28.0),
+                        left: Dim::px(0.0),
+                        ..Edges::AUTO
+                    },
+                    padding: Edges {
+                        left: Dim::px(8.0),
+                        right: Dim::px(8.0),
+                        top: Dim::px(4.0),
+                        bottom: Dim::px(4.0),
+                    },
                     ..LayoutStyle::default()
                 },
-                children: vec![
-                    target,
-                    Element {
-                        role: Role::Tooltip,
-                        label: text.clone(),
-                        content: crate::NodeContent::Text(
-                            text,
-                            TextStyle {
-                                font_size: 12.0,
-                                weight: 400.0,
-                                color: Color::srgb8(0x44, 0x44, 0x44, 0xff),
-                                line_height: None,
-                                letter_spacing: 0.0,
-                                family: None,
-                            },
-                        ),
-                        ..Element::default()
+                content: crate::NodeContent::Text(
+                    text,
+                    TextStyle {
+                        font_size: 12.0,
+                        weight: 400.0,
+                        color: Color::srgb8(0xff, 0xff, 0xff, 0xff),
+                        line_height: None,
+                        letter_spacing: 0.0,
+                        family: None,
                     },
-                ],
+                ),
                 ..Element::default()
-            }
+            };
+            children.push(tip);
+        }
+
+        let el = Element {
+            role: Role::Group,
+            elide_semantics: true,
+            style: LayoutStyle {
+                position: lumen_layout::Position::Relative,
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                ..LayoutStyle::default()
+            },
+            children,
+            ..Element::default()
         };
         Tooltip { el }
     }
@@ -176,8 +219,8 @@ impl_common!(Tooltip);
 
 /// Wrap `target` with a tooltip whose `text` is exposed to assistive tech.
 /// *(Thin shim over [`Tooltip`] — the typed form is preferred.)*
-pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
-    Tooltip::new(target, text).into()
+pub fn tooltip(cx: &BuildCx, name: &str, target: Element, text: impl Into<String>) -> Element {
+    Tooltip::new(cx, name, target, text).into()
 }
 
 /// [`Menu`] — a vertical list of menu items (typed form of [`menu`]).

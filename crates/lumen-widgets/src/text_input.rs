@@ -41,6 +41,15 @@ pub struct TextInput {
     el: Element,
     editor: Signal<TextEditor>,
     mirror: Signal<String>,
+    /// Rebuilt lazily by the option setters, which have to re-derive the shown
+    /// text (masking, placeholder) and the caret position that goes with it.
+    text: String,
+    mask: Option<char>,
+    placeholder: Option<String>,
+    /// Caret position in *characters* (for remapping onto masked glyphs) and in
+    /// bytes (the unmasked case).
+    caret_chars: usize,
+    caret_byte: usize,
 }
 
 impl TextInput {
@@ -95,7 +104,149 @@ impl TextInput {
             })),
             ..Element::default()
         };
-        TextInput { el, editor, mirror }
+        let caret_byte = ed.cursor();
+        let caret_chars = text
+            .get(..caret_byte)
+            .map(|s| s.chars().count())
+            .unwrap_or_else(|| text.chars().count());
+        TextInput {
+            el,
+            editor,
+            mirror,
+            text,
+            mask: None,
+            placeholder: None,
+            caret_chars,
+            caret_byte,
+        }
+    }
+
+    /// Re-derive the displayed content after an option changed.
+    ///
+    /// Masking and the placeholder both change what is *shown* without changing
+    /// what is *stored*, so this is the one place that decides the glyphs, the
+    /// text colour, and whether a caret is drawn.
+    fn refresh(&mut self) {
+        let empty = self.text.is_empty();
+        let shown = match (&self.mask, empty, &self.placeholder) {
+            // Placeholder only shows while genuinely empty, and never leaks the
+            // masked value.
+            (_, true, Some(p)) if !p.is_empty() => p.clone(),
+            (Some(c), _, _) => std::iter::repeat_n(*c, self.text.chars().count()).collect(),
+            (None, true, _) => " ".to_string(),
+            (None, false, _) => self.text.clone(),
+        };
+        let showing_placeholder = empty && self.placeholder.as_ref().is_some_and(|p| !p.is_empty());
+        let mut ts = lumen_text::TextStyle::default();
+        if showing_placeholder {
+            ts.color = lumen_core::Color::srgb8(0x8a, 0x90, 0x9a, 0xff);
+        }
+        self.el.content = NodeContent::Text(shown, ts);
+        // A masked field's caret must be remapped: `caret_byte` indexes the
+        // SHOWN text, and one plaintext byte is not one bullet.
+        self.el.caret_byte = Some(match self.mask {
+            Some(c) => self.caret_chars * c.len_utf8(),
+            None if showing_placeholder => 0,
+            None => self.caret_byte,
+        });
+        // Selection highlighting would leak the shape of a masked value's
+        // sub-ranges; drop it while masked.
+        if self.mask.is_some() {
+            self.el.selection = None;
+        }
+        // Semantics: never publish the secret. An *empty* masked field has no
+        // secret, so its placeholder still labels it (that is the whole point
+        // of a placeholder on a password box).
+        if showing_placeholder {
+            self.el.label = self.placeholder.clone().unwrap_or_default();
+            self.el.value = Some(String::new());
+        } else if let Some(c) = self.mask {
+            self.el.label = String::new();
+            self.el.value = Some(std::iter::repeat_n(c, self.text.chars().count()).collect());
+        } else {
+            self.el.label = self.text.clone();
+            self.el.value = Some(self.text.clone());
+        }
+    }
+
+    /// Show `text` when the field is empty (and report it as the accessible
+    /// label, the way a placeholder should).
+    pub fn placeholder(mut self, text: impl Into<String>) -> TextInput {
+        self.placeholder = Some(text.into());
+        self.refresh();
+        self
+    }
+
+    /// Cap the contents at `n` characters. Input past the cap is dropped
+    /// (the field keeps what it already had) rather than truncating silently
+    /// mid-edit.
+    pub fn max_length(mut self, n: usize) -> TextInput {
+        let editor = self.editor;
+        let mirror = self.mirror;
+        self.el.on_text = Some(Rc::new(move |rt, t| {
+            editor.update(rt, |e| {
+                let room = n.saturating_sub(e.text().chars().count());
+                if room == 0 {
+                    return;
+                }
+                let take: String = t.chars().take(room).collect();
+                if !take.is_empty() {
+                    e.insert(&take);
+                }
+            });
+            sync_mirror(rt, editor, mirror);
+        }));
+        self
+    }
+
+    /// Make the field read-only: it still focuses, selects and copies, but
+    /// cannot be edited.
+    ///
+    /// Distinct from `.disabled(true)` (W1), which removes it from input and
+    /// focus entirely — read-only content is still readable and selectable,
+    /// which is what assistive tech expects from `Readonly`.
+    pub fn read_only(mut self, yes: bool) -> TextInput {
+        if yes {
+            self.el.on_text = None;
+            self.el.on_set_value = None;
+            let editor = self.editor;
+            // Keep caret movement, selection and copy; drop the mutating keys.
+            self.el.on_key = Some(Rc::new(move |rt, ke| {
+                edit_key_readonly(rt, ke, editor);
+            }));
+            self.el.states.push(lumen_core::semantics::State::Readonly);
+        }
+        self
+    }
+
+    /// Run `f` with the full contents after every edit.
+    pub fn on_change(mut self, f: impl Fn(&Runtime, &str) + 'static) -> TextInput {
+        let editor = self.editor;
+        let mirror = self.mirror;
+        let prev = self.el.on_text.take();
+        self.el.on_text = Some(Rc::new(move |rt, t| {
+            match &prev {
+                Some(h) => h(rt, t),
+                None => {
+                    editor.update(rt, |e| e.insert(t));
+                    sync_mirror(rt, editor, mirror);
+                }
+            }
+            let now = editor.with(rt, |e| e.text().to_string());
+            f(rt, &now);
+        }));
+        self
+    }
+
+    /// Mask the contents with `bullet` — a password field.
+    ///
+    /// The stored value is unchanged; only the glyphs and the published
+    /// semantics are masked, so the secret never reaches the semantic tree, a
+    /// screenshot, or assistive tech.
+    pub fn password(mut self, bullet: char) -> TextInput {
+        self.mask = Some(bullet);
+        self.refresh();
+        self
     }
 
     /// Run `f` with the current value when Enter is pressed, then clear the field
@@ -147,6 +298,25 @@ fn sync_mirror(rt: &Runtime, editor: Signal<TextEditor>, mirror: Signal<String>)
 /// when `multiline` — Enter inserts a newline. Plain character input arrives
 /// separately via `on_text`. Vertical nav (Up/Down) is handled app-side (it
 /// needs layout geometry). Keeps the string mirror in sync.
+/// The read-only key subset: caret movement, selection and copy — everything
+/// that reads, nothing that writes.
+pub(crate) fn edit_key_readonly(rt: &Runtime, ke: &KeyEvent, editor: Signal<TextEditor>) {
+    let ctrl = ke.modifiers.contains(Modifiers::CTRL) || ke.modifiers.contains(Modifiers::META);
+    let shift = ke.modifiers.contains(Modifiers::SHIFT);
+    match &ke.key {
+        Key::Named(NamedKey::ArrowLeft) => editor.update(rt, |e| e.move_left(shift)),
+        Key::Named(NamedKey::ArrowRight) => editor.update(rt, |e| e.move_right(shift)),
+        Key::Named(NamedKey::Home) => editor.update(rt, |e| e.move_home(shift)),
+        Key::Named(NamedKey::End) => editor.update(rt, |e| e.move_end(shift)),
+        Key::Character(s) if ctrl => match s.to_lowercase().as_str() {
+            "a" => editor.update(rt, |e| e.select_all()),
+            "c" => rt.set_clipboard(editor.get(rt).selected_text()),
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
 pub(crate) fn edit_key(
     rt: &Runtime,
     ke: &KeyEvent,

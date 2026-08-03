@@ -127,6 +127,25 @@ impl Avatar {
     }
 }
 
+impl Avatar {
+    /// Show `img` instead of the initials, clipped to the avatar's circle.
+    ///
+    /// Initials remain the **fallback** — the framework-agnostic contract for an
+    /// avatar (Flutter's `CircleAvatar.backgroundImage`, Material's avatar) — so
+    /// a failed or absent image still renders something identifiable, and the
+    /// accessible label stays the person's name either way.
+    pub fn image(mut self, img: lumen_render::RgbaImage) -> Avatar {
+        let d = self.el.style.width;
+        let mut pic: Element = crate::Image::new(img).into();
+        pic.style.width = d;
+        pic.style.height = self.el.style.height;
+        pic.elide_semantics = true; // the avatar itself carries the label
+        self.el.children = vec![pic];
+        self.el.clip = true; // round the picture to the avatar's circle
+        self
+    }
+}
+
 impl_common!(Avatar);
 
 /// Page navigation: `‹ 1 2 … n ›`, current page in a signal.

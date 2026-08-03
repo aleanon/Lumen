@@ -15,6 +15,7 @@ pub mod asset;
 pub mod audit;
 pub mod boundary;
 pub mod button;
+pub mod card;
 pub mod charts;
 pub mod check_box;
 pub mod color_picker;
@@ -272,6 +273,7 @@ pub fn renderer_override() -> Option<Box<dyn Renderer>> {
 pub use accordion::Accordion;
 // Typed forms of the legacy fn-style widgets (migration, 2026-07-20).
 pub use button::Button;
+pub use card::{Badge, Card};
 pub use charts::{LineChart, PieChart, PieSlice};
 pub use check_box::CheckBox;
 pub use color_picker::ColorPicker;

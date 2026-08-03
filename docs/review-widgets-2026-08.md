@@ -181,7 +181,13 @@ building a real screen.
 
 ---
 
-## 5. Implementation plan
+## 5. Implementation plan — ☑ W1–W5 IMPLEMENTED 2026-08-03
+
+*Status: all five phases landed (commits `885c3e4` W1 → `7a1dad8` W2 →
+`a0e57c6` W3 → `f81911c` W4 → W5). Workspace: 702 tests passing, 0 failing,
+clippy clean. Three framework-level constraints were discovered while
+implementing and are recorded at the end of this section.*
+
 
 Five phases, ordered by leverage. Each phase is independently shippable and
 gated by the existing headless suite + `assert_view_coherent`.
@@ -243,3 +249,43 @@ cannot afford to get wrong (ADR-009: "one schema … prevents drift between what
 tests query and what the AI sees"). W4 is small and prevents silent
 mis-targeting. W3 is the biggest volume of work but is purely additive. W5 is
 feature work and can be paced.
+
+
+---
+
+## 6. What implementing this taught us (2026-08-03)
+
+Three constraints surfaced only by building the fixes, each now encoded in code
+comments and tests:
+
+1. **Focus is keyed by `StableId`, so a focusable node *without an id* can never
+   hold focus.** `move_focus` sets `focused_id` from the target's meta id, and
+   `None` silently drops focus. `Tabs`' individual tabs and `PickList`'s trigger
+   were focusable but id-less, so Tab skipped them and they never received keys.
+   Any widget that wants keyboard interaction must give its focusable parts
+   namespaced ids.
+
+2. **`widgets::row`/`column` set `elide_semantics`, which splices the node — and
+   its id — out of the semantic tree.** A widget that builds its control *from*
+   a row (PickList's trigger, a selectable Chip) must clear the flag, or the
+   control is invisible to selectors, focus and assistive tech even though it
+   renders and handles clicks.
+
+3. **Visual state must not be readable from `BuildCx` unless it is
+   signal-backed.** `app.rs` documents this: hover/focus/pressed are applied
+   *after* the view closures run precisely so pointer motion gets memoized
+   rebuilds (`tests/hover_memo.rs` guards it). The hover-driven `Tooltip` needed
+   build-time hover, so `BuildCx::is_hovered` reads a `lumen.hover` **signal** —
+   only scopes that call it record the dependency and re-run; the rest stay
+   memoized. A plain accessor would have quietly staled every memoized subtree.
+
+### Deferred from W3/W5 (not blockers, tracked)
+
+- Arrow-key navigation for `Select`, `Combobox`, `Menu` and the 2-D grids
+  (`Grid`/`DataGrid`/`Tree`). The pattern is established by `PickList`/`Tabs`;
+  these are the same shape applied again.
+- `Radio` group arrow navigation needs the group to own its options (a
+  `RadioGroup` widget); an individual `Radio` cannot see its siblings, and
+  registering members during build would make `build` impure.
+- Chart builder options (axis titles, legend, multi-series) and the remaining
+  new widgets (`SegmentedControl`, `ListTile`, `Rating`, `Breadcrumb`).

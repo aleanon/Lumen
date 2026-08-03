@@ -81,8 +81,13 @@ fn select_cycles_options() {
 
 #[test]
 fn tooltip_menu_grid_wrap_split_textarea_render() {
-    let h = run(|_| widgets_extra::tooltip(widgets::text("hover me"), "the tip"));
-    assert!(by_role(&sem(&h), Role::Tooltip).is_some());
+    // A tooltip is transient: nothing is shown until the target is hovered
+    // (it used to render permanently, stacked under the target).
+    let h = run(|cx| widgets_extra::tooltip(cx, "t", widgets::text("hover me"), "the tip"));
+    assert!(
+        by_role(&sem(&h), Role::Tooltip).is_none(),
+        "no tip before hover"
+    );
 
     let h = run(|_| widgets_extra::menu(&["New", "Open", "Save"]));
     assert_eq!(sem(&h).role, Role::Menu);
@@ -114,4 +119,53 @@ fn text_area_accepts_multiline_input() {
     }));
     h.pump();
     assert_eq!(sem(&h).value.as_deref(), Some("line1\nline2"));
+}
+
+/// W5: `Tooltip` shows on hover, floats above content, and does not disturb
+/// the layout of what it wraps.
+#[test]
+fn a_tooltip_appears_on_hover_and_does_not_move_the_layout() {
+    use lumen_core::events::{Event, PointerEvent};
+
+    let mut h = run(|cx| {
+        widgets::column(vec![
+            widgets_extra::tooltip(cx, "t", widgets::text("hover me").id("target"), "the tip"),
+            widgets::text("below").id("below"),
+        ])
+    });
+    h.pump();
+
+    let below_before = h.node_bounds_by_id("below").expect("sibling laid out");
+    assert!(
+        by_role(&sem(&h), Role::Tooltip).is_none(),
+        "hidden until hovered"
+    );
+
+    // Hover the target.
+    let t = h.node_bounds_by_id("t-tip-host").expect("host laid out");
+    h.inject(Event::PointerMove(PointerEvent::at(kurbo::Point::new(
+        (t.x0 + t.x1) / 2.0,
+        (t.y0 + t.y1) / 2.0,
+    ))));
+    h.pump();
+
+    assert!(
+        by_role(&sem(&h), Role::Tooltip).is_some(),
+        "the tip appears while hovered"
+    );
+    assert_eq!(
+        h.node_bounds_by_id("below"),
+        Some(below_before),
+        "and it must not push the following content around"
+    );
+
+    // Move away — it goes again.
+    h.inject(Event::PointerMove(PointerEvent::at(kurbo::Point::new(
+        1000.0, 1000.0,
+    ))));
+    h.pump();
+    assert!(
+        by_role(&sem(&h), Role::Tooltip).is_none(),
+        "and disappears when the pointer leaves"
+    );
 }
