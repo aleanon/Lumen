@@ -82,6 +82,24 @@ fn hover_click_options_and_scroll_axes_route() {
 }
 
 #[test]
+fn scroll_with_an_unresolvable_selector_errors_instead_of_wheeling_origin() {
+    let mut h = App::new(build).run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    // A selector that resolves to nothing (e.g. an elided pure-layout id)
+    // must surface as an error — the old fallback silently wheeled at
+    // (0,0) and reported ok.
+    let r = call(
+        &mut h,
+        "input.scroll",
+        json!({ "selector": "#does-not-exist", "dy": 40.0, "timeout_ms": 50 }),
+    );
+    assert!(r.get("error").is_some(), "unresolvable selector errors: {r}");
+    // And with no selector at all, same contract as the other input verbs.
+    let r = call(&mut h, "input.scroll", json!({ "dy": 40.0 }));
+    assert!(r.get("error").is_some(), "missing selector errors: {r}");
+}
+
+#[test]
 fn type_clear_replaces_while_default_appends() {
     let mut h = App::new(build).run_headless(Size::new(300.0, 200.0));
     h.pump();

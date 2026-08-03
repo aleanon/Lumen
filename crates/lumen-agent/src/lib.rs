@@ -658,12 +658,13 @@ fn handle<R: Renderer, E: Spawner>(
             Ok(json!({ "ok": true }))
         }
         "input.scroll" => {
-            // C.4a: both axes (`dx` for horizontal panes/carousels).
+            // C.4a: both axes (`dx` for horizontal panes/carousels). The
+            // selector is required and must resolve — the old fallback
+            // wheeled at (0,0) and reported ok, a silent no-op that cost
+            // real debugging time (elided ids resolve to nothing).
             let dx = params.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let dy = params.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let p = resolve_action(app, params)
-                .map(|n| center(n.bounds))
-                .unwrap_or(Point::new(0.0, 0.0));
+            let p = center(resolve_action(app, params)?.bounds);
             app.inject(Event::Wheel(lumen_core::events::WheelEvent {
                 pos: p,
                 delta: kurbo::Vec2::new(dx, dy),
