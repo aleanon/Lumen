@@ -25,6 +25,14 @@ macro_rules! impl_common {
                 self.el = self.el.class(c);
                 self
             }
+            /// Disable the widget: it stops responding to clicks, hover,
+            /// drags, keyboard focus and the agent's `input.invokeAction`, and
+            /// reports `SemState::Disabled` so `:disabled` styling and assistive
+            /// tech agree with what the user can actually do.
+            pub fn disabled(mut self, yes: bool) -> Self {
+                self.el.disabled = yes;
+                self
+            }
             /// Override the background fill.
             pub fn background(mut self, color: lumen_core::Color) -> Self {
                 self.el.background = Some(color);

@@ -85,7 +85,9 @@ numeric only.
 
 Interaction states match under both spellings — `:hovered`/`:hover`,
 `:focused`/`:focus`, `:pressed`/`:active` — and **every semantic widget
-state is matchable**: `:checked`/`:unchecked`, `:disabled`, `:selected`,
+state is matchable**: `:checked`/`:unchecked`, `:disabled` (emitted by
+`.disabled(true)` on any widget since W1 — it also blocks input, so styling and
+behaviour agree), `:selected`,
 `:expanded`/`:collapsed`, `:invalid`, `:busy`, … (the closed set in
 `lumen_core::semantics::State`).
 

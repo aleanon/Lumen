@@ -251,6 +251,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             container_stack: Vec::new(),
             container_repass: false,
             hidden_count: 0,
+            disabled_count: 0,
             frame_ms: std::collections::VecDeque::new(),
             frames_rendered: 0,
             menu: crate::system::MenuModel::default(),
@@ -640,6 +641,10 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// B.3 `visibility:hidden` — depth of enclosing hidden subtrees during
     /// build; > 0 clears VISIBLE/HIT_TESTABLE on every node built inside.
     hidden_count: usize,
+    /// W1 `disabled` — depth of enclosing disabled subtrees during build, so a
+    /// child of a disabled container also matches `:disabled` in `.lss` (the
+    /// enforcement half is `propagate_disabled` over the finished tree).
+    disabled_count: usize,
     /// C.2: rolling per-painted-frame pump durations in ms (cap 120) + total
     /// painted frames — the agent's `app.perf`. Diagnostic only (never feeds
     /// rendering); not recorded on wasm (no `Instant`).
@@ -1887,6 +1892,34 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .and_then(|n| self.node_caret.get(&n).copied())
     }
 
+    /// Push `DISABLED` down the tree and strip input from disabled subtrees
+    /// (W1).
+    ///
+    /// Clearing `HIT_TESTABLE`/`FOCUSABLE` is what makes the state *enforced*
+    /// rather than cosmetic: `hit_visit` and `focus_ring` already filter on
+    /// those bits, so a disabled control cannot be clicked, hovered, dragged or
+    /// tabbed to — and therefore cannot report `Disabled` to the agent while
+    /// still responding to input.
+    fn propagate_disabled(&mut self, node: NodeIndex, inherited: bool) {
+        let mut f = self.tree.flags(node);
+        let disabled = inherited || f.contains(NodeFlags::DISABLED);
+        if disabled {
+            f |= NodeFlags::DISABLED;
+            f.remove(NodeFlags::HIT_TESTABLE | NodeFlags::FOCUSABLE);
+            self.tree.set_flags(node, f);
+        }
+        let mut c = self.tree.first_child(node);
+        while c.is_some() {
+            self.propagate_disabled(c, disabled);
+            c = self.tree.next_sibling(c);
+        }
+    }
+
+    /// Whether `node` is disabled (itself or by an ancestor).
+    fn is_disabled(&self, node: NodeIndex) -> bool {
+        self.tree.flags(node).contains(NodeFlags::DISABLED)
+    }
+
     fn move_focus(&mut self, forward: bool) {
         let current = self.focused_node();
         if let Some(next) = lumen_core::events::next_focus(&self.tree, current, forward) {
@@ -1896,6 +1929,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
     fn activate_focused(&mut self) {
         if let Some(n) = self.focused_node() {
+            // A node can become disabled *while* focused; refuse rather than
+            // fire a handler the pointer path would have rejected.
+            if self.is_disabled(n) {
+                return;
+            }
             if let Some(h) = self.meta.get(&n).and_then(|m| m.on_click.clone()) {
                 h(&self.rt);
             }
@@ -2399,6 +2437,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.container_nodes.clear();
         self.container_stack.clear();
         self.hidden_count = 0;
+        self.disabled_count = 0;
         self.style_env = self.app_sheet.as_ref().map(|sheet| StyleEnv {
             sources: [lumen_style::StyleSource {
                 origin: lumen_style::Origin::App,
@@ -2533,6 +2572,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
         self.tree = tree;
         self.meta = meta;
+        // W1: a disabled node disables its whole subtree. Done as a pass over
+        // the finished tree rather than threaded through `build_node`, so a
+        // disabled container also covers children lowered by memo copy-forward.
+        let root = self.tree.root();
+        if root.is_some() {
+            self.propagate_disabled(root, false);
+        }
         // B.5: drop animations whose node id left the tree.
         if !self.prop_anims.is_empty() {
             let live: std::collections::HashSet<StableId> =
@@ -2593,6 +2639,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         in_overlay.hash(&mut h);
         (self.hidden_count > 0).hash(&mut h);
+        (self.disabled_count > 0).hash(&mut h);
         h.finish()
     }
 
@@ -2932,6 +2979,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .into_iter()
             .find(|n| n.index() == id)
             .ok_or_else(|| "resolved node is not live".to_string())?;
+        // W1: the agent gets the same answer as the pointer. Without this the
+        // geometry-free path would drive a control the user cannot touch.
+        if self.is_disabled(node) {
+            return Err(format!("node `{selector}` is disabled"));
+        }
         let m = self.meta.get(&node);
         match action {
             "click" => {
@@ -3085,6 +3137,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         if el.focusable {
             flags |= NodeFlags::FOCUSABLE;
         }
+        if el.disabled {
+            flags |= NodeFlags::DISABLED;
+        }
         if el.id.is_some() && el.id == self.focused_id {
             flags |= NodeFlags::FOCUSED;
         }
@@ -3128,6 +3183,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 states.push("active".to_string());
             }
             states.extend(el.states.iter().map(|s| s.as_str().to_string()));
+            // W1: `disabled` is its own Element field (not a semantic state the
+            // author writes), so fold it in here — inherited, so a control
+            // inside a disabled container matches `:disabled` too.
+            if el.disabled || self.disabled_count > 0 {
+                states.push("disabled".to_string());
+            }
             let desc = lumen_style::NodeDesc {
                 id: el.id.as_ref().map(|i| i.as_str().to_string()),
                 classes: el.classes.clone(),
@@ -3298,6 +3359,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
 
         // Consume the children (move, not clone) and recurse.
+        let pushed_disabled = el.disabled;
+        if pushed_disabled {
+            self.disabled_count += 1;
+        }
         let child_built: Vec<(NodeIndex, LayoutNode)> = el
             .children
             .into_iter()
@@ -3311,6 +3376,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         if pushed_hidden {
             self.hidden_count -= 1;
+        }
+        if pushed_disabled {
+            self.disabled_count -= 1;
         }
         let child_lnodes: Vec<LayoutNode> = child_built.iter().map(|(_, l)| *l).collect();
         // A.3.2: retain the final (post-css) layout style so a copied-forward

@@ -148,6 +148,15 @@ pub struct Element {
     pub content: NodeContent,
     /// Whether the node is keyboard-focusable.
     pub focusable: bool,
+    /// Disabled: the node (and its whole subtree) ignores input.
+    ///
+    /// This is enforced, not advisory — `build_node` clears `HIT_TESTABLE` and
+    /// `FOCUSABLE` on the subtree, so a disabled control cannot be clicked,
+    /// hovered, dragged, tabbed to, activated, or driven by the agent's
+    /// `input.invokeAction`. `SemState::Disabled` reaches semantics and the
+    /// `:disabled` `.lss` selector, so what the agent sees matches what the
+    /// user can do.
+    pub disabled: bool,
     /// Claim focus after a rebuild when nothing is focused yet (e.g. the
     /// primary input of a screen). First autofocus node in document order
     /// wins; it never steals focus the user has placed elsewhere.
@@ -243,6 +252,7 @@ impl Default for Element {
             corner_radius: 0.0,
             content: NodeContent::None,
             focusable: false,
+            disabled: false,
             autofocus: false,
             elide_semantics: false,
             states: Vec::new(),
