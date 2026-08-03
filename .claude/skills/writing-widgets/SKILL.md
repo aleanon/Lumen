@@ -137,6 +137,25 @@ pub fn zoom_at(rt: &Runtime, name: &str) -> f64 { … }
 
 ## Step 3 — the rules (non-negotiable)
 
+- **Never declare an action you don't implement** (W2). `actions` is the
+  contract the agent (`input.invokeAction`) and AccessKit read, so declaring
+  `Increment` without an `on_increment` makes the tree lie. Pairs:
+  `Click`→`on_click`, `Focus`→`focusable`, `Dismiss`→`on_dismiss`,
+  `Increment`/`Decrement`/`SetValue`→`on_increment`/`on_decrement`/
+  `on_set_value`. `Headless::audit_actions()` reports violations as `W0106` —
+  assert it is empty in your widget's test.
+- **Disabled is free and enforced** (W1): `impl_common!` gives every widget
+  `.disabled(bool)`, which clears `HIT_TESTABLE`/`FOCUSABLE` on the whole
+  subtree and makes `invoke_action` refuse. Don't hand-roll a "looks disabled"
+  state — it would still be clickable.
+- **A focusable node needs a stable id.** Focus is keyed by `StableId`
+  (`move_focus` reads the target's meta id), so a focusable node without one can
+  never hold focus and therefore never receives keys. Give focusable parts ids
+  namespaced under `name` (`{name}-tab-{i}`).
+- **`widgets::row`/`column` set `elide_semantics`** — the node *and its id* are
+  spliced out of the semantic tree. If you build your control from one, clear
+  the flag (`el.elide_semantics = false`) or it is invisible to selectors, focus
+  and AT even though it renders and clicks.
 - **Semantics are mandatory, not optional.** Set `role`, `label`, and the
   relevant `actions`/`states`/`value`/`focusable`. This is how the agent sees and
   drives the UI and how a11y works — the framework's core value. A node with no
@@ -192,6 +211,8 @@ pub fn zoom_at(rt: &Runtime, name: &str) -> f64 { … }
 | `on_key` | `Fn(&Runtime, &KeyEvent)` | key event |
 | `on_text` | `Fn(&Runtime, &str)` | committed text |
 | `on_caret_set` | `Fn(&Runtime, usize, bool)` | byte offset, `extend` |
+| `on_increment` / `on_decrement` | `Fn(&Runtime)` | — (W2: back `Action::Increment`/`Decrement`) |
+| `on_set_value` | `Fn(&Runtime, &str)` | new value as text (W2: backs `Action::SetValue`) |
 
 Sliders/scrollbars read the drag fraction; pixel drags (resize, pan) read `pos`.
 For reactive props without a rebuild, prefer the `text!` / `bind!` macros and

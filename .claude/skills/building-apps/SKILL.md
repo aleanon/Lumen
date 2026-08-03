@@ -89,6 +89,20 @@ P.4), `LineChart::element(values, labels)` / `PieChart::element(slices)`,
 `AlignBox::center(child)`. Anything unbounded
 (lists/tables) must use `virtual_list`/`data_grid` — they're O(visible).
 
+## Widget options you can now rely on (W1–W5, 2026-08-03)
+
+- `.disabled(true)` on **any** widget — enforced, not cosmetic: no clicks, no
+  hover, no Tab, and the agent's `invokeAction` refuses it. `:disabled` styling
+  works.
+- Keyboard: `Slider`/`RangeSlider` (arrows/Home/End/PageUp/Down), `Tabs` (←/→),
+  `PickList` (↑/↓/Home/End/Escape), `Scrollable` (arrows/Page/Home/End).
+- `TextInput`: `.placeholder()`, `.password(bullet)`, `.max_length()`,
+  `.read_only()`, `.on_change()`. Masking hides the value from the semantic tree
+  too, so secrets don't leak to the agent or logs.
+- `ProgressBar::indeterminate(cx)`, `Avatar::image()`, `Chip::selected()`,
+  `Toast::action()`/`.auto_dismiss()`, `Tooltip` (hover-gated, no layout shift),
+  and the new `Card` / `Badge`.
+
 ## Step 4 — state rules (the ones that bite)
 
 - State lives in `cx.signal(key, init)`, read at build, mutated **only in
