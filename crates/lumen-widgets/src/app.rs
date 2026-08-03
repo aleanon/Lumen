@@ -475,6 +475,9 @@ struct NodeMeta {
     caret_byte: Option<usize>,
     selection: Option<(usize, usize)>,
     on_dismiss: Option<Handler>,
+    on_increment: Option<Handler>,
+    on_decrement: Option<Handler>,
+    on_set_value: Option<crate::element::ValueHandler>,
     background: Option<Color>,
     border: Option<Border>,
     corner_radius: f64,
@@ -1892,6 +1895,56 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .and_then(|n| self.node_caret.get(&n).copied())
     }
 
+    /// Report every node that declares a semantic [`Action`] it does not
+    /// implement (`W0106`, W2).
+    ///
+    /// `actions` is the contract the agent (`input.invokeAction`) and AccessKit
+    /// read to decide what a node can do. Declaring `Increment` without an
+    /// `on_increment` means the agent's call fails and a screen-reader user is
+    /// offered a control that does nothing — the exact semantics-vs-reality
+    /// drift ADR-009 exists to prevent. Run it over a screen in a test to keep
+    /// the class from coming back.
+    pub fn audit_actions(&self) -> Vec<lumen_core::Diagnostic> {
+        let mut out = Vec::new();
+        for node in self.tree.document_order() {
+            let Some(m) = self.meta.get(&node) else {
+                continue;
+            };
+            let who =
+                m.id.as_ref()
+                    .map(|i| i.as_str().to_string())
+                    .unwrap_or_else(|| {
+                        if m.label.is_empty() {
+                            format!("{:?} node-{}", m.role, node.index())
+                        } else {
+                            m.label.clone()
+                        }
+                    });
+            for a in &m.actions {
+                let missing = match a {
+                    Action::Click => m.on_click.is_none(),
+                    Action::Focus => !self.tree.flags(node).contains(NodeFlags::FOCUSABLE),
+                    Action::Dismiss => m.on_dismiss.is_none(),
+                    Action::Increment => m.on_increment.is_none(),
+                    Action::Decrement => m.on_decrement.is_none(),
+                    Action::SetValue => m.on_set_value.is_none(),
+                    // Not routable yet — declaring them is informational, not a
+                    // broken promise, so they are not flagged.
+                    Action::Blur | Action::ScrollIntoView | Action::Expand | Action::Collapse => {
+                        false
+                    }
+                };
+                if missing {
+                    out.push(lumen_core::Diagnostic::new(
+                        lumen_core::codes::W0106,
+                        format!("`{who}` declares action `{a:?}` but implements no handler for it"),
+                    ));
+                }
+            }
+        }
+        out
+    }
+
     /// Push `DISABLED` down the tree and strip input from disabled subtrees
     /// (W1).
     ///
@@ -2970,6 +3023,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// robust under overlap/transforms. `action` is `click`/`focus`/`dismiss`.
     /// Pumps afterward; returns the node index or an error string.
     pub fn invoke_action(&mut self, selector: &str, action: &str) -> Result<u32, String> {
+        self.invoke_action_with(selector, action, None)
+    }
+
+    /// [`Headless::invoke_action`] with a payload — `setValue` carries the new
+    /// value as a string, which the widget parses (W2).
+    pub fn invoke_action_with(
+        &mut self,
+        selector: &str,
+        action: &str,
+        value: Option<&str>,
+    ) -> Result<u32, String> {
         let root = self.semantics_doc().root.elided();
         let id = lumen_core::semantics::resolve_one(&root, selector)
             .map_err(|_| format!("selector `{selector}` did not resolve to one node"))?;
@@ -2998,6 +3062,32 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 let handler = m.and_then(|m| m.on_dismiss.clone());
                 if let Some(h) = handler {
                     h(&self.rt);
+                }
+            }
+            // W2: value adjustment. A widget that declares Increment/Decrement/
+            // SetValue must implement it — otherwise the semantic tree
+            // advertises a capability neither the agent nor a screen reader can
+            // use, which is exactly the drift ADR-009 exists to prevent.
+            "increment" => {
+                let handler = m.and_then(|m| m.on_increment.clone());
+                match handler {
+                    Some(h) => h(&self.rt),
+                    None => return Err(format!("node `{selector}` has no increment handler")),
+                }
+            }
+            "decrement" => {
+                let handler = m.and_then(|m| m.on_decrement.clone());
+                match handler {
+                    Some(h) => h(&self.rt),
+                    None => return Err(format!("node `{selector}` has no decrement handler")),
+                }
+            }
+            "setValue" | "set_value" => {
+                let handler = m.and_then(|m| m.on_set_value.clone());
+                let v = value.ok_or_else(|| "`setValue` needs a `value`".to_string())?;
+                match handler {
+                    Some(h) => h(&self.rt, v),
+                    None => return Err(format!("node `{selector}` has no setValue handler")),
                 }
             }
             other => return Err(format!("unsupported action `{other}`")),
@@ -3416,6 +3506,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 caret_byte: el.caret_byte,
                 selection: el.selection,
                 on_dismiss: el.on_dismiss,
+                on_increment: el.on_increment,
+                on_decrement: el.on_decrement,
+                on_set_value: el.on_set_value,
                 background: el.background,
                 border: el.border,
                 corner_radius: el.corner_radius,

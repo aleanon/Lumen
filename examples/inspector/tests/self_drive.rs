@@ -34,7 +34,8 @@ fn inspector_drives_itself_via_agent() {
     // Style editor: bump font-size and see the preview update.
     click(&mut app, "tab:nth(2)");
     assert!(tree(&mut app).contains("preview: 16px"));
-    click(&mut app, "#font-size-stepper #inc");
+    // W4: stepper child ids are namespaced under its `name` ("font-size").
+    click(&mut app, "#font-size-inc");
     assert!(
         tree(&mut app).contains("preview: 17px"),
         "style edit applied"

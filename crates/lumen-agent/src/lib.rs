@@ -614,8 +614,10 @@ fn handle<R: Renderer, E: Spawner>(
                 .get("action")
                 .and_then(|v| v.as_str())
                 .unwrap_or("click");
+            // W2: `setValue` carries the new value (additive optional field).
+            let value = params.get("value").and_then(|v| v.as_str());
             let id = app
-                .invoke_action(selector, action)
+                .invoke_action_with(selector, action, value)
                 .map_err(|e| (-32602, e))?;
             Ok(json!({ "ok": true, "node": format!("node-{id}") }))
         }

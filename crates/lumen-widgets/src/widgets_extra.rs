@@ -5,6 +5,7 @@
 use crate::element::{BuildCx, Element};
 use crate::widget::impl_common;
 use lumen_core::semantics::{Action, Role, State as SemState};
+use lumen_core::state::Runtime;
 use lumen_core::Color;
 use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, FlexWrap, GridTrack, LayoutStyle};
 use lumen_text::TextStyle;
@@ -202,38 +203,67 @@ pub fn tooltip(target: Element, text: impl Into<String>) -> Element {
 /// drifts from that committed image, so the picture is always current.
 pub struct Menu {
     el: Element,
+    items: Vec<String>,
 }
+
+/// Shared select handler for [`Menu`] items: `(runtime, item index)`.
+type SelectHandler = Rc<dyn Fn(&Runtime, usize)>;
 
 impl Menu {
     /// A vertical menu of selectable items.
+    ///
+    /// Attach [`Menu::on_select`] to react to a choice — without it the items
+    /// are inert. (They still carry `Role::MenuItem` + a label, so the menu
+    /// reads correctly, but `actions` stays empty rather than advertising a
+    /// `Click` nothing implements.)
     pub fn new(items: &[&str]) -> Menu {
-        let el = {
-            Element {
-                role: Role::Menu,
-                style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Column,
-                    ..LayoutStyle::default()
-                },
-                children: items
-                    .iter()
-                    .map(|t| Element {
-                        role: Role::MenuItem,
-                        label: (*t).to_string(),
-                        focusable: true,
-                        actions: vec![Action::Click, Action::Focus],
-                        style: LayoutStyle {
-                            padding: Edges::all(Dim::px(6.0)),
-                            ..LayoutStyle::default()
-                        },
-                        content: crate::NodeContent::Text((*t).to_string(), TextStyle::default()),
-                        ..Element::default()
-                    })
-                    .collect(),
-                ..Element::default()
-            }
+        let items: Vec<String> = items.iter().map(|s| (*s).to_string()).collect();
+        let el = Element {
+            role: Role::Menu,
+            style: LayoutStyle {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                ..LayoutStyle::default()
+            },
+            children: items.iter().map(|t| Self::item(t, None)).collect(),
+            ..Element::default()
         };
-        Menu { el }
+        Menu { el, items }
+    }
+
+    /// One menu item. `on` is the shared select handler; with `None` the item
+    /// declares no actions (W2: never advertise what isn't implemented).
+    fn item(text: &str, on: Option<(SelectHandler, usize)>) -> Element {
+        let mut el = Element {
+            role: Role::MenuItem,
+            label: text.to_string(),
+            focusable: true,
+            style: LayoutStyle {
+                padding: Edges::all(Dim::px(6.0)),
+                ..LayoutStyle::default()
+            },
+            content: crate::NodeContent::Text(text.to_string(), TextStyle::default()),
+            ..Element::default()
+        };
+        el.actions = vec![Action::Focus];
+        if let Some((f, i)) = on {
+            el.actions.push(Action::Click);
+            el.on_click = Some(Rc::new(move |rt| f(rt, i)));
+        }
+        el
+    }
+
+    /// Run `f(rt, index)` when an item is chosen (click, or Enter/Space while
+    /// focused — the framework routes focused activation to `on_click`).
+    pub fn on_select(mut self, f: impl Fn(&Runtime, usize) + 'static) -> Menu {
+        let f: SelectHandler = Rc::new(f);
+        self.el.children = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(i, t)| Self::item(t, Some((Rc::clone(&f), i))))
+            .collect();
+        self
     }
 }
 

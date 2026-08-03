@@ -8,6 +8,7 @@
 use crate::element::{BuildCx, Element};
 use crate::widget::impl_common;
 use crate::Canvas;
+use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
 use lumen_core::Color;
 use lumen_layout::{Dim, Display, Edges, FlexDirection, LayoutStyle, Position};
@@ -334,24 +335,56 @@ impl Stepper {
         let el = {
             let value = cx.signal(name, || min);
             let v = value.get(cx.runtime());
+            // W4: child ids are namespaced under `name` — hardcoded "dec"/"inc"/
+            // "value" made two steppers on one screen collide (W0001), and the
+            // agent would drive whichever came first.
             let dec =
                 crate::widgets::button("-", move |rt| value.update(rt, |x| *x = (*x - 1).max(min)))
-                    .id("dec");
+                    .id(format!("{name}-dec"));
             let inc =
                 crate::widgets::button("+", move |rt| value.update(rt, |x| *x = (*x + 1).min(max)))
-                    .id("inc");
+                    .id(format!("{name}-inc"));
             Element {
                 role: Role::Group,
                 label: format!("{v}"),
                 value: Some(format!("{v}")),
-                actions: vec![Action::Increment, Action::Decrement],
+                actions: vec![Action::Increment, Action::Decrement, Action::SetValue],
+                focusable: true,
                 style: LayoutStyle {
                     display: Display::Flex,
                     flex_direction: FlexDirection::Row,
                     column_gap: Dim::px(8.0),
                     ..LayoutStyle::default()
                 },
-                children: vec![dec, Element::text(format!("{v}")).id("value"), inc],
+                // W2: honour the declared actions.
+                on_increment: Some(Rc::new(move |rt| {
+                    value.update(rt, |x| *x = (*x + 1).min(max))
+                })),
+                on_decrement: Some(Rc::new(move |rt| {
+                    value.update(rt, |x| *x = (*x - 1).max(min))
+                })),
+                on_set_value: Some(Rc::new(move |rt, s| {
+                    if let Ok(n) = s.parse::<i64>() {
+                        value.set(rt, n.clamp(min, max));
+                    }
+                })),
+                // W3: arrow keys adjust, Home/End jump to the bounds.
+                on_key: Some(Rc::new(move |rt, ke| match ke.key {
+                    Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::ArrowRight) => {
+                        value.update(rt, |x| *x = (*x + 1).min(max))
+                    }
+                    Key::Named(NamedKey::ArrowDown) | Key::Named(NamedKey::ArrowLeft) => {
+                        value.update(rt, |x| *x = (*x - 1).max(min))
+                    }
+                    Key::Named(NamedKey::Home) => value.set(rt, min),
+                    Key::Named(NamedKey::End) => value.set(rt, max),
+                    _ => {}
+                })),
+                children: vec![
+                    dec,
+                    Element::text(format!("{v}")).id(format!("{name}-value")),
+                    inc,
+                ],
                 ..Element::default()
             }
         };

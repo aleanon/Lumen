@@ -138,15 +138,15 @@ fn tabs_select() {
 #[test]
 fn stepper_inc_dec() {
     let mut h = run(160.0, 40.0, |cx| widgets_m1::stepper(cx, "st", 0, 10));
-    assert_eq!(by_id(&sem(&h), "value").unwrap().label, "0");
+    assert_eq!(by_id(&sem(&h), "st-value").unwrap().label, "0");
     check_golden("stepper", &h.screenshot());
-    let inc = by_id(&sem(&h), "inc").unwrap().bounds;
+    let inc = by_id(&sem(&h), "st-inc").unwrap().bounds;
     click_at(&mut h, center(inc));
     click_at(&mut h, center(inc));
-    assert_eq!(by_id(&sem(&h), "value").unwrap().label, "2");
-    let dec = by_id(&sem(&h), "dec").unwrap().bounds;
+    assert_eq!(by_id(&sem(&h), "st-value").unwrap().label, "2");
+    let dec = by_id(&sem(&h), "st-dec").unwrap().bounds;
     click_at(&mut h, center(dec));
-    assert_eq!(by_id(&sem(&h), "value").unwrap().label, "1");
+    assert_eq!(by_id(&sem(&h), "st-value").unwrap().label, "1");
 }
 
 #[test]

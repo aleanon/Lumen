@@ -19,6 +19,10 @@ use std::rc::Rc;
 
 /// A click/activate handler. Re-registered every build; never stored (ADR-013).
 pub type Handler = Rc<dyn Fn(&Runtime)>;
+
+/// A handler that receives a value (W2) — backs [`Action::SetValue`], which the
+/// widget parses from the string.
+pub type ValueHandler = Rc<dyn Fn(&Runtime, &str)>;
 /// A wheel handler receiving the horizontal and vertical delta (logical px) and
 /// the modifier state. Most consumers scroll vertically (`dy`); a 2D surface
 /// (spreadsheet) uses both, and reads the modifiers (e.g. Ctrl+wheel to zoom).
@@ -191,6 +195,18 @@ pub struct Element {
     /// element's bounds, or on Escape. Used for click-away on transient overlays
     /// (dropdowns, popovers, menus, tooltips).
     pub on_dismiss: Option<Handler>,
+    /// Adjust the value one step up / down (W2).
+    ///
+    /// A widget that declares [`Action::Increment`]/[`Action::Decrement`] must
+    /// set these — that pair is the contract the agent (`input.invokeAction`)
+    /// and AccessKit read, and it is also what arrow-key handling calls, so a
+    /// slider is drivable without pixel geometry.
+    pub on_increment: Option<Handler>,
+    /// Counterpart of [`Element::on_increment`].
+    pub on_decrement: Option<Handler>,
+    /// Set the value directly from a string (W2) — backs [`Action::SetValue`].
+    /// The widget parses it; a value it can't parse is ignored.
+    pub on_set_value: Option<ValueHandler>,
     /// Clip descendants to this element's (rounded) bounds — `overflow: hidden`.
     /// Used by scroll viewports so off-screen content doesn't paint outside.
     pub clip: bool,
@@ -267,6 +283,9 @@ impl Default for Element {
             caret_byte: None,
             selection: None,
             on_dismiss: None,
+            on_increment: None,
+            on_decrement: None,
+            on_set_value: None,
             clip: false,
             overlay: false,
             container: false,
@@ -465,6 +484,21 @@ impl Element {
     /// Set the light-dismiss handler (fires on an outside press or Escape).
     pub fn on_dismiss(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
         self.on_dismiss = Some(Rc::new(f));
+        self
+    }
+    /// Set the step-up handler (W2) — pair it with [`Action::Increment`].
+    pub fn on_increment(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
+        self.on_increment = Some(Rc::new(f));
+        self
+    }
+    /// Set the step-down handler (W2) — pair it with [`Action::Decrement`].
+    pub fn on_decrement(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
+        self.on_decrement = Some(Rc::new(f));
+        self
+    }
+    /// Set the direct-value handler (W2) — pair it with [`Action::SetValue`].
+    pub fn on_set_value(mut self, f: impl Fn(&Runtime, &str) + 'static) -> Self {
+        self.on_set_value = Some(Rc::new(f));
         self
     }
     /// Clip descendants to this element's bounds (`overflow: hidden`).

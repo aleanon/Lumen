@@ -79,6 +79,17 @@ impl TextInput {
             on_caret_set: Some(Rc::new(move |rt, byte, extend| {
                 editor.update(rt, |e| e.place(byte, extend));
             })),
+            // W2: `SetValue` is declared, so implement it — replace the whole
+            // contents (the AT/agent meaning of setting a field's value).
+            on_set_value: Some(Rc::new(move |rt, v| {
+                // Replace the contents via select-all + insert so the edit goes
+                // through the normal path (undo history stays coherent).
+                editor.update(rt, |e| {
+                    e.select_all();
+                    e.insert(v);
+                });
+                sync_mirror(rt, editor, mirror);
+            })),
             on_key: Some(Rc::new(move |rt, ke| {
                 edit_key(rt, ke, editor, mirror, false);
             })),

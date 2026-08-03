@@ -124,6 +124,12 @@ pub mod codes {
     /// An interactive node laid out with zero area — clickable but invisible /
     /// unhittable (usually a missing size or empty content).
     pub const W0105: &str = "W0105";
+    /// A node declares a semantic `Action` it does not implement (W2). The
+    /// action list is the contract the agent and assistive tech read to decide
+    /// what a node can do, so advertising an unimplemented one makes the
+    /// semantic tree lie — `input.invokeAction` fails and AT offers a control
+    /// that does nothing.
+    pub const W0106: &str = "W0106";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).
