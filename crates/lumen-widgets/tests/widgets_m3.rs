@@ -79,8 +79,15 @@ fn app_bar_shows_title_and_actions() {
         let _ = cx;
         widgets_m3::app_bar("Inbox", vec![widgets::button("⋯", |_| {}).id("menu")])
     });
-    assert_eq!(by_id(&sem(&h), "title").unwrap().label, "Inbox");
-    assert!(by_id(&sem(&h), "menu").is_some());
+    // W4: the bar carries the title as its own label rather than id-ing the
+    // title node `#title` (which would squat on an id apps commonly use).
+    let s = sem(&h);
+    assert_eq!(s.label, "Inbox", "the bar is labelled by its title");
+    assert!(
+        by_label(&s, Role::Text, "Inbox").is_some(),
+        "and the title text is still in the tree"
+    );
+    assert!(by_id(&s, "menu").is_some());
 }
 
 #[test]
@@ -90,12 +97,12 @@ fn pull_to_refresh_triggers_on_overpull() {
         widgets_m3::pull_to_refresh(cx, "feed", 30.0, |_| {}, lines)
     });
     assert_eq!(
-        by_id(&sem(&h), "refresh-indicator").unwrap().label,
+        by_id(&sem(&h), "feed-refresh-indicator").unwrap().label,
         "Pull to refresh"
     );
 
     // Pull down hard at the top (negative wheel delta past threshold).
-    let scroll = center(by_id(&sem(&h), "scroll").unwrap());
+    let scroll = center(by_id(&sem(&h), "feed-scroll").unwrap());
     h.inject(Event::Wheel(WheelEvent {
         pos: scroll,
         delta: Vec2::new(0.0, -50.0),
@@ -103,7 +110,7 @@ fn pull_to_refresh_triggers_on_overpull() {
     }));
     h.pump();
     let s = sem(&h);
-    let ind = by_id(&s, "refresh-indicator").unwrap();
+    let ind = by_id(&s, "feed-refresh-indicator").unwrap();
     assert_eq!(ind.label, "Refreshing…");
     assert!(ind.states.contains(&State::Busy));
 }
@@ -135,7 +142,7 @@ fn date_picker_selects_a_day_from_the_calendar() {
 #[test]
 fn date_picker_navigates_months() {
     let mut h = run(360.0, 420.0, |cx| widgets_m3::date_picker(cx, "dob"));
-    let next = center(by_id(&sem(&h), "date-next").expect("next-month button"));
+    let next = center(by_id(&sem(&h), "dob-date-next").expect("next-month button"));
     click(&mut h, next);
     assert_eq!(
         by_id(&sem(&h), "dob").unwrap().value.as_deref(),
@@ -152,7 +159,7 @@ fn time_picker_value_and_targets() {
         by_id(&sem(&h), "alarm").unwrap().value.as_deref(),
         Some("09:30")
     );
-    let min_dec = center(by_id(&sem(&h), "min-dec").expect("minute decrement"));
+    let min_dec = center(by_id(&sem(&h), "alarm-min-dec").expect("minute decrement"));
     click(&mut h, min_dec);
     assert_eq!(
         by_id(&sem(&h), "alarm").unwrap().value.as_deref(),
@@ -165,7 +172,7 @@ fn time_picker_value_and_targets() {
 fn time_picker_dial_sets_the_hour() {
     let mut h = run(300.0, 400.0, |cx| widgets_m3::time_picker(cx, "alarm"));
     // The dial drives the hour: tap "4 o'clock".
-    let four = center(by_id(&sem(&h), "hour-4").expect("dial hour 4"));
+    let four = center(by_id(&sem(&h), "alarm-hour-4").expect("dial hour 4"));
     click(&mut h, four);
     assert_eq!(
         by_id(&sem(&h), "alarm").unwrap().value.as_deref(),

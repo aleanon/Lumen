@@ -229,8 +229,7 @@ impl AppBar {
                     },
                 ),
                 ..Element::default()
-            }
-            .id("title")];
+            }];
             children.extend(actions);
             Element {
                 role: Role::Group,
@@ -337,7 +336,7 @@ impl PullToRefresh {
                 ),
                 ..Element::default()
             }
-            .id("refresh-indicator");
+            .id(format!("{name}-refresh-indicator"));
 
             let inner = Element {
                 role: Role::ScrollArea,
@@ -366,7 +365,7 @@ impl PullToRefresh {
                 })),
                 ..Element::default()
             }
-            .id("scroll");
+            .id(format!("{name}-scroll"));
 
             Element {
                 role: Role::Group,
@@ -496,7 +495,7 @@ fn calendar(cx: &BuildCx, name: &str) -> Element {
     let val = format!("{yv:04}-{mv:02}-{dv:02}");
 
     // Header: ‹  Month YYYY  ›
-    let prev = nav_button("‹", "date-prev", move |rt| {
+    let prev = nav_button("‹", &format!("{name}-date-prev"), move |rt| {
         let m = month.get(rt);
         if m <= 1 {
             month.set(rt, 12);
@@ -505,7 +504,7 @@ fn calendar(cx: &BuildCx, name: &str) -> Element {
             month.set(rt, m - 1);
         }
     });
-    let next = nav_button("›", "date-next", move |rt| {
+    let next = nav_button("›", &format!("{name}-date-next"), move |rt| {
         let m = month.get(rt);
         if m >= 12 {
             month.set(rt, 1);
@@ -832,7 +831,7 @@ fn clock(cx: &BuildCx, name: &str) -> Element {
             ..Edges::AUTO
         };
         b.on_click = Some(Rc::new(move |rt| hour.set(rt, k)));
-        children.push(b.id(format!("hour-{k}")));
+        children.push(b.id(format!("{name}-hour-{k}")));
     }
     let dial = Element {
         role: Role::Group,
@@ -847,10 +846,10 @@ fn clock(cx: &BuildCx, name: &str) -> Element {
     };
 
     // Compact minute control (the dial drives the hour).
-    let dec = nav_button("−", "min-dec", move |rt| {
+    let dec = nav_button("−", &format!("{name}-min-dec"), move |rt| {
         minute.update(rt, |x| *x = (*x - 1).rem_euclid(60))
     });
-    let inc = nav_button("+", "min-inc", move |rt| {
+    let inc = nav_button("+", &format!("{name}-min-inc"), move |rt| {
         minute.update(rt, |x| *x = (*x + 1).rem_euclid(60))
     });
     let mut mlabel = crate::widgets::text(format!("{mnv:02} min"));

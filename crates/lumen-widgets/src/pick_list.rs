@@ -93,6 +93,10 @@ impl PickList {
         // never hold focus (and never receives keys). Namespaced under `name`
         // so two dropdowns don't collide (W4).
         trigger.id = Some(format!("{name}-trigger").into());
+        // `widgets::row` marks itself structural, which splices it (and its id)
+        // out of the semantic tree — but this row IS the control now, so it has
+        // to be visible to selectors, focus and assistive tech.
+        trigger.elide_semantics = false;
         trigger.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
         trigger.corner_radius = 8.0;
         trigger.style.align_items = Some(Align::Center);
