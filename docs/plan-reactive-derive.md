@@ -1,5 +1,74 @@
 # Plan: `#[derive(Reactive)]` — Xilem-shaped authoring over the existing store (RD-series)
 
+> # ⛔ RETIRED 2026-08-04 — DO NOT IMPLEMENT. Superseded by `docs/plan-state-keys.md`.
+>
+> Retired the same day it was written, before any phase started, after three
+> independent reviews (architecture, Rust feasibility, migration). Nothing below
+> was built. **Read this box before re-proposing anything in this shape** — the
+> plan is kept, not deleted, precisely because a superseded task buried in an
+> unread document is what produced the N3.4 mistake in `plan-node-cost.md`.
+>
+> **The governance reason, which is on its own sufficient.** The ADR-021 design
+> entry (`.ai_docs/07-decision-log.md`, 2026-08-02 — *two days before this plan*)
+> already ruled on it: *"**Not a reactivity-model change** — fine-grained signals
+> + scopes stand (**NOT a central `&mut AppState`/lens diff-engine, which would be
+> a separate ADR**)."* This plan is that thing, and its ADR-impact table claimed
+> ADR-007 "unchanged" with no new-ADR row. ADR-007 is not unchanged at the wording
+> level either: it reads *"Identity = call-site path + explicit keys"*, whereas
+> derive identity is a **type field path**, call-site independent.
+>
+> **The three structural faults**, each verified against the code:
+>
+> 1. **Derive state can only ever be root-owned.** `BuildCx::signal`
+>    (`element.rs:686`) folds into `self.prefix_hash` — the enclosing `cx.scope` —
+>    while `Runtime::signal` (`state.rs:588`) folds into `ROOT_ID`, and `Runtime`
+>    has no ambient scope. A `Read<T>`/`Write<T>` holding only a `&Runtime`
+>    therefore cannot address scope-local state at all. Measured:
+>    `fold_id(fold_id(fold_id(ROOT,"todos"),47),"done")` = `0x27aa88f1…` vs
+>    `fold_id(ROOT,"todos[47].done")` = `0x44d663f9…`. The foundational
+>    "same `IdHash`" invariant holds only for flat top-level state. The same
+>    decision-log entry names this exact hazard: *"flat-string addressing of
+>    scoped state … silently turned `benches/perf.rs`'s `scope_memo_one_of_many`
+>    into a no-op-rebuild measurement."*
+> 2. **The benefit doesn't survive contact with the widget set.** Widget-owned
+>    state is string-keyed *public API* — `{name}.open`, `{name}.selected`,
+>    `{name}.page`, `{name}.path` across at least 13 widget files
+>    (`sheet.rs:30`, `combobox.rs:52`, `pick_list.rs:76`, …), documented in
+>    `building-apps`. A derive app that opens a Sheet still writes
+>    `cx.signal("cart.open", …)`. The key discipline the plan existed to kill is
+>    not eliminable from the app layer, so every non-trivial derive app is a
+>    hybrid, and the two styles are not peers — the derive is a strictly weaker
+>    root-only subset.
+> 3. **F5 list GC would leak every derive slot.** `evict_scope` (`state.rs:441`)
+>    reclaims by `Slot.owner` walked through `scope_parent`; root-owned derive
+>    slots are never swept, so `todos[47].*` survives `todos.remove(47)` forever.
+>    Fixing it requires a `lumen-core` change, contradicting the plan's own
+>    "nothing in `lumen-core` changes semantics" premise. Note the precedent in
+>    the same log entry: `evict_prefix` "had to die" because it *"would have leaked
+>    one slot per removed list row, **silently, with every existing test green**."*
+>
+> **Also found, and worth keeping:**
+> - The plan's stated top risk (RD1.1, a const-eval `hash_str` matching `hash_id`
+>   bit-for-bit) is **not a risk** — verified on rustc 1.94.0 across a 19-string
+>   corpus and 1 000 random fold pairs, 0 mismatches. The risk ranking was
+>   inverted; RD3.5's list GC was the real one and wasn't on the table.
+> - RD3.3's flagship hazard **cannot fire**: `*s.a_mut() = s.b()` evaluates the
+>   value operand before the place expression, so no guard is live. The forms that
+>   do violate purity already panic through `RefCell`, in release too.
+> - RD3.4 would have routed every handler through `Runtime::batch`, which leaked
+>   `batch_depth` on unwind. **That bug was real and is now fixed** (`state.rs`,
+>   `a_panicking_batch_does_not_leak_the_depth`) — the one durable good this plan
+>   produced.
+> - The plan's flagship snippet did not compile: `text!` parses exactly
+>   `(Expr, LitStr)` with bare-identifier holes (`lumen-macros/src/lib.rs:96–124`).
+> - `stable_handler!` hard-codes `Copy + Fn(&Runtime)` (`lumen-macros/src/lib.rs:47`),
+>   so it rejects derive-shaped handlers outright — a macro change, not doctests.
+>
+> **If the Xilem authoring model is still wanted**, it needs its own ADR and an
+> honest justification as an *authoring-model change* — not as key-discipline
+> relief, which it does not deliver (fault 2) and which has cheaper fixes
+> (`plan-state-keys.md`).
+
 *Design + build plan, 2026-08-04. Companion to `plan-fine-grained-view.md`
 (the F-series store this sits on top of) and `plan-hash-identity.md` (ADR-021,
 whose identity primitive this reuses).*
