@@ -728,15 +728,33 @@ impl Runtime {
 
     /// Run `f` with writes batched: subscribed scopes flush once, after `f`
     /// returns, instead of after each write.
+    ///
+    /// Unwind-safe: if `f` panics the depth is still restored. That matters
+    /// because handler and rebuild panics are *caught* upstream (the subtree
+    /// error boundary and `rebuild`'s `catch_unwind`), so a leaked depth would
+    /// leave [`flush`](Self::flush) permanently short-circuited — it returns
+    /// early while `batch_depth > 0` — and the app would silently stop
+    /// reacting to every later write, with no panic and no diagnostic.
     pub fn batch<R>(&self, f: impl FnOnce() -> R) -> R {
+        /// Restores the batch depth on the way out, panic or not.
+        struct DepthGuard<'a>(&'a Runtime);
+        impl Drop for DepthGuard<'_> {
+            fn drop(&mut self) {
+                self.0.inner.borrow_mut().batch_depth -= 1;
+            }
+        }
+
         self.inner.borrow_mut().batch_depth += 1;
-        let r = f();
-        let flush = {
-            let mut b = self.inner.borrow_mut();
-            b.batch_depth -= 1;
-            b.batch_depth == 0
+        let r = {
+            let _depth = DepthGuard(self);
+            f()
         };
-        if flush {
+        // Deliberately *outside* the guard: `flush` runs subscribed scopes,
+        // which need the store the guard would still be unwinding through, and
+        // a panic escaping a destructor during unwind aborts the process. A
+        // panicking batch therefore restores the depth and skips the flush;
+        // the next successful write flushes the accumulated dirty set.
+        if self.inner.borrow().batch_depth == 0 {
             self.flush();
         }
         r
@@ -1190,6 +1208,63 @@ mod tests {
         let before = rt.run_count();
         sigs[42].set(&rt, 7);
         assert_eq!(rt.run_count() - before, 1);
+    }
+
+    #[test]
+    fn a_panicking_batch_does_not_leak_the_depth() {
+        // Regression: `batch` used to decrement `batch_depth` only on the
+        // normal path. Handler/rebuild panics are caught upstream, so an
+        // unwinding batch left the depth pinned above zero, `flush` returned
+        // early forever, and the app stopped reacting — silently, no panic.
+        let rt = Runtime::new();
+        let sig = rt.signal("v", || 0i32);
+        let runs = Rc::new(Cell::new(0u64));
+        {
+            let c = runs.clone();
+            rt.effect("e", move |scope| {
+                let _ = sig.get(scope);
+                c.set(c.get() + 1);
+            });
+        }
+        assert_eq!(runs.get(), 1, "effect runs once on registration");
+
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            rt.batch(|| {
+                sig.set(&rt, 1);
+                panic!("handler blew up mid-batch");
+            })
+        }));
+        assert!(caught.is_err(), "the panic must still propagate");
+
+        // The store is still live: a later write flushes normally.
+        sig.set(&rt, 2);
+        assert!(
+            runs.get() > 1,
+            "runtime stopped reacting after a panicking batch (leaked batch_depth)"
+        );
+        assert_eq!(sig.get(&rt), 2);
+    }
+
+    #[test]
+    fn nested_batches_still_flush_once_at_the_outermost_exit() {
+        let rt = Runtime::new();
+        let sig = rt.signal("v", || 0i32);
+        let runs = Rc::new(Cell::new(0u64));
+        {
+            let c = runs.clone();
+            rt.effect("e", move |scope| {
+                let _ = sig.get(scope);
+                c.set(c.get() + 1);
+            });
+        }
+        let before = runs.get();
+        rt.batch(|| {
+            sig.set(&rt, 1);
+            rt.batch(|| sig.set(&rt, 2));
+            // The inner batch must not have flushed.
+            assert_eq!(runs.get(), before, "inner batch flushed early");
+        });
+        assert_eq!(runs.get(), before + 1, "outer batch must flush exactly once");
     }
 
     #[test]
