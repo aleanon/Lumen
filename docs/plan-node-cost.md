@@ -10,6 +10,26 @@ reactive build), and `plan-remediation-2026-07.md` (A.3/A.4, which N3 completes)
 > changed frame) and, since the R5 glyph-run slice, it is no longer display-list
 > emission. It is **per-node lowering and the side tables that hang off it**.
 
+> # ⚠️ N0 RAN 2026-08-05 — THE THESIS ABOVE IS FALSIFIED. PHASES N1–N5 ARE NOT VALID AS WRITTEN.
+>
+> A performance review found the phase table below unfalsifiable with the
+> instruments in the repo (its rows summed to 994 µs against a 773 µs measured
+> frame — parts exceeding the whole by 29 %, with the raster row silently
+> dropped). N0 was built and run to settle it (`benches/benches/nodecost.rs`).
+> **Every headline claim in this plan failed.** Do not start N1 on the basis of
+> the Thesis; read `docs/results-node-cost-n0.md` first.
+>
+> | claim | measured |
+> |---|---|
+> | lowering dominates (~58 % of frame) | **no** — no phase exceeds ~25 %; the cost is broadly distributed |
+> | lowering is allocation-bound | **no** — 2 952 allocs/frame × 25 ns ≈ 74 µs of 776 µs ≈ **10 %** |
+> | scope memoization gives O(changed) | **no** — the memoized 1-of-500 frame is **1.44× slower** than the all-dirty rebuild (1 118 µs vs 776 µs) and allocates **1.85× more** |
+> | finer `cx.scope` granularity helps | **no** — U-curve; past ~50 scopes at fixed node count, cost *rises*, marginal cost per scope 1.24 → 2.02 → 3.36 µs (quadratic signature, the `copy_span` term) |
+> | N1's SoA refactor is the lever | **partly** — a hasher swap alone (no SoA, no classification, no generation stamps) buys **9–14 %** |
+>
+> **Consequence:** the biggest available win is not in this plan at all. It is
+> making the *incremental* path stop costing more than the full rebuild.
+
 ---
 
 ## Measured baseline (this box, 2026-08-04, release)
