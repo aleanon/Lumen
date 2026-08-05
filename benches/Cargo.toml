@@ -30,7 +30,8 @@ harness = false
 name = "identity"
 harness = false
 
-# N0 measurement suite (docs/plan-node-cost.md): allocation counts per frame,
+# N0 measurement suite (docs/plan-incremental-path.md; born testing the retired
+# docs/plan-node-cost.md): allocation counts per frame,
 # the missing O(changed) bench, and scope-count scaling.
 [[bench]]
 name = "nodecost"

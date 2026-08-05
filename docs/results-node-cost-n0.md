@@ -184,10 +184,11 @@ answer it.
 
 ---
 
-## 8. What should replace N1–N5
+## 8. What replaced N1–N5
 
-Not a revision of the existing phases — they are aimed at the wrong target. The
-evidence supports a different ordering:
+`docs/plan-incremental-path.md` (CP-series), written from this evidence.
+`plan-node-cost.md` is retired in place. The ordering below is what that plan
+implements:
 
 1. **Fix `copy_node`/`copy_span`** so a memo hit is cheaper than a rebuild. §2 and
    §3 are the same defect seen two ways, it is worth ~1.44× on the shape the

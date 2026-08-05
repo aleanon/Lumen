@@ -10,14 +10,19 @@ reactive build), and `plan-remediation-2026-07.md` (A.3/A.4, which N3 completes)
 > changed frame) and, since the R5 glyph-run slice, it is no longer display-list
 > emission. It is **per-node lowering and the side tables that hang off it**.
 
-> # ⚠️ N0 RAN 2026-08-05 — THE THESIS ABOVE IS FALSIFIED. PHASES N1–N5 ARE NOT VALID AS WRITTEN.
+> # ⛔ RETIRED 2026-08-05 — DO NOT IMPLEMENT. Superseded by `docs/plan-incremental-path.md`.
+>
+> Kept, not deleted, so the falsification is findable — a superseded task buried
+> in an unread document is what produced this plan's own N3.4 mistake. **Nothing
+> below was built** except N0, which was built specifically to test the Thesis and
+> disproved it.
 >
 > A performance review found the phase table below unfalsifiable with the
 > instruments in the repo (its rows summed to 994 µs against a 773 µs measured
 > frame — parts exceeding the whole by 29 %, with the raster row silently
-> dropped). N0 was built and run to settle it (`benches/benches/nodecost.rs`).
-> **Every headline claim in this plan failed.** Do not start N1 on the basis of
-> the Thesis; read `docs/results-node-cost-n0.md` first.
+> dropped). N0 was built and run to settle it (`benches/benches/nodecost.rs`;
+> full results in `docs/results-node-cost-n0.md`). **Every headline claim in this
+> plan failed.**
 >
 > | claim | measured |
 > |---|---|
@@ -28,7 +33,11 @@ reactive build), and `plan-remediation-2026-07.md` (A.3/A.4, which N3 completes)
 > | N1's SoA refactor is the lever | **partly** — a hasher swap alone (no SoA, no classification, no generation stamps) buys **9–14 %** |
 >
 > **Consequence:** the biggest available win is not in this plan at all. It is
-> making the *incremental* path stop costing more than the full rebuild.
+> making the *incremental* path stop costing more than the full rebuild — which
+> is what `docs/plan-incremental-path.md` (CP-series) does. The one piece of N1
+> that survives is carried forward there as CP2.1, on the measured copy-path
+> evidence rather than on the falsified thesis; everything else is retired with
+> its numbers in that plan's non-goals table.
 
 ---
 

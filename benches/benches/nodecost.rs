@@ -1,4 +1,4 @@
-//! N0 measurement suite — the falsifiers for `docs/plan-node-cost.md`.
+//! N0 measurement suite — the falsifiers for the retired `docs/plan-node-cost.md`; the surviving plan is `docs/plan-incremental-path.md`.
 //!
 //! The N-plan's priority order rests on one claim: *per-node lowering dominates
 //! a changed frame and is allocation-bound*. A 2026-08-04 performance review
