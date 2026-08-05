@@ -12,6 +12,10 @@ actionable for Lumen and are already what the CP-series targets. The third is a
 deliberate trade Lumen makes, but it is currently unavoidable even when the trade
 isn't wanted, which is a bug-shaped gap.
 
+*Follow-up: §4 (idle CPU) and §7(c) (the GPU context) were investigated
+separately — see `docs/results-idle-and-gpu-context.md`. §4's original analysis
+was wrong and is corrected in place.*
+
 ---
 
 ## 1. What mintupdate actually is
@@ -122,16 +126,27 @@ Window mapped and visible, sampled over 10 s:
 | Lumen `counter-win` | 0.40 % |
 | Lumen `datagrid-win` | **1.90 %** |
 
+> **⚠️ Corrected 2026-08-06 — the analysis that was here was wrong on both counts.**
+> It claimed the idle CPU was "on the main thread" and "a bug, not a design cost".
+> Investigation (`docs/results-idle-and-gpu-context.md`) found:
+> - **The main thread is at zero.** `about_to_wait` is called **once** in 12 s and
+>   enters `ControlFlow::Wait`. Lumen's event loop is correct.
+> - **It is the NVIDIA driver**, running a 100 Hz `FUTEX_WAKE` + 10 ms timed-wait
+>   loop in two of its own threads. Same binary on lavapipe: **0 jiffies over
+>   20 s**. Not Lumen's bug and not fixable in Lumen.
+>
+> The original numbers came from a 10 s sample taken 3 s after launch — startup
+> tail, at a resolution where one stray wakeup dominates. Re-measured over 30 s
+> after settling, per-thread, the main thread is flat zero.
+
 Lumen's shell has the right structure — `ControlFlow::Wait` when idle,
 `WaitUntil` for scheduled wakes, `Poll` only for continuous animation
-(`lumen-shell/src/lib.rs:851`). But neither app reaches a true zero, and the
-consumption is on the **main thread**, not a driver thread. `datagrid` at 1.9 %
-means something is requesting frames continuously in a view that is not animating.
+(`lumen-shell/src/lib.rs:851`) — and it reaches it.
 
-**This is a bug, not a design cost, and it is not in any current plan.** On a
-laptop or phone, a UI that never sleeps is the difference between all-day battery
-and not. Worth a `wake_reason` diagnostic — the F4 machinery already records why
-a pump happened.
+The residual is the price of **holding a Vulkan context**, which is
+driver-dependent and outside Lumen's control. The only lever Lumen has is not
+creating one — see §7(c), which the same investigation showed is currently
+impossible.
 
 ---
 
@@ -180,14 +195,24 @@ render 500 rows — `GtkTreeView` only walks the viewport. Lumen has
 500 rows means 500 of everything. `vlist_1m_scroll` at 1.15 ms shows the
 virtualized path works; the issue is that it is a widget the author must choose.
 
-**(c) The GPU context should be optional, and today it isn't.** `LUMEN_RENDERER=cpu`
-correctly selects `TinySkia` for drawing — but the process **still maps 225
-NVIDIA/LLVM regions and sits at 222 MB**, because the shell creates the wgpu
-surface regardless. For an update-manager-shaped app — static list, no animation,
+**(c) The GPU context should be optional, and today it is worse than optional.**
+`LUMEN_RENDERER=cpu` correctly selects `TinySkia` for drawing — but the process
+**still maps 225 NVIDIA/LLVM regions and sits at 216–225 MB**. Investigated
+(`docs/results-idle-and-gpu-context.md`): choosing the CPU renderer makes
+`attach_surface` report it cannot present, which *causes* the shell to build a
+**second** wgpu instance/adapter/device purely to blit
+(`lumen-shell/src/lib.rs:491`, `:1457`). The branch is inverted from the user's
+intent, and there is no CPU-only present path today — that needs `softbuffer`
+or a hand-rolled per-platform blit, i.e. an ADR-003 escalation. For an update-manager-shaped app — static list, no animation,
 wants to sip battery — that is ~123 MB and a slower start for nothing. A genuine
 no-GPU path would put Lumen within striking distance of GTK's footprint.
 
-**(d) Idle should be exactly zero.** §4. Not currently planned; should be.
+**(d) Idle CPU — investigated, and it is not ours.** §4. The residual is the
+NVIDIA driver's 100 Hz polling, not Lumen's loop
+(`docs/results-idle-and-gpu-context.md`). The only lever is (c): don't hold a
+GPU context you aren't using. Separately, that investigation found
+`ThreadPoolSpawner::default()` spawns `available_parallelism()` threads
+unconditionally — 32 here for a counter app that never runs a task.
 
 ## 8. What this comparison does *not* say
 
