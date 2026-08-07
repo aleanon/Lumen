@@ -4283,7 +4283,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             s.value = m.value.clone();
             s.classes = m.classes.clone();
             s.actions = m.actions.clone();
-            s.type_name = format!("{:?}", m.role);
+            s.type_name = m.role.type_name();
             s.elide = m.elide;
             s.overlay = m.overlay;
             s.scroll = m.scroll;

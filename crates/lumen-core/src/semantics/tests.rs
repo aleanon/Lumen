@@ -6,7 +6,7 @@ use crate::identity::StableId;
 fn node(n: u32, role: Role, label: &str) -> SemanticsNode {
     let mut s = SemanticsNode::new(n, role);
     s.label = label.to_string();
-    s.type_name = format!("{role:?}");
+    s.type_name = role.type_name();
     s
 }
 fn with_id(mut s: SemanticsNode, id: &str) -> SemanticsNode {

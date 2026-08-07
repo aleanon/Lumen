@@ -119,6 +119,70 @@ impl Role {
             Generic => "generic",
         }
     }
+
+    /// The `SemanticsNode::type_name` spelling for this role — PascalCase,
+    /// byte-identical to the derived `Debug` output.
+    ///
+    /// **Not the same string as [`as_str`](Self::as_str)**, and the two must
+    /// never be merged: `as_str` is the snake_case *wire* role
+    /// (`"text_input"`), while this is the PascalCase *type* name
+    /// (`"TextInput"`) that the agent tree serializes under `"type"`. Both are
+    /// stable API and agents match on them independently.
+    ///
+    /// This exists so `build_semantics` doesn't `format!("{:?}", role)` once
+    /// per node per frame — a heap allocation on the rebuild *and* restyle
+    /// paths, for a value that is always one of 31 compile-time constants.
+    /// `role_debug_spelling_is_byte_identical` pins it to `Debug`, so a new
+    /// variant that forgets to update this method fails the test rather than
+    /// silently changing the agent tree.
+    pub fn type_name(self) -> &'static str {
+        use Role::*;
+        match self {
+            Window => "Window",
+            Button => "Button",
+            Checkbox => "Checkbox",
+            Radio => "Radio",
+            Switch => "Switch",
+            Slider => "Slider",
+            TextInput => "TextInput",
+            Text => "Text",
+            Image => "Image",
+            Link => "Link",
+            List => "List",
+            ListItem => "ListItem",
+            Table => "Table",
+            Row => "Row",
+            Cell => "Cell",
+            ColumnHeader => "ColumnHeader",
+            TabList => "TabList",
+            Tab => "Tab",
+            TabPanel => "TabPanel",
+            Menu => "Menu",
+            MenuItem => "MenuItem",
+            Dialog => "Dialog",
+            Alert => "Alert",
+            Tooltip => "Tooltip",
+            Progress => "Progress",
+            Group => "Group",
+            ScrollArea => "ScrollArea",
+            Tree => "Tree",
+            TreeItem => "TreeItem",
+            ComboBox => "ComboBox",
+            Generic => "Generic",
+        }
+    }
+
+    /// Every role, in declaration order. Lets exhaustiveness be *tested*, not
+    /// just enforced at the `match` — a new variant added without extending
+    /// this array is caught by `role_list_is_exhaustive`.
+    pub const ALL: [Role; 31] = {
+        use Role::*;
+        [
+            Window, Button, Checkbox, Radio, Switch, Slider, TextInput, Text, Image, Link, List,
+            ListItem, Table, Row, Cell, ColumnHeader, TabList, Tab, TabPanel, Menu, MenuItem,
+            Dialog, Alert, Tooltip, Progress, Group, ScrollArea, Tree, TreeItem, ComboBox, Generic,
+        ]
+    };
 }
 
 /// Node state (03 §1).
@@ -296,8 +360,12 @@ pub struct SemanticsNode {
     pub scroll: Option<ScrollInfo>,
     /// Text selection (text inputs only).
     pub text_selection: Option<TextSelection>,
-    /// Rust widget type name (debug aid).
-    pub type_name: String,
+    /// Rust widget type name (debug aid) — see [`Role::type_name`].
+    ///
+    /// `&'static str` rather than `String`: it is always one of 31 compile-time
+    /// constants, so owning it cost a heap allocation per node per frame on
+    /// both the rebuild and restyle paths.
+    pub type_name: &'static str,
     /// If this node is the root of a `cx.scope`, the stable keys of the signals
     /// that scope depends on — the reactive graph projected into observability
     /// (F2). Lets the agent see *why* a subtree updates. `None` ⇒ not a scope
@@ -329,7 +397,7 @@ impl SemanticsNode {
             actions: Vec::new(),
             scroll: None,
             text_selection: None,
-            type_name: String::new(),
+            type_name: "",
             deps: None,
             elide: false,
             overlay: false,
