@@ -285,6 +285,16 @@ All warnings/errors are `Diagnostic { code: &'static str, severity, message, spa
 the audit lint, E0201, W0401 (i18n missing key), E0701 (contained panic).
 The defined-but-dead bucket from the 2026-07 audit is empty.
 
+*Correction (2026-08-08, SD5.0):* **W0106** (a node declares a semantic `Action`
+it does not implement) is emitted only by `Headless::audit_actions()`, which is
+called from tests and never from `App::lint()` — so it does **not** reach
+`ui.lint` over the agent protocol. An agent therefore cannot currently observe
+this class of defect. Folding `audit_actions()` into `lint()` is tracked as SD4;
+until then "every registered code is emitted" holds for the code set but not for
+every *surface*. The full registry (16 codes) lives in `lumen-core/diagnostics.md`
+and is now pinned to the `codes` module by
+`crates/lumen-core/tests/diagnostics_registry.rs`.
+
 ## 10. Built-in widget set
 **M0 primitives (10):** Text, Image, Row, Column, Stack, Scroll, Button, TextFieldBasic (single-style, pre-IME), Checkbox, Slider.
 **M1 additions (to 30 total):** RichText, Icon, Spacer, Divider, Grid, Wrap, Padding, Align, SplitPane, TextField (full IME), TextArea, Radio, Switch, Stepper, Select, Tooltip, Popover, Menu, Tabs, VirtualList.
