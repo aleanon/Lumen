@@ -2,7 +2,7 @@
 //! in well under 2 s, the host-owned state survives, and an ABI-incompatible
 //! component is rejected in favour of tier 3.
 
-use lumen_cli::hotpatch::{HotComponent, Swap};
+use lumen_cli::hotpatch::{HotComponent, Swap, Tier3Reason};
 use lumen_core::Runtime;
 use std::path::PathBuf;
 use std::process::Command;
@@ -51,6 +51,10 @@ fn tier2_swap_preserves_state_and_is_fast() {
     count.set(&rt, 5);
 
     let mut comp = HotComponent::load(&dylib("hot_a")).expect("load v1");
+    // Tier 2 is opt-in (HR1) — the ABI token cannot establish compatibility, so
+    // it is off unless asked for. This test is about the swap mechanism, so it
+    // asks explicitly rather than depending on process env.
+    comp.set_tier2(true);
     assert_eq!(comp.label(), "Count");
     assert_eq!(comp.retired_count(), 0);
 
@@ -78,15 +82,40 @@ fn abi_mismatch_falls_back_to_tier3() {
     ensure_fixtures();
 
     let mut comp = HotComponent::load(&dylib("hot_a")).expect("load v1");
+    comp.set_tier2(true);
     let outcome = comp.swap(&dylib("hot_c")).expect("swap attempt");
 
     match outcome {
-        Swap::NeedsTier3 { host, found } => {
+        Swap::NeedsTier3(Tier3Reason::AbiMismatch { host, found }) => {
             assert_ne!(host, found);
         }
-        other => panic!("expected tier-3 fallback, got {other:?}"),
+        other => panic!("expected an ABI-mismatch tier-3 fallback, got {other:?}"),
     }
     // The incompatible candidate must not have been adopted.
     assert_eq!(comp.label(), "Count");
     assert_eq!(comp.retired_count(), 0);
+}
+
+#[test]
+fn tier2_is_off_by_default() {
+    ensure_fixtures();
+
+    // HR1: HOST_ABI_HASH is a placeholder that fingerprints nothing — not the
+    // compiler, not the core crates, not the layout of any type crossing the
+    // boundary. A matching token therefore does not establish compatibility,
+    // so an in-place swap must not happen just because the tokens agree.
+    //
+    // hot_b is the ABI-*matching* candidate: without the opt-in it must still
+    // be refused, which is what distinguishes "off by default" from "only
+    // refuses mismatches".
+    let mut comp = HotComponent::load(&dylib("hot_a")).expect("load v1");
+    let outcome = comp.swap(&dylib("hot_b")).expect("swap attempt");
+
+    assert_eq!(
+        outcome,
+        Swap::NeedsTier3(Tier3Reason::NotEnabled),
+        "a matching ABI token must not authorize a swap on its own"
+    );
+    assert_eq!(comp.label(), "Count", "component must not have been adopted");
+    assert_eq!(comp.retired_count(), 0, "nothing should have been retired");
 }

@@ -45,6 +45,9 @@ fn ensure_fixtures() {
 fn hot_swap_keeps_state_and_tier3_hands_it_across() {
     ensure_fixtures();
     let mut d = Tier2Driver::start(&dylib("hot_a"), Size::new(400.0, 300.0)).unwrap();
+    // Tier 2 is opt-in since HR1 (the ABI token cannot establish
+    // compatibility). This test covers the swap mechanism, so it asks for it.
+    d.set_tier2(true);
     let sem = d.app.semantics_json().to_string();
     assert!(sem.contains("Count"), "initial build renders: {sem}");
 
@@ -82,4 +85,35 @@ fn hot_swap_keeps_state_and_tier3_hands_it_across() {
         sem.contains("count: 2"),
         "tier 3 handed the snapshot across: {sem}"
     );
+}
+
+#[test]
+fn without_opt_in_an_abi_matching_update_still_takes_tier3() {
+    ensure_fixtures();
+
+    // HR1: the default path. hot_b quotes the *same* ABI token as the host, so
+    // before HR1 this would have hot-swapped. It must now take tier 3 instead,
+    // because a matching placeholder token proves nothing about compatibility.
+    //
+    // The user-visible outcome is identical either way — same label, same
+    // preserved state — which is exactly why the weaker default is affordable:
+    // it costs a restart, not correctness.
+    let mut d = Tier2Driver::start(&dylib("hot_a"), Size::new(400.0, 300.0)).unwrap();
+    assert!(!d.tier2(), "tier 2 must be off unless opted into");
+
+    let p = center(d.app.node_bounds_by_id("count").unwrap());
+    d.app.inject(Event::PointerDown(PointerEvent::at(p)));
+    d.app.inject(Event::PointerUp(PointerEvent::at(p)));
+    d.app.pump();
+    assert!(d.app.semantics_json().to_string().contains("count: 1"));
+
+    let applied = d.apply_update(&dylib("hot_b")).unwrap();
+    match &applied {
+        Applied::Tier3 { dropped, .. } => assert_eq!(*dropped, 0, "clean handoff"),
+        other => panic!("expected tier-3 by default, got {other:?}"),
+    }
+
+    let sem = d.app.semantics_json().to_string();
+    assert!(sem.contains("Counter"), "new build rendered: {sem}");
+    assert!(sem.contains("count: 1"), "state survived the restart: {sem}");
 }

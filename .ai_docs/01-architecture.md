@@ -48,7 +48,13 @@ WGSL `ShaderWidget`s, portable via wgpu: declared typed uniforms, built-ins (tim
 
 ## 7. Hot reload — three tiers
 1. **Data (~one frame, zero risk):** `.lss`, `.wgsl`, assets pushed by the dev server file-watcher into the running app (desktop or device, same socket). Failed parse keeps the old version live + emits a diagnostic. State untouched.
-2. **Code hot-patch (~0.5–2s):** components compiled into a `cdylib` behind a C-ABI registry of `build()` entry points; incremental rebuild, `libloading` swap under versioned names, affected components rebuilt. State survives because it lives in the store, not the component; changed state *shape* resets that component to defaults. Old dylibs are intentionally leaked (never unloaded).
+2. **Code hot-patch (~0.5–2s) — OPT-IN, DEFAULTS OFF (HR1, 2026-08-08):** components compiled into a `cdylib` behind a C-ABI registry of `build()` entry points; incremental rebuild, `libloading` swap under versioned names, affected components rebuilt. State survives because it lives in the store, not the component; changed state *shape* resets that component to defaults. Old dylibs are intentionally leaked (never unloaded).
+
+   *Implementation status.* What is built and tested is the **protocol**: the swap is fast, retiring the old library is safe, host-owned state survives, and an incompatible candidate cleanly downgrades to tier 3. What is **not** built is ABI verification — `HOST_ABI_HASH` is a fixed placeholder that fingerprints neither the compiler, the core crates, nor the layout of any type crossing the boundary, because Rust has no stable ABI to derive one from. A matching token therefore proves nothing, so a match alone must not authorize an in-place swap.
+
+   Consequently tier 2 requires an explicit opt-in (`LUMEN_TIER2=1`, or `HotComponent::set_tier2`) and **tier 3 is what runs by default**. Treating the placeholder as a safety gate would be worse than having no gate: it reads as verified, and would load a mismatched library rather than erroring. Note also that no `Element`-building code crosses the FFI boundary today — the fixtures exercise two `extern "C"` symbols, one returning a static string.
+
+   *Why this is not urgent.* Measured incremental rebuild on this workspace is ~0.4–1.1s, so a real tier 2 would buy **state preservation, not speed**. Instance-migration reload (Flutter/Dart class) is unreachable in any AOT language for lack of a precise pointer map; code-substitution reload (Dioxus `subsecond` class, shipping in iced and Bevy 0.17) is reachable and remains the ADR-014 future track.
 3. **Snapshot restart (~2–5s):** for ABI-crossing changes — serialize state store + navigation/scroll/focus, full rebuild, relaunch, rehydrate.
 
 Every reload emits a structured result event (tier, status, components swapped, state preserved, duration) on the agent protocol.

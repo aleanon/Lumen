@@ -76,24 +76,51 @@ pub enum Applied {
 }
 
 /// The live dev host (C.7): owns the app whose root renders the hot
-/// component, watches for fresh builds, and applies them — tier 2 when the
-/// ABI matches, tier-3 snapshot restart when it doesn't. State (signals,
-/// focus, scroll) lives host-side, so tier 2 preserves it by construction
-/// and tier 3 preserves it through the snapshot.
+/// component, watches for fresh builds, and applies them — tier 2 when it is
+/// opted into *and* the ABI token matches, tier-3 snapshot restart otherwise.
+/// State (signals, focus, scroll) lives host-side, so tier 2 preserves it by
+/// construction and tier 3 preserves it through the snapshot.
+///
+/// Since HR1 tier 2 is off unless `LUMEN_TIER2=1` or [`set_tier2`] asks for it,
+/// so the default path here is tier 3.
+///
+/// [`set_tier2`]: Tier2Driver::set_tier2
 pub struct Tier2Driver {
     comp: Rc<RefCell<HotComponent>>,
     /// The hosted app (public: tests/tools drive and inspect it).
     pub app: Headless,
     size: Size,
+    /// Mirrors the component's opt-in so it survives the reload that the
+    /// tier-3 path performs (which would otherwise reset it to the env value).
+    tier2: bool,
 }
 
 impl Tier2Driver {
     /// Load the initial component and boot the host app around it.
     pub fn start(dylib: &std::path::Path, size: Size) -> Result<Tier2Driver, String> {
         let comp = Rc::new(RefCell::new(HotComponent::load(dylib)?));
+        let tier2 = comp.borrow().tier2_enabled();
         let mut app = Self::host_app(comp.clone()).run_headless(size);
         app.pump();
-        Ok(Tier2Driver { comp, app, size })
+        Ok(Tier2Driver {
+            comp,
+            app,
+            size,
+            tier2,
+        })
+    }
+
+    /// Override the tier-2 opt-in (HR1). Defaults to `LUMEN_TIER2=1`; tier 3 is
+    /// what runs otherwise, because the ABI token cannot establish
+    /// compatibility. See [`crate::hotpatch`] for why.
+    pub fn set_tier2(&mut self, enabled: bool) {
+        self.tier2 = enabled;
+        self.comp.borrow_mut().set_tier2(enabled);
+    }
+
+    /// Whether an in-place tier-2 swap will be attempted.
+    pub fn tier2(&self) -> bool {
+        self.tier2
     }
 
     /// The host view: the component's build output plus a host-owned counter
@@ -127,10 +154,15 @@ impl Tier2Driver {
                     ms: t0.elapsed().as_millis() as u64,
                 })
             }
-            Swap::NeedsTier3 { .. } => {
+            Swap::NeedsTier3(_) => {
                 // restart_request: snapshot, reload the world, restore.
                 let snap = self.app.snapshot();
-                *self.comp.borrow_mut() = HotComponent::load(dylib)?;
+                let mut fresh = HotComponent::load(dylib)?;
+                // `load` re-reads the environment; carry the driver's explicit
+                // opt-in across so a tier-3 restart doesn't silently disable
+                // tier 2 for every subsequent update.
+                fresh.set_tier2(self.tier2);
+                *self.comp.borrow_mut() = fresh;
                 let label = self.comp.borrow().label().to_string();
                 let (mut app, diags) =
                     Self::host_app(self.comp.clone()).run_headless_restored(self.size, snap);
