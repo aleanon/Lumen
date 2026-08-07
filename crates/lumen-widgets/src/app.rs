@@ -270,7 +270,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             scope_live: RefCell::new(std::collections::HashSet::new()),
             bg_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
-            dep_index: HashMap::new(),
             last_change: ChangeReport {
                 kind: "idle",
                 nodes: Vec::new(),
@@ -406,6 +405,10 @@ impl NodeDeps {
 /// A reverse-index entry (F4.2): a node that depends on some signal, and how it
 /// would update when that signal changes.
 #[derive(Clone)]
+/// Snapshot-only: `dependents_of` is the sole constructor, and it is the only
+/// caller's (`what_depends_on`) return shape. Gated so a lean build — which has
+/// no agent surface to serve it to — doesn't carry a dead type.
+#[cfg(feature = "snapshot")]
 struct DepEntry {
     /// Node index (serialized as `node-<index>`).
     node: u32,
@@ -704,9 +707,6 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// binding reads; paint-only bindings are isolated out). `is_current` false ⇒
     /// rebuild; else a paint-only binding change can be patched (F3.4).
     structural_reads: lumen_core::state::ReadSet,
-    /// Reverse index (F4.2): signal key → the nodes that depend on it and how
-    /// they'd update. Rebuilt each `rebuild` from the per-node `NodeDeps`.
-    dep_index: HashMap<String, Vec<DepEntry>>,
     /// What the last `pump` actually did (F4.3 change attribution).
     last_change: ChangeReport,
 }
@@ -813,6 +813,13 @@ type PendingStyle = (
 
 /// What a `pump` did, for change attribution (F4.3).
 #[derive(Clone, Default)]
+/// Pre-existing lean-build waste, not introduced by OB3: the four write sites
+/// run unconditionally but the only reader (`last_change()`) is snapshot-gated,
+/// so a lean build allocates a `Vec<u32>` per pump that nothing can observe.
+/// Gating the writes as well is a follow-up (it touches the pump's control
+/// flow); silencing the warning here is what lets the lean profile build with
+/// `-D warnings` at all, which LN0 needs.
+#[cfg_attr(not(feature = "snapshot"), allow(dead_code))]
 struct ChangeReport {
     /// `"idle"`, `"patch"` (paint-only bindings), or `"rebuild"` (structural).
     kind: &'static str,
@@ -2660,23 +2667,34 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         self.last_damage = self.paint();
         self.sem_root = Some(self.build_semantics(self.tree.root()));
-        self.rebuild_dep_index();
     }
 
-    /// F4.2: rebuild the reverse index (signal key → dependent nodes) from the
-    /// per-node `NodeDeps`. `background` deps update via a patch, `scope`/`text`
-    /// via a rebuild.
-    fn rebuild_dep_index(&mut self) {
-        let mut idx: HashMap<String, Vec<DepEntry>> = HashMap::new();
+    /// F4.2: the nodes depending on `signal`, gathered on demand.
+    ///
+    /// OB3: this used to be an eagerly-rebuilt reverse index
+    /// (`HashMap<String, Vec<DepEntry>>`) refreshed at the end of *every*
+    /// rebuild, cloning a `String` per dependency per node — for a structure
+    /// whose only reader is `what_depends_on`, an agent RPC that is called
+    /// interactively, if at all. A lean build paid for it too, despite having
+    /// no agent surface at all.
+    ///
+    /// Scanning for one signal on demand is strictly better on every axis: no
+    /// per-frame cost, nothing retained between frames, no `HashMap`
+    /// allocation, and string clones only for the entries that actually match.
+    /// The cost is O(nodes) per query instead of O(nodes) per frame.
+    ///
+    /// CP3.1: results are sorted by `(node, via)`. The scan visits `self.meta`,
+    /// a `HashMap`, so iteration order is unspecified — without the sort the
+    /// serialized `dependents` array would reorder whenever the hasher or the
+    /// insertion pattern changed, silently altering agent-visible output.
+    #[cfg(feature = "snapshot")]
+    fn dependents_of(&self, signal: &str) -> Vec<DepEntry> {
+        let mut out: Vec<DepEntry> = Vec::new();
         for (node, m) in &self.meta {
-            let id = node.index();
+            let node = node.index();
             let mut add = |keys: &[String], via, update| {
-                for k in keys {
-                    idx.entry(k.clone()).or_default().push(DepEntry {
-                        node: id,
-                        via,
-                        update,
-                    });
+                if keys.iter().any(|k| k == signal) {
+                    out.push(DepEntry { node, via, update });
                 }
             };
             add(&m.deps.scope, "scope", "rebuild");
@@ -2684,7 +2702,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             add(&m.deps.background, "background", "patch");
             add(&m.deps.class, "class", "rebuild");
         }
-        self.dep_index = idx;
+        out.sort_by(|a, b| a.node.cmp(&b.node).then_with(|| a.via.cmp(b.via)));
+        out
     }
 
     /// Hash of everything *outside* a scope that its nodes' retained work
@@ -3006,10 +3025,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     #[cfg(feature = "snapshot")]
     pub fn what_depends_on(&self, signal: &str) -> serde_json::Value {
         let dependents: Vec<serde_json::Value> = self
-            .dep_index
-            .get(signal)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+            .dependents_of(signal)
             .iter()
             .map(|e| {
                 serde_json::json!({
