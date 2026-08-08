@@ -1,0 +1,41 @@
+# Competitive benchmark harness (BENCH1).
+#
+# Its OWN workspace, excluded from the root one, so foreign UI toolkits never
+# enter Lumen's dependency graph, Cargo.lock, or cargo-deny closure. ADR-003's
+# whitelist governs the framework; this crate is a measuring instrument that
+# happens to link the things being measured against.
+[workspace]
+
+[package]
+name = "lumen-competitive-benches"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+lumen-widgets = { path = "../crates/lumen-widgets" }
+lumen-core = { path = "../crates/lumen-core" }
+kurbo = "0.11"
+
+# `egui` core only — deliberately NOT `eframe`, which would drag in winit/wgpu
+# and measure a windowing stack rather than the framework's build+layout cost.
+egui = { version = "0.29", default-features = false, features = ["default_fonts"] }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "vs_egui"
+harness = false
+
+# Match the root workspace's release profile so Lumen is measured with the
+# optimizations it actually ships with (root Cargo.toml [profile.release]).
+# Without this the harness silently benchmarks a differently-compiled Lumen
+# than users get. egui gets the same treatment, so neither side is advantaged.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1

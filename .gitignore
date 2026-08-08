@@ -11,3 +11,6 @@ Cargo.lock.orig
 .DS_Store
 *.swp
 __pycache__/
+
+# Competitive benchmark harness has its own workspace + lockfile.
+benches-competitive/target/
