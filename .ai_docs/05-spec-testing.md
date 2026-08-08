@@ -2,6 +2,26 @@
 
 Playwright-class testing for Lumen apps. Runs the real app headless on the CPU reference renderer by default (no GPU, no display server — CI-safe), or headed/GPU with a flag. Tests are ordinary `cargo test` integration tests.
 
+## Field coverage — does each backend CONSUME every display-list field?
+
+`crates/lumen-render/tests/field_coverage.rs` (2026-08-08). The parity suite
+compares backends on a corpus of *scenes*, which catches a scene rendered
+wrongly but not a field **no scene happens to use**. Those are different
+questions and only the first had a test.
+
+It cost a shipped bug to notice: `DrawCmd::PushLayer` carries a `transform`
+the CPU backend honours and `gpu.rs` never reads, so a `.lss` `transform`
+property was implemented against it, passed every test, and would have been a
+silent no-op under `--wgpu`. Reverted.
+
+Method: for each field, two display lists differing in **that field alone** must
+render differently on each backend. Each backend is only ever compared with
+itself, so the assertion is exact and the failure names the field and the
+backend. Known gaps live in `GPU_IGNORES` and are asserted to still BE gaps — a
+tripwire in both directions, so implementing one fails the test until the entry
+goes, and a new gap fails immediately. Skipping would let the set grow silently,
+which is the defect class the file exists to close.
+
 ## 1. Entry points
 
 ```rust
