@@ -1898,25 +1898,25 @@ impl Wgpu {
     /// bind group + instance buffer (drawn by the caller at the next segment's
     /// start); all blur intermediates are parked in `keep`. (R1 glass.)
     #[allow(clippy::too_many_arguments)]
-    fn prepare_backdrop(
+    /// Blur `src` into a fresh texture with the 3× box ping-pong (R1).
+    ///
+    /// Extracted from `prepare_backdrop` so the LAYER filter (`filter: blur()`)
+    /// can use the same passes. The extraction is byte-verified: the backdrop
+    /// corpus render hashes identically before and after, which matters because
+    /// the parity tests are tolerance-based and would accept a subtly wrong
+    /// blur.
+    #[allow(clippy::too_many_arguments)]
+    fn blur_texture(
         &self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         keep: &mut KeepAlive,
-        resolved: &wgpu::Texture,
+        src_view: &wgpu::TextureView,
         width: u32,
         height: u32,
-        scale: f64,
-        rect: kurbo::Rect,
-        radii: CornerRadii,
-        blur: f32,
-        saturate: f32,
-        refraction: f32,
-        specular: f32,
-    ) -> (wgpu::BindGroup, wgpu::Buffer) {
+        r_px: f32,
+    ) -> wgpu::Texture {
         use wgpu::util::DeviceExt;
-        let r_px = (blur as f64 * scale).round().max(0.0) as f32;
-
         let mk_tex = |label| {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
@@ -1938,7 +1938,6 @@ impl Wgpu {
         let tex_b = mk_tex("blur-b");
         let view_a = tex_a.create_view(&Default::default());
         let view_b = tex_b.create_view(&Default::default());
-        let src_view = resolved.create_view(&Default::default());
 
         let param = |dir: [f32; 2]| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1977,7 +1976,7 @@ impl Wgpu {
                 ],
             })
         };
-        let bind_resolved = src_bind(&src_view);
+        let bind_src = src_bind(src_view);
         let bind_a = src_bind(&view_a);
         let bind_b = src_bind(&view_b);
 
@@ -2003,13 +2002,51 @@ impl Wgpu {
                 pass.set_bind_group(1, src, &[]);
                 pass.draw(0..3, 0..1);
             };
-        blur_pass(&view_a, &h_params, &bind_resolved);
+        blur_pass(&view_a, &h_params, &bind_src);
         blur_pass(&view_b, &v_params, &bind_a);
         blur_pass(&view_a, &h_params, &bind_b);
         blur_pass(&view_b, &v_params, &bind_a);
         blur_pass(&view_a, &h_params, &bind_b);
         blur_pass(&view_b, &v_params, &bind_a);
-        // blurred = tex_b.
+        drop(blur_pass);
+        // Every intermediate the RECORDED passes reference must outlive
+        // `queue.submit`, so it is parked rather than dropped here — the caller
+        // only owns the returned texture.
+        keep.textures.push(tex_a);
+        keep.views.push(view_a);
+        keep.views.push(view_b);
+        keep.buffers.push(h_buf);
+        keep.buffers.push(v_buf);
+        keep.binds.push(h_params);
+        keep.binds.push(v_params);
+        keep.binds.push(bind_src);
+        keep.binds.push(bind_a);
+        keep.binds.push(bind_b);
+        tex_b
+    }
+
+    fn prepare_backdrop(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        keep: &mut KeepAlive,
+        resolved: &wgpu::Texture,
+        width: u32,
+        height: u32,
+        scale: f64,
+        rect: kurbo::Rect,
+        radii: CornerRadii,
+        blur: f32,
+        saturate: f32,
+        refraction: f32,
+        specular: f32,
+    ) -> (wgpu::BindGroup, wgpu::Buffer) {
+        use wgpu::util::DeviceExt;
+        let r_px = (blur as f64 * scale).round().max(0.0) as f32;
+        let src_view = resolved.create_view(&Default::default());
+        let blurred = self.blur_texture(device, encoder, keep, &src_view, width, height, r_px);
+        let view_b = blurred.create_view(&Default::default());
+        keep.textures.push(blurred);
 
         let composite_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("backdrop-bg"),
@@ -2048,19 +2085,10 @@ impl Wgpu {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        // Park blur intermediates (the recorded passes reference them).
-        keep.textures.push(tex_a);
-        keep.textures.push(tex_b);
-        keep.views.push(view_a);
-        keep.views.push(view_b);
+        // `blur_texture` parks its own intermediates; this frame only adds the
+        // views it made from the result.
         keep.views.push(src_view);
-        keep.buffers.push(h_buf);
-        keep.buffers.push(v_buf);
-        keep.binds.push(h_params);
-        keep.binds.push(v_params);
-        keep.binds.push(bind_resolved);
-        keep.binds.push(bind_a);
-        keep.binds.push(bind_b);
+        keep.views.push(view_b);
         (composite_bind, instance)
     }
 
