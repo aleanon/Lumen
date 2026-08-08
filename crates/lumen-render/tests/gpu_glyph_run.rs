@@ -5,6 +5,7 @@
 
 use kurbo::Rect;
 use lumen_core::Color;
+use lumen_render::display_list::{BlendMode, CornerRadii};
 use lumen_render::gpu::Wgpu;
 use lumen_render::{Brush, DisplayList, DrawCmd, GlyphImage, GlyphRun, PlacedGlyph};
 
@@ -191,45 +192,73 @@ fn glyphs_on_a_second_atlas_page_sample_their_own_page() {
     );
 }
 
-/// R6.4: a steady frame loop must stop allocating render targets.
+/// R6.4: a steady frame loop must stop allocating layer render targets.
 ///
 /// `encode_layer` used to create a fresh resolved texture (plus an MSAA
-/// attachment) per layer per frame and drop both at frame end — multi-megabyte
-/// allocations at frame rate for targets that are the same size every time.
+/// attachment) per layer per frame and drop both at frame end.
 ///
-/// This asserts the pool actually engages, because nothing else would notice if
-/// it did not: every existing test renders one frame and checks pixels, and a
-/// pool that silently missed on every acquire would pass all of them. wgpu
-/// exposes no allocation counter, hence `pooled_target_count`.
+/// The scene needs a **nested layer**: since R6.3 the root has its own
+/// dedicated, retained target and no longer draws from the pool, so a flat
+/// scene leaves the pool empty and this test would assert nothing. (It did,
+/// briefly — the first version used a flat glyph scene and started reporting a
+/// pool size of zero the moment the root stopped using it.)
+///
+/// Nothing else would notice a pool that missed on every acquire: every other
+/// GPU test renders one frame and checks pixels, and wgpu exposes no allocation
+/// counter — hence `pooled_target_count`.
 #[test]
 fn repeated_frames_stop_allocating_render_targets() {
     let Some(gpu) = Wgpu::new() else {
         eprintln!("gpu_glyph_run: no wgpu adapter; skipping");
         return;
     };
-    let dl = glyph_list(Color::srgb8(0x20, 0x40, 0xa0, 0xff), 20.0, 11.0);
+    // A group-opacity layer: the child renders to its own target and composites.
+    let layered = |w: u32, h: u32| {
+        let mut dl = DisplayList::new();
+        dl.push(DrawCmd::PushLayer {
+            clip: None,
+            opacity: 0.5,
+            transform: kurbo::Affine::IDENTITY,
+            filter_blur: 0.0,
+            blend: BlendMode::SourceOver,
+        });
+        dl.push(DrawCmd::Rect {
+            rect: Rect::new(4.0, 4.0, w as f64 - 4.0, h as f64 - 4.0),
+            brush: Brush::Solid(Color::srgb8(0x20, 0x40, 0xa0, 0xff)),
+            radii: CornerRadii::all(2.0),
+            border: None,
+        });
+        dl.push(DrawCmd::PopLayer);
+        dl
+    };
 
-    gpu.render(&dl, W, H, Color::WHITE);
-    let after_first = gpu.pooled_target_count();
-    assert!(after_first > 0, "the first frame must allocate a target");
+    let dl = layered(W, H);
+    for _ in 0..4 {
+        gpu.render(&dl, W, H, Color::WHITE);
+    }
+    let steady = gpu.pooled_target_count();
+    assert!(steady > 0, "a nested layer must allocate a pooled target");
 
     for _ in 0..12 {
         gpu.render(&dl, W, H, Color::WHITE);
     }
     assert_eq!(
         gpu.pooled_target_count(),
-        after_first,
+        steady,
         "12 further frames at the same size must reuse the pooled targets, not \
          allocate more"
     );
 
     // A different size is a different key and legitimately allocates; the point
     // is that it too settles rather than growing per frame.
-    gpu.render(&dl, W * 2, H * 2, Color::WHITE);
+    let big = layered(W * 2, H * 2);
+    for _ in 0..4 {
+        gpu.render(&big, W * 2, H * 2, Color::WHITE);
+    }
     let after_resize = gpu.pooled_target_count();
-    assert!(after_resize > after_first, "a new size allocates");
+    assert!(after_resize > steady, "a new size allocates");
     for _ in 0..8 {
-        gpu.render(&dl, W * 2, H * 2, Color::WHITE);
+        gpu.render(&big, W * 2, H * 2, Color::WHITE);
     }
     assert_eq!(
         gpu.pooled_target_count(),

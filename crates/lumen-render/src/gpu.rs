@@ -52,6 +52,11 @@ pub struct Wgpu {
     >,
     /// R6.4: reusable layer render targets.
     targets: std::cell::RefCell<TargetPool>,
+    /// R6.3: the root target from the previous frame, and whether its contents
+    /// can be trusted. Held separately from the pool because "first free target
+    /// of this size" is not necessarily the one holding last frame's pixels once
+    /// a frame has nested layers.
+    retained_root: std::cell::RefCell<Option<RetainedRoot>>,
     /// The adapter's reported name (e.g. "NVIDIA GeForce RTX 4070",
     /// "llvmpipe (LLVM 20.1.2, 256 bits)"). Kept so tests can attribute a
     /// failure to a driver rather than to the renderer — the GPU parity suite
@@ -269,6 +274,31 @@ impl TargetPool {
         v.push(t.clone());
         t
     }
+}
+
+/// R6.3: last frame's root attachments, kept so a damaged frame can `Load` them
+/// and redraw only the scissored region.
+struct RetainedRoot {
+    width: u32,
+    height: u32,
+    resolved: std::rc::Rc<wgpu::Texture>,
+    msaa: Option<std::rc::Rc<wgpu::Texture>>,
+}
+
+/// The root layer's dedicated attachments, plus what to do with their contents.
+///
+/// The root does NOT come from [`TargetPool`]. It is kept per size and drawn
+/// into every frame — cleared on a full redraw, loaded on a damaged one. Routing
+/// it through the pool instead made the two mechanisms fight: the retained root
+/// holds a reference, so the pool judged it in-use, allocated a replacement, and
+/// the count climbed frame over frame until it hit the per-key cap. Owning the
+/// root outright is both simpler and the reason retention is obviously correct.
+struct RootReuse {
+    resolved: std::rc::Rc<wgpu::Texture>,
+    msaa: Option<std::rc::Rc<wgpu::Texture>>,
+    /// `Some` = load the attachments and confine drawing to this rect.
+    /// `None`  = clear them; this frame redraws everything.
+    scissor: Option<(u32, u32, u32, u32)>,
 }
 
 #[derive(Default)]
@@ -1068,6 +1098,7 @@ impl Wgpu {
             glyph_pipeline,
             path_pipeline,
             targets: std::cell::RefCell::new(TargetPool::default()),
+            retained_root: std::cell::RefCell::new(None),
             adapter_name,
             adapter_backend,
             gradient_pipeline,
@@ -1243,6 +1274,7 @@ impl Wgpu {
             list,
             background,
             scale,
+            None,
         );
         let root_view = root.create_view(&Default::default());
         let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1316,6 +1348,7 @@ impl Wgpu {
         list: &DisplayList,
         background: Color,
         scale: f64,
+        dirty: Option<(u32, u32, u32, u32)>,
     ) -> std::rc::Rc<wgpu::Texture> {
         use wgpu::util::DeviceExt;
         self.targets.borrow_mut().begin_frame();
@@ -1335,6 +1368,69 @@ impl Wgpu {
                 resource: viewport.as_entire_binding(),
             }],
         });
+        // R6.3: is a partial redraw legal this frame? Every condition here is a
+        // way last frame's retained pixels could be wrong rather than merely old.
+        //
+        //  * a `BackdropFilter` samples the parent's resolved content mid-pass,
+        //    and splits the root into several passes — out of scope for the
+        //    single-pass scissor path;
+        //  * the atlas cleared, so text pixels in the retained target reference
+        //    slots that have since moved (R6.5 made this 4x rarer, not
+        //    impossible, and "rarer" is not a correctness argument);
+        //  * the size changed, or there is no retained root at all.
+        let has_backdrop = list
+            .cmds
+            .iter()
+            .any(|c| matches!(c, DrawCmd::BackdropFilter { .. }));
+        let matches_retained = {
+            let slot = self.retained_root.borrow();
+            slot.as_ref()
+                .is_some_and(|r| r.width == width && r.height == height)
+        };
+        let scissor =
+            dirty.filter(|_| matches_retained && !has_backdrop && !self.atlas_overflow.get());
+
+        // The root's attachments, allocated once per size and kept.
+        if !matches_retained {
+            let mk = |samples: u32, usage| {
+                std::rc::Rc::new(device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("root"),
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: samples,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: TARGET_FORMAT,
+                    usage,
+                    view_formats: &[],
+                }))
+            };
+            *self.retained_root.borrow_mut() = Some(RetainedRoot {
+                width,
+                height,
+                resolved: mk(
+                    1,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                ),
+                msaa: (self.sample_count > 1)
+                    .then(|| mk(self.sample_count, wgpu::TextureUsages::RENDER_ATTACHMENT)),
+            });
+        }
+        let reuse = {
+            let slot = self.retained_root.borrow();
+            let r = slot.as_ref().expect("root target was just ensured");
+            RootReuse {
+                resolved: r.resolved.clone(),
+                msaa: r.msaa.clone(),
+                scissor,
+            }
+        };
+
         // The whole list is the root layer, cleared to the opaque background.
         let root = self.encode_layer(
             device,
@@ -1347,6 +1443,7 @@ impl Wgpu {
             list,
             Some(background),
             scale,
+            Some(&reuse),
         );
         keep.buffers.push(viewport);
         keep.binds.push(viewport_bg);
@@ -1385,6 +1482,37 @@ impl Wgpu {
         scale: f64,
         background: Color,
     ) -> RgbaImage {
+        self.render_at_scale_dirty(list, width, height, scale, background, None)
+    }
+
+    /// R6.3: as [`render_at_scale`](Self::render_at_scale), but when `dirty` is
+    /// `Some` the root target is **loaded** from last frame and drawing is
+    /// scissored to that region — the pixels outside it are last frame's.
+    ///
+    /// The caller must pass a region that genuinely bounds every change, which
+    /// is what `damage_between` computes. Passing too small a rect leaves stale
+    /// pixels on screen, so this is deliberately not the default path: it is
+    /// opt-in, and `partial_redraw_matches_full_redraw` is the corpus that holds
+    /// it to byte-equality with a full render.
+    pub fn render_at_scale_dirty(
+        &self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        scale: f64,
+        background: Color,
+        dirty: Option<kurbo::Rect>,
+    ) -> RgbaImage {
+        let dirty = dirty.and_then(|d| {
+            let x = d.x0.floor().max(0.0) as u32;
+            let y = d.y0.floor().max(0.0) as u32;
+            let w = (d.x1.ceil().min(width as f64) - x as f64).max(0.0) as u32;
+            let h = (d.y1.ceil().min(height as f64) - y as f64).max(0.0) as u32;
+            // A zero-area or out-of-bounds rect is not a licence to draw
+            // nothing — it means "no usable damage", so fall back to a full
+            // redraw rather than presenting a frame with nothing drawn.
+            (w > 0 && h > 0 && x < width && y < height).then_some((x, y, w, h))
+        });
         let device = &self.device;
         let mut keep = KeepAlive::default();
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -1396,6 +1524,7 @@ impl Wgpu {
             list,
             background,
             scale,
+            dirty,
         );
 
         // Readback from the resolved root texture. Reuse a cached buffer across
@@ -1484,6 +1613,7 @@ impl Wgpu {
         list: &DisplayList,
         clear: Option<Color>,
         scale: f64,
+        reuse: Option<&RootReuse>,
     ) -> std::rc::Rc<wgpu::Texture> {
         use wgpu::util::DeviceExt;
 
@@ -1533,6 +1663,7 @@ impl Wgpu {
                         list,
                         None,
                         scale,
+                        None,
                     );
                     // `filter: blur()` — blur the layer's OWN content before it
                     // composites, reusing the same passes the backdrop uses.
@@ -1813,13 +1944,26 @@ impl Wgpu {
         // --- this layer's target. MSAA (when available) gives tessellated
         // paths their edge AA; the single-sample `resolved` is the resolve target
         // (and what a parent composite / backdrop blur samples).
-        let resolved = self.targets.borrow_mut().acquire(device, width, height, 1);
+        // R6.3: with `reuse`, draw into LAST FRAME's attachments and load them
+        // rather than clearing. Both must be retained: the pass renders into the
+        // multisample attachment, so loading only the resolved target would load
+        // pixels nothing reads. The resolve then covers the whole attachment,
+        // reproducing last frame outside the scissor and new content inside.
+        let (resolved, msaa_tex) = match reuse {
+            Some(r) => (r.resolved.clone(), r.msaa.clone()),
+            None => {
+                // Bound separately: as one tuple expression the first
+                // `borrow_mut()` temporary outlives the second and panics.
+                let res = self.targets.borrow_mut().acquire(device, width, height, 1);
+                let ms = (self.sample_count > 1).then(|| {
+                    self.targets
+                        .borrow_mut()
+                        .acquire(device, width, height, self.sample_count)
+                });
+                (res, ms)
+            }
+        };
         let resolved_view = resolved.create_view(&Default::default());
-        let msaa_tex = (self.sample_count > 1).then(|| {
-            self.targets
-                .borrow_mut()
-                .acquire(device, width, height, self.sample_count)
-        });
         let msaa_view = msaa_tex
             .as_ref()
             .map(|t| t.create_view(&Default::default()));
@@ -1839,6 +1983,39 @@ impl Wgpu {
             a: c.a as f64,
         };
 
+        let load_op = match reuse.and_then(|r| r.scissor) {
+            Some(_) => wgpu::LoadOp::Load,
+            None => wgpu::LoadOp::Clear(clear_color),
+        };
+        // R6.3: `Load` skips the clear, so without this the frame's anti-aliased
+        // and alpha-blended edges composite over LAST frame's pixels instead of
+        // over the background — a moving shape leaves a ghost of itself. A clear
+        // op cannot help: it applies to the whole attachment, not the scissor.
+        // So the damaged region is repainted with an opaque background quad
+        // first, which is what "clear the damage rect" has to mean here.
+        //
+        // Found by the equivalence corpus, not by inspection: the two cases that
+        // failed were an anti-aliased edge and the frame boundary, and both look
+        // perfectly correct in any single-frame test.
+        if let (Some((sx, sy, sw, sh)), Some(c)) = (reuse.and_then(|r| r.scissor), clear) {
+            // Instances are logical px; the scissor is physical.
+            let inv = (1.0 / scale) as f32;
+            let bg_rect = [
+                sx as f32 * inv,
+                sy as f32 * inv,
+                sw as f32 * inv,
+                sh as f32 * inv,
+            ];
+            let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("damage-bg"),
+                contents: bytemuck_lite::cast_slice(&[RectInstance::plain(
+                    bg_rect,
+                    [c.r, c.g, c.b, c.a],
+                )]),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            ops.insert(0, LayerDraw::Rects { buf, count: 1 });
+        }
         if !has_backdrop {
             // Fast path: a single pass for the whole layer.
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1847,7 +2024,7 @@ impl Wgpu {
                     view: attach_view,
                     resolve_target,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color),
+                        load: load_op,
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -1855,6 +2032,11 @@ impl Wgpu {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+            // R6.3: confine drawing to the damaged region. Everything outside it
+            // is last frame's content, loaded above.
+            if let Some((x, y, w, h)) = reuse.and_then(|r| r.scissor) {
+                pass.set_scissor_rect(x, y, w, h);
+            }
             for op in &ops {
                 self.draw_op(&mut pass, viewport_bg, op);
             }
