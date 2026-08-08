@@ -120,6 +120,11 @@ pub trait Renderer {
 
     /// Render `list` straight to the attached swapchain — no CPU readback (1c).
     /// Returns `false` if no surface is attached (caller uses `render_frame`).
+    ///
+    /// R6.2/R6.3: `dirty` is the physical-pixel region that changed since the
+    /// last presented frame, or `None` for "redraw everything". A backend may
+    /// ignore it — the frame is correct either way — but one that honours it
+    /// culls the display list to that region and scissors the redraw.
     #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
     fn present_to_surface(
         &mut self,
@@ -128,6 +133,7 @@ pub trait Renderer {
         _height: u32,
         _scale: f64,
         _background: Color,
+        _dirty: Option<kurbo::Rect>,
     ) -> bool {
         false
     }
@@ -238,8 +244,9 @@ impl<R: Renderer + ?Sized> Renderer for Box<R> {
         height: u32,
         scale: f64,
         background: Color,
+        dirty: Option<kurbo::Rect>,
     ) -> bool {
-        (**self).present_to_surface(list, width, height, scale, background)
+        (**self).present_to_surface(list, width, height, scale, background, dirty)
     }
 
     fn name(&self) -> &'static str {

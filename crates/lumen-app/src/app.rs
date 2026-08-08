@@ -1484,9 +1484,25 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let pw = (self.size.width * self.scale).round().max(1.0) as u32;
         let ph = (self.size.height * self.scale).round().max(1.0) as u32;
         let bg = Color::srgb8(255, 255, 255, 255);
+        // R6.2/R6.3: hand the backend the damaged region so it can cull the
+        // display list and scissor the redraw. Only `Region` qualifies —
+        // `Damage::Full` and `Damage::None` both mean "no usable sub-region",
+        // and the backend falls back to a full frame. Anything that invalidates
+        // the retained target (resize, surface recreation) already routes
+        // through `force_full_repaint`, which clears `last_dl` and so produces
+        // `Full` on the next pump.
+        let dirty = match self.last_damage {
+            Damage::Region(r) => Some(kurbo::Rect::new(
+                (r.x0 * self.scale).floor().max(0.0),
+                (r.y0 * self.scale).floor().max(0.0),
+                (r.x1 * self.scale).ceil().min(pw as f64),
+                (r.y1 * self.scale).ceil().min(ph as f64),
+            )),
+            Damage::Full | Damage::None => None,
+        };
         let ok = self
             .renderer
-            .present_to_surface(&dl, pw, ph, self.scale, bg);
+            .present_to_surface(&dl, pw, ph, self.scale, bg, dirty);
         self.last_dl = Some(dl);
         ok
     }
@@ -4628,9 +4644,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         };
 
         if self.surface_attached {
-            // Direct-to-surface (1c): no CPU rasterization. The shell presents the
-            // retained `last_dl` via `present_to_surface` when `damage != None`
-            // (granularity is ignored — the GPU renders the whole frame anyway).
+            // Direct-to-surface (1c): no CPU rasterization. The shell presents
+            // the retained `last_dl` via `present_to_surface` when
+            // `damage != None`, which reads `last_damage` (set below) and passes
+            // the region down — R6.2 culls the list to it and R6.3 scissors the
+            // redraw. Before that, granularity was computed here and discarded.
         } else {
             match damage {
                 Damage::None => { /* nothing changed — reuse self.frame */ }

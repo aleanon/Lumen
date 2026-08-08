@@ -182,3 +182,43 @@ fn require_gpu_or_skip() -> Option<Wgpu> {
         }
     }
 }
+
+/// A `BackdropFilter` disqualifies the frame from partial redraw: it samples the
+/// parent's resolved content mid-pass, so a partially-updated parent would feed
+/// it stale pixels, and it splits the root into several passes that the
+/// single-pass scissor does not cover.
+///
+/// The check runs on the *uncalled* list deliberately — culling to the damage
+/// region could drop the backdrop command and make an ineligible frame look
+/// eligible.
+#[test]
+fn a_backdrop_forces_a_full_redraw() {
+    let Some(gpu) = require_gpu_or_skip() else {
+        return;
+    };
+    let with_backdrop = |x: f64| {
+        let mut dl = scene(x, 70.0);
+        dl.push(DrawCmd::BackdropFilter {
+            rect: Rect::new(20.0, 20.0, 90.0, 60.0),
+            radii: CornerRadii::all(6.0),
+            blur: 4.0,
+            saturate: 1.2,
+            refraction: 0.0,
+            specular: 0.0,
+        });
+        dl
+    };
+    let (a, b) = (with_backdrop(40.0), with_backdrop(52.0));
+
+    gpu.render_at_scale(&a, W, H, 1.0, bg());
+    let partial =
+        gpu.render_at_scale_dirty(&b, W, H, 1.0, bg(), Some(damage(40.0, 70.0, 52.0, 70.0)));
+
+    let Some(ref_gpu) = Wgpu::new() else { return };
+    let full = ref_gpu.render_at_scale(&b, W, H, 1.0, bg());
+    assert_eq!(
+        full.pixels(),
+        partial.pixels(),
+        "a frame containing a BackdropFilter must fall back to a full redraw"
+    );
+}

@@ -601,9 +601,10 @@ impl crate::Renderer for WgpuFallbackTinySkia {
         height: u32,
         scale: f64,
         background: Color,
+        dirty: Option<kurbo::Rect>,
     ) -> bool {
         match &mut self.main {
-            Some(g) => g.present_to_surface(list, width, height, scale, background),
+            Some(g) => g.present_to_surface(list, width, height, scale, background, dirty),
             None => false,
         }
     }
@@ -1246,6 +1247,7 @@ impl Wgpu {
         height: u32,
         scale: f64,
         background: Color,
+        dirty: Option<kurbo::Rect>,
     ) -> bool {
         let Some(surf) = self.surface.as_ref() else {
             return false;
@@ -1253,6 +1255,26 @@ impl Wgpu {
         // A resize makes the swapchain Outdated/Lost until reconfigured; rather
         // than drop the frame (visible stutter during a drag), reconfigure and
         // retry once. Skipping here is what made resizing feel janky.
+        // R6.2 + R6.3: cull the display list to the damaged region and scissor
+        // the redraw to it. The cull drops vertex, fragment and upload work for
+        // commands that cannot affect those pixels; the scissor keeps the rest
+        // of the retained root intact. `culled_for_damage` is the same cull the
+        // CPU path uses, and the R0 corpus proves culled ≡ full.
+        let scissor = self.reusable_scissor(list, width, height, dirty);
+        let culled;
+        let list = match scissor {
+            Some((x, y, w, h)) => {
+                culled = list.culled_for_damage(kurbo::Rect::new(
+                    x as f64,
+                    y as f64,
+                    (x + w) as f64,
+                    (y + h) as f64,
+                ));
+                &culled
+            }
+            None => list,
+        };
+
         let frame = match surf.surface.get_current_texture() {
             Ok(f) => f,
             Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
@@ -1274,7 +1296,7 @@ impl Wgpu {
             list,
             background,
             scale,
-            None,
+            scissor,
         );
         let root_view = root.create_view(&Default::default());
         let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1485,6 +1507,57 @@ impl Wgpu {
         self.render_at_scale_dirty(list, width, height, scale, background, None)
     }
 
+    /// R6.3: clamp a logical damage rect to integer physical pixels inside the
+    /// frame, or `None` when there is nothing usable to scissor to.
+    ///
+    /// A zero-area or fully out-of-bounds rect is **not** a licence to draw
+    /// nothing — it means "no usable damage", so the caller falls back to a full
+    /// redraw rather than presenting a frame with nothing in it.
+    fn scissor_for(
+        dirty: Option<kurbo::Rect>,
+        width: u32,
+        height: u32,
+    ) -> Option<(u32, u32, u32, u32)> {
+        let d = dirty?;
+        let x = d.x0.floor().max(0.0) as u32;
+        let y = d.y0.floor().max(0.0) as u32;
+        let w = (d.x1.ceil().min(width as f64) - x as f64).max(0.0) as u32;
+        let h = (d.y1.ceil().min(height as f64) - y as f64).max(0.0) as u32;
+        (w > 0 && h > 0 && x < width && y < height).then_some((x, y, w, h))
+    }
+
+    /// R6.2/R6.3: the region this frame may confine itself to, or `None` if it
+    /// must redraw everything.
+    ///
+    /// **This is the single decision point, and it has to be made before the
+    /// display list is culled.** Culling to a region and then discovering the
+    /// frame cannot reuse the retained target produces a full-cleared frame
+    /// drawn from a partial list — everything outside the damage rect simply
+    /// missing. That is not hypothetical: it is what happened when the cull read
+    /// `scissor_for` directly and the reuse test lived inside `encode_root`, and
+    /// the resize case in the equivalence corpus is what caught it.
+    fn reusable_scissor(
+        &self,
+        list: &DisplayList,
+        width: u32,
+        height: u32,
+        dirty: Option<kurbo::Rect>,
+    ) -> Option<(u32, u32, u32, u32)> {
+        let s = Self::scissor_for(dirty, width, height)?;
+        let matches_retained = self
+            .retained_root
+            .borrow()
+            .as_ref()
+            .is_some_and(|r| r.width == width && r.height == height);
+        // Checked on the ORIGINAL list: culling could drop the backdrop command
+        // and turn an ineligible frame into one that looks eligible.
+        let has_backdrop = list
+            .cmds
+            .iter()
+            .any(|c| matches!(c, DrawCmd::BackdropFilter { .. }));
+        (matches_retained && !has_backdrop && !self.atlas_overflow.get()).then_some(s)
+    }
+
     /// R6.3: as [`render_at_scale`](Self::render_at_scale), but when `dirty` is
     /// `Some` the root target is **loaded** from last frame and drawing is
     /// scissored to that region — the pixels outside it are last frame's.
@@ -1503,16 +1576,24 @@ impl Wgpu {
         background: Color,
         dirty: Option<kurbo::Rect>,
     ) -> RgbaImage {
-        let dirty = dirty.and_then(|d| {
-            let x = d.x0.floor().max(0.0) as u32;
-            let y = d.y0.floor().max(0.0) as u32;
-            let w = (d.x1.ceil().min(width as f64) - x as f64).max(0.0) as u32;
-            let h = (d.y1.ceil().min(height as f64) - y as f64).max(0.0) as u32;
-            // A zero-area or out-of-bounds rect is not a licence to draw
-            // nothing — it means "no usable damage", so fall back to a full
-            // redraw rather than presenting a frame with nothing drawn.
-            (w > 0 && h > 0 && x < width && y < height).then_some((x, y, w, h))
-        });
+        let dirty = self.reusable_scissor(list, width, height, dirty);
+        // R6.2: cull to the damaged region as well as scissoring to it — the
+        // same composition the present path uses, so the equivalence corpus
+        // covers both. Culling alone would still draw everywhere; scissoring
+        // alone would still encode every command.
+        let culled;
+        let list = match dirty {
+            Some((x, y, w, h)) => {
+                culled = list.culled_for_damage(kurbo::Rect::new(
+                    x as f64,
+                    y as f64,
+                    (x + w) as f64,
+                    (y + h) as f64,
+                ));
+                &culled
+            }
+            None => list,
+        };
         let device = &self.device;
         let mut keep = KeepAlive::default();
         let mut encoder = device.create_command_encoder(&Default::default());
