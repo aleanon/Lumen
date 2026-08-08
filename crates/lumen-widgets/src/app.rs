@@ -4714,7 +4714,12 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
     // B.4: typography reaches the text stack — the measured and the painted
     // TextStyle are the same object (content moves into NodeMeta), so one
     // override covers both passes.
-    if css.font_size.is_some() || css.font_weight.is_some() || css.line_height.is_some() {
+    if css.font_size.is_some()
+        || css.font_weight.is_some()
+        || css.line_height.is_some()
+        || css.letter_spacing.is_some()
+        || css.font_family.is_some()
+    {
         if let NodeContent::Text(_, ts) = &mut el.content {
             if let Some(fs) = css.font_size {
                 ts.font_size = fs;
@@ -4724,6 +4729,14 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
             }
             if let Some(lh) = css.line_height {
                 ts.line_height = Some(lh);
+            }
+            // PROP1: both fields already existed on `TextStyle`; only this
+            // bridge was missing, so the declarations parsed and vanished.
+            if let Some(ls) = css.letter_spacing {
+                ts.letter_spacing = ls;
+            }
+            if let Some(fam) = &css.font_family {
+                ts.family = Some(fam.clone());
             }
         }
     }

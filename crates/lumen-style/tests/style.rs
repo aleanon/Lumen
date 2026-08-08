@@ -122,6 +122,10 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         assert_eq!(from_lss, want, "{prop}");
     }
     covered.extend(["inset-top", "inset-right", "inset-bottom", "inset-left"]);
+    style_parity!(covered, "letter-spacing", "8px", |s: Style| s
+        .letter_spacing(8.0));
+    style_parity!(covered, "font-family", "Inter", |s: Style| s
+        .font_family("Inter"));
     style_parity!(covered, "visibility", "hidden", |s: Style| s
         .visibility(false));
     style_parity!(covered, "clip", "rounded", |s: Style| s
@@ -213,6 +217,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "align-content" => "center",
         "position" => "absolute",
         "aspect-ratio" => "1.5",
+        "font-family" => "Inter",
         _ => "8px", // the lengths
     };
     for &p in lumen_style::APPLIED_PROPERTIES {

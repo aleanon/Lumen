@@ -189,6 +189,12 @@ pub struct Style {
     /// `inset-top/right/bottom/left` longhands (PROP1), in that order. Applied
     /// after the shorthand so per-side values win, matching `padding`/`margin`.
     pub inset_sides: [Option<f32>; 4],
+    /// `letter-spacing` (PROP1), extra tracking in logical px.
+    pub letter_spacing: Option<f32>,
+    /// `font-family` (PROP1) — a family registered via
+    /// `TextEngine::register_font`. Unknown names fall back to the bundled
+    /// face, matching the Rust-side `TextStyle::family` contract.
+    pub font_family: Option<String>,
     /// `background` color.
     pub background: Option<Color>,
     /// `background: linear-gradient(…)|radial-gradient(…)` (B.3).
@@ -335,6 +341,19 @@ impl Style {
     /// `flex-wrap`.
     pub fn flex_wrap(mut self, w: FlexWrap) -> Self {
         self.flex_wrap = Some(w);
+        self
+    }
+
+    /// `letter-spacing` (PROP1), extra tracking in logical px.
+    pub fn letter_spacing(mut self, px: f32) -> Self {
+        self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `font-family` (PROP1). Register the face first with
+    /// `TextEngine::register_font`; unknown names fall back to the bundled one.
+    pub fn font_family(mut self, name: impl Into<String>) -> Self {
+        self.font_family = Some(name.into());
         self
     }
 
@@ -554,11 +573,9 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     "z-index",
     "cursor",
     // Typography — needs text-stack plumbing.
-    "font-family",
     "font-style",
     "font-features",
     "font-variation",
-    "letter-spacing",
     "text-align",
     "text-overflow",
     "text-wrap",
@@ -608,6 +625,8 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "inset-right",
     "inset-bottom",
     "inset-left",
+    "letter-spacing",
+    "font-family",
     "background",
     "color",
     "border-radius",
@@ -678,6 +697,9 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "inset-right" => style.inset_sides[1] = as_px(&v),
         "inset-bottom" => style.inset_sides[2] = as_px(&v),
         "inset-left" => style.inset_sides[3] = as_px(&v),
+        // PROP1: typography whose `TextStyle` fields already existed.
+        "letter-spacing" => style.letter_spacing = as_px(&v),
+        "font-family" => style.font_family = as_font_family(&v),
         "background" => match &v {
             Value::Function(name, args)
                 if name == "linear-gradient" || name == "radial-gradient" =>
@@ -1208,6 +1230,19 @@ fn as_align(v: &Value) -> Option<Align> {
             "space-around" => Some(Align::SpaceAround),
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// `font-family` (PROP1): a quoted string or a bare keyword. A comma-separated
+/// CSS font stack is NOT resolved — shaping uses exactly one registered family
+/// (ADR-005 forbids system-font enumeration, so there is no list to fall
+/// through). The first entry wins and the rest are ignored, which is closer to
+/// CSS intent than rejecting the declaration outright.
+fn as_font_family(v: &Value) -> Option<String> {
+    match v {
+        Value::Str(s) | Value::Keyword(s) => Some(s.clone()),
+        Value::List(items) => items.iter().find_map(as_font_family),
         _ => None,
     }
 }

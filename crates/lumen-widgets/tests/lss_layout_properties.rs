@@ -233,3 +233,36 @@ fn align_content_moves_wrapped_lines_along_the_cross_axis() {
         end.y0
     );
 }
+
+// --- PROP1, typography batch -------------------------------------------------
+
+/// `letter-spacing` must reach the text stack, i.e. change the MEASURED width.
+/// Asserting the field were set would pass with the bridge missing.
+#[test]
+fn letter_spacing_widens_measured_text() {
+    let tight = bounds_of("#a { letter-spacing: 0px; }", "a");
+    let loose = bounds_of("#a { letter-spacing: 10px; }", "a");
+    assert!(
+        loose.width() > tight.width() + 5.0,
+        "letter-spacing must widen the run (tight={}, loose={})",
+        tight.width(),
+        loose.width()
+    );
+}
+
+/// An unregistered `font-family` falls back to the bundled face rather than
+/// failing or rendering tofu — the same contract `TextStyle::family` documents.
+/// The declaration must still be *applied* (it reaches `TextStyle`), which is
+/// what distinguishes this from the silent-discard bug being fixed.
+#[test]
+fn an_unknown_font_family_falls_back_to_the_bundled_face() {
+    let plain = bounds_of("#a { font-size: 16px; }", "a");
+    let named = bounds_of("#a { font-size: 16px; font-family: NotInstalled; }", "a");
+    assert!(
+        (named.width() - plain.width()).abs() < 0.5,
+        "unknown family should shape identically to the default \
+         (plain={}, named={})",
+        plain.width(),
+        named.width()
+    );
+}

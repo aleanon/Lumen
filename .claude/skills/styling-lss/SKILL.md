@@ -31,7 +31,10 @@ and `overflow`. Everything else in the flex/box family now
 works in `.lss` — `flex-grow/shrink/basis/wrap`,
 `justify-content`, `align-items/self/content`, `min/max-*`,
 `aspect-ratio`, `position: absolute` + `inset` (+ per-side
-longhands). PROP1, 2026-08-08.
+longhands), `letter-spacing`, `font-family`. PROP1, 2026-08-08.
+(`font-family` needs the face registered via
+`TextEngine::register_font`; unknown names fall back to the
+bundled one rather than rendering tofu.)
 
 ## What works in `.lss` today
 
