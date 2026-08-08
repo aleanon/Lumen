@@ -73,10 +73,15 @@ load-bearing:
   soundness argument for R6.3 still needs the clear to be *handled*, not just
   made less frequent.
 
-There is also an unresolved correctness question the plan already flagged:
-`get_current_texture()` on a double/triple-buffered swapchain does **not**
-guarantee the acquired image holds *last* frame's content. Partial redraw needs
-either a guarantee or an explicit per-image damage history.
+~~There is also an unresolved correctness question the plan already flagged:~~
+**Resolved 2026-08-08 — it does not apply to Lumen.** `get_current_texture()`
+indeed guarantees nothing about the acquired image's prior content, but Lumen
+never renders into it: `present_to_surface` encodes into an offscreen root and
+then blits with `LoadOp::Clear`, fully overwriting the swapchain image every
+present. R6.3 would `Load` from the *root*, which Lumen owns and which persists
+since R6.4. The constraint that actually shapes R6.3 is MSAA — both the
+multisample attachment and the resolve target must be retained and loaded. See
+`docs/r6.3-design.md`.
 
 ## Revised estimate and recommendation
 
