@@ -1927,3 +1927,108 @@ mod menu_tests {
         assert_eq!(n.get(h.runtime()), 1, "bound command ran");
     }
 }
+
+/// AT1: `route_at_action` is the only path a real screen-reader click takes
+/// into the app, and until now nothing exercised it.
+///
+/// `crates/lumen-widgets/tests/a11y.rs` matches nodes by tree *position*, so it
+/// stays green even if published ids stop resolving. And the function fails
+/// **open** — `let Some(bounds) = … else { return; }` — so a broken lookup is a
+/// silent no-op: the AT reports success, nothing happens, and no diagnostic is
+/// emitted anywhere. That combination is why this needs a dedicated test before
+/// ID1 changes how ids are minted.
+#[cfg(test)]
+mod at_routing_tests {
+    use super::*;
+    use lumen_widgets::{col, widgets, App, BuildCx, Element, Headless};
+
+    /// Walk the published AccessKit tree for the node carrying `label`.
+    fn published_id(update: &accesskit::TreeUpdate, label: &str) -> accesskit::NodeId {
+        update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label().is_some_and(|l| l == label))
+            .map(|(id, _)| *id)
+            .unwrap_or_else(|| panic!("no published node labelled {label:?}"))
+    }
+
+    fn counter_app() -> Headless {
+        App::new(|cx: &mut BuildCx| -> Element {
+            let n = cx.signal("clicks", || 0i64);
+            col![
+                widgets::text(format!("clicks: {}", n.get(cx.runtime()))).id("out"),
+                widgets::button("Bump", move |rt| n.update(rt, |v| *v += 1)).id("bump")
+            ]
+        })
+        .run_headless(kurbo::Size::new(320.0, 200.0))
+    }
+
+    #[test]
+    fn at_click_on_a_published_id_reaches_the_handler() {
+        let mut h = counter_app();
+        h.pump();
+
+        // Take the id from the tree we actually publish to the platform, not
+        // from an internal field — that is the whole point: it proves the id
+        // an AT receives round-trips back to the right node.
+        let update = lumen_widgets::a11y::build_tree(&h.semantics_elided());
+        let target = published_id(&update, "Bump");
+
+        route_at_action(
+            &mut h,
+            &accesskit::ActionRequest {
+                action: accesskit::Action::Click,
+                target,
+                data: None,
+            },
+        );
+
+        let n: lumen_core::state::Signal<i64> = h.runtime().signal("clicks", || 0);
+        assert_eq!(
+            n.get(h.runtime()),
+            1,
+            "an AT Click on the published id must invoke the button's handler"
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_id_is_a_no_op_not_a_panic() {
+        let mut h = counter_app();
+        h.pump();
+
+        // Failing open is the deliberate behavior (an AT must never crash the
+        // app), which is exactly why the positive case above has to be tested:
+        // this path cannot distinguish "no such node" from "ids broke".
+        route_at_action(
+            &mut h,
+            &accesskit::ActionRequest {
+                action: accesskit::Action::Click,
+                target: accesskit::NodeId(u64::MAX),
+                data: None,
+            },
+        );
+
+        let n: lumen_core::state::Signal<i64> = h.runtime().signal("clicks", || 0);
+        assert_eq!(n.get(h.runtime()), 0, "unknown target must change nothing");
+    }
+
+    #[test]
+    fn published_ids_are_unique_within_one_update() {
+        // The guard ID-0a specifies for ID1's fold64. Its value is catching an
+        // id-derivation bug that maps distinct nodes together — which would
+        // make AT clicks land on the wrong widget — not birthday collisions.
+        let mut h = counter_app();
+        h.pump();
+
+        let update = lumen_widgets::a11y::build_tree(&h.semantics_elided());
+        let mut seen = std::collections::HashSet::new();
+        for (id, _) in &update.nodes {
+            assert!(
+                seen.insert(*id),
+                "duplicate published AccessKit id {id:?} — two nodes would \
+                 be indistinguishable to assistive tech"
+            );
+        }
+        assert!(seen.len() >= 2, "expected a non-trivial tree, got {seen:?}");
+    }
+}
