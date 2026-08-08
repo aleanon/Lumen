@@ -134,6 +134,79 @@ struct SignalId(u32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 struct ScopeId(u32);
 
+/// SD6b: a signal key with its value type bound at declaration.
+///
+/// Signal keys are strings, so two call sites can name the same key with
+/// different types. SD6a made that failure *loud* — the panic now names the key
+/// and both types — but loud-at-runtime is still runtime. A `SignalKey<T>`
+/// carries the type in its own type, so the mismatch cannot be written:
+///
+/// ```
+/// # use lumen_core::state::{Runtime, SignalKey};
+/// const COUNT: SignalKey<i64> = SignalKey::new("count");
+///
+/// let rt = Runtime::new();
+/// let a = rt.signal_keyed(COUNT, || 0);
+/// let b = rt.signal_keyed(COUNT, || 0);   // same key, necessarily same type
+/// a.set(&rt, 7);
+/// assert_eq!(b.get(&rt), 7);
+/// ```
+///
+/// Declaring it as a `const` is the point: the key and its type are written
+/// once, and every use refers to that declaration instead of re-typing a
+/// string. A second site cannot disagree about the type without failing to
+/// compile.
+///
+/// This is additive. The `&str` API stays — same-key-same-type sharing across
+/// widgets (`{name}.open` on Sheet/Drawer/Popover/Combobox) is a deliberate
+/// contract, and typed keys would make that sharing private by construction.
+/// `docs/plan-state-keys.md` records why that must not be broken.
+pub struct SignalKey<T> {
+    key: &'static str,
+    _pd: PhantomData<fn() -> T>,
+}
+
+impl<T> SignalKey<T> {
+    /// Declare a typed key. `const`-callable so it can live in a `const`.
+    pub const fn new(key: &'static str) -> SignalKey<T> {
+        SignalKey {
+            key,
+            _pd: PhantomData,
+        }
+    }
+
+    /// The underlying string, for interop with the untyped API and for
+    /// snapshot/agent surfaces that address state by name.
+    pub const fn as_str(&self) -> &'static str {
+        self.key
+    }
+}
+
+impl<T> Clone for SignalKey<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T> Copy for SignalKey<T> {}
+
+impl<T> std::fmt::Debug for SignalKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Debug-prints as the bare key so `key_name` and every diagnostic that
+        // formats a key produce the same text as the `&str` API. A typed key
+        // must not change what a snapshot or an agent sees.
+        f.write_str(self.key)
+    }
+}
+
+impl<T> std::hash::Hash for SignalKey<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Hash as the bare string, so `SignalKey::<T>::new("k")` and `"k"`
+        // address the SAME signal. Typed and untyped access must agree, or
+        // migrating a key to a typed one would silently orphan its state.
+        self.key.hash(state);
+    }
+}
+
 /// A copyable handle to a stored signal value (02 §4).
 pub struct Signal<T> {
     id: SignalId,
@@ -629,6 +702,16 @@ impl Runtime {
             || key_name(&key),
             init,
         )
+    }
+
+    /// SD6b: create or re-attach state through a [`SignalKey<T>`], so the key
+    /// and its value type are declared together and cannot disagree.
+    ///
+    /// Identical addressing to [`signal`](Self::signal) with the same string —
+    /// `SignalKey` hashes as its bare key — so a codebase can migrate one call
+    /// site at a time without orphaning the state.
+    pub fn signal_keyed<T: State>(&self, key: SignalKey<T>, init: impl FnOnce() -> T) -> Signal<T> {
+        self.signal(key, init)
     }
 
     /// [`Runtime::signal`] at an already-folded identity, owned by scope

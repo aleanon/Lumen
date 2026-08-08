@@ -693,6 +693,17 @@ impl<'a> BuildCx<'a> {
         )
     }
 
+    /// SD6b: [`signal`](Self::signal) through a typed
+    /// [`SignalKey<T>`](lumen_core::state::SignalKey), so a key's value type is
+    /// fixed where the key is declared rather than re-asserted at every use.
+    pub fn signal_keyed<T: State>(
+        &self,
+        key: lumen_core::state::SignalKey<T>,
+        init: impl FnOnce() -> T,
+    ) -> Signal<T> {
+        self.signal(key, init)
+    }
+
     /// A memoized view region (F1). Runs `f` inside a read-tracking window and
     /// caches the subtree it returns; on a later build the closure is **skipped**
     /// (the cached subtree reused) while none of the signals it read has changed.
