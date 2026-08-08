@@ -285,13 +285,15 @@ All warnings/errors are `Diagnostic { code: &'static str, severity, message, spa
 the audit lint, E0201, W0401 (i18n missing key), E0701 (contained panic).
 The defined-but-dead bucket from the 2026-07 audit is empty.
 
-*Correction (2026-08-08, SD5.0):* **W0106** (a node declares a semantic `Action`
-it does not implement) is emitted only by `Headless::audit_actions()`, which is
-called from tests and never from `App::lint()` — so it does **not** reach
-`ui.lint` over the agent protocol. An agent therefore cannot currently observe
-this class of defect. Folding `audit_actions()` into `lint()` is tracked as SD4;
-until then "every registered code is emitted" holds for the code set but not for
-every *surface*. The full registry (16 codes) lives in `lumen-core/diagnostics.md`
+*Resolved (2026-08-08, SD4):* **W0106** (a node declares a semantic `Action` it
+does not implement) is now emitted by `App::lint()`, so it reaches `ui.lint`
+over the agent protocol. It previously fired only from
+`Headless::audit_actions()`, which tests called and `lint()` did not — an
+agent could not observe this defect class at all. Wiring it in found three real
+cases immediately: two buttons in the lint suite's own "normal UI" fixture that
+declared `Click` and implemented nothing, and `TextField` advertising
+`SetValue` with no handler (so `input.invokeAction {action:"setValue"}` and any
+AT offering "set value" silently did nothing). All three are fixed. The full registry (16 codes) lives in `lumen-core/diagnostics.md`
 and is now pinned to the `codes` module by
 `crates/lumen-core/tests/diagnostics_registry.rs`.
 

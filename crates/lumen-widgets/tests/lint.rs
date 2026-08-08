@@ -11,7 +11,15 @@ fn a_normal_ui_has_no_lint_findings() {
     let mut h = App::new(|_| {
         Element::column(vec![
             Label::new("Hello, gypq — descenders and Ástërisks").into(),
-            Element::row(vec![Button::new("OK").into(), Button::new("Cancel").into()]),
+            // SD4: these buttons had no on_click. A button that advertises
+            // Action::Click and implements nothing renders as interactive and
+            // does nothing — W0106 exactly. It went unnoticed because W0106
+            // was only reachable from `audit_actions()`, which `lint()` never
+            // called, so a "normal UI" fixture could contain two inert buttons.
+            Element::row(vec![
+                Button::new("OK").on_press(|_| {}).into(),
+                Button::new("Cancel").on_press(|_| {}).into(),
+            ]),
             Label::new("A second paragraph of body text.").into(),
         ])
     })

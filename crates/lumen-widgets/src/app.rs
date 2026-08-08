@@ -1481,6 +1481,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// and via the agent (`ui.lint`).
     pub fn lint(&mut self) -> Vec<lumen_core::Diagnostic> {
         let mut out = crate::audit::lint(&self.semantics_doc().root);
+        // SD4: W0106 (a node advertises a semantic Action it does not
+        // implement) was emitted only by `audit_actions()`, which tests call
+        // and `ui.lint` never did — so an agent could not observe this class of
+        // defect at all, even though the whole point of the action list is
+        // that the agent and assistive tech read it as a contract. Surfaced by
+        // SD5.0's registry repair: the code existed, was documented, and had
+        // no reachable path.
+        out.extend(self.audit_actions());
         // T.4 tofu: any text node whose shaped block contains `.notdef`
         // glyphs (chars no registered face covers). Shaping hits the cache,
         // so this is a cheap walk on an already-rendered tree.

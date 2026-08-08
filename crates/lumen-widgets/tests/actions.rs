@@ -180,3 +180,63 @@ fn no_widget_declares_an_action_it_does_not_implement() {
 fn col(items: Vec<Element>) -> Element {
     widgets::column(items)
 }
+
+/// SD4: a declared action must be implemented — and `App::lint()` must be the
+/// surface that says so.
+///
+/// W0106 existed, was documented, and was reachable only from
+/// `audit_actions()`, which tests called and `ui.lint` never did. So an agent
+/// could not observe this class of defect at all, even though the action list
+/// is precisely the contract the agent and assistive tech read to decide what a
+/// node can do. Wiring it in immediately found three real cases: two inert
+/// buttons in a "normal UI" lint fixture, and a TextField advertising SetValue
+/// with no handler.
+#[test]
+fn lint_reports_declared_but_unimplemented_actions() {
+    use lumen_core::codes;
+
+    // A button that advertises Click and implements nothing: it renders as
+    // interactive, an AT offers "click", and pressing it does nothing.
+    let mut h = App::new(|_| lumen_widgets::Button::new("Inert").id("inert").into())
+        .run_headless(kurbo::Size::new(200.0, 80.0));
+    h.pump();
+
+    let found = h.lint();
+    assert!(
+        found.iter().any(|d| d.code == codes::W0106),
+        "lint must surface W0106 for an unimplemented declared action; got {found:?}"
+    );
+}
+
+/// The counterpart: a TextField now implements the SetValue it declares, so
+/// `input.invokeAction` on it actually changes the value.
+#[test]
+fn text_field_set_value_is_implemented() {
+    let mut h = App::new(|cx| {
+        lumen_widgets::TextField::new(cx, "notes", "")
+            .id("notes")
+            .into()
+    })
+    .run_headless(kurbo::Size::new(300.0, 200.0));
+    h.pump();
+
+    h.invoke_action_with("#notes", "setValue", Some("typed by an agent"))
+        .expect("setValue must be routable — it is a declared action");
+    h.pump();
+
+    let sem = h.semantics_elided();
+    fn find<'a>(
+        n: &'a lumen_core::semantics::SemanticsNode,
+        id: &str,
+    ) -> Option<&'a lumen_core::semantics::SemanticsNode> {
+        if n.id.as_ref().is_some_and(|s| s.as_str() == id) {
+            return Some(n);
+        }
+        n.children.iter().find_map(|c| find(c, id))
+    }
+    assert_eq!(
+        find(&sem, "notes").and_then(|n| n.value.as_deref()),
+        Some("typed by an agent"),
+        "setValue must replace the field's contents"
+    );
+}
