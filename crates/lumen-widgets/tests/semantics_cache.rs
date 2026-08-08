@@ -75,10 +75,7 @@ fn restyle_invalidates_the_elided_cache() {
     h.pump();
     let cold = h.semantics_elided();
     let hovered_before = find(&cold, "bump")
-        .map(|n| {
-            n.states
-                .contains(&lumen_core::semantics::State::Hovered)
-        })
+        .map(|n| n.states.contains(&lumen_core::semantics::State::Hovered))
         .unwrap_or(false);
     assert!(!hovered_before, "precondition: not hovered");
 
@@ -89,10 +86,7 @@ fn restyle_invalidates_the_elided_cache() {
 
     let hot = h.semantics_elided();
     let hovered_after = find(&hot, "bump")
-        .map(|n| {
-            n.states
-                .contains(&lumen_core::semantics::State::Hovered)
-        })
+        .map(|n| n.states.contains(&lumen_core::semantics::State::Hovered))
         .unwrap_or(false);
     assert!(
         hovered_after,

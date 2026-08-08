@@ -27,9 +27,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use kurbo::Size;
 use lumen_core::color::Color;
-use lumen_layout::{Dim, LayoutStyle};
 use lumen_core::identity::{fold_id, hash_id, ScopePath};
 use lumen_core::state::{Runtime, Signal};
+use lumen_layout::{Dim, LayoutStyle};
 use lumen_widgets::{widgets, App};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -280,7 +280,11 @@ fn text_vs_rect_frame(c: &mut Criterion) {
                 widgets::column(vec![])
                     .style(LayoutStyle {
                         width: Dim::px(200.0),
-                        height: Dim::px(if i == 0 { 10.0 + (bump % 3) as f32 } else { 10.0 }),
+                        height: Dim::px(if i == 0 {
+                            10.0 + (bump % 3) as f32
+                        } else {
+                            10.0
+                        }),
                         ..LayoutStyle::default()
                     })
                     .background(Color::srgb8(40, 40, 60, 255))
@@ -326,11 +330,127 @@ fn scope_scaling(c: &mut Criterion) {
     g.finish();
 }
 
+// --- instrument 5 (CP0.6): the observability share of a frame ---------------
+
+/// How much of a changed frame is spent on the agent/a11y surface.
+///
+/// This replaces a QUARANTINED figure. `docs/plan-node-cost.md` claimed
+/// "semantics + dep_index = 125 us of a 776 us frame (16%)", but that table is
+/// disclaimed by its own document (its rows sum to 994 us against a 773 us
+/// measured frame). Nothing reproducible ever backed it, so the campaign
+/// forbids exit criteria citing it — hence this bench.
+///
+/// It measures the difference between a frame whose semantics are consumed and
+/// one whose are not, which is the honest form of the question: the tree is
+/// built eagerly today, so the cost is paid whether or not anyone reads it.
+fn semantics_share(c: &mut Criterion) {
+    const N: i64 = 500;
+    let mut g = c.benchmark_group("observability_share_500_nodes");
+
+    // Baseline: pump only.
+    let mut h = flat_app(N).run_headless(Size::new(400.0, 800.0));
+    h.pump();
+    let n: Signal<i64> = h.runtime().signal("n", || 0);
+    g.bench_function("pump_only", |b| {
+        b.iter(|| {
+            n.update(h.runtime(), |v| *v += 1);
+            h.pump();
+        });
+    });
+
+    // Same frame, plus building the elided projection an agent/AT would read.
+    // The delta is what observability costs a *consumer*; the eager
+    // `build_semantics` inside pump is charged to both sides, which is why
+    // making it lazy (OB2) is measured by pump_only moving, not by this delta.
+    let mut h2 = flat_app(N).run_headless(Size::new(400.0, 800.0));
+    h2.pump();
+    let n2: Signal<i64> = h2.runtime().signal("n", || 0);
+    g.bench_function("pump_and_read_semantics", |b| {
+        b.iter(|| {
+            n2.update(h2.runtime(), |v| *v += 1);
+            h2.pump();
+            std::hint::black_box(h2.semantics_elided());
+        });
+    });
+    g.finish();
+}
+
+// --- instrument 6 (CP0.6): the restyle path -------------------------------
+
+/// A hover transition, which was entirely unbenched.
+///
+/// `restyle_visual` is a distinct pump outcome from a rebuild: no closure runs,
+/// but the whole semantics tree is rebuilt anyway (`app.rs`'s restyle branch).
+/// Pointer motion across an interactive UI therefore pays a per-node cost that
+/// no gate watched. It is also the path OB2's incremental-semantics work has to
+/// improve, so it needs a number before that work starts.
+fn restyle_hover_frame(c: &mut Criterion) {
+    const N: i64 = 500;
+
+    // Buttons, not text: hover only takes the restyle path if some node's
+    // hovered state actually flips. An all-text tree makes PointerMove an idle
+    // pump (~4 us here), i.e. a bench that measures nothing and would stay
+    // green forever — worse than having no bench at all.
+    let mut h = App::new(move |cx| {
+        let rows: Vec<_> = (0..N)
+            .map(|i| {
+                let s: Signal<i64> = cx.signal("clicks", || 0);
+                widgets::button(format!("row {i}"), move |rt| s.update(rt, |v| *v += 1))
+                    .id(format!("row-{i}"))
+            })
+            .collect();
+        widgets::column(rows)
+    })
+    .run_headless(Size::new(400.0, 800.0));
+    h.pump();
+
+    // Take the points from real laid-out bounds rather than guessing
+    // coordinates — a guess that lands outside every button silently turns
+    // this into an idle-pump benchmark.
+    let a = h
+        .node_bounds_by_id("row-0")
+        .expect("row-0 laid out")
+        .center();
+    let b_pt = h
+        .node_bounds_by_id("row-1")
+        .expect("row-1 laid out")
+        .center();
+
+    // Guard the measurement: if hover stops flipping state, this bench
+    // silently becomes an idle-pump benchmark again.
+    h.inject(lumen_core::events::Event::PointerMove(
+        lumen_core::events::PointerEvent::at(a),
+    ));
+    h.pump();
+    fn any_hovered(n: &lumen_core::semantics::SemanticsNode) -> bool {
+        n.states.contains(&lumen_core::semantics::State::Hovered)
+            || n.children.iter().any(any_hovered)
+    }
+    assert!(
+        any_hovered(&h.semantics_elided()),
+        "restyle_hover_frame must actually hover something, else it measures \
+         an idle pump"
+    );
+
+    let mut flip = false;
+    c.bench_function("restyle_hover_frame", |b| {
+        b.iter(|| {
+            flip = !flip;
+            h.inject(lumen_core::events::Event::PointerMove(
+                lumen_core::events::PointerEvent::at(if flip { a } else { b_pt }),
+            ));
+            h.pump();
+        });
+    });
+}
+
 criterion_group!(
     nodecost,
     allocs_per_frame,
     text_vs_rect_frame,
     text_list_scoped_changed_frame,
-    scope_scaling
+    scope_scaling,
+    semantics_share,
+    restyle_hover_frame
 );
 criterion_main!(nodecost);

@@ -115,5 +115,8 @@ fn without_opt_in_an_abi_matching_update_still_takes_tier3() {
 
     let sem = d.app.semantics_json().to_string();
     assert!(sem.contains("Counter"), "new build rendered: {sem}");
-    assert!(sem.contains("count: 1"), "state survived the restart: {sem}");
+    assert!(
+        sem.contains("count: 1"),
+        "state survived the restart: {sem}"
+    );
 }

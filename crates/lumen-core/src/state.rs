@@ -1144,9 +1144,10 @@ impl<T: State> Signal<T> {
                 let slot = b.slots.get_mut(&self.id).expect("signal slot missing");
                 slot.version = ver;
                 let found = slot.stored_type_name();
-                let v = slot.stored_mut().downcast_mut::<T>().unwrap_or_else(|| {
-                    panic!("{}", type_mismatch_msg::<T>(key.as_deref(), found))
-                });
+                let v = slot
+                    .stored_mut()
+                    .downcast_mut::<T>()
+                    .unwrap_or_else(|| panic!("{}", type_mismatch_msg::<T>(key.as_deref(), found)));
                 f(v);
             }
             let subs: Vec<ScopeId> = b
@@ -1311,7 +1312,11 @@ mod tests {
             // The inner batch must not have flushed.
             assert_eq!(runs.get(), before, "inner batch flushed early");
         });
-        assert_eq!(runs.get(), before + 1, "outer batch must flush exactly once");
+        assert_eq!(
+            runs.get(),
+            before + 1,
+            "outer batch must flush exactly once"
+        );
     }
 
     #[test]

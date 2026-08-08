@@ -1065,9 +1065,7 @@ impl Shell {
     fn push_a11y_tree(&mut self) {
         let Some(h) = &self.headless else { return };
         if let Some(a) = &mut self.a11y {
-            a.update_if_active(|| {
-                lumen_widgets::a11y::build_tree(&h.semantics_elided())
-            });
+            a.update_if_active(|| lumen_widgets::a11y::build_tree(&h.semantics_elided()));
         }
     }
 

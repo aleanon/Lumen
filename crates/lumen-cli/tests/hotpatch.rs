@@ -116,6 +116,10 @@ fn tier2_is_off_by_default() {
         Swap::NeedsTier3(Tier3Reason::NotEnabled),
         "a matching ABI token must not authorize a swap on its own"
     );
-    assert_eq!(comp.label(), "Count", "component must not have been adopted");
+    assert_eq!(
+        comp.label(),
+        "Count",
+        "component must not have been adopted"
+    );
     assert_eq!(comp.retired_count(), 0, "nothing should have been retired");
 }

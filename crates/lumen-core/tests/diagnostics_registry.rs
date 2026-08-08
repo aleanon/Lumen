@@ -43,9 +43,7 @@ fn defined_codes() -> BTreeSet<String> {
 /// `E####` or `W####`.
 fn is_code(s: &str) -> bool {
     let mut chars = s.chars();
-    matches!(chars.next(), Some('E' | 'W'))
-        && s.len() == 5
-        && chars.all(|c| c.is_ascii_digit())
+    matches!(chars.next(), Some('E' | 'W')) && s.len() == 5 && chars.all(|c| c.is_ascii_digit())
 }
 
 #[test]

@@ -93,7 +93,10 @@ fn scroll_with_an_unresolvable_selector_errors_instead_of_wheeling_origin() {
         "input.scroll",
         json!({ "selector": "#does-not-exist", "dy": 40.0, "timeout_ms": 50 }),
     );
-    assert!(r.get("error").is_some(), "unresolvable selector errors: {r}");
+    assert!(
+        r.get("error").is_some(),
+        "unresolvable selector errors: {r}"
+    );
     // And with no selector at all, same contract as the other input verbs.
     let r = call(&mut h, "input.scroll", json!({ "dy": 40.0 }));
     assert!(r.get("error").is_some(), "missing selector errors: {r}");

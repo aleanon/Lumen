@@ -63,7 +63,10 @@ fn type_mismatch_does_not_report_the_box() {
         !msg.contains("Box<"),
         "diagnostic reported the box rather than the stored type: {msg}"
     );
-    assert!(msg.contains("u8"), "expected the stored type u8, got: {msg}");
+    assert!(
+        msg.contains("u8"),
+        "expected the stored type u8, got: {msg}"
+    );
     assert!(
         msg.contains("f32"),
         "expected the requested type f32, got: {msg}"
