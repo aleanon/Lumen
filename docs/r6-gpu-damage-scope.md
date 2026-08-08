@@ -58,6 +58,12 @@ load-bearing:
 - And `LoadOp::Load` is unsound while the atlas can **wipe itself**: on overflow
   today the whole atlas is cleared (`gpu.rs:1102`), which invalidates glyphs the
   retained target still shows. Hence **R6.5** first.
+  **R6.5 landed 2026-08-08**: the atlas is a 4-layer texture array, `page` rides
+  in the instance stream as a flat varying, and the glyph pipeline has its own
+  bind-group layout (view dimension is part of a layout, so it could not keep
+  sharing `image_bgl`). Clears are now 4× rarer rather than eliminated — the
+  soundness argument for R6.3 still needs the clear to be *handled*, not just
+  made less frequent.
 
 There is also an unresolved correctness question the plan already flagged:
 `get_current_texture()` on a double/triple-buffered swapchain does **not**

@@ -223,6 +223,8 @@ struct GlyphInstance {
     uv: [f32; 4],
     /// Text color (straight alpha).
     color: [f32; 4],
+    /// R6.5: atlas array layer this glyph was packed into.
+    page: u32,
 }
 
 /// One ordered draw within a layer (R1: draws are emitted in display-list order,
@@ -321,6 +323,15 @@ const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// Edge length of the (single-page) glyph coverage atlas in px (R3.3). Holds
 /// thousands of small glyphs; on overflow the allocator is cleared and repacked.
 const ATLAS_SIZE: u32 = 1024;
+/// R6.5: glyph-atlas array layers. The atlas packer has always supported pages
+/// (`GlyphAtlas::new(size, max_pages)`); the GPU pinned it to 1 because the
+/// texture was a single 2-D layer and the instance stream carried no page
+/// index, so a second page would have sampled the first one's texels. With the
+/// texture an array and `page` in the vertex stream, raising this is the whole
+/// of R6.5 — and it matters because exhausting the atlas CLEARS it (every glyph
+/// re-rasterised and re-uploaded), which is both a latency spike and the thing
+/// that makes `LoadOp::Load` unsound for R6.3.
+const ATLAS_PAGES: u32 = 4;
 
 /// The GPU backend as a runtime-selectable [`Renderer`](crate::Renderer) (A1).
 /// Covers the command set the offscreen backend supports (solid rects — square
@@ -575,6 +586,30 @@ impl Wgpu {
             ],
         });
 
+        // R6.5: the glyph atlas is a texture ARRAY, so it cannot share
+        // `image_bgl` (view dimension is part of the layout).
+        let atlas_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("glyph-atlas"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         let blend = Some(wgpu::BlendState::ALPHA_BLENDING);
         let target = wgpu::ColorTargetState {
             format: TARGET_FORMAT,
@@ -649,16 +684,21 @@ impl Wgpu {
 
         // Glyph pipeline (R3.3): instanced quads sampling the shared coverage
         // atlas (group 1 = atlas texture + sampler, same layout as images).
+        let glyph_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("glyph-layout"),
+            bind_group_layouts: &[&viewport_bgl, &atlas_bgl],
+            push_constant_ranges: &[],
+        });
         let glyph_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("glyph"),
-            layout: Some(&image_layout),
+            layout: Some(&glyph_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "glyph_vs",
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<GlyphInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Uint32],
                 }],
                 compilation_options: Default::default(),
             },
@@ -885,7 +925,7 @@ impl Wgpu {
             size: wgpu::Extent3d {
                 width: ATLAS_SIZE,
                 height: ATLAS_SIZE,
-                depth_or_array_layers: 1,
+                depth_or_array_layers: ATLAS_PAGES,
             },
             mip_level_count: 1,
             sample_count: 1,
@@ -894,10 +934,13 @@ impl Wgpu {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let atlas_view = atlas_tex.create_view(&Default::default());
+        let atlas_view = atlas_tex.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         let atlas_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("glyph-atlas-bg"),
-            layout: &image_bgl,
+            layout: &atlas_bgl,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -932,7 +975,7 @@ impl Wgpu {
             image_bgl,
             atlas_tex,
             atlas_bind,
-            atlas: std::cell::RefCell::new(crate::atlas::GlyphAtlas::new(ATLAS_SIZE, 1)),
+            atlas: std::cell::RefCell::new(crate::atlas::GlyphAtlas::new(ATLAS_SIZE, ATLAS_PAGES)),
             atlas_overflow: std::cell::Cell::new(false),
             readback: std::cell::RefCell::new(None),
             sampler,
@@ -1597,7 +1640,7 @@ impl Wgpu {
                                         origin: wgpu::Origin3d {
                                             x: slot.x,
                                             y: slot.y,
-                                            z: 0,
+                                            z: slot.page,
                                         },
                                         aspect: wgpu::TextureAspect::All,
                                     },
@@ -1626,6 +1669,7 @@ impl Wgpu {
                                     gi.height as f32 / s,
                                 ],
                                 color,
+                                page: slot.page,
                             });
                         }
                         drop(atlas);
@@ -2855,22 +2899,38 @@ fn image_fs(in: VsOut) -> @location(0) vec4<f32> {
 // `uv` is `[u0, v0, u_w, v_h]` into the R8 atlas; the fragment tints the sampled
 // coverage with the run color (straight alpha, source-over).
 
+// R6.5: the atlas is a texture ARRAY. Declared separately from `img_tex` at the
+// same group/binding — each pipeline supplies its own layout, and wgpu validates
+// against the bindings a given entry point actually uses.
+@group(1) @binding(0) var atlas_tex: texture_2d_array<f32>;
+@group(1) @binding(1) var atlas_samp: sampler;
+
+struct GlyphVsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) uv: vec2<f32>,
+    // `flat`: a layer index must not be interpolated across the quad.
+    @location(2) @interpolate(flat) page: u32,
+};
+
 @vertex
 fn glyph_vs(@builtin(vertex_index) vi: u32,
             @location(0) rect: vec4<f32>,
             @location(1) uv: vec4<f32>,
-            @location(2) color: vec4<f32>) -> VsOut {
+            @location(2) color: vec4<f32>,
+            @location(3) page: u32) -> GlyphVsOut {
     let c = corner(vi);
-    var o: VsOut;
+    var o: GlyphVsOut;
     o.pos = to_ndc(rect.xy + c * rect.zw);
     o.color = color;
     o.uv = uv.xy + c * uv.zw;
+    o.page = page;
     return o;
 }
 
 @fragment
-fn glyph_fs(in: VsOut) -> @location(0) vec4<f32> {
-    let cov = textureSample(img_tex, img_samp, in.uv).r;
+fn glyph_fs(in: GlyphVsOut) -> @location(0) vec4<f32> {
+    let cov = textureSample(atlas_tex, atlas_samp, in.uv, in.page).r;
     return vec4<f32>(in.color.rgb, in.color.a * cov);
 }
 
