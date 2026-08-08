@@ -302,6 +302,30 @@ fn handle<R: Renderer, E: Spawner>(
     params: &Value,
 ) -> RpcResult {
     match method {
+        // ID0: version discovery. An agent connecting to an unknown build has
+        // no way to ask what it is talking to — every other verb assumes the
+        // shapes it returns are already understood. That is fine while nothing
+        // changes, and useless the moment something does: ID1 changes the node
+        // handle from `node-<index>` to `nx-<hex>`, and a client needs to learn
+        // that from the server rather than by pattern-matching a string and
+        // guessing.
+        //
+        // `accepts` is deliberately separate from `semantics`: during the ID2
+        // alias window the server EMITS only the new form while still ACCEPTING
+        // the old one, and a client cannot infer that from a version number.
+        "agent.protocol" => Ok(json!({
+            "semantics": lumen_core::semantics::SCHEMA,
+            "rpc": "lumen-rpc/1",
+            "accepts": { "nodeHandles": ["node-<index>", "nx-<hex>"] },
+            "deprecations": [{
+                "what": "node-<index>",
+                "since": "2026-08-08",
+                "code": lumen_core::codes::W0302,
+                "replacement": "nx-<hex>",
+                "why": "node ids were arena slot indices, re-minted every \
+                        rebuild; persisting the arena makes them ambiguous",
+            }],
+        })),
         "ui.getTree" => {
             let raw = params.get("raw").and_then(|v| v.as_bool()).unwrap_or(false);
             // C.4a: an optional selector narrows the reply to one subtree —
@@ -1064,6 +1088,11 @@ pub fn mcp_manifest() -> Value {
     let tool = |name: &str, desc: &str| json!({ "name": name, "description": desc });
     json!({
         "tools": [
+            tool(
+                "agent_protocol",
+                "Protocol versions this server speaks, the node-handle forms it \
+                 accepts, and pending deprecations.",
+            ),
             tool("ui_getTree", "Get the semantic tree (accessibility/agent view)."),
             tool("ui_screenshot", "Capture a PNG screenshot, optionally ID-annotated."),
             tool("ui_getStyles", "Computed styles for a selector."),

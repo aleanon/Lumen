@@ -14,6 +14,15 @@ use kurbo::Rect;
 #[cfg(feature = "snapshot")]
 use serde_json::{json, Value};
 
+/// Version of the agent-facing semantics JSON shape, reported as `schema` on
+/// every `ui.getTree` and by the `agent.protocol` RPC.
+///
+/// Bumped **with** a breaking change, never ahead of one: a version that moves
+/// while the shape stays identical is a lie to any client doing version
+/// negotiation. ID1 changes node handles from `node-<index>` to `nx-<hex>` and
+/// bumps this in the same commit.
+pub const SCHEMA: &str = "lumen-semantics/1";
+
 /// Accessible role (closed set, 03 §1). Extend only via the decision log.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Role {
@@ -549,7 +558,7 @@ impl SemanticsDoc {
             window.insert("focused".into(), json!(format!("node-{f}")));
         }
         json!({
-            "schema": "lumen-semantics/1",
+            "schema": SCHEMA,
             "window": Value::Object(window),
             "root": root.to_json(),
         })

@@ -94,3 +94,44 @@ fn mcp_manifest_lists_tools() {
     assert!(tools.iter().any(|t| t["name"] == json!("ui_getTree")));
     assert!(tools.iter().any(|t| t["name"] == json!("input_click")));
 }
+
+/// ID0: an agent connecting to an unknown build must be able to ask what it is
+/// talking to, rather than pattern-matching handle strings and guessing.
+#[test]
+fn agent_protocol_reports_versions_and_deprecations() {
+    let mut h = counter().run_headless(kurbo::Size::new(300.0, 200.0));
+    h.pump();
+
+    let r = lumen_agent::dispatch(
+        &mut h,
+        &json!({"jsonrpc":"2.0","id":1,"method":"agent.protocol"}),
+    );
+    let p = &r["result"];
+
+    assert_eq!(
+        p["semantics"],
+        lumen_core::semantics::SCHEMA,
+        "must report the same schema string ui.getTree stamps, not a literal"
+    );
+    assert!(p["rpc"].is_string(), "rpc version present");
+
+    // `accepts` is separate from `semantics` on purpose: during the ID2 alias
+    // window the server emits only the new handle form while still accepting
+    // the old one, and no version number can express that.
+    let accepts = p["accepts"]["nodeHandles"]
+        .as_array()
+        .expect("accepted handle forms listed");
+    assert!(
+        accepts.iter().any(|v| v == "nx-<hex>"),
+        "the replacement form must be advertised: {accepts:?}"
+    );
+
+    let dep = &p["deprecations"][0];
+    assert_eq!(dep["what"], "node-<index>");
+    assert_eq!(dep["replacement"], "nx-<hex>");
+    assert_eq!(
+        dep["code"],
+        lumen_core::codes::W0302,
+        "deprecation must name the diagnostic an agent will actually receive"
+    );
+}

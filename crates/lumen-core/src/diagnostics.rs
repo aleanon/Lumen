@@ -134,6 +134,12 @@ pub mod codes {
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).
     pub const W0301: &str = "W0301";
+    /// A deprecated `node-<index>` agent handle was accepted (ID2 alias
+    /// window). The id space moved to `nx-<hex>` because arena slot indices
+    /// are re-minted every rebuild, so persisting the arena makes them
+    /// ambiguous. Emitted on input only — the server never *returns* the old
+    /// form, since after CP6 it would be wrong rather than merely deprecated.
+    pub const W0302: &str = "W0302";
     /// Missing translation for a message key in the active locale (T5.3).
     pub const W0401: &str = "W0401";
     /// Tofu: a shaped text block contains `.notdef` glyphs — characters no
