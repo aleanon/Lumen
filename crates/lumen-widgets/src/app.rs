@@ -274,6 +274,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             bg_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
             elided_cache: RefCell::new(None),
+            #[cfg(feature = "snapshot")]
             last_change: ChangeReport {
                 kind: "idle",
                 nodes: Vec::new(),
@@ -734,6 +735,7 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// `sem_root` is reassigned.
     elided_cache: RefCell<Option<Rc<lumen_core::semantics::SemanticsNode>>>,
     /// What the last `pump` actually did (F4.3 change attribution).
+    #[cfg(feature = "snapshot")]
     last_change: ChangeReport,
 }
 
@@ -839,13 +841,13 @@ type PendingStyle = (
 
 /// What a `pump` did, for change attribution (F4.3).
 #[derive(Clone, Default)]
-/// Pre-existing lean-build waste, not introduced by OB3: the four write sites
-/// run unconditionally but the only reader (`last_change()`) is snapshot-gated,
-/// so a lean build allocates a `Vec<u32>` per pump that nothing can observe.
-/// Gating the writes as well is a follow-up (it touches the pump's control
-/// flow); silencing the warning here is what lets the lean profile build with
-/// `-D warnings` at all, which LN0 needs.
-#[cfg_attr(not(feature = "snapshot"), allow(dead_code))]
+/// What the last pump did (F4.3), for `ui.lastChange`.
+///
+/// Snapshot-only. The four write sites route through `record_change`, which
+/// compiles away in a lean build — previously they ran unconditionally while
+/// the only reader was gated, so a lean build allocated a `Vec<u32>` per pump
+/// for a value nothing could observe.
+#[cfg(feature = "snapshot")]
 struct ChangeReport {
     /// `"idle"`, `"patch"` (paint-only bindings), or `"rebuild"` (structural).
     kind: &'static str,
@@ -967,10 +969,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         } else {
             // Nothing changed — keep the retained frame, report no damage.
             self.last_damage = Damage::None;
-            self.last_change = ChangeReport {
-                kind: "idle",
-                nodes: Vec::new(),
-            };
+            self.record_change("idle", Vec::new);
         }
         // F0 fixpoint contract: a settled pump leaves the reactive graph
         // quiescent. Writes flush synchronously, so after dispatch + build
@@ -1727,6 +1726,27 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         built
     }
 
+    /// Record what this pump did (F4.3), if anything will ever read it.
+    ///
+    /// `nodes` is a closure so the `Vec` is not built in a lean build: the only
+    /// reader is `last_change()`, which is `#[cfg(feature = "snapshot")]`, so
+    /// without this a lean build allocated a `Vec<u32>` every pump for a value
+    /// nothing could observe.
+    #[inline]
+    fn record_change(&mut self, kind: &'static str, nodes: impl FnOnce() -> Vec<u32>) {
+        #[cfg(feature = "snapshot")]
+        {
+            self.last_change = ChangeReport {
+                kind,
+                nodes: nodes(),
+            };
+        }
+        #[cfg(not(feature = "snapshot"))]
+        {
+            let _ = (kind, nodes);
+        }
+    }
+
     /// Drop the memoized elided tree — call wherever `sem_root` is reassigned.
     fn invalidate_semantics_cache(&self) {
         self.elided_cache.borrow_mut().take();
@@ -2347,10 +2367,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
         self.invalidate_semantics_cache();
         self.last_damage = self.paint();
-        self.last_change = ChangeReport {
-            kind: "restyle",
-            nodes: nodes.iter().map(|n| n.index()).collect(),
-        };
+        self.record_change("restyle", || nodes.iter().map(|n| n.index()).collect());
         true
     }
 
@@ -2493,10 +2510,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         self.last_damage = self.paint();
         self.last_build_gen = self.rt.write_gen();
-        self.last_change = ChangeReport {
-            kind: "patch",
-            nodes: patched,
-        };
+        self.record_change("patch", || patched);
     }
 
     fn rebuild(&mut self) {
@@ -2546,10 +2560,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.last_build_clock = self.clock_ms;
         // F4.3: a structural rebuild. Per-node change-diffing is deferred; the
         // agent reads the fresh tree via `getTree`. (Patches report exact nodes.)
-        self.last_change = ChangeReport {
-            kind: "rebuild",
-            nodes: Vec::new(),
-        };
+        self.record_change("rebuild", Vec::new);
     }
 
     fn rebuild_inner(&mut self) {
