@@ -55,6 +55,14 @@ load-bearing:
   loading last frame's content requires that content to still exist, which needs
   **R6.4** (pooled, persistent render targets; today `encode_root` creates a
   fresh resolved/MSAA texture per layer per frame and drops it).
+  **R6.4 landed 2026-08-08**: `TargetPool` keys targets on
+  `(width, height, samples)` and derives availability from `Rc::strong_count`,
+  so a target an in-flight frame still holds cannot be reissued. Measured 2
+  targets across 13 frames against 18 unpooled. Sizes unused for 120 frames are
+  evicted, which is what stops a resize drag pinning one target per intermediate
+  size. Targets now *persist*, so R6.3 has the content it needs to `Load` — the
+  remaining blocker there is the atlas clear (R6.5 made it 4× rarer, not
+  impossible) and the `get_current_texture()` content guarantee.
 - And `LoadOp::Load` is unsound while the atlas can **wipe itself**: on overflow
   today the whole atlas is cleared (`gpu.rs:1102`), which invalidates glyphs the
   retained target still shows. Hence **R6.5** first.

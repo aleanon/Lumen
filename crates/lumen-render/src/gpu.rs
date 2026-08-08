@@ -50,6 +50,8 @@ pub struct Wgpu {
     tess_cache: std::cell::RefCell<
         std::collections::HashMap<u64, std::rc::Rc<(Vec<PathVertex>, Vec<u32>)>>,
     >,
+    /// R6.4: reusable layer render targets.
+    targets: std::cell::RefCell<TargetPool>,
     /// The adapter's reported name (e.g. "NVIDIA GeForce RTX 4070",
     /// "llvmpipe (LLVM 20.1.2, 256 bits)"). Kept so tests can attribute a
     /// failure to a driver rather than to the renderer — the GPU parity suite
@@ -172,9 +174,109 @@ struct CompositeInstance {
 
 /// GPU resources that must outlive `queue.submit` (textures referenced by the
 /// recorded command buffer). Dropped after submit returns.
+/// R6.4: reusable layer render targets, keyed by `(width, height, samples)`.
+///
+/// `encode_layer` created a fresh `resolved` (and, with MSAA, a fresh multisample
+/// attachment) for every layer on every frame and dropped both at frame end —
+/// allocating and freeing multi-megabyte textures at frame rate for targets that
+/// are almost always the identical size as last frame's.
+///
+/// Availability is derived from `Rc::strong_count`, not tracked by hand: an
+/// entry is free exactly when the pool is its only owner. That makes the
+/// in-flight case correct by construction — a target a frame still references
+/// cannot be handed out, because that frame's `KeepAlive` holds a clone. The
+/// alternative (an explicit release at frame end) has to be right about when the
+/// GPU is finished, and would be wrong in the direction that corrupts frames.
+#[derive(Default)]
+struct TargetPool {
+    by_key: std::collections::HashMap<(u32, u32, u32), Vec<std::rc::Rc<wgpu::Texture>>>,
+    /// Frame counter, used only to evict sizes that have stopped being asked
+    /// for. Without it a window resize drag would leave one pooled target per
+    /// intermediate size, permanently.
+    epoch: u64,
+    last_used: std::collections::HashMap<(u32, u32, u32), u64>,
+}
+
+/// Frames a size may go unused before its pooled targets are dropped.
+const TARGET_POOL_TTL: u64 = 120;
+/// Free targets kept per size. More than a handful means layers nest deeply at
+/// one size, which is bounded in practice; the cap stops a pathological list
+/// from pinning memory forever.
+const TARGET_POOL_PER_KEY: usize = 8;
+
+impl TargetPool {
+    fn begin_frame(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
+        let (epoch, last) = (self.epoch, &self.last_used);
+        self.by_key.retain(|k, v| {
+            let fresh = last
+                .get(k)
+                .is_some_and(|&e| epoch.saturating_sub(e) < TARGET_POOL_TTL);
+            if fresh {
+                // Drop surplus free entries even for a live size.
+                let mut free = 0;
+                v.retain(|t| {
+                    if std::rc::Rc::strong_count(t) > 1 {
+                        return true;
+                    }
+                    free += 1;
+                    free <= TARGET_POOL_PER_KEY
+                });
+            }
+            // A size still referenced by an in-flight frame is never dropped.
+            fresh || v.iter().any(|t| std::rc::Rc::strong_count(t) > 1)
+        });
+        self.last_used
+            .retain(|_, &mut e| epoch.saturating_sub(e) < TARGET_POOL_TTL);
+    }
+
+    fn acquire(
+        &mut self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        samples: u32,
+    ) -> std::rc::Rc<wgpu::Texture> {
+        let key = (width, height, samples);
+        self.last_used.insert(key, self.epoch);
+        let v = self.by_key.entry(key).or_default();
+        if let Some(t) = v.iter().find(|t| std::rc::Rc::strong_count(t) == 1) {
+            return t.clone();
+        }
+        // Multisample attachments are never sampled or copied from; the resolve
+        // target is both (a parent composite and the backdrop blur read it).
+        let usage = if samples > 1 {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+        } else {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING
+        };
+        let t = std::rc::Rc::new(device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(if samples > 1 { "layer-msaa" } else { "layer" }),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: samples,
+            dimension: wgpu::TextureDimension::D2,
+            format: TARGET_FORMAT,
+            usage,
+            view_formats: &[],
+        }));
+        v.push(t.clone());
+        t
+    }
+}
+
 #[derive(Default)]
 struct KeepAlive {
     textures: Vec<wgpu::Texture>,
+    /// R6.4: pooled layer targets this frame borrowed. Holding a clone is what
+    /// marks them in-use — see [`TargetPool`].
+    rc_textures: Vec<std::rc::Rc<wgpu::Texture>>,
     views: Vec<wgpu::TextureView>,
     buffers: Vec<wgpu::Buffer>,
     binds: Vec<wgpu::BindGroup>,
@@ -965,6 +1067,7 @@ impl Wgpu {
             image_pipeline,
             glyph_pipeline,
             path_pipeline,
+            targets: std::cell::RefCell::new(TargetPool::default()),
             adapter_name,
             adapter_backend,
             gradient_pipeline,
@@ -1213,8 +1316,9 @@ impl Wgpu {
         list: &DisplayList,
         background: Color,
         scale: f64,
-    ) -> wgpu::Texture {
+    ) -> std::rc::Rc<wgpu::Texture> {
         use wgpu::util::DeviceExt;
+        self.targets.borrow_mut().begin_frame();
         let device = &self.device;
         // Shared viewport uniform: physical size + the logical→physical scale.
         let viewport = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1253,6 +1357,14 @@ impl Wgpu {
     /// distinguish "Lumen renders this wrong" from "this driver does".
     pub fn adapter_name(&self) -> &str {
         &self.adapter_name
+    }
+
+    /// R6.4: how many layer render targets the pool has allocated in total.
+    /// A steady frame loop must not grow this after the first frame — that is
+    /// the property the pool exists for, and it is not observable any other way
+    /// from outside (wgpu exposes no allocation counter).
+    pub fn pooled_target_count(&self) -> usize {
+        self.targets.borrow().by_key.values().map(Vec::len).sum()
     }
 
     /// True when the OpenGL backend answered. GL is only selected when no
@@ -1372,7 +1484,7 @@ impl Wgpu {
         list: &DisplayList,
         clear: Option<Color>,
         scale: f64,
-    ) -> wgpu::Texture {
+    ) -> std::rc::Rc<wgpu::Texture> {
         use wgpu::util::DeviceExt;
 
         // --- collect ordered draw ops (display-list order within the layer) -
@@ -1486,7 +1598,7 @@ impl Wgpu {
                         usage: wgpu::BufferUsages::VERTEX,
                     });
                     ops.push(LayerDraw::Composite { buf, bind });
-                    keep.textures.push(child);
+                    keep.rc_textures.push(child);
                     keep.views.push(child_view);
                     i = j + 1;
                 }
@@ -1701,38 +1813,12 @@ impl Wgpu {
         // --- this layer's target. MSAA (when available) gives tessellated
         // paths their edge AA; the single-sample `resolved` is the resolve target
         // (and what a parent composite / backdrop blur samples).
-        let resolved = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("layer"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: TARGET_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let resolved = self.targets.borrow_mut().acquire(device, width, height, 1);
         let resolved_view = resolved.create_view(&Default::default());
         let msaa_tex = (self.sample_count > 1).then(|| {
-            device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("layer-msaa"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: self.sample_count,
-                dimension: wgpu::TextureDimension::D2,
-                format: TARGET_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            })
+            self.targets
+                .borrow_mut()
+                .acquire(device, width, height, self.sample_count)
         });
         let msaa_view = msaa_tex
             .as_ref()
@@ -1883,7 +1969,7 @@ impl Wgpu {
             }
         }
         if let Some(t) = msaa_tex {
-            keep.textures.push(t);
+            keep.rc_textures.push(t);
         }
         keep.views.extend(msaa_view);
         keep.views.push(resolved_view);
