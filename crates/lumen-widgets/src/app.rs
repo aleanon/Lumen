@@ -16,12 +16,12 @@ use lumen_core::semantics::{
 use lumen_core::state::Runtime;
 use lumen_core::tree::{NodeFlags, Tree};
 use lumen_core::{Color, NodeIndex, StableId};
-use lumen_layout::{Dim, LayoutNode, LayoutStyle, LayoutTree};
+use lumen_layout::{Dim, LayoutEngine, LayoutNode, LayoutStyle, LayoutTree};
 use lumen_render::{
     cpu, BlendMode, Border, Brush, CornerRadii, Damage, DisplayList, DrawCmd, RgbaImage,
     RoundedRect,
 };
-use lumen_text::TextEngine;
+use lumen_text::{TextBlockApi, TextEngine, TextEngineApi};
 use std::cell::RefCell;
 
 use crate::fxhash::HashMap;
@@ -31,6 +31,46 @@ use std::rc::Rc;
 /// paint on top in a final pass, so they must also win hit-testing over the
 /// normal-flow content they cover (which has the default z of 0).
 const OVERLAY_Z: u32 = 1000;
+
+/// MOD1: the platform bundle — one type parameter carrying every swappable
+/// internal, instead of one parameter per seam.
+///
+/// # Why a bundle
+///
+/// `App<R, E, L, T, S, …>` would add a type parameter per seam. On a 4,600-line
+/// runtime that costs build time on every edit, strains coherence, and forces
+/// every downstream signature (`Headless<R, E, …>` appears across three crates)
+/// to grow with the seam count. A bundle keeps the arity fixed: adding a seam
+/// later adds an associated type here, not a parameter everywhere.
+///
+/// # What it does not do yet
+///
+/// The seams it names — [`LayoutEngine`](lumen_layout::LayoutEngine) and
+/// [`TextEngineApi`](lumen_text::TextEngineApi) — are verified substitutable by
+/// their own `engine_seam.rs` tests. What this trait adds is the *selection*
+/// mechanism. The `Style` seam is deliberately absent: MOD4's extension point is
+/// runtime registration (`lumen_style::register_property`), not a type swap, so
+/// there is nothing for an associated type to name.
+///
+/// `Default` is required on both because the runtime constructs a fresh layout
+/// tree per rebuild and one text engine per window; a bundle whose members
+/// could not be constructed without arguments would need a factory method and a
+/// stored instance, which is more machinery than the seam warrants today.
+pub trait PlatformConfig: 'static {
+    /// The layout engine (MOD2).
+    type Layout: lumen_layout::LayoutEngine + Default;
+    /// The text engine (MOD3).
+    type Text: lumen_text::TextEngineApi + Default;
+}
+
+/// The shipped bundle: taffy layout (ADR-004) + parley/swash text (ADR-005).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DefaultPlatform;
+
+impl PlatformConfig for DefaultPlatform {
+    type Layout = LayoutTree;
+    type Text = TextEngine;
+}
 
 /// Statistics for one rendered frame.
 #[derive(Clone, Copy, Debug)]
@@ -62,7 +102,14 @@ type WindowDecl = (
 /// deterministic CPU `TinySkia`). The runtime is generic over `R` — zero-cost by
 /// default; a consumer who wants dynamic backend selection uses
 /// `R = Box<dyn Renderer>` (see the blanket `Renderer` impl in `lumen-render`).
-pub struct App<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::InlineSpawner> {
+pub struct App<
+    R = lumen_render::DefaultRenderer,
+    E = lumen_core::tasks::InlineSpawner,
+    P = DefaultPlatform,
+> {
+    /// MOD1: `App` names the platform bundle only to hand it to the `Headless`
+    /// it builds — it holds no layout or text state itself.
+    _platform: std::marker::PhantomData<P>,
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     #[allow(dead_code)]
     stylesheet: Option<String>,
@@ -83,6 +130,7 @@ impl App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner> {
     /// reference renderer and the deterministic inline executor.
     pub fn new(root: impl Fn(&mut BuildCx) -> Element + 'static) -> App {
         App {
+            _platform: std::marker::PhantomData,
             root: Box::new(root),
             stylesheet: None,
             fonts: Vec::new(),
@@ -93,9 +141,31 @@ impl App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner> {
     }
 }
 
-impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
+impl<P: PlatformConfig> App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner, P> {
+    /// MOD1: like [`App::new`](App::new), but on a chosen [`PlatformConfig`]
+    /// instead of the shipped taffy + parley bundle.
+    ///
+    /// A separate constructor rather than a generic `new`, because `App::new`
+    /// must keep inferring its parameters from nothing — a struct's type-
+    /// parameter defaults do not apply to inference of a function's return, so
+    /// generalising `new` would force every existing call site to name a
+    /// platform.
+    pub fn with_platform(root: impl Fn(&mut BuildCx) -> Element + 'static) -> Self {
+        App {
+            _platform: std::marker::PhantomData,
+            root: Box::new(root),
+            stylesheet: None,
+            fonts: Vec::new(),
+            windows: Vec::new(),
+            renderer: lumen_render::TinySkia,
+            executor: lumen_core::tasks::InlineSpawner,
+        }
+    }
+}
+
+impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig> App<R, E, P> {
     /// Attach a stylesheet (parsed in M1; stored for now).
-    pub fn stylesheet(mut self, lss: &str) -> App<R, E> {
+    pub fn stylesheet(mut self, lss: &str) -> Self {
         self.stylesheet = Some(lss.to_string());
         self
     }
@@ -103,7 +173,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
     /// Register an extra font (its bytes) for the app, selectable by family name
     /// via [`TextStyle::family`](lumen_text::TextStyle::family). Additive — the
     /// bundled font stays the default; no system-font enumeration (ADR-005).
-    pub fn with_font(mut self, bytes: impl Into<Vec<u8>>) -> App<R, E> {
+    pub fn with_font(mut self, bytes: impl Into<Vec<u8>>) -> Self {
         self.fonts.push(bytes.into());
         self
     }
@@ -116,7 +186,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
         mut self,
         desc: crate::system::WindowDesc,
         root: impl Fn(&mut BuildCx) -> Element + 'static,
-    ) -> App<R, E> {
+    ) -> Self {
         self.windows.push((desc, std::rc::Rc::new(root)));
         self
     }
@@ -127,6 +197,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
     /// selection passes a `Box<dyn Renderer>`.
     pub fn with_renderer<R2: lumen_render::Renderer>(self, renderer: R2) -> App<R2, E> {
         App {
+            _platform: std::marker::PhantomData,
             root: self.root,
             stylesheet: self.stylesheet,
             fonts: self.fonts,
@@ -142,6 +213,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
     /// wanting runtime selection passes a `Box<dyn Spawner>`.
     pub fn with_executor<E2: lumen_core::tasks::Spawner>(self, executor: E2) -> App<R, E2> {
         App {
+            _platform: std::marker::PhantomData,
             root: self.root,
             stylesheet: self.stylesheet,
             fonts: self.fonts,
@@ -152,7 +224,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
     }
 
     /// Run headless at `size` (no OS dependencies).
-    pub fn run_headless(self, size: Size) -> Headless<R, E> {
+    pub fn run_headless(self, size: Size) -> Headless<R, E, P> {
         let mut h = self.into_headless(size, None);
         h.rebuild();
         h
@@ -167,7 +239,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
         self,
         size: Size,
         snap: AppSnapshot,
-    ) -> (Headless<R, E>, Vec<lumen_core::Diagnostic>) {
+    ) -> (Headless<R, E, P>, Vec<lumen_core::Diagnostic>) {
         // Focus is host state (not in the reactive store), so it is carried on
         // the snapshot and re-applied directly.
         let mut h = self.into_headless(size, snap.focused.clone());
@@ -181,12 +253,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
 
     /// Construct the headless instance (fonts registered, focus applied) without
     /// the first build. Shared by the plain and restore boot paths.
-    fn into_headless(self, size: Size, focused: Option<StableId>) -> Headless<R, E> {
+    fn into_headless(self, size: Size, focused: Option<StableId>) -> Headless<R, E, P> {
         // Register app fonts before the first build so styled text can select
         // them. Bytes are retained so secondary windows (P.3d) can build
         // their own TextEngine with the same faces.
         let font_bytes = self.fonts.clone();
-        let mut text = TextEngine::new();
+        // MOD1: the bundle's text engine, not the concrete one. `Default` is
+        // the constructor the seam offers (see `PlatformConfig`).
+        let mut text = P::Text::default();
         for bytes in self.fonts {
             text.register_font(bytes);
         }
@@ -316,7 +390,9 @@ pub trait Checkpoint {
 }
 
 #[cfg(feature = "snapshot")]
-impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Checkpoint for Headless<R, E> {
+impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig> Checkpoint
+    for Headless<R, E, P>
+{
     fn quiesce(&mut self) {
         // pump() flushes writes and asserts the graph is quiescent on exit.
         self.pump();
@@ -516,7 +592,11 @@ fn dim_px(d: Dim) -> f64 {
 
 /// A headless, CPU-rendered application instance (02 §8). Drives the same input
 /// queue as a real shell, so tests and the agent exercise the real paths.
-pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::InlineSpawner> {
+pub struct Headless<
+    R = lumen_render::DefaultRenderer,
+    E = lumen_core::tasks::InlineSpawner,
+    P: PlatformConfig = DefaultPlatform,
+> {
     root: Box<dyn Fn(&mut BuildCx) -> Element>,
     /// P.3d: declared secondary windows (descriptor + root closure), realized
     /// on demand by [`open_window`](Self::open_window). `windows` (below)
@@ -549,7 +629,7 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// frame gets scheduled. Set by the shell; `None` headless (the next manual
     /// `pump` drains the deferred-op queue).
     task_waker: Option<lumen_core::tasks::WakeFn>,
-    text: TextEngine,
+    text: P::Text,
     /// Cache of rasterized text keyed by (string, size bits, weight bits, sRGB
     /// color): static labels then cost one memcpy per frame instead of a full
     /// reshape + glyph raster. Cleared wholesale when it exceeds a cap so an
@@ -855,7 +935,9 @@ struct ChangeReport {
     nodes: Vec<u32>,
 }
 
-impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
+impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig>
+    Headless<R, E, P>
+{
     /// Process the input queue, then rebuild/layout/paint/semantics one turn —
     /// unless nothing that affects the frame changed, in which case the rebuild is
     /// skipped entirely (idle/non-effecting frames cost ~µs instead of ~ms).
@@ -1634,10 +1716,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         id: &str,
         renderer: R2,
         executor: E2,
-    ) -> Option<Headless<R2, E2>> {
+    ) -> Option<Headless<R2, E2, P>> {
         let (desc, root) = self.window_decls.iter().find(|(d, _)| d.id == id)?;
         let root = root.clone();
-        let app = App {
+        // Secondary windows share the parent's platform bundle: a window that
+        // laid out with a different engine than its owner would produce
+        // geometry the owner cannot reason about.
+        let app: App<R2, E2, P> = App {
+            _platform: std::marker::PhantomData,
             root: Box::new(move |cx| root(cx)),
             stylesheet: self.stylesheet_src.clone(),
             fonts: self.font_bytes.clone(),
@@ -1656,7 +1742,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
     /// [`open_window_with`](Self::open_window_with) on the default CPU
     /// renderer + inline executor (tests and headless agents).
-    pub fn open_window(&self, id: &str) -> Option<Headless> {
+    pub fn open_window(
+        &self,
+        id: &str,
+    ) -> Option<Headless<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner, P>> {
         self.open_window_with(id, lumen_render::TinySkia, lumen_core::tasks::InlineSpawner)
     }
 
@@ -2720,7 +2809,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         });
 
         let mut tree = Tree::new();
-        let mut layout = LayoutTree::new();
+        // MOD1: the bundle's layout engine, constructed per rebuild.
+        let mut layout = P::Layout::default();
         let mut meta = HashMap::default();
         let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::new();
         let (_root_node, root_lnode) = self.build_node(
@@ -2901,7 +2991,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         span: SpanRec,
         hash: u64,
         tree: &mut Tree,
-        layout: &mut LayoutTree,
+        layout: &mut P::Layout,
         meta: &mut HashMap<NodeIndex, NodeMeta>,
         built: &mut Vec<(NodeIndex, LayoutNode)>,
         parent: Option<NodeIndex>,
@@ -2975,7 +3065,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         prev: NodeIndex,
         parent: Option<NodeIndex>,
         tree: &mut Tree,
-        layout: &mut LayoutTree,
+        layout: &mut P::Layout,
         meta: &mut HashMap<NodeIndex, NodeMeta>,
         built: &mut Vec<(NodeIndex, LayoutNode)>,
         root_map: &mut HashMap<NodeIndex, NodeIndex>,
@@ -3027,9 +3117,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // `leaf`/`container` took ownership while `node_layout_style` also
         // needed a copy — on the memo-hit path, per node.
         let lnode = if child_lnodes.is_empty() {
-            layout.leaf_ref(&lstyle)
+            layout.leaf(&lstyle)
         } else {
-            layout.container_ref(&lstyle, &child_lnodes)
+            layout.container(&lstyle, &child_lnodes)
         };
         self.node_layout_style.insert(node, lstyle);
         built.push((node, lnode));
@@ -3300,7 +3390,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         &mut self,
         mut el: Element,
         tree: &mut Tree,
-        layout: &mut LayoutTree,
+        layout: &mut P::Layout,
         meta: &mut HashMap<NodeIndex, NodeMeta>,
         built: &mut Vec<(NodeIndex, LayoutNode)>,
         parent: Option<NodeIndex>,
@@ -3674,9 +3764,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // span can rebuild its taffy nodes without re-deriving it.
         self.node_layout_style.insert(node, style.clone());
         let lnode = if child_lnodes.is_empty() {
-            layout.leaf(style)
+            layout.leaf(&style)
         } else {
-            layout.container(style, &child_lnodes)
+            layout.container(&style, &child_lnodes)
         };
 
         // Move the remaining fields into the retained NodeMeta (no clones).
@@ -4303,7 +4393,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// needs (not `&mut self`) so it composes with the `&self.meta` borrow held by
     /// the paint loop. Shares the glyph cache with own-text painting.
     fn rasterize_frame_text(
-        text: &mut TextEngine,
+        text: &mut P::Text,
         cache: &mut HashMap<(String, u32, u32, u32, u32), RgbaImage>,
         dl: &mut DisplayList,
         t: lumen_render::canvas::FrameText,

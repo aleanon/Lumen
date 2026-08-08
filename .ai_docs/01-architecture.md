@@ -119,14 +119,26 @@ caller and one callee, which proves nothing about substitutability. Both
 (deliberately trivial: a fixed grid, a monospace grid) and drive *both* it and
 the bundled one through the same generic function.
 
-**Layout and text are not yet wired into `App` as type parameters.** That is
-deliberate, and it is MOD1's job: `App<R, E, L, T, S, …>` would add a parameter
-per seam, which strains coherence and hurts build times on a 4,600-line file.
-The intended shape is a single `PlatformConfig` bundle carrying associated
-`Layout`/`Text`/`Style` types, so the seams compose as one parameter. Until MOD1
-lands, the traits are the *contract* and the concrete types are the only wiring
-— which is enough to keep the contract honest (the tests prove it), but is not
-yet runtime substitutability.
+**MOD1 wires layout and text into `App` through one bundle**, not one parameter
+per seam: `App<R, E, P = DefaultPlatform>` where `P: PlatformConfig` carries
+associated `Layout` and `Text` types. Adding a seam later adds an associated
+type, not a parameter across three crates' signatures.
+
+The parameter is **defaulted**, so nothing downstream changed — the whole
+workspace, tests and examples included, compiled unmodified. `App::new` keeps
+the shipped bundle; `App::with_platform` selects another. (A separate
+constructor is required rather than a generic `new`: a struct's type-parameter
+defaults do not apply to inference of a function's *return*, so generalising
+`new` would force every existing call site to name a platform.)
+
+`Style` is deliberately absent from the bundle: MOD4's extension point is
+runtime registration (`register_property`), not a type swap, so there is nothing
+for an associated type to name.
+
+Verified by `lumen-widgets/tests/platform_config.rs`, which runs an `App` on a
+text engine with deliberately wrong metrics (10px advance, 30px line) and
+asserts the laid-out box matches *those* numbers — the bundle is consulted, not
+merely declared.
 
 ## 9b. Hardening & privacy (E.3)
 
