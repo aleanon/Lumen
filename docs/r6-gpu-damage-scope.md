@@ -70,15 +70,19 @@ R6 is not a plumbing task. It is: atlas texture-array support (+ shader), render
 target pooling with a lifetime contract, swapchain content semantics, and only
 then scissored partial redraw — each with GPU-visible correctness risk.
 
-**And it is currently ungateable.** The CPU goldens cannot see GPU regressions
-by construction (ADR-002), and the lavapipe job that would catch them
-[fails on gradients](../.github/workflows/ci.yml) — so R6 would land with no
-automated way to prove it did not break rendering. **GX0's gradient issue and a
-GPU parity suite should be fixed before R6 starts**, not after.
+**~~And it is currently ungateable.~~ Resolved 2026-08-08.** The claim was that
+the lavapipe job "fails on gradients", leaving R6 with no way to prove it had
+not broken rendering. The gradient failure was never lavapipe's: `Backends::all()`
+was resolving to the **OpenGL** adapter, where `textureSample` of the gradient
+ramp returns zeros — a real shipped defect that silently dropped every gradient
+on any machine wgpu resolved to GL. `Wgpu::new` now prefers PRIMARY. On real
+lavapipe the scene renders and matches the CPU better than any other in the
+corpus (ΔE 0.0039), and the full 16-suite render set passes there under
+`LUMEN_REQUIRE_GPU=1`. See `docs/gl-gradient-defect.md`.
 
-Recommended order: fix the lavapipe gradient failure → broaden GPU parity →
-R6.5 (atlas array) → R6.4 (target pooling) → R6.3 (scissor + Load) → R6.2
-(cull). R6.1 is retired as already-implemented.
+Recommended order: ~~fix the lavapipe gradient failure~~ (done) → broaden GPU
+parity → R6.5 (atlas array) → R6.4 (target pooling) → R6.3 (scissor + Load) →
+R6.2 (cull). R6.1 is retired as already-implemented.
 
 ## What this does not change
 

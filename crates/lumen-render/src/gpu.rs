@@ -50,6 +50,15 @@ pub struct Wgpu {
     tess_cache: std::cell::RefCell<
         std::collections::HashMap<u64, std::rc::Rc<(Vec<PathVertex>, Vec<u32>)>>,
     >,
+    /// The adapter's reported name (e.g. "NVIDIA GeForce RTX 4070",
+    /// "llvmpipe (LLVM 20.1.2, 256 bits)"). Kept so tests can attribute a
+    /// failure to a driver rather than to the renderer — the GPU parity suite
+    /// has one scene that fails on lavapipe and nowhere else.
+    adapter_name: String,
+    /// Which wgpu backend answered. The parity suite keys its one known
+    /// backend gap on this rather than on the adapter string, which varies by
+    /// vendor and driver version.
+    adapter_backend: wgpu::Backend,
     rect_pipeline: wgpu::RenderPipeline,
     image_pipeline: wgpu::RenderPipeline,
     glyph_pipeline: wgpu::RenderPipeline,
@@ -467,15 +476,34 @@ impl crate::Renderer for WgpuFallbackTinySkia {
 impl Wgpu {
     /// Create a headless renderer, or `None` if no adapter is available.
     pub fn new() -> Option<Wgpu> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..Default::default()
-        });
-        let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))?;
+        // PRIMARY (Vulkan/Metal/DX12) first; GL only if nothing there answers.
+        //
+        // `Backends::all()` alone is NOT equivalent, and the difference is a
+        // silent rendering bug: on a box with both an NVIDIA Vulkan ICD and
+        // NVIDIA GL, `HighPerformance` selected the **GL** adapter, and on that
+        // path `textureSample` of the gradient ramp returns zeros — every
+        // gradient in the frame renders as nothing, with no validation error.
+        // (`textureLoad` through the same pipeline, bind group and texture is
+        // correct, which is what localises it to GL's sampling path rather than
+        // to our geometry. Verified 2026-08-08; the same scene is correct on
+        // Vulkan for both NVIDIA and lavapipe.)
+        //
+        // GL remains reachable for hardware that only has GL. It is simply no
+        // longer chosen ahead of a working Vulkan driver.
+        let (instance, adapter) = [wgpu::Backends::PRIMARY, wgpu::Backends::SECONDARY]
+            .into_iter()
+            .find_map(|backends| {
+                let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                    backends,
+                    ..Default::default()
+                });
+                let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                }))?;
+                Some((instance, adapter))
+            })?;
         let (device, queue) = block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("lumen-gpu"),
@@ -490,6 +518,9 @@ impl Wgpu {
             None,
         ))
         .ok()?;
+
+        let info = adapter.get_info();
+        let (adapter_name, adapter_backend) = (info.name, info.backend);
 
         // Pick the best MSAA level the adapter supports for our target format
         // (paths get geometry AA from it). downlevel hardware may only do 1×.
@@ -891,6 +922,8 @@ impl Wgpu {
             image_pipeline,
             glyph_pipeline,
             path_pipeline,
+            adapter_name,
+            adapter_backend,
             gradient_pipeline,
             composite_pipeline,
             blur_pipeline,
@@ -1171,6 +1204,19 @@ impl Wgpu {
         keep.buffers.push(viewport);
         keep.binds.push(viewport_bg);
         root
+    }
+
+    /// The adapter this renderer is running on. Used by the parity suite to
+    /// distinguish "Lumen renders this wrong" from "this driver does".
+    pub fn adapter_name(&self) -> &str {
+        &self.adapter_name
+    }
+
+    /// True when the OpenGL backend answered. GL is only selected when no
+    /// PRIMARY backend is available, and it has a known gradient defect — see
+    /// `DRIVER_GAPS` in `tests/cpu_vs_gpu.rs`.
+    pub fn adapter_is_gl(&self) -> bool {
+        self.adapter_backend == wgpu::Backend::Gl
     }
 
     /// Render `list` (logical-px) to a `width`×`height` *physical* image,

@@ -45,11 +45,47 @@ fn require_gpu() -> Option<Wgpu> {
     }
 }
 
+/// Scenes a **specific backend** renders wrong, where Lumen is not at fault.
+///
+/// Measured 2026-08-08. `gradient_linear` renders as *nothing* on the **OpenGL**
+/// backend: the draw is issued, bind group and instance data are identical to
+/// the working case, and `textureSample` of the 512×1 Oklab ramp returns zeros.
+/// Swapping that one call for `textureLoad` — same pipeline, same bind group,
+/// same texture — renders it correctly, which localises the fault to GL's
+/// filtered-sampling path. Three Lumen-side explanations were tested and
+/// falsified: the sRGB format (the bilinear *image* scene filters an sRGB
+/// texture on the same backend and is fine), the texture being one texel tall
+/// (a two-row ramp fails identically), and the texture handle being dropped
+/// after the bind group is built (keeping it alive changes nothing). wgpu
+/// validation reports no error at any point.
+///
+/// **Not lavapipe.** The project recorded this for months as "the lavapipe job
+/// fails on gradients", which is why R6 was filed as ungateable. On real
+/// lavapipe the scene renders and matches the CPU better than any other
+/// (ΔE 0.0039). The misattribution came from `VK_DRIVER_FILES` — it constrains
+/// *Vulkan*, so with `Backends::all()` wgpu answered with the NVIDIA **GL**
+/// adapter and the failure was pinned on the ICD that had just been swapped in.
+/// `Wgpu::new` now prefers PRIMARY, so GL is only reached when it is all there
+/// is — which is exactly when this entry applies.
+///
+/// Keyed on the reported backend, not the adapter name: vendor strings vary
+/// by driver version, and this gap is a property of GL, not of a vendor.
+///
+/// Asserted, not skipped — same doctrine as `field_coverage.rs`'s `GPU_IGNORES`.
+/// A skip would let this set grow silently, and would hide the good news: when
+/// GL is fixed, this test fails and says to delete the entry.
+const GL_GAPS: &[&str] = &["gradient_linear"];
+
+fn is_driver_gap(gpu: &Wgpu, scene: &str) -> bool {
+    gpu.adapter_is_gl() && GL_GAPS.contains(&scene)
+}
+
 #[test]
 fn gpu_matches_cpu_for_opaque_and_renders_the_rest() {
     let Some(gpu) = require_gpu() else {
         return;
     };
+    eprintln!("cpu_vs_gpu: adapter = {}", gpu.adapter_name());
 
     let blank = blank_frame();
     let mut exact_checked = 0usize;
@@ -83,11 +119,24 @@ fn gpu_matches_cpu_for_opaque_and_renders_the_rest() {
         } else {
             // Not parity-checked (linear vs gamma); but the GPU must render real
             // content and do so deterministically.
-            assert!(
-                frame_diff(&gpu_img, &blank).differing > 0,
-                "GPU rendered nothing for {}",
-                s.name
-            );
+            let drew = frame_diff(&gpu_img, &blank).differing > 0;
+            if is_driver_gap(&gpu, s.name) {
+                assert!(
+                    !drew,
+                    "`{}` is listed in GL_GAPS and this adapter ({}) is GL, but it now \
+                     RENDERS. That is good news: the driver was fixed. Delete the \
+                     entry so the scene is gated again.",
+                    s.name,
+                    gpu.adapter_name()
+                );
+                eprintln!(
+                    "cpu_vs_gpu: {} — known driver gap on {}, not gated",
+                    s.name,
+                    gpu.adapter_name()
+                );
+                continue;
+            }
+            assert!(drew, "GPU rendered nothing for {}", s.name);
             let again = gpu.render(&s.dl, W, H, bg());
             assert_frames_exact(&gpu_img, &again, &format!("{} GPU determinism", s.name));
         }
@@ -119,11 +168,18 @@ fn gpu_renders_at_2x_and_matches_cpu_for_nearest_images() {
             "{} size",
             s.name
         );
-        assert!(
-            frame_diff(&gpu_img, &blank).differing > 0,
-            "GPU rendered nothing at 2× for {}",
-            s.name
-        );
+        let drew = frame_diff(&gpu_img, &blank).differing > 0;
+        if is_driver_gap(&gpu, s.name) {
+            assert!(
+                !drew,
+                "`{}` is listed in GL_GAPS and {} is GL, but it now renders at 2×; \
+                 delete the entry.",
+                s.name,
+                gpu.adapter_name()
+            );
+            continue;
+        }
+        assert!(drew, "GPU rendered nothing at 2× for {}", s.name);
         // A nearest-sampled opaque image has no AA and no blend, so it's exact at
         // any scale — a clean geometry/scale parity check.
         if s.name == "image_checker" {
