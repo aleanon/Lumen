@@ -141,7 +141,7 @@ cannot drift from the code again. The three lists live in the crate —
 `KNOWN_PROPERTIES`, `APPLIED_PROPERTIES`, `PARSE_ONLY_PROPERTIES` — and
 `crates/lumen-style/tests/property_parity.rs` asserts `KNOWN == APPLIED ∪
 PARSE_ONLY`, so a property that parses without an implementation is a **build
-failure**. Current split: **78 known, 70 applied, 8 parse-only** — no layout property is parse-only, and of typography only `font-features`/`font-variation`/`text-overflow`/`text-wrap`/`text-decoration` remain (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
+failure**. Current split: **78 known, 71 applied, 7 parse-only** — no layout property is parse-only, and of typography only `font-features`/`font-variation`/`text-overflow`/`text-wrap`/`text-decoration` remain (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
 declaration now reports `W0107` at parse time instead of silently doing
 nothing.)*
 
@@ -177,9 +177,19 @@ Note `get_styles` does *not* answer this question: it reports the **declared**
 value and its source span, not what was applied, so a rejected value still
 appears there. `ui.explain {kind: "style"}` distinguishes them per node.
 
+**`text-overflow: ellipsis` is parse-only for a reason worth recording**, since
+`TextEngine::layout_ellipsized` exists and looks like it should just be wired up
+(2026-08-08). It cannot be: the paint path shapes the node's own text, so
+rendering an ellipsis means painting a *different string* from the one the node
+carries — and the semantic tree, the agent and assistive tech must keep reading
+the **full** text. Truncating the stored string would make `ui.getTree` report
+"Some long lab…", which is a worse defect than the property not working. Doing
+it properly needs the paint layer to carry a display string distinct from the
+semantic one; that is a design change, not a bridge.
+
 **`z-index` is parse-only for a structural reason, not an oversight** (investigated 2026-08-08). `Tree::hit_test` already maximizes `(z, preorder_pos)`, so wiring `z-index` to `Tree::set_z` would take about five minutes — and would be a **trap**: it would change which node receives a click *without changing what is painted on top*. Paint order is a two-pass scheme (normal, then overlay) keyed on the `overlay` flag, not on `z`, and `emit_pass` maintains its clip stack **by depth**, popping layers as depth decreases — so it requires a strict preorder traversal. Stable-sorting the paint order by `z` therefore breaks clip nesting (layers pop and push against the wrong nodes). Honouring `z-index` visually needs **stacking contexts**: paint each context as a self-contained subtree, then order contexts by `z`. That is real work, and until it exists the property must stay inert rather than half-wired.
 
-| **parse-only** | `filter`, `transform(-origin)`, `z-index`, `font-features/variation`, `text-overflow/wrap` |
+| **parse-only** | `filter`, `transform(-origin)`, `z-index`, `font-features/variation`, `text-overflow` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 + `!important` **work**; nested `&` rules **applied** (B.1 ✅ — flattened at

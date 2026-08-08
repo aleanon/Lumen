@@ -193,6 +193,8 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
+    /// `text-wrap` (PROP1). `Some(false)` = `nowrap`.
+    pub text_wrap: Option<bool>,
     /// `selection-color` (PROP1) — the text-selection highlight.
     pub selection_color: Option<Color>,
     /// `text-decoration` (PROP1) — underline / line-through.
@@ -391,6 +393,12 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `text-wrap` (PROP1) — `false` disables wrapping.
+    pub fn text_wrap(mut self, wrap: bool) -> Self {
+        self.text_wrap = Some(wrap);
         self
     }
 
@@ -644,7 +652,6 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     "font-features",
     "font-variation",
     "text-overflow",
-    "text-wrap",
 ];
 
 /// SD5.x: does `value` actually apply to `property`?
@@ -766,6 +773,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "cursor",
     "text-decoration",
     "selection-color",
+    "text-wrap",
     "grid-template-columns",
     "grid-template-rows",
     "grid-column",
@@ -849,6 +857,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "cursor" => style.cursor = as_cursor(&v),
         "text-decoration" => style.text_decoration = as_text_decoration(&v),
         "selection-color" => style.selection_color = as_color(&v),
+        "text-wrap" => style.text_wrap = as_text_wrap(&v),
         "grid-template-columns" => style.grid_template_columns = as_grid_tracks(&v),
         "grid-template-rows" => style.grid_template_rows = as_grid_tracks(&v),
         "grid-column" => style.grid_column = as_grid_line_pair(&v),
@@ -1390,6 +1399,21 @@ fn as_align(v: &Value) -> Option<Align> {
             "baseline" => Some(Align::Baseline),
             "space-between" => Some(Align::SpaceBetween),
             "space-around" => Some(Align::SpaceAround),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `text-wrap` (PROP1). `wrap` and `nowrap` only — CSS's `balance` and
+/// `pretty` ask the shaper to optimise line breaks across the whole paragraph,
+/// which parley does not expose, and accepting them as aliases for `wrap` would
+/// silently do nothing.
+fn as_text_wrap(v: &Value) -> Option<bool> {
+    match v {
+        Value::Keyword(k) => match k.as_str() {
+            "wrap" => Some(true),
+            "nowrap" => Some(false),
             _ => None,
         },
         _ => None,

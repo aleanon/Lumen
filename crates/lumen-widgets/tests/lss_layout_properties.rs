@@ -684,3 +684,47 @@ fn selection_color_overrides_the_builtin_highlight() {
         "selection-color must change the rendered highlight"
     );
 }
+
+// --- PROP1, text-wrap --------------------------------------------------------
+
+/// `text-wrap: nowrap` keeps the explicit box width but shapes on ONE line, so
+/// the run overflows instead of folding. Asserted on the laid-out height: a
+/// wrapped paragraph is taller than a single line.
+#[test]
+fn text_wrap_nowrap_keeps_the_run_on_one_line() {
+    fn height(lss: &str) -> f64 {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text(
+                "a fairly long sentence that will certainly wrap when narrow",
+            )
+            .id("a")])
+            .id("root")
+        })
+        .run_headless(Size::new(400.0, 300.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        h.node_bounds_by_id("a").expect("label").height()
+    }
+    let wrapped = height("#a { width: 80px; }");
+    let nowrap = height("#a { width: 80px; text-wrap: nowrap; }");
+    assert!(
+        wrapped > nowrap * 1.5,
+        "a narrow box must wrap to several lines ({wrapped}) unless nowrap ({nowrap})"
+    );
+    // `wrap` is the default, so saying it explicitly changes nothing.
+    assert_eq!(height("#a { width: 80px; text-wrap: wrap; }"), wrapped);
+}
+
+/// `balance`/`pretty` ask the shaper to optimise breaks across the paragraph,
+/// which parley does not expose. Accepting them as aliases for `wrap` would
+/// silently do nothing, so they are rejected.
+#[test]
+fn unsupported_text_wrap_modes_are_reported() {
+    for bad in ["balance", "pretty"] {
+        let (_, ds) = lumen_style::parse("t.lss", &format!("x {{ text-wrap: {bad}; }}"));
+        assert!(
+            ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+            "`text-wrap: {bad}` must warn, got {ds:?}"
+        );
+    }
+}

@@ -3732,10 +3732,18 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // keep that width, taking only the (wrapped) height from the block.
             // Otherwise the box is sized to the unwrapped text *plus* padding so
             // the label has room; it's then painted at the padded origin.
-            let wrap = match style.width {
+            let mut wrap = match style.width {
                 Dim::Px(w) => Some((w - (pl + pr) as f32).max(0.0)),
                 _ => None,
             };
+            // PROP1 `text-wrap: nowrap`: keep the explicit width for the BOX but
+            // shape unwrapped, so the run overflows on one line instead of
+            // folding. Read back from `node_style` because `css` was moved there
+            // above. Pair it with `overflow: hidden` to clip the overflow — this
+            // property decides line breaking, not clipping.
+            if self.node_style.get(&node).and_then(|s| s.text_wrap) == Some(false) {
+                wrap = None;
+            }
             let block = self.text.shaped(txt, ts, wrap, ts.align);
             if wrap.is_none() {
                 style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
