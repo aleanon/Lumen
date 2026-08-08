@@ -177,6 +177,31 @@ Note `get_styles` does *not* answer this question: it reports the **declared**
 value and its source span, not what was applied, so a rejected value still
 appears there. `ui.explain {kind: "style"}` distinguishes them per node.
 
+### The four remaining parse-only properties, and why (verified 2026-08-08)
+
+PROP1 took this set from 29 to 4. The classification that survived is
+evidence-based rather than inherited: **six of the seven properties previously
+filed as "needs new capability" turned out to be bridges** — the capability
+already existed and only the wiring was missing (`overflow`→clip,
+`text-decoration`→rect drawing, `cursor`→hover+winit, `selection-color`→a
+hardcoded literal, `text-wrap`→`wrap_width`, `transform`→`PushLayer`'s unused
+`Affine`). Each of the four below was re-checked against what the render and
+text layers actually offer today.
+
+* **`filter`** — needs a *layer* filter. `BackdropFilter` exists but blurs what
+  is painted BEHIND a region; `filter` must blur the element's own content,
+  i.e. render the subtree to an offscreen layer, filter that, then composite.
+  `PushLayer` has no filter field, so this is a change to both renderers (CPU
+  and wgpu) plus golden re-baselining — a real render-pass addition, not a
+  bridge.
+* **`z-index`** — needs stacking contexts; see below.
+* **`font-variation`** — the bundled face is **static** (no `fvar` axes, checked
+  with fontTools). parley exposes `StyleProperty::FontVariations` and wiring it
+  would take an hour, but the property would be **inert and untestable** with the
+  shipped font: exactly the silent no-op this series exists to remove. It
+  becomes real the day a variable face is bundled or an app registers one.
+* **`text-overflow`** — see below.
+
 **`text-overflow: ellipsis` is parse-only for a reason worth recording**, since
 `TextEngine::layout_ellipsized` exists and looks like it should just be wired up
 (2026-08-08). It cannot be: the paint path shapes the node's own text, so
