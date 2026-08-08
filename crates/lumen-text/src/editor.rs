@@ -18,6 +18,15 @@ struct Snapshot {
     anchor: usize,
 }
 
+/// Maximum retained undo steps. Each step holds a full copy of the document,
+/// so this is the knob that turns unbounded growth into a fixed ceiling.
+const UNDO_LIMIT: usize = 256;
+
+/// How many of the oldest steps to drop when [`UNDO_LIMIT`] is exceeded.
+/// Batching keeps the amortized cost of trimming near one element-move per
+/// edit instead of a full shift every keystroke past the cap.
+const UNDO_TRIM: usize = 64;
+
 /// A single-document text editor.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct TextEditor {
@@ -96,6 +105,25 @@ impl TextEditor {
             cursor: self.cursor,
             anchor: self.anchor,
         });
+        // CACHE1: bound the history.
+        //
+        // Each snapshot clones the WHOLE document, and the stack was
+        // unbounded, so typing N characters into a document of length L cost
+        // O(N*L) memory — the only quadratic growth in the codebase, and it
+        // grows fastest exactly where it hurts most: a long document being
+        // edited for a long time.
+        //
+        // Capping the depth is the small fix; the principled one is delta-based
+        // history (store the edit, not the document), which is a different
+        // project. A cap is not a compromise on correctness — every editor has
+        // a finite undo depth — it just makes the bound explicit instead of
+        // "until memory runs out".
+        //
+        // Trimmed in a batch rather than one-at-a-time so the O(n) shift is
+        // amortized to roughly one element-move per edit.
+        if self.undo.len() > UNDO_LIMIT {
+            self.undo.drain(..UNDO_TRIM);
+        }
         self.redo.clear();
     }
 
@@ -235,6 +263,11 @@ impl TextEditor {
 
     // --- history ------------------------------------------------------------
 
+    /// Number of retained undo steps. Bounded by `UNDO_LIMIT` (CACHE1).
+    pub fn undo_depth(&self) -> usize {
+        self.undo.len()
+    }
+
     /// Undo the last edit.
     pub fn undo(&mut self) {
         if let Some(snap) = self.undo.pop() {
@@ -359,5 +392,43 @@ mod tests {
         assert_eq!(e.display_text(), "你好shijie");
         e.commit("世界");
         assert_eq!(e.text(), "你好世界");
+    }
+}
+
+#[cfg(test)]
+mod history_bound_tests {
+    use super::*;
+
+    #[test]
+    fn undo_history_is_bounded() {
+        // Before CACHE1 this grew without limit, and each entry holds a full
+        // copy of the document — so a long editing session on a large document
+        // grew memory quadratically.
+        let mut ed = TextEditor::new("");
+        for i in 0..(UNDO_LIMIT * 3) {
+            ed.insert(&format!("{i} "));
+        }
+        assert!(
+            ed.undo_depth() <= UNDO_LIMIT,
+            "undo history must stay bounded, got {}",
+            ed.undo_depth()
+        );
+    }
+
+    #[test]
+    fn recent_history_still_undoes_correctly() {
+        // Capping must drop the OLDEST steps, never disturb recent ones —
+        // a bound that broke undo would be worse than the leak.
+        let mut ed = TextEditor::new("");
+        for _ in 0..(UNDO_LIMIT + 10) {
+            ed.insert("x");
+        }
+        let before = ed.text().to_string();
+        ed.undo();
+        assert_eq!(
+            ed.text().len(),
+            before.len() - 1,
+            "the most recent edit must still be undoable after trimming"
+        );
     }
 }

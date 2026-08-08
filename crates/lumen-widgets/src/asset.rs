@@ -18,6 +18,15 @@ thread_local! {
     static CACHE: RefCell<HashMap<u64, RgbaImage>> = RefCell::new(HashMap::new());
 }
 
+/// CACHE1: maximum decoded images retained per thread.
+///
+/// The cache had no cap and no way to clear it, so every distinct image an app
+/// ever decoded stayed resident for the process lifetime — decoded RGBA, not
+/// the compressed source, so a few dozen full-window images is tens of MB. An
+/// app that cycles through images (a gallery, a list of avatars, anything
+/// data-driven) grew without bound.
+const MAX_CACHED_IMAGES: usize = 64;
+
 fn key(bytes: &[u8]) -> u64 {
     let mut h = DefaultHasher::new();
     bytes.hash(&mut h);
@@ -33,8 +42,33 @@ pub fn png(bytes: &[u8]) -> Result<RgbaImage, String> {
         return Ok(img);
     }
     let img = RgbaImage::from_png(bytes)?;
-    CACHE.with(|c| c.borrow_mut().insert(k, img.clone()));
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        // Whole-cache eviction rather than LRU: tracking recency needs a
+        // counter per entry and a scan per hit, which is real cost on the hot
+        // path to protect against a case (>64 live images on one thread) that
+        // is already unusual. Dropping everything is O(1), keeps the hit path
+        // free, and the next frame re-decodes only what it actually draws.
+        if c.len() >= MAX_CACHED_IMAGES {
+            c.clear();
+        }
+        c.insert(k, img.clone());
+    });
     Ok(img)
+}
+
+/// Drop every decoded image on this thread.
+///
+/// Call on OS memory pressure (Android `LowMemory`, iOS memory warning): the
+/// cache is pure derived data, so releasing it costs a re-decode and nothing
+/// else.
+pub fn clear_cache() {
+    CACHE.with(|c| c.borrow_mut().clear());
+}
+
+/// Number of decoded images currently retained on this thread.
+pub fn cache_len() -> usize {
+    CACHE.with(|c| c.borrow().len())
 }
 
 /// True if `bytes` is already in the decode cache (test/diagnostic aid).

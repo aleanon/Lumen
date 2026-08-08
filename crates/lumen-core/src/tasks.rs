@@ -274,9 +274,23 @@ impl ThreadPoolSpawner {
 #[cfg(not(target_arch = "wasm32"))]
 impl Default for ThreadPoolSpawner {
     fn default() -> ThreadPoolSpawner {
+        // CACHE1: cap the default pool.
+        //
+        // `available_parallelism()` alone spawns one thread per core — 32 on
+        // the dev box — for an app that may never spawn a task. Each carries a
+        // stack reservation, so the cost is address space and scheduler
+        // pressure paid up front for capacity almost no UI needs. UI work is
+        // latency-bound, not throughput-bound: a handful of threads absorbs
+        // the IO an app actually offloads, and anything genuinely parallel
+        // should ask for a sized pool explicitly via `ThreadPoolSpawner::new`.
+        //
+        // Matters most on mobile, where core counts are high, memory is tight,
+        // and idle threads still cost battery.
+        const MAX_DEFAULT_THREADS: usize = 4;
         let n = std::thread::available_parallelism()
             .map(|n| n.get())
-            .unwrap_or(4);
+            .unwrap_or(4)
+            .min(MAX_DEFAULT_THREADS);
         ThreadPoolSpawner::new(n)
     }
 }
