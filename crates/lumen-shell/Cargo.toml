@@ -21,18 +21,18 @@ winit = { workspace = true }
 # P.3a (ADR-P1): OS clipboard — bridged to the portable Runtime clipboard.
 arboard = { workspace = true }
 # P.3b (ADR-P1): native file dialogs fulfilling SystemRequest::OpenFile.
-rfd = { workspace = true }
+rfd = { workspace = true, optional = true }
 # P.3c (ADR-P1): native menus. Attached on Windows (hwnd) / macOS (nsapp);
 # on Linux muda is GTK-bound and winit has no menubar attachment point, so
 # activation there is the portable accelerator path + agent verbs.
-muda = { workspace = true }
+muda = { workspace = true, optional = true }
 # P.4: platform assistive-tech bridge — the semantic tree (already built for
 # tests/agent) published to AT-SPI/UIA/NSAccessibility; AT actions come back
 # through the event loop and route into the same input queue.
 accesskit = { workspace = true }
 accesskit_winit = { workspace = true }
 # P.3e: system tray (lazy — created on the first TrayTooltip request).
-tray-icon = { workspace = true }
+tray-icon = { workspace = true, optional = true }
 wgpu = { workspace = true }
 # Embedded agent endpoint (LUMEN_AGENT_ADDR): lets an AI observe and drive the
 # *live* window over the same JSON-RPC the headless agent speaks. Behind the
@@ -47,6 +47,14 @@ notify = { workspace = true }
 # Compile in the live-window agent RPC server. Off by default: a normal build has
 # no dormant TCP endpoint / LUMEN_AGENT_ADDR handling and doesn't link lumen-agent.
 agent = ["dep:lumen-agent", "dep:serde_json", "lumen-widgets/snapshot"]
+# GX2: native desktop integration — file dialogs, menus, tray. Default ON, so
+# a normal desktop app is unchanged; `--no-default-features` drops the entire
+# Linux GTK cluster (`rfd` + `muda` + `tray-icon` + `gtk`, all of which link
+# gtk 0.18 on Linux), which is what CFG1's constrained profile needs. The
+# corresponding SystemRequests then report unsupported instead of silently
+# doing nothing, so an app can detect the difference.
+desktop-integration = ["dep:rfd", "dep:muda", "dep:tray-icon", "dep:gtk"]
+default = ["desktop-integration"]
 # Forwarded tiers (T.4): consumers (the facade) decide; nothing default here
 # so the lean profile can drop them.
 wgpu = ["lumen-widgets/wgpu"]
@@ -55,4 +63,4 @@ pan-unicode = ["lumen-widgets/pan-unicode"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The tray's dedicated gtk thread (winit owns the main loop on Linux).
-gtk = { workspace = true }
+gtk = { workspace = true, optional = true }

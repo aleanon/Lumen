@@ -12,7 +12,7 @@ publish = false
 # facade's ShaderWidget re-export. (Web/mobile drop wgpu via target-gating in
 # lumen-render regardless; the CPU-only renderer build is `lumen-render
 # --no-default-features`.)
-default = ["wgpu", "snapshot", "pan-unicode"]
+default = ["wgpu", "snapshot", "pan-unicode", "desktop-integration"]
 wgpu = ["lumen-widgets/wgpu", "lumen-render/wgpu", "lumen-shell/wgpu"]
 # The serializable/introspectable surfaces (AppSnapshot, get_styles, agent
 # JSON) — default-on; the lean shipped profile drops it (02 §4 doctrine).
@@ -25,6 +25,10 @@ pan-unicode = ["lumen-widgets/pan-unicode", "lumen-shell/pan-unicode"]
 # The live-window agent endpoint (JSON-RPC on LUMEN_AGENT_ADDR) — default-off,
 # forwarded to the desktop shell. Scaffolded apps use it via `just run-agent`.
 agent = ["lumen-shell/agent"]
+# GX2: native file dialogs, menus and tray. Default ON. Turning it off drops
+# the entire Linux GTK cluster (rfd + muda + tray-icon + gtk); the constrained
+# profile CFG1 targets is built this way.
+desktop-integration = ["lumen-shell/desktop-integration"]
 
 [dependencies]
 lumen-core = { workspace = true }
@@ -41,4 +45,9 @@ lumen-widgets = { path = "../lumen-widgets", default-features = false }
 # their own shells (lumen-shell-android / -ios / -web), so excluding it here
 # keeps winit → android-activity out of those builds.
 [target.'cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))'.dependencies]
-lumen-shell = { workspace = true }
+# Direct path dep, defaults off. Cargo IGNORES `default-features = false` on a
+# workspace-inherited dependency, so `lumen-shell = { workspace = true }` would
+# silently keep `desktop-integration` (and with it the whole GTK cluster) even
+# under `--no-default-features`. Same trap already documented for lumen-widgets
+# in crates/lumen-shell/Cargo.toml.
+lumen-shell = { path = "../lumen-shell", default-features = false }

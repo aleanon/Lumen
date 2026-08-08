@@ -142,6 +142,15 @@ arboard = "3"
 # backend drags in a full async runtime (tokio/async-std), while GTK is
 # dynamically linked and present on every Linux desktop; revisit per the
 # ADR if the GTK linkage leaks into non-shell crates.
+#
+# GX2 re-check (2026-08-08): that rationale is now OUTDATED. rfd 0.14's own
+# default is `["xdg-portal", "async-std"]`, and `xdg-portal` alone pulls
+# ashpd + urlencoding + `pollster` — a `block_on` shim, not a runtime. So
+# `default-features = false, features = ["xdg-portal"]` gets the portal
+# WITHOUT an async runtime. Not switched here: muda and tray-icon still
+# require gtk on Linux, so rfd alone would not remove the cluster, and the
+# portal changes dialog behaviour (better under Wayland/Flatpak) which needs
+# its own verification. Gated instead — see `desktop-integration`.
 rfd = { version = "0.14", default-features = false, features = ["gtk3"] }
 # ADR-P1 (approved): native menus (P.3c). Defaults off drops libxdo (only
 # used by muda's predefined items, which Lumen doesn't emit — the menu model

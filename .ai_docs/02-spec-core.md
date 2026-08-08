@@ -267,6 +267,16 @@ impl App {
 // `SystemRequest::TrayTooltip` → lazy system tray (created on first request;
 // tooltip + title text; menu = the app `MenuModel`). OS file drops arrive as
 // the same `Event::Drop` headless tests synthesize.
+//
+// GX2 (2026-08-08): native dialogs, menus and tray sit behind lumen-shell's
+// default-ON `desktop-integration` feature. Off, the whole Linux GTK cluster
+// (rfd + muda + tray-icon + gtk, all linking gtk 0.18) disappears: measured
+// 70 -> 5 shared libraries and -1.0% binary on a minimal facade consumer.
+// `native_dialog_resolver` still exists and returns `None`, so "no backend" is
+// an observable result rather than a build error; tray requests are drained.
+// NOTE the propagation trap: Cargo IGNORES `default-features = false` on a
+// workspace-inherited dep, so the facade must take lumen-shell as a direct
+// path dep or the feature silently stays on under `--no-default-features`.
 pub struct Headless;  // used by lumen-test and lumen-agent in headless mode
 impl Headless {
     pub fn pump(&mut self) -> FrameStats;                  // process queue, layout, paint

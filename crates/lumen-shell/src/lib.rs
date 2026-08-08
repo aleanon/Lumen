@@ -61,6 +61,7 @@ enum ShellEvent {
     /// `MenuModel`). Pushed via muda's event handler so the click *wakes*
     /// the loop (a drain in `about_to_wait` only ran on the next unrelated
     /// event).
+    #[cfg(feature = "desktop-integration")]
     Menu(muda::MenuEvent),
 }
 
@@ -103,6 +104,7 @@ pub fn run(app: App, size: Size) {
     }
     // P.3c/P.3e: native menu + tray-menu clicks land here from muda's
     // handler thread; forward them into the loop (each one wakes it).
+    #[cfg(feature = "desktop-integration")]
     {
         let proxy = event_loop.create_proxy();
         muda::MenuEvent::set_event_handler(Some(move |ev: muda::MenuEvent| {
@@ -131,10 +133,13 @@ pub fn run(app: App, size: Size) {
         cursor: Point::ZERO,
         scale: 1.0,
         modifiers: Modifiers::empty(),
+        #[cfg(feature = "desktop-integration")]
         menu_rev_seen: 0,
+        #[cfg(feature = "desktop-integration")]
         native_menu: None,
         a11y: None,
         force_present: false,
+        #[cfg(feature = "desktop-integration")]
         tray: None,
         secondary: std::collections::HashMap::new(),
         os_clipboard: arboard::Clipboard::new().ok(),
@@ -287,15 +292,19 @@ struct Shell {
     modifiers: Modifiers,
     /// P.3c: [`Headless::menu_rev`] last realized as a native (muda) menu —
     /// the menu is rebuilt only when the app installs a new model.
+    #[cfg(feature = "desktop-integration")]
     menu_rev_seen: u64,
     /// The realized native menu. Attached to the window on Windows/macOS;
     /// on Linux muda is GTK-bound and winit offers no menubar attachment
     /// point, so the model stays data and accelerators/agent verbs activate
     /// items (see `attach_native_menu`).
+    #[cfg(feature = "desktop-integration")]
     native_menu: Option<muda::Menu>,
-    /// P.4: the AccessKit adapter. Dormant (near-zero cost) until an
-    /// assistive technology subscribes; then the semantic tree — the same
-    /// one the agent and tests read — is published after every frame.
+    /// P.4: the AccessKit adapter. The *tree* is dormant until an assistive
+    /// technology subscribes — then the semantic tree, the same one the agent
+    /// and tests read, is published after every frame. The adapter itself is
+    /// NOT free: constructing it spawns a D-Bus thread on Linux whether or not
+    /// an AT exists, which is why creation is gated by `a11y_enabled` (GX4).
     a11y: Option<accesskit_winit::Adapter>,
     /// Present on the next `RedrawRequested` even if its pump paints nothing:
     /// set by paths that already pumped (agent dispatch, AT actions, style
@@ -316,6 +325,7 @@ struct Shell {
     /// `SystemRequest::TrayTooltip` (no tray unless asked for). On Linux it
     /// lives on a dedicated gtk thread (winit owns the main loop) reached by
     /// this channel; elsewhere the TrayIcon is held directly.
+    #[cfg(feature = "desktop-integration")]
     tray: Option<TrayState>,
     /// Whether an IME composition context is active (then text arrives via
     /// `Ime::Commit`, not `KeyEvent::text`).
@@ -423,6 +433,7 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 // direct-to-surface path).
                 self.redraw_all();
             }
+            #[cfg(feature = "desktop-integration")]
             ShellEvent::Menu(ev) => {
                 if let Some(h) = &mut self.headless {
                     h.activate_menu(ev.id().0.as_str());
@@ -759,6 +770,7 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     }
                     // P.3c: realize a newly installed menu model natively.
                     // (Attach is a no-op on Linux — see `attach_native_menu`.)
+                    #[cfg(feature = "desktop-integration")]
                     if h.menu_rev() != self.menu_rev_seen {
                         self.menu_rev_seen = h.menu_rev();
                         let menu = build_native_menu(h.menu());
@@ -796,11 +808,16 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         }
                     }
                 }
+                #[cfg(feature = "desktop-integration")]
                 if let Some((tips, model)) = pending_tray {
                     for t in tips {
                         self.tray_update(&t, &model);
                     }
                 }
+                // GX2: without the tray backend the requests are drained and
+                // dropped rather than queueing forever.
+                #[cfg(not(feature = "desktop-integration"))]
+                let _ = pending_tray;
             }
             _ => {}
         }
@@ -1083,6 +1100,7 @@ impl Shell {
 
 // --- P.3e: system tray --------------------------------------------------------
 
+#[cfg(feature = "desktop-integration")]
 /// The realized tray. Linux: a channel into the tray's gtk thread; other
 /// platforms hold the icon on the loop thread.
 enum TrayState {
@@ -1095,6 +1113,7 @@ enum TrayState {
 /// A 16×16 solid-accent icon generated in code — identifies the tray slot
 /// without shipping an asset (apps get real icon support with `lumen
 /// package` branding, E.1).
+#[cfg(feature = "desktop-integration")]
 fn tray_icon_pixels() -> tray_icon::Icon {
     let mut rgba = Vec::with_capacity(16 * 16 * 4);
     for _ in 0..(16 * 16) {
@@ -1112,6 +1131,7 @@ fn tray_icon_pixels() -> tray_icon::Icon {
 /// StatusNotifierItem, no error). Item clicks arrive on muda's event
 /// handler → `ShellEvent::Menu` → `activate_menu`.
 #[cfg(target_os = "linux")]
+#[cfg(feature = "desktop-integration")]
 fn spawn_tray(initial: String, model: lumen_widgets::system::MenuModel) -> TrayState {
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::spawn(move || {
@@ -1158,6 +1178,7 @@ fn spawn_tray(initial: String, model: lumen_widgets::system::MenuModel) -> TrayS
 }
 
 #[cfg(not(target_os = "linux"))]
+#[cfg(feature = "desktop-integration")]
 fn spawn_tray(initial: String, model: lumen_widgets::system::MenuModel) -> TrayState {
     let mut builder = tray_icon::TrayIconBuilder::new()
         .with_icon(tray_icon_pixels())
@@ -1178,6 +1199,7 @@ fn spawn_tray(initial: String, model: lumen_widgets::system::MenuModel) -> TrayS
 impl Shell {
     /// Apply a `TrayTooltip` request: create the tray on first use, then
     /// push the text.
+    #[cfg(feature = "desktop-integration")]
     fn tray_update(&mut self, text: &str, model: &lumen_widgets::system::MenuModel) {
         match &mut self.tray {
             None => self.tray = Some(spawn_tray(text.to_string(), model.clone())),
@@ -1351,6 +1373,7 @@ fn accel_target(
 
 /// Realize the portable [`MenuModel`](lumen_widgets::system::MenuModel) as a
 /// muda menu (same ids, so a native click reports the portable command id).
+#[cfg(feature = "desktop-integration")]
 fn build_native_menu(model: &lumen_widgets::system::MenuModel) -> muda::Menu {
     fn native(item: &lumen_widgets::system::MenuItem) -> Box<dyn muda::IsMenuItem> {
         if item.children.is_empty() {
@@ -1386,6 +1409,7 @@ fn build_native_menu(model: &lumen_widgets::system::MenuModel) -> muda::Menu {
 
 /// Attach the realized menu as the window's native menubar.
 #[cfg(target_os = "windows")]
+#[cfg(feature = "desktop-integration")]
 fn attach_native_menu(menu: &muda::Menu, window: &Window) {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     if let Ok(h) = window.window_handle() {
@@ -1399,6 +1423,7 @@ fn attach_native_menu(menu: &muda::Menu, window: &Window) {
 
 /// Attach the realized menu as the application menu (macOS menubar).
 #[cfg(target_os = "macos")]
+#[cfg(feature = "desktop-integration")]
 fn attach_native_menu(menu: &muda::Menu, _window: &Window) {
     menu.init_for_nsapp();
 }
@@ -1408,6 +1433,7 @@ fn attach_native_menu(menu: &muda::Menu, _window: &Window) {
 /// stays observable data; activation paths here are accelerator chords
 /// (matched by the shell's key handler) and the agent's `menu.invoke`.
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(feature = "desktop-integration")]
 fn attach_native_menu(_menu: &muda::Menu, _window: &Window) {}
 
 fn map_modifiers(s: winit::keyboard::ModifiersState) -> Modifiers {
@@ -1794,6 +1820,12 @@ fn notify_native(_title: &str, _body: &str) -> bool {
 
 /// The rfd-backed resolver: a modal native file-open dialog (GTK backend,
 /// ADR-P1 P.3b decision — the portal backend needs a full async runtime).
+///
+/// GX2: without `desktop-integration` the whole GTK cluster is dropped and this
+/// resolves nothing. The function still exists and still returns `Option`, so
+/// the caller's contract is unchanged and "no native dialog available" is an
+/// observable `None` rather than a build error or a silent no-op.
+#[cfg(feature = "desktop-integration")]
 pub fn native_dialog_resolver(req: &lumen_widgets::system::SystemRequest) -> Option<String> {
     if let lumen_widgets::system::SystemRequest::OpenFile { filters, .. } = req {
         let mut dlg = rfd::FileDialog::new();
@@ -1803,6 +1835,13 @@ pub fn native_dialog_resolver(req: &lumen_widgets::system::SystemRequest) -> Opt
         }
         return dlg.pick_file().map(|p| p.display().to_string());
     }
+    None
+}
+
+/// Stand-in for [`native_dialog_resolver`] when `desktop-integration` is off:
+/// there is no native dialog backend linked, so every request is unresolved.
+#[cfg(not(feature = "desktop-integration"))]
+pub fn native_dialog_resolver(_req: &lumen_widgets::system::SystemRequest) -> Option<String> {
     None
 }
 
@@ -1925,6 +1964,8 @@ mod menu_tests {
         );
     }
 
+    /// GX2: the native menu only exists when the backend is linked.
+    #[cfg(feature = "desktop-integration")]
     #[test]
     fn native_menu_mirrors_the_model() {
         // Executes muda's (GTK-backend) item construction on Linux — the
