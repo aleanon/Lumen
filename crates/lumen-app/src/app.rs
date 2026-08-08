@@ -580,6 +580,12 @@ struct NodeMeta {
     /// element carries an explicit pixel width). `None` = size-to-content, no
     /// wrap. The paint pass must lay out with the same width as the measure pass.
     wrap_width: Option<f32>,
+    /// PROP1 `text-overflow: ellipsis`: the truncated string the PAINT pass
+    /// draws. The node's own text (and therefore the semantic tree, the agent
+    /// and assistive tech) keeps the FULL string — truncating that would make
+    /// `ui.getTree` report "Some long lab…", corrupting the observability
+    /// surface to fix a visual one.
+    display_text: Option<String>,
 }
 
 /// The px value of a [`Dim`] (0 for non-px / auto / percent).
@@ -3726,6 +3732,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let (pr, pb) = (dim_px(style.padding.right), dim_px(style.padding.bottom));
         let pad = (pl, pt);
         let mut text_wrap: Option<f32> = None;
+        let mut ellipsized: Option<String> = None;
         if let NodeContent::Text(txt, ts) = &el.content {
             // An explicit pixel width turns the label into a wrapping paragraph:
             // we lay out into the content box (width minus horizontal padding) and
@@ -3743,6 +3750,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // property decides line breaking, not clipping.
             if self.node_style.get(&node).and_then(|s| s.text_wrap) == Some(false) {
                 wrap = None;
+            }
+            // PROP1 `text-overflow: ellipsis`. Only meaningful with a bounded
+            // width AND no wrapping — a wrapping paragraph has no overflowing
+            // line to truncate, it just gets taller.
+            if self.node_style.get(&node).and_then(|s| s.text_ellipsis) == Some(true)
+                && wrap.is_none()
+            {
+                if let Dim::Px(w) = style.width {
+                    let avail = (w - (pl + pr) as f32).max(0.0);
+                    ellipsized = self.text.ellipsized_text(txt, ts, avail);
+                }
             }
             let block = self.text.shaped(txt, ts, wrap, ts.align);
             if wrap.is_none() {
@@ -3845,6 +3863,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 content: el.content,
                 pad,
                 wrap_width: text_wrap,
+                display_text: ellipsized,
             },
         );
         built.push((node, lnode));
@@ -4298,6 +4317,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 });
             }
             if let NodeContent::Text(txt, ts) = &m.content {
+                // PROP1 `text-overflow: ellipsis`: PAINT the truncated string,
+                // while `m.content`'s text — and therefore the semantic tree the
+                // agent and assistive tech read — stays the full one. This one
+                // binding is the whole feature; everything else it touches is
+                // deliberately left alone.
+                let txt: &str = m.display_text.as_deref().unwrap_or(txt);
                 // Apply a `.lss` text colour to the glyphs (the cascade also
                 // drives background/radius above). Colour is size-neutral, so it
                 // doesn't desync the layout box measured at build time; `.lss`
@@ -4462,7 +4487,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     // handle isn't derivable yet. `contrast_report` translates
                     // it before the value reaches an agent.
                     node: Some(node.index().to_string()),
-                    label: Some(txt.clone()),
+                    label: Some(txt.to_string()),
                     foreground: text_color,
                     region: bounds,
                 });

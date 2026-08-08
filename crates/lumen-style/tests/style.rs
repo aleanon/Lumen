@@ -149,6 +149,8 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         .transform_origin(0.0, 0.0));
     style_parity!(covered, "font-features", "\"smcp\"", |s: Style| s
         .font_features("\"smcp\""));
+    style_parity!(covered, "text-overflow", "ellipsis", |s: Style| s
+        .text_ellipsis(true));
     style_parity!(covered, "text-wrap", "nowrap", |s: Style| s
         .text_wrap(false));
     style_parity!(covered, "selection-color", "#ff0000ff", |s: Style| s
@@ -262,6 +264,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "cursor" => "pointer",
         "text-decoration" => "underline",
         "text-wrap" => "nowrap",
+        "text-overflow" => "ellipsis",
         "font-features" => "\"smcp\"",
         "transform" => "scale(2)",
         "transform-origin" => "left top",

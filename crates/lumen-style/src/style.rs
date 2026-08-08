@@ -203,6 +203,8 @@ pub struct Style {
     pub transform_origin: Option<(f64, f64)>,
     /// `font-features` (PROP1) — CSS `font-feature-settings` syntax.
     pub font_features: Option<String>,
+    /// `text-overflow` (PROP1). `Some(true)` = `ellipsis`.
+    pub text_ellipsis: Option<bool>,
     /// `text-wrap` (PROP1). `Some(false)` = `nowrap`.
     pub text_wrap: Option<bool>,
     /// `selection-color` (PROP1) — the text-selection highlight.
@@ -421,6 +423,12 @@ impl Style {
     /// `font-features` (PROP1).
     pub fn font_features(mut self, settings: impl Into<String>) -> Self {
         self.font_features = Some(settings.into());
+        self
+    }
+
+    /// `text-overflow` (PROP1) — `true` truncates with an ellipsis.
+    pub fn text_ellipsis(mut self, yes: bool) -> Self {
+        self.text_ellipsis = Some(yes);
         self
     }
 
@@ -676,7 +684,6 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     "z-index",
     // Typography — needs text-stack plumbing.
     "font-variation",
-    "text-overflow",
 ];
 
 /// SD5.x: does `value` actually apply to `property`?
@@ -819,6 +826,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "text-decoration",
     "selection-color",
     "text-wrap",
+    "text-overflow",
     "font-features",
     "transform",
     "transform-origin",
@@ -906,6 +914,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "text-decoration" => style.text_decoration = as_text_decoration(&v),
         "selection-color" => style.selection_color = as_color(&v),
         "text-wrap" => style.text_wrap = as_text_wrap(&v),
+        "text-overflow" => style.text_ellipsis = as_text_overflow(&v),
         "font-features" => style.font_features = as_feature_settings(&v),
         "transform" => style.transform = as_transform(&v),
         "transform-origin" => style.transform_origin = as_transform_origin(&v),
@@ -1563,6 +1572,20 @@ fn as_feature_settings(v: &Value) -> Option<String> {
             let joined = parts.join(" ");
             (!joined.trim().is_empty()).then_some(joined)
         }
+        _ => None,
+    }
+}
+
+/// `text-overflow` (PROP1). `clip` and `ellipsis` only — CSS also allows an
+/// arbitrary replacement string, which would need its own width measurement per
+/// node and buys little over the ellipsis.
+fn as_text_overflow(v: &Value) -> Option<bool> {
+    match v {
+        Value::Keyword(k) => match k.as_str() {
+            "clip" => Some(false),
+            "ellipsis" => Some(true),
+            _ => None,
+        },
         _ => None,
     }
 }

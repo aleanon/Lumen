@@ -816,3 +816,71 @@ fn percentage_translate_is_rejected() {
         "percentage translate must warn, got {ds:?}"
     );
 }
+
+// --- PROP1, text-overflow ----------------------------------------------------
+
+/// `text-overflow: ellipsis` paints a truncated string while the SEMANTIC tree
+/// keeps the full one. That split is the whole feature: truncating the stored
+/// label would make `ui.getTree` report "a very long lab…", corrupting the
+/// observability surface to fix a visual one.
+#[test]
+fn text_overflow_truncates_the_paint_but_not_the_semantics() {
+    const FULL: &str = "a very long label that will not fit";
+    let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+        widgets::column(vec![widgets::text(FULL).id("a")]).id("root")
+    })
+    .run_headless(Size::new(400.0, 80.0));
+    h.set_stylesheet("#a { width: 90px; text-wrap: nowrap; text-overflow: ellipsis; }");
+    h.pump();
+
+    // The agent still reads the whole string.
+    fn find<'x>(
+        n: &'x lumen_core::semantics::SemanticsNode,
+        id: &str,
+    ) -> Option<&'x lumen_core::semantics::SemanticsNode> {
+        if n.id.as_ref().map(|i| i.as_str()) == Some(id) {
+            return Some(n);
+        }
+        n.children.iter().find_map(|c| find(c, id))
+    }
+    let root = h.semantics_elided();
+    let node = find(&root, "a").expect("node");
+    assert_eq!(
+        node.label, FULL,
+        "the semantic label must stay the FULL text — this is the property's \
+         entire reason for needing more than a bridge"
+    );
+
+    // And the frame differs from the untruncated one.
+    let truncated = h.screenshot().pixels().to_vec();
+    let mut h2 = App::new(|_cx: &mut BuildCx| -> Element {
+        widgets::column(vec![widgets::text(FULL).id("a")]).id("root")
+    })
+    .run_headless(Size::new(400.0, 80.0));
+    h2.set_stylesheet("#a { width: 90px; text-wrap: nowrap; }");
+    h2.pump();
+    assert_ne!(
+        truncated,
+        h2.screenshot().pixels().to_vec(),
+        "ellipsis must change what is painted"
+    );
+}
+
+/// Text that already fits is untouched — no stray ellipsis, and the frame is
+/// byte-identical to not asking for one.
+#[test]
+fn text_that_fits_is_not_ellipsized() {
+    fn frame(lss: &str) -> Vec<u8> {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text("hi").id("a")]).id("root")
+        })
+        .run_headless(Size::new(400.0, 80.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        h.screenshot().pixels().to_vec()
+    }
+    assert_eq!(
+        frame("#a { width: 200px; text-wrap: nowrap; text-overflow: ellipsis; }"),
+        frame("#a { width: 200px; text-wrap: nowrap; }")
+    );
+}

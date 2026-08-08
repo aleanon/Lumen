@@ -41,7 +41,9 @@ and the `-style`/`-color` longhands are not accepted.
 `selection-color` retints the text-selection highlight (it
 paints BEHIND the glyphs, so keep some alpha).
 `text-wrap: nowrap` keeps the box width but shapes on one
-line — pair with `overflow: hidden` to clip the overflow.
+line — pair with `overflow: hidden` to clip, or
+`text-overflow: ellipsis` to truncate with `…` (needs a fixed
+width and `nowrap`; the AGENT still reads the full text).
 `font-features: "smcp"` (CSS font-feature-settings syntax)
 goes to the shaper verbatim; the bundled face carries smcp,
 tnum, onum, zero, frac, liga and more. `normal` clears it.

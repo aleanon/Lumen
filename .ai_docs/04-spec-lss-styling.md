@@ -141,7 +141,7 @@ cannot drift from the code again. The three lists live in the crate —
 `KNOWN_PROPERTIES`, `APPLIED_PROPERTIES`, `PARSE_ONLY_PROPERTIES` — and
 `crates/lumen-style/tests/property_parity.rs` asserts `KNOWN == APPLIED ∪
 PARSE_ONLY`, so a property that parses without an implementation is a **build
-failure**. Current split: **78 known, 74 applied, 4 parse-only** — no layout property is parse-only, and of typography only `font-variation` and `text-overflow` remain (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
+failure**. Current split: **78 known, 75 applied, 3 parse-only** — no layout property is parse-only, and of typography only `font-variation` remains (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
 declaration now reports `W0107` at parse time instead of silently doing
 nothing.)*
 
@@ -221,19 +221,24 @@ text layers actually offer today.
   becomes real the day a variable face is bundled or an app registers one.
 * **`text-overflow`** — see below.
 
-**`text-overflow: ellipsis` is parse-only for a reason worth recording**, since
+**`text-overflow: ellipsis` needed a display/semantic split, and got one** (2026-08-08). The obstacle was real, and is worth recording because
 `TextEngine::layout_ellipsized` exists and looks like it should just be wired up
-(2026-08-08). It cannot be: the paint path shapes the node's own text, so
-rendering an ellipsis means painting a *different string* from the one the node
-carries — and the semantic tree, the agent and assistive tech must keep reading
-the **full** text. Truncating the stored string would make `ui.getTree` report
-"Some long lab…", which is a worse defect than the property not working. Doing
-it properly needs the paint layer to carry a display string distinct from the
-semantic one; that is a design change, not a bridge.
+(2026-08-08). the paint path shapes the node's own text, so rendering an ellipsis means
+painting a *different string* from the one the node carries — while the semantic
+tree, the agent and assistive tech must keep reading the **full** text.
+Truncating the stored string would make `ui.getTree` report "Some long lab…",
+a worse defect than the property not working.
+
+Resolved by giving `NodeMeta` a `display_text` the paint pass prefers, leaving
+`content` (and therefore semantics) untouched — one binding in the paint loop.
+`TextEngineApi::ellipsized_text` returns the *string* rather than a block, and is
+a **provided** trait method expressed in terms of `layout`, so the MOD3 seam
+stays as narrow as it was and every implementor gets it free. A test asserts the
+semantic label is still the full string; that assertion is the property's point.
 
 **`z-index` is parse-only for a structural reason, not an oversight** (investigated 2026-08-08). `Tree::hit_test` already maximizes `(z, preorder_pos)`, so wiring `z-index` to `Tree::set_z` would take about five minutes — and would be a **trap**: it would change which node receives a click *without changing what is painted on top*. Paint order is a two-pass scheme (normal, then overlay) keyed on the `overlay` flag, not on `z`, and `emit_pass` maintains its clip stack **by depth**, popping layers as depth decreases — so it requires a strict preorder traversal. Stable-sorting the paint order by `z` therefore breaks clip nesting (layers pop and push against the wrong nodes). Honouring `z-index` visually needs **stacking contexts**: paint each context as a self-contained subtree, then order contexts by `z`. That is real work, and until it exists the property must stay inert rather than half-wired.
 
-| **parse-only** | `filter`, `z-index`, `font-variation`, `text-overflow` |
+| **parse-only** | `filter`, `z-index`, `font-variation` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 + `!important` **work**; nested `&` rules **applied** (B.1 ✅ — flattened at

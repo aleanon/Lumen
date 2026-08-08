@@ -442,6 +442,44 @@ pub trait TextEngineApi {
         max_width: Option<f32>,
         align: TextAlign,
     ) -> Self::Block;
+
+    /// The truncated string to PAINT for `text-overflow: ellipsis`, or `None` if
+    /// `text` already fits (PROP1).
+    ///
+    /// A **provided** method, not a required one: truncation is just repeated
+    /// measurement, so it is expressed in terms of `layout` and every
+    /// implementor gets it free. The seam stays as narrow as MOD3 made it.
+    ///
+    /// It returns the *string* rather than a laid-out block because the runtime
+    /// paints it while the node keeps its FULL text — the semantic tree, the
+    /// agent and assistive tech must not see "Some long lab…". That split is the
+    /// whole reason this property needed more than a bridge.
+    fn ellipsized_text(&mut self, text: &str, base: &TextStyle, max_width: f32) -> Option<String> {
+        if self
+            .layout(text, base.clone(), &[], None, base.align)
+            .width()
+            <= max_width
+        {
+            return None;
+        }
+        let ellipsis = '…';
+        let mut best = String::from(ellipsis);
+        let mut acc = String::new();
+        for ch in text.chars() {
+            acc.push(ch);
+            let candidate = format!("{acc}{ellipsis}");
+            if self
+                .layout(&candidate, base.clone(), &[], None, base.align)
+                .width()
+                <= max_width
+            {
+                best = candidate;
+            } else {
+                break;
+            }
+        }
+        Some(best)
+    }
 }
 
 /// The measurement + hit-testing surface of a shaped block (MOD3).
