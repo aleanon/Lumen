@@ -142,6 +142,11 @@ has to.
 
 1. **A CPU presentation backend**, so `wgpu` can become optional in
    `lumen-shell`. This is the gating item — everything below is smaller.
+   **ESCALATED (2026-08-08): see `BLOCKED.md`.** It needs a platform surface
+   crate (`softbuffer`) that is not in the ADR-003 whitelist, which `07 §2`
+   defines as an owner decision. Measured for the escalation: softbuffer adds
+   **7 crates** beyond what `lumen-shell` already pulls via winit (45 of its 52
+   are shared). Options and a recommendation are written up there.
 2. **`PlatformConfig` (MOD1)** so the profile is selected through one bundle
    type rather than a hand-assembled feature list. The plan scoped CFG1 as
    "selected through `PlatformConfig`"; what exists today is the feature set,
