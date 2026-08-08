@@ -83,6 +83,8 @@ Every reload emits a structured result event (tier, status, components swapped, 
   | default (pan-Unicode face, snapshot, desktop-integration) | 22.0 MB | 70 |
   | lean **windowed** (`--no-default-features --features wgpu`) | **13.3 MB** | 5 |
   | lean **headless** (same features, no `lumen::run`) | 6.8 MB | 5 |
+  | wasm, default | 22.0 MB | — |
+  | wasm, lean (`--no-default-features`) | **6.4 MB** | — |
 
   **<5 MB remains the target and is currently unreachable on desktop**, for a
   structural reason rather than a dependency-diet one: `lumen-shell` depends on

@@ -37,6 +37,48 @@ What the lean profile drops, and what each is worth:
   D-Bus thread: measured 13 threads / 12 socket fds down to 11 / 10 on a live
   window.
 
+## Web: the lean profile did not exist until the chain was fixed
+
+Web is where size is a hard *distribution* constraint, and it is where the lean
+profile was most thoroughly broken: `--no-default-features` produced a **21.9 MB**
+wasm module against the default's 22.0 MB. It bought 0.1 MB, and nothing noticed.
+
+| wasm profile | size |
+|---|---:|
+| default (pan-Unicode face) | 22.0 MB |
+| lean (`--no-default-features`) — **before** | 21.9 MB |
+| lean — **after** | **6.4 MB** |
+
+**Why:** Cargo silently ignores `default-features = false` on a
+*workspace-inherited* (`{ workspace = true }`) dependency. Reaching `lumen` from
+a platform shell crosses five crates, and **one** inherited link anywhere in the
+chain re-enables defaults for everything downstream:
+
+```
+lean-wasm consumer
+  └── lumen-shell-web ── lumen-shell-core ── lumen ── lumen-widgets ── lumen-text
+                    └── lumen-agent ─────────────────┘                (pan-unicode)
+```
+
+All five had to become direct path deps. Fixing four of them bought ~0.1 MB; the
+fifth (`lumen-agent -> lumen-widgets`) took it from 21.9 MB to 6.4 MB. There is
+no partial credit — the chain is only as lean as its most default-featured link.
+
+Two things make this worth recording rather than just fixing:
+
+* **The trap was already known and written down.** `lumen-shell-web`'s manifest
+  documents it *by name*, for its `lumen-agent` link — two lines below a
+  `lumen = { workspace = true }` that was falling into it. `lumen-shell-core`,
+  created earlier in this same campaign, fell into it too. A comment next to one
+  dependency does not protect the others.
+* **`snapshot` is not a tier for `lumen-agent`.** The agent bridge *is* the JSON
+  surface (`semantics_json`, `get_styles`), so `lumen-widgets/snapshot` is a hard
+  requirement there and is now requested unconditionally rather than forwarded.
+
+`scripts/web_gate.sh` gained a fourth leg that builds the lean module and fails
+above 9 MB. It is a **regression detector for this trap**, not a size budget:
+reverting a single link was verified to push it to 20.8 MB and fail the gate.
+
 ## The blocker for the rest: there is no CPU presentation path
 
 `01 §9` budgets a hello-world binary at **<5 MB**. The lean *headless* build is

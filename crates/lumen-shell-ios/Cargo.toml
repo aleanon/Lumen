@@ -11,15 +11,21 @@ publish = false
 name = "lumen_shell_ios"
 
 [features]
-# Forward the facade's snapshot tier (default-on via `lumen`'s defaults):
-# the session preserves state across a rotate via the snapshot handoff.
-default = ["snapshot"]
-snapshot = ["lumen/snapshot"]
+# Forwarded tiers (GX3). Default preserves today's behaviour exactly;
+# `--no-default-features` is what makes a lean build of this platform reachable.
+# `snapshot` is load-bearing here beyond size: the session preserves state
+# across a rotate via the snapshot handoff.
+default = ["pan-unicode", "snapshot"]
+pan-unicode = ["lumen/pan-unicode", "lumen-shell-core/pan-unicode"]
+snapshot = ["lumen/snapshot", "lumen-shell-core/snapshot"]
 
 [dependencies]
-lumen = { workspace = true }
+# Direct path deps, defaults OFF. `{ workspace = true }` silently ignores
+# `default-features = false`, so any default-featured link in this chain
+# re-enables the 15.5 MB pan-Unicode face for every consumer downstream.
+lumen = { path = "../lumen", default-features = false }
 lumen-core = { workspace = true }
-lumen-shell-core = { workspace = true }
+lumen-shell-core = { path = "../lumen-shell-core", default-features = false }
 lumen-render = { workspace = true }
 
 [dev-dependencies]

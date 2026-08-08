@@ -10,10 +10,23 @@ publish = false
 [lib]
 name = "lumen_shell_web"
 
+[features]
+# Forwarded tiers. Default matches the previous behaviour exactly (the facade's
+# own defaults minus the desktop-only ones), so existing consumers are
+# unchanged; `--no-default-features` is what makes a lean wasm build reachable.
+default = ["pan-unicode", "snapshot"]
+pan-unicode = ["lumen/pan-unicode", "lumen-shell-core/pan-unicode", "lumen-agent/pan-unicode"]
+snapshot = ["lumen/snapshot", "lumen-shell-core/snapshot"]
+
 [dependencies]
-lumen = { workspace = true }
+# Direct path dep, defaults OFF — same trap the `lumen-agent` line below calls
+# out, which this line was itself falling into: `lumen = { workspace = true }`
+# silently ignores `default-features = false`, so a consumer building a lean
+# wasm module still got the 15.5 MB pan-Unicode face through feature
+# unification, and `--no-default-features` bought ~0.1 MB out of 22.
+lumen = { path = "../lumen", default-features = false }
 lumen-core = { workspace = true }
-lumen-shell-core = { workspace = true }
+lumen-shell-core = { path = "../lumen-shell-core", default-features = false }
 lumen-render = { workspace = true }
 # P.2: the agent bridge — dispatch only; the browser owns the transport
 # (WebSocket/CDP), so the native ws serving loop stays off. Direct path dep:

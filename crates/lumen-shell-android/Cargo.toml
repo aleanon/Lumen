@@ -10,8 +10,18 @@ publish = false
 [lib]
 name = "lumen_shell_android"
 
+[features]
+# Forwarded tiers (GX3). Default preserves today's behaviour exactly;
+# `--no-default-features` is what makes a lean build of this platform reachable.
+default = ["pan-unicode", "snapshot"]
+pan-unicode = ["lumen/pan-unicode"]
+snapshot = ["lumen/snapshot"]
+
 [dependencies]
-lumen = { workspace = true }
+# Direct path deps, defaults OFF. `{ workspace = true }` silently ignores
+# `default-features = false`, so any default-featured link in this chain
+# re-enables the 15.5 MB pan-Unicode face for every consumer downstream.
+lumen = { path = "../lumen", default-features = false }
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }
 

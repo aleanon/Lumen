@@ -13,8 +13,20 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Forwarded tiers. Default preserves the previous behaviour exactly, so no
+# existing consumer changes; `--no-default-features` is what lets a platform
+# shell (notably wasm, where size is a distribution constraint) go lean.
+default = ["pan-unicode", "snapshot"]
+pan-unicode = ["lumen/pan-unicode"]
+snapshot = ["lumen/snapshot"]
+
 [dependencies]
-lumen = { workspace = true }
+# Direct path dep, defaults OFF. `lumen = { workspace = true }` silently
+# ignores `default-features = false`, and because every platform shell reaches
+# `lumen` THROUGH this crate, that one line pinned the 15.5 MB pan-Unicode face
+# into every wasm build no matter what the consumer asked for.
+lumen = { path = "../lumen", default-features = false }
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }
 kurbo = { workspace = true }

@@ -9,7 +9,12 @@ publish = false
 
 [dependencies]
 lumen-core = { workspace = true }
-lumen-widgets = { workspace = true }
+# Direct path dep, defaults OFF. As a `{ workspace = true }` link this crate
+# was the last one re-enabling `lumen-widgets`'s defaults (and with them the
+# 15.5 MB pan-Unicode face) for every platform shell that depends on the agent
+# bridge — even when the consumer, the shell, and the shared shell core had all
+# already been switched to defaults-off.
+lumen-widgets = { path = "../lumen-widgets", default-features = false, features = ["snapshot"] }
 kurbo = { workspace = true }
 serde_json = { workspace = true }
 # Sync WebSocket so the non-Send app stays on the serving thread (ADR-003,
@@ -20,7 +25,12 @@ serde_json = { workspace = true }
 tungstenite = { workspace = true, optional = true }
 
 [features]
-default = ["ws"]
+default = ["ws", "pan-unicode"]
+# Forwarded tier (GX3), so a lean platform shell can actually reach lean.
+# NOTE `snapshot` is NOT forwardable: the agent bridge IS the JSON surface
+# (`semantics_json`, `get_styles`), so lumen-widgets/snapshot is a hard
+# requirement here rather than a tier — it is requested unconditionally above.
+pan-unicode = ["lumen-widgets/pan-unicode"]
 # The native WebSocket serving loop (serve_one/serve_one_session).
 ws = ["dep:tungstenite"]
 
