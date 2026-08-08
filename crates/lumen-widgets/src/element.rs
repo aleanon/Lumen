@@ -591,7 +591,7 @@ pub(crate) struct CachedScope {
 
 /// Per-app store of memoized scope subtrees, keyed by scope identity path. Owned
 /// by `Headless`, persists across builds, threaded into `BuildCx`.
-pub(crate) type ScopeCache = std::collections::HashMap<IdHash, CachedScope>;
+pub(crate) type ScopeCache = crate::fxhash::HashMap<IdHash, CachedScope>;
 
 /// The build context handed to the root closure and components. Exposes signal
 /// creation, the (virtual) clock, time-driven animation, and background tasks.

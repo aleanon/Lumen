@@ -30,6 +30,7 @@ pub mod element;
 pub mod feedback;
 pub mod file_picker;
 pub mod forms;
+mod fxhash;
 pub mod grid;
 pub mod i18n;
 pub mod label;

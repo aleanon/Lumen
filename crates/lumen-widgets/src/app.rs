@@ -23,7 +23,8 @@ use lumen_render::{
 };
 use lumen_text::TextEngine;
 use std::cell::RefCell;
-use std::collections::HashMap;
+
+use crate::fxhash::HashMap;
 use std::rc::Rc;
 
 /// Hit-test z for overlay subtrees (dropdown menus, popovers, tooltips). They
@@ -205,13 +206,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             executor: self.executor,
             task_waker: None,
             text,
-            text_cache: HashMap::new(),
-            shadow_cache: HashMap::new(),
+            text_cache: HashMap::default(),
+            shadow_cache: HashMap::default(),
             tree: Tree::new(),
-            meta: HashMap::new(),
-            node_ink: HashMap::new(),
-            node_caret: HashMap::new(),
-            node_text_metrics: HashMap::new(),
+            meta: HashMap::default(),
+            node_ink: HashMap::default(),
+            node_caret: HashMap::default(),
+            node_text_metrics: HashMap::default(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
             sem_root: None,
             build_panic: None,
@@ -223,28 +224,28 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             requests: crate::element::FrameRequests::default(),
             app_sheet: self.stylesheet.as_deref().and_then(parse_sheet),
             theme: lumen_style::ThemeKind::Light,
-            node_style: HashMap::new(),
-            node_computed: HashMap::new(),
+            node_style: HashMap::default(),
+            node_computed: HashMap::default(),
             style_env: None,
-            scope_spans: HashMap::new(),
-            prev_spans: HashMap::new(),
+            scope_spans: HashMap::default(),
+            prev_spans: HashMap::default(),
             prev_tree: Tree::new(),
-            prev_meta: HashMap::new(),
-            prev_node_style: HashMap::new(),
-            prev_node_computed: HashMap::new(),
-            node_layout_style: HashMap::new(),
-            prev_layout_style: HashMap::new(),
+            prev_meta: HashMap::default(),
+            prev_node_style: HashMap::default(),
+            prev_node_computed: HashMap::default(),
+            node_layout_style: HashMap::default(),
+            prev_layout_style: HashMap::default(),
             allow_copy_forward: false,
             impure_seen: 0,
             nodes_rebuilt: 0,
             nodes_copied: 0,
-            style_memo: HashMap::new(),
+            style_memo: HashMap::default(),
             style_memo_hits: 0,
             style_memo_misses: 0,
-            commands: HashMap::new(),
-            prop_anims: HashMap::new(),
+            commands: HashMap::default(),
+            prop_anims: HashMap::default(),
             reduced_motion: false,
-            key_anims: HashMap::new(),
+            key_anims: HashMap::default(),
             theme_anim_until: 0.0,
             desc_stack: Vec::new(),
             container_nodes: Vec::new(),
@@ -267,7 +268,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             last_build_gen: 0,
             force_rebuild: false,
             last_build_clock: 0.0,
-            scope_cache: RefCell::new(HashMap::new()),
+            scope_cache: RefCell::new(HashMap::default()),
             scope_live: RefCell::new(std::collections::HashSet::new()),
             bg_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
@@ -2359,7 +2360,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         };
         let computed = lumen_style::resolve_with_ancestors(&env.sources, &desc, ancestors, &media);
         let mut css = lumen_style::Style::new();
-        let mut resolved = HashMap::new();
+        let mut resolved = HashMap::default();
         for (prop, c) in &computed {
             lumen_style::apply(&mut css, prop, &c.value, &env.tokens);
             resolved.insert(
@@ -2583,7 +2584,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             },
             keyframes: {
                 let tokens = lumen_style::tokens_for(sheet, self.theme);
-                let mut map = HashMap::new();
+                let mut map = HashMap::default();
                 for item in &sheet.items {
                     if let lumen_style::Item::Keyframes(kf) = item {
                         let mut stops: Vec<(f32, KeyStop)> = kf
@@ -2620,7 +2621,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
         let mut tree = Tree::new();
         let mut layout = LayoutTree::new();
-        let mut meta = HashMap::new();
+        let mut meta = HashMap::default();
         let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::new();
         let (_root_node, root_lnode) = self.build_node(
             root_el,
@@ -2812,7 +2813,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .filter(|(k, r)| **k != key && prev_nodes.contains(&r.root))
             .map(|(k, r)| (*k, *r))
             .collect();
-        let mut root_map: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+        let mut root_map: HashMap<NodeIndex, NodeIndex> = HashMap::default();
         let (node, lnode) =
             self.copy_node(span.root, parent, tree, layout, meta, built, &mut root_map);
         self.scope_spans.insert(
@@ -3389,7 +3390,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     &media,
                 );
                 let mut css = lumen_style::Style::new();
-                let mut resolved = HashMap::new();
+                let mut resolved = HashMap::default();
                 for (prop, c) in &computed {
                     lumen_style::apply(&mut css, prop, &c.value, &env.tokens);
                     // Store the token-resolved value so `get_styles` returns
@@ -3441,7 +3442,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // B.6b without a stylesheet: the inline tier still applies (its
             // own layout/typography/visibility effects included).
             let mut css = lumen_style::Style::new();
-            let mut resolved = HashMap::new();
+            let mut resolved = HashMap::default();
             merge_inline_style(&mut css, &mut resolved, &inline);
             apply_css_to_element(&mut el, &css);
             if css.visibility == Some(false) {
@@ -3617,7 +3618,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // they sit above the rest of the UI and escape ancestor clips (dropdown
         // menus, popovers, tooltips). Both subsets keep document order.
         let root = order.first().copied();
-        let mut depth: HashMap<NodeIndex, u32> = HashMap::new();
+        let mut depth: HashMap<NodeIndex, u32> = HashMap::default();
         let mut main_order: Vec<NodeIndex> = Vec::new();
         let mut overlay_order: Vec<NodeIndex> = Vec::new();
         let mut overlay_depths: Vec<u32> = Vec::new();
