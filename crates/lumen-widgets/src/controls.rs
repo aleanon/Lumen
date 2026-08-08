@@ -1,58 +1,219 @@
-//! M1 widget additions (02 §10), most importantly the windowing `VirtualList`.
+//! Single-value input controls and small decorative elements: icons, switches,
+//! steppers, radios, text areas, avatars and skeleton placeholders.
 //!
-//! These are `Element` constructors like the M0 primitives; stateful ones own a
-//! signal keyed by `name`. The remaining 02 §10 M1 widgets (RichText, Grid,
-//! Wrap, Align, SplitPane, TextArea, Select, Tooltip, Popover, Menu) follow the
-//! same constructor pattern.
+//! (SD2: regrouped out of the milestone-named `widgets_m*`/`misc_w2` modules,
+//! which recorded WHEN a widget was written rather than what it is.)
 
-use crate::element::{BuildCx, Element};
 use crate::widget::impl_common;
-use crate::Canvas;
+use crate::{widgets, BuildCx, Canvas, Element};
 use lumen_core::events::{Key, NamedKey};
-use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
+use lumen_core::semantics::{Action, Role, State as SemState};
 use lumen_core::Color;
-use lumen_layout::{Dim, Display, Edges, FlexDirection, LayoutStyle, Position};
+use lumen_layout::{Align as LAlign, Dim, Display, Edges, FlexDirection, LayoutStyle};
+use lumen_text::TextStyle;
 use std::rc::Rc;
 
-/// Flexible empty space that grows to fill its container.
-pub fn spacer() -> Element {
+/// A loading placeholder block: a soft grey box that pulses (opacity keyed
+/// to the clock) while content loads.
+/// # Example
+///
+/// ```
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Skeleton, BuildCx, Element};
+///
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Skeleton::new(cx, 160.0, 16.0).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 56.0, "skeleton");
+/// ```
+///
+/// Renders:
+///
+/// ![Skeleton example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/skeleton.png)
+///
+/// The picture above is `src/doc_shots/skeleton.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
+pub struct Skeleton {
+    el: Element,
+}
+
+impl Skeleton {
+    /// A pulsing placeholder of the given size.
+    pub fn new(cx: &BuildCx, width: f64, height: f64) -> Skeleton {
+        cx.animate();
+        let t = cx.now_ms() / 1000.0;
+        // 0.55..0.95 alpha pulse.
+        let a = 0.75 + 0.20 * (t * 2.2).sin();
+        let mut el = Element::default().class("skeleton");
+        el.role = Role::Generic;
+        el.background = Some(Color::srgb8(0xd7, 0xdb, 0xe1, (a * 255.0) as u8));
+        el.corner_radius = 6.0;
+        el.style.width = Dim::px(width as f32);
+        el.style.height = Dim::px(height as f32);
+        Skeleton { el }
+    }
+}
+
+impl_common!(Skeleton);
+
+/// A round avatar showing the initials of a name over a color hashed from it.
+/// # Example
+///
+/// ```
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, Avatar, BuildCx, Element};
+///
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, Avatar::new("Ada Lovelace", 40.0).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 72.0, 72.0, "avatar");
+/// ```
+///
+/// Renders:
+///
+/// ![Avatar example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/avatar.png)
+///
+/// The picture above is `src/doc_shots/avatar.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
+pub struct Avatar {
+    el: Element,
+}
+
+impl Avatar {
+    /// An avatar of `diameter` px for `name` (initials + stable hash color).
+    pub fn new(name: &str, diameter: f64) -> Avatar {
+        let initials: String = name
+            .split_whitespace()
+            .filter_map(|w| w.chars().next())
+            .take(2)
+            .collect::<String>()
+            .to_uppercase();
+        let hash: u32 = name
+            .bytes()
+            .fold(2166136261u32, |h, b| (h ^ b as u32).wrapping_mul(16777619));
+        let palette = [
+            Color::srgb8(0x1a, 0x73, 0xe8, 0xff),
+            Color::srgb8(0x18, 0x8a, 0x42, 0xff),
+            Color::srgb8(0xc9, 0x5b, 0x0b, 0xff),
+            Color::srgb8(0x8e, 0x24, 0xaa, 0xff),
+            Color::srgb8(0xd3, 0x2f, 0x2f, 0xff),
+            Color::srgb8(0x00, 0x83, 0x8f, 0xff),
+        ];
+        let bg = palette[(hash as usize) % palette.len()];
+
+        let mut text = widgets::text(if initials.is_empty() {
+            "?".to_string()
+        } else {
+            initials
+        });
+        if let Some(ts) = text.text_style_mut() {
+            ts.font_size = (diameter * 0.4) as f32;
+            ts.weight = 600.0;
+            ts.color = Color::srgb8(0xff, 0xff, 0xff, 0xff);
+        }
+        let mut el = Element {
+            role: Role::Image,
+            label: name.to_string(),
+            background: Some(bg),
+            corner_radius: diameter / 2.0,
+            children: vec![text],
+            ..Element::default()
+        };
+        el = el.class("avatar");
+        el.style.width = Dim::px(diameter as f32);
+        el.style.height = Dim::px(diameter as f32);
+        el.style.align_items = Some(LAlign::Center);
+        el.style.justify_content = Some(LAlign::Center);
+        Avatar { el }
+    }
+}
+
+impl Avatar {
+    /// Show `img` instead of the initials, clipped to the avatar's circle.
+    ///
+    /// Initials remain the **fallback** — the framework-agnostic contract for an
+    /// avatar (Flutter's `CircleAvatar.backgroundImage`, Material's avatar) — so
+    /// a failed or absent image still renders something identifiable, and the
+    /// accessible label stays the person's name either way.
+    pub fn image(mut self, img: lumen_render::RgbaImage) -> Avatar {
+        let d = self.el.style.width;
+        let mut pic: Element = crate::Image::new(img).into();
+        pic.style.width = d;
+        pic.style.height = self.el.style.height;
+        pic.elide_semantics = true; // the avatar itself carries the label
+        self.el.children = vec![pic];
+        self.el.clip = true; // round the picture to the avatar's circle
+        self
+    }
+}
+
+impl_common!(Avatar);
+
+/// A radio button in the group keyed by `group`; selecting it sets the group to
+/// `value`. Exactly one member of a group is checked.
+pub fn radio(cx: &BuildCx, group: &str, value: usize, label: impl Into<String>) -> Element {
+    let selected = cx.signal(group, || 0usize);
+    let on = selected.get(cx.runtime()) == value;
+    let label = label.into();
     Element {
-        role: Role::Generic,
-        elide_semantics: true,
+        role: Role::Radio,
+        label: label.clone(),
+        focusable: true,
+        actions: vec![Action::Click, Action::Focus],
+        states: if on {
+            vec![SemState::Checked]
+        } else {
+            vec![SemState::Unchecked]
+        },
         style: LayoutStyle {
-            flex_grow: 1.0,
+            padding: Edges::all(Dim::px(4.0)),
             ..LayoutStyle::default()
         },
+        content: crate::NodeContent::Text(
+            format!("{} {label}", if on { "◉" } else { "○" }),
+            TextStyle::default(),
+        ),
+        on_click: Some(Rc::new(move |rt| selected.set(rt, value))),
         ..Element::default()
     }
 }
 
-/// A horizontal divider line.
-pub fn divider() -> Element {
+/// A multi-line text input. `name` keys the text; typing (including newlines)
+/// appends to it.
+pub fn text_area(cx: &BuildCx, name: &str, initial: &str) -> Element {
+    let value = cx.signal(name, || initial.to_string());
+    let v = value.get(cx.runtime());
+    let shown = if v.is_empty() {
+        " ".to_string()
+    } else {
+        v.clone()
+    };
     Element {
-        role: Role::Generic,
-        background: Some(Color::srgb8(0xd8, 0xdd, 0xe3, 0xff)),
+        role: Role::TextInput,
+        focusable: true,
+        label: v.clone(),
+        value: Some(v),
+        actions: vec![Action::Focus, Action::SetValue],
+        background: Some(Color::srgb8(0xf2, 0xf2, 0xf2, 0xff)),
+        corner_radius: 4.0,
         style: LayoutStyle {
-            height: Dim::px(1.0),
-            width: Dim::pct(1.0),
+            padding: Edges::all(Dim::px(6.0)),
+            min_width: Dim::px(160.0),
+            min_height: Dim::px(72.0),
             ..LayoutStyle::default()
         },
+        content: crate::NodeContent::Text(shown, TextStyle::default()),
+        on_text: Some(Rc::new(move |rt, t| {
+            let t = t.to_string();
+            value.update(rt, |s| s.push_str(&t))
+        })),
         ..Element::default()
     }
-}
-
-/// Wrap `child` in uniform padding (px).
-pub fn padding(px: f32, child: Element) -> Element {
-    Element {
-        role: Role::Generic,
-        elide_semantics: true,
-        style: LayoutStyle {
-            padding: Edges::all(Dim::px(px)),
-            ..LayoutStyle::default()
-        },
-        children: vec![child],
-        ..Element::default()
-    }
+    .id(name)
 }
 
 /// [`Icon`] — a small vector-glyph icon (Flutter `Icon` structure; typed form
@@ -400,235 +561,14 @@ pub fn stepper(cx: &BuildCx, name: &str, min: i64, max: i64) -> Element {
     Stepper::new(cx, name, min, max).into()
 }
 
-/// [`Tabs`] — a tab bar; selected index under `name` (typed form of
-/// [`tabs`]).
-/// # Example
-///
-/// ```
-/// # use lumen_widgets::App;
-/// use lumen_widgets::{full_width, Tabs, BuildCx, Element};
-///
-/// fn build(cx: &mut BuildCx) -> Element {
-///     full_width(cx, Tabs::new(cx, "tab", &["One", "Two", "Three"]).into())
-/// }
-/// # let app = App::new(build);
-/// # lumen_widgets::doc_shot(app, 240.0, 60.0, "tabs");
-/// ```
-///
-/// Renders:
-///
-/// ![Tabs example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/tabs.png)
-///
-/// The picture above is `src/doc_shots/tabs.png` — this exact example's
-/// output. `doc_shot` re-renders it every test run and fails if the render
-/// drifts from that committed image, so the picture is always current.
-pub struct Tabs {
-    el: Element,
-}
-
-impl Tabs {
-    /// A tab bar with its own selected-index state (`name`).
-    pub fn new(cx: &BuildCx, name: &str, labels: &[&str]) -> Tabs {
-        let el = {
-            let selected = cx.signal(name, || 0usize);
-            let cur = selected.get(cx.runtime());
-            let n = labels.len().max(1);
-            let tabs: Vec<Element> = labels
-                .iter()
-                .enumerate()
-                .map(|(i, label)| {
-                    let on = i == cur;
-                    Element {
-                        id: Some(format!("{name}-tab-{i}").into()),
-                        role: Role::Tab,
-                        label: (*label).to_string(),
-                        focusable: true,
-                        actions: vec![Action::Click, Action::Focus],
-                        states: if on { vec![SemState::Selected] } else { vec![] },
-                        background: Some(if on {
-                            Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
-                        } else {
-                            Color::srgb8(0xee, 0xf0, 0xf3, 0xff)
-                        }),
-                        corner_radius: 4.0,
-                        style: LayoutStyle {
-                            padding: Edges::all(Dim::px(6.0)),
-                            ..LayoutStyle::default()
-                        },
-                        content: crate::NodeContent::Text(
-                            (*label).to_string(),
-                            lumen_text::TextStyle {
-                                font_size: 14.0,
-                                weight: 400.0,
-                                color: if on { Color::WHITE } else { Color::BLACK },
-                                line_height: None,
-                                letter_spacing: 0.0,
-                                family: None,
-                                features: None,
-                                variations: None,
-                                italic: false,
-                                align: Default::default(),
-                            },
-                        ),
-                        on_click: Some(Rc::new(move |rt| selected.set(rt, i))),
-                        // W3: the WAI-ARIA tablist keys — ←/→ move the
-                        // selection, Home/End jump to the ends.
-                        //
-                        // Movement is relative to the *current selection*, not
-                        // to this tab's own index: focus does not rove with the
-                        // selection (it is keyed by StableId and only Tab moves
-                        // it), so keying off `i` would make ← / → depend on
-                        // which tab happens to hold focus.
-                        on_key: Some(Rc::new(move |rt, ke| {
-                            let cur = selected.get(rt);
-                            match ke.key {
-                                Key::Named(NamedKey::ArrowRight) => selected.set(rt, (cur + 1) % n),
-                                Key::Named(NamedKey::ArrowLeft) => {
-                                    selected.set(rt, (cur + n - 1) % n)
-                                }
-                                Key::Named(NamedKey::Home) => selected.set(rt, 0),
-                                Key::Named(NamedKey::End) => selected.set(rt, n - 1),
-                                _ => {}
-                            }
-                        })),
-                        ..Element::default()
-                    }
-                })
-                .collect();
-            Element {
-                role: Role::TabList,
-                style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Dim::px(4.0),
-                    ..LayoutStyle::default()
-                },
-                children: tabs,
-                ..Element::default()
-            }
-        };
-        Tabs { el }
-    }
-}
-
-impl_common!(Tabs);
-
-/// A tab bar with its own selected-index state (`name`).
-/// *(Thin shim over [`Tabs`] — the typed form is preferred.)*
-pub fn tabs(cx: &BuildCx, name: &str, labels: &[&str]) -> Element {
-    Tabs::new(cx, name, labels).into()
-}
-
-/// [`VirtualList`] — a windowing list materializing only visible items
-/// plus overscan; scroll offset under `name` (typed form of
-/// [`virtual_list`]).
-/// # Example
-///
-/// ```
-/// # use lumen_widgets::App;
-/// use lumen_widgets::{centered, widgets, VirtualList, BuildCx, Element};
-///
-/// fn build(cx: &mut BuildCx) -> Element {
-///     let list =
-///         VirtualList::new(cx, "vl", 1000, 24.0, 96.0, |i| widgets::text(format!("Row {i}")));
-///     centered(cx, list.into())
-/// }
-/// # let app = App::new(build);
-/// # lumen_widgets::doc_shot(app, 200.0, 120.0, "virtual_list");
-/// ```
-///
-/// Renders:
-///
-/// ![Virtual List example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/virtual_list.png)
-///
-/// The picture above is `src/doc_shots/virtual_list.png` — this exact example's
-/// output. `doc_shot` re-renders it every test run and fails if the render
-/// drifts from that committed image, so the picture is always current.
-pub struct VirtualList {
-    el: Element,
-}
-
-impl VirtualList {
-    /// A windowing list (02 §10): materializes only the visible items plus overscan,
-    /// regardless of `item_count`. State (`name`) is the scroll offset.
-    pub fn new(
-        cx: &BuildCx,
-        name: &str,
-        item_count: usize,
-        item_height: f64,
-        viewport_h: f64,
-        render: impl Fn(usize) -> Element,
-    ) -> VirtualList {
-        let el = {
-            const OVERSCAN: usize = 2;
-            let offset = cx.signal(name, || 0.0f64);
-            let y = offset.get(cx.runtime());
-
-            let first = ((y / item_height).floor() as usize).saturating_sub(OVERSCAN);
-            let per_view = (viewport_h / item_height).ceil() as usize;
-            let last = (first + per_view + OVERSCAN * 2).min(item_count);
-
-            let children: Vec<Element> = (first..last)
-                .map(|i| {
-                    let top = (i as f64 * item_height) - y;
-                    let mut el = render(i);
-                    el.style.position = Position::Absolute;
-                    el.style.inset = Edges {
-                        left: Dim::px(0.0),
-                        top: Dim::px(top as f32),
-                        ..Edges::AUTO
-                    };
-                    el.style.height = Dim::px(item_height as f32);
-                    el
-                })
-                .collect();
-
-            let max_y = (item_count as f64 * item_height - viewport_h).max(0.0);
-            Element {
-                role: Role::List,
-                scroll: Some(ScrollInfo {
-                    x: 0.0,
-                    y,
-                    max_x: 0.0,
-                    max_y,
-                }),
-                actions: vec![Action::ScrollIntoView],
-                style: LayoutStyle {
-                    position: Position::Relative,
-                    width: Dim::pct(1.0),
-                    height: Dim::px(viewport_h as f32),
-                    ..LayoutStyle::default()
-                },
-                on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
-                    offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
-                })),
-                children,
-                ..Element::default()
-            }
-        };
-        VirtualList { el }
-    }
-}
-
-impl_common!(VirtualList);
-
-/// A windowing list (02 §10): materializes only the visible items plus overscan,
-/// regardless of `item_count`. State (`name`) is the scroll offset.
-/// *(Thin shim over [`VirtualList`] — the typed form is preferred.)*
-pub fn virtual_list(
-    cx: &BuildCx,
-    name: &str,
-    item_count: usize,
-    item_height: f64,
-    viewport_h: f64,
-    render: impl Fn(usize) -> Element,
-) -> Element {
-    VirtualList::new(cx, name, item_count, item_height, viewport_h, render).into()
-}
-
+/// The typed-vs-shim migration contract. It deliberately spans modules — Switch,
+/// Stepper and Icon live here, Tabs in `nav_chrome`, VirtualList in `lists` —
+/// because the contract is about the typed forms as a family, not about any one
+/// module. Every type is reached through the crate root, which is also the path
+/// a consumer uses.
 #[cfg(test)]
 mod typed_tests {
-    use crate::{widgets_m1, App};
+    use crate::{widgets, App};
     use kurbo::Size;
     use lumen_core::events::{Event, PointerEvent};
     use lumen_core::geometry::Point;
@@ -640,13 +580,13 @@ mod typed_tests {
     fn typed_forms_match_shims_and_behave() {
         let mut h = App::new(|cx| {
             crate::widgets::column(vec![
-                widgets_m1::Switch::new(cx, "wifi", "Wi-Fi").id("sw").into(),
-                widgets_m1::Tabs::new(cx, "tab", &["One", "Two"])
+                crate::Switch::new(cx, "wifi", "Wi-Fi").id("sw").into(),
+                crate::Tabs::new(cx, "tab", &["One", "Two"])
                     .id("tabs")
                     .into(),
-                widgets_m1::Stepper::new(cx, "n", 0, 5).id("st").into(),
-                widgets_m1::Icon::new("gear").id("ic").into(),
-                widgets_m1::VirtualList::new(cx, "vl", 1000, 20.0, 100.0, |i| {
+                crate::Stepper::new(cx, "n", 0, 5).id("st").into(),
+                crate::Icon::new("gear").id("ic").into(),
+                crate::VirtualList::new(cx, "vl", 1000, 20.0, 100.0, |i| {
                     crate::widgets::text(format!("row {i}"))
                 })
                 .id("vl")
@@ -675,16 +615,15 @@ mod typed_tests {
     /// Shim output ≡ typed output (byte-identical semantic trees).
     #[test]
     fn shim_and_typed_trees_are_identical() {
-        let a = App::new(|cx| crate::widgets::column(vec![widgets_m1::switch(cx, "s", "L")]))
+        let a = App::new(|cx| crate::widgets::column(vec![widgets::switch(cx, "s", "L")]))
             .run_headless(Size::new(200.0, 100.0))
             .semantics_json()
             .to_string();
-        let b = App::new(|cx| {
-            crate::widgets::column(vec![widgets_m1::Switch::new(cx, "s", "L").into()])
-        })
-        .run_headless(Size::new(200.0, 100.0))
-        .semantics_json()
-        .to_string();
+        let b =
+            App::new(|cx| crate::widgets::column(vec![crate::Switch::new(cx, "s", "L").into()]))
+                .run_headless(Size::new(200.0, 100.0))
+                .semantics_json()
+                .to_string();
         assert_eq!(a, b);
     }
 }

@@ -26,6 +26,8 @@ pub mod container;
 #[cfg(feature = "snapshot")]
 pub mod design;
 pub use lumen_app::element;
+/// W.2 small widgets: Skeleton, Avatar, Pagination, AlignBox.
+mod controls;
 /// W.1 promotions: Toast, Spinner, Chip.
 pub mod feedback;
 pub mod file_picker;
@@ -35,8 +37,6 @@ pub mod i18n;
 pub mod label;
 mod macros;
 pub mod markdown;
-/// W.2 small widgets: Skeleton, Avatar, Pagination, AlignBox.
-mod misc_w2;
 pub mod motion;
 pub mod nav;
 pub mod pick_list;
@@ -65,20 +65,29 @@ pub mod shader;
 pub use lumen_app::tasks;
 pub mod widgets;
 
-// SD2: the milestone-named modules (`widgets_m1`/`m3`/`m4`/`extra`,
-// `misc_w2`) are now private. They recorded WHEN a widget was built — an
-// internal scheduling fact that is meaningless to a consumer, impossible to
-// reorganize without a breaking change, and was reachable as
-// `lumen::widgets_m3::DatePicker`. Their contents are re-exported from the one
-// flat `widgets` namespace instead (the shape iced and egui use), which is
-// where a consumer would look first anyway.
+// SD2 (complete): the milestone-named modules are gone. They recorded WHEN a
+// widget was built — an internal scheduling fact meaningless to a consumer, and
+// `lumen::widgets_m3::DatePicker` was a reachable path, so the grouping was
+// frozen by compatibility.
 //
-// Verified collision-free: 77 public items across the six modules, no
-// duplicate names.
-mod widgets_extra;
-mod widgets_m1;
-mod widgets_m3;
-mod widgets_m4;
+// Two steps. First the modules were made private and their contents re-exported
+// flat from `widgets` (the shape iced and egui use), which closed the one-way
+// door: nothing public named a milestone any more. Then the files themselves
+// were regrouped by function — `controls`, `lists`, `nav_chrome`, `overlay`,
+// `panes`, `pickers`, `primitives`, `text_editing`, and `BarChart` joining the
+// existing `charts` beside LineChart and PieChart.
+//
+// The second step was safe to defer precisely because the first had landed:
+// private modules can be reorganized at any time. Public API is byte-identical
+// across the move — 95 re-exports before and after, all 61 public items in the
+// old modules accounted for.
+mod lists;
+mod nav_chrome;
+mod overlay;
+mod panes;
+mod pickers;
+mod primitives;
+mod text_editing;
 
 pub use app::{center, App, FrameStats, Headless, ReloadResult};
 #[cfg(feature = "snapshot")]
@@ -285,18 +294,30 @@ pub use accordion::Accordion;
 // Typed forms of the legacy fn-style widgets (migration, 2026-07-20).
 pub use button::Button;
 pub use card::{Badge, Card};
+pub use charts::BarChart;
 pub use charts::{LineChart, PieChart, PieSlice};
 pub use check_box::CheckBox;
 pub use color_picker::ColorPicker;
 pub use combobox::Combobox;
 pub use container::Container;
+pub use controls::{Avatar, Skeleton};
+pub use controls::{Icon, Stepper, Switch};
 pub use feedback::{Chip, Spinner, Toast, ToastKind};
 pub use file_picker::FilePicker;
 pub use grid::{CellRef, Grid, GridStyle};
 pub use label::Label;
-pub use misc_w2::{AlignBox, Avatar, Pagination, Skeleton};
+pub use lists::Pagination;
+pub use lists::VirtualList;
+pub use lists::{DataGrid, Tree};
+pub use nav_chrome::Tabs;
+pub use nav_chrome::{AppBar, BottomNav, NavigationRail, PullToRefresh};
+pub use overlay::{Menu, Modal, Select, Tooltip};
+pub use panes::{PaneGrid, SplitPane};
 pub use pick_list::PickList;
+pub use pickers::{DatePicker, TimePicker};
 pub use popover::{Popover, PopoverSide};
+pub use primitives::AlignBox;
+pub use primitives::Wrap;
 pub use progress_bar::ProgressBar;
 pub use radio::Radio;
 pub use range_slider::RangeSlider;
@@ -306,10 +327,7 @@ pub use search_field::SearchField;
 pub use sheet::{Drawer, DrawerSide, Sheet};
 pub use slider::Slider;
 pub use space::Space;
+pub use text_editing::{FindReplaceBar, RichText, RichTextEditor};
 pub use text_field::TextField;
 pub use text_input::TextInput;
 pub use widgets::{Canvas, Image};
-pub use widgets_extra::{Menu, Modal, PaneGrid, Select, SplitPane, Tooltip, Wrap};
-pub use widgets_m1::{Icon, Stepper, Switch, Tabs, VirtualList};
-pub use widgets_m3::{AppBar, BottomNav, DatePicker, NavigationRail, PullToRefresh, TimePicker};
-pub use widgets_m4::{BarChart, DataGrid, FindReplaceBar, RichText, RichTextEditor, Tree};

@@ -3,10 +3,12 @@
 //! keeps its richer themed copy). Both measure to the available box, paint
 //! with `Frame` geometry + text, and expose value-bearing semantics.
 
+use crate::widget::impl_common;
 use crate::{widgets, Element, LeafWidget};
 use kurbo::{BezPath, Point, Rect, Size};
 use lumen_core::semantics::Role;
 use lumen_core::Color;
+use lumen_layout::{Dim, Display, FlexDirection, LayoutStyle};
 use lumen_render::canvas::{AnchorX, AnchorY, Frame, TextOpts};
 
 fn grid() -> Color {
@@ -290,4 +292,84 @@ impl LeafWidget for PieChart {
             .collect();
         (Role::Image, format!("Pie chart: {}", parts.join(", ")))
     }
+}
+
+/// [`BarChart`] — vertical bars for `values` (typed form of
+/// [`bar_chart`]).
+/// # Example
+///
+/// ```
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, BarChart, BuildCx, Element};
+///
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, BarChart::new(&[3.0, 7.0, 4.0, 8.0, 2.0], 160.0, 80.0).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 200.0, 116.0, "bar_chart");
+/// ```
+///
+/// Renders:
+///
+/// ![Bar Chart example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/bar_chart.png)
+///
+/// The picture above is `src/doc_shots/bar_chart.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
+pub struct BarChart {
+    el: Element,
+}
+
+impl BarChart {
+    /// A simple bar chart: one bar per value, heights proportional to the max.
+    /// `name` is the accessible label; the value is the bar count.
+    pub fn new(values: &[f64], width: f64, height: f64) -> BarChart {
+        let el = {
+            let max = values.iter().cloned().fold(f64::MIN, f64::max).max(1e-9);
+            let bars = values
+                .iter()
+                .map(|v| {
+                    let frac = (v / max).clamp(0.0, 1.0);
+                    Element {
+                        role: Role::Generic,
+                        background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
+                        style: LayoutStyle {
+                            flex_grow: 1.0,
+                            flex_basis: Dim::px(0.0),
+                            height: Dim::px((frac * height) as f32),
+                            align_self: Some(lumen_layout::Align::End),
+                            ..LayoutStyle::default()
+                        },
+                        ..Element::default()
+                    }
+                })
+                .collect();
+            Element {
+                role: Role::Group,
+                label: format!("bar chart, {} values", values.len()),
+                value: Some(format!("{}", values.len())),
+                style: LayoutStyle {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    align_items: Some(lumen_layout::Align::End),
+                    column_gap: Dim::px(2.0),
+                    width: Dim::px(width as f32),
+                    height: Dim::px(height as f32),
+                    ..LayoutStyle::default()
+                },
+                children: bars,
+                ..Element::default()
+            }
+        };
+        BarChart { el }
+    }
+}
+
+impl_common!(BarChart);
+
+/// A simple bar chart: one bar per value, heights proportional to the max.
+/// `name` is the accessible label; the value is the bar count.
+/// *(Thin shim over [`BarChart`] — the typed form is preferred.)*
+pub fn bar_chart(values: &[f64], width: f64, height: f64) -> Element {
+    BarChart::new(values, width, height).into()
 }

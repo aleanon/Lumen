@@ -355,11 +355,15 @@ pub fn progress_bar(fraction: f64) -> Element {
 
 // SD2: the rest of the catalogue, re-exported so `widgets::` is the single
 // place to find a widget regardless of which milestone happened to add it.
-pub use crate::misc_w2::*;
-pub use crate::widgets_extra::*;
-pub use crate::widgets_m1::*;
-pub use crate::widgets_m3::*;
-pub use crate::widgets_m4::*;
+pub use crate::charts::{bar_chart, BarChart};
+pub use crate::controls::*;
+pub use crate::lists::*;
+pub use crate::nav_chrome::*;
+pub use crate::overlay::*;
+pub use crate::panes::*;
+pub use crate::pickers::*;
+pub use crate::primitives::*;
+pub use crate::text_editing::*;
 
 #[cfg(test)]
 mod typed_tests {

@@ -1,0 +1,306 @@
+//! Rich text: styled runs, an editable rich-text surface, and its find/replace
+//! bar.
+//!
+//! (SD2: regrouped out of the milestone-named `widgets_m*`/`misc_w2` modules,
+//! which recorded WHEN a widget was written rather than what it is.)
+
+use crate::widget::impl_common;
+use crate::{BuildCx, Element};
+use lumen_core::semantics::{Action, Role};
+use lumen_core::Color;
+use lumen_layout::{Dim, Display, Edges, FlexDirection, LayoutStyle};
+use lumen_text::TextStyle;
+use std::rc::Rc;
+
+/// One styled run of [`rich_text`].
+pub struct Run<'a> {
+    /// Text content.
+    pub text: &'a str,
+    /// Run colour.
+    pub color: Color,
+    /// Font size (px).
+    pub size: f32,
+}
+
+/// [`RichText`] — a row of differently-styled text runs (typed form of
+/// [`rich_text`]).
+/// # Example
+///
+/// ```
+/// # use lumen_widgets::App;
+/// use lumen_widgets::widgets::Run;
+/// use lumen_widgets::{centered, RichText, BuildCx, Element};
+/// use lumen_core::Color;
+///
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let runs = [
+///         Run { text: "Bold ", color: Color::BLACK, size: 16.0 },
+///         Run { text: "and blue", color: Color::srgb8(0x1a, 0x73, 0xe8, 0xff), size: 16.0 },
+///     ];
+///     centered(cx, RichText::new(&runs).into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 220.0, 56.0, "rich_text");
+/// ```
+///
+/// Renders:
+///
+/// ![Rich Text example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/rich_text.png)
+///
+/// The picture above is `src/doc_shots/rich_text.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
+pub struct RichText {
+    el: Element,
+}
+
+impl RichText {
+    /// A paragraph of differently-styled runs laid out in a row.
+    pub fn new(runs: &[Run]) -> RichText {
+        let el = {
+            let children = runs
+                .iter()
+                .map(|r| Element {
+                    role: Role::Text,
+                    label: r.text.to_string(),
+                    content: crate::NodeContent::Text(
+                        r.text.to_string(),
+                        TextStyle {
+                            font_size: r.size,
+                            weight: 400.0,
+                            color: r.color,
+                            line_height: None,
+                            letter_spacing: 0.0,
+                            family: None,
+                            features: None,
+                            variations: None,
+                            italic: false,
+                            align: Default::default(),
+                        },
+                    ),
+                    ..Element::default()
+                })
+                .collect();
+            Element {
+                role: Role::Group,
+                label: runs.iter().map(|r| r.text).collect::<String>(),
+                style: LayoutStyle {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Dim::px(2.0),
+                    ..LayoutStyle::default()
+                },
+                children,
+                ..Element::default()
+            }
+        };
+        RichText { el }
+    }
+}
+
+impl_common!(RichText);
+
+/// A paragraph of differently-styled runs laid out in a row.
+/// *(Thin shim over [`RichText`] — the typed form is preferred.)*
+pub fn rich_text(runs: &[Run]) -> Element {
+    RichText::new(runs).into()
+}
+
+/// [`RichTextEditor`] — a markdown-lite source editor with a live parsed
+/// preview; state under `name` (typed form of [`rich_text_editor`]).
+/// # Example
+///
+/// ```
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, RichTextEditor, BuildCx, Element};
+///
+/// fn build(cx: &mut BuildCx) -> Element {
+///     centered(cx, RichTextEditor::new(cx, "doc", "# Title\nSome **bold** body").into())
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 320.0, 140.0, "rich_text_editor");
+/// ```
+///
+/// Renders:
+///
+/// ![Rich Text Editor example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/rich_text_editor.png)
+///
+/// The picture above is `src/doc_shots/rich_text_editor.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
+pub struct RichTextEditor {
+    el: Element,
+}
+
+impl RichTextEditor {
+    /// M.4: the rich-text editor — the `RichDoc` model edited at the SOURCE
+    /// level with the full [`lumen_text::TextEditor`] caret/selection/clipboard/
+    /// undo machinery (same engine as `TextField`), plus a live parsed preview.
+    /// State: `{name}` holds the `TextEditor`; `{name}.text` mirrors the source
+    /// for plain reads. The semantic value is the source; the preview subtree
+    /// carries the rendered document (links/lists/images per [`crate::richdoc`]).
+    pub fn new(cx: &BuildCx, name: &str, initial: &str) -> RichTextEditor {
+        let el = {
+            use lumen_text::TextEditor;
+            let editor = cx.signal(name, || TextEditor::new(initial));
+            let mirror = cx.signal(format!("{name}.text"), || initial.to_string());
+            let ed = editor.get(cx.runtime());
+            let src = ed.text().to_string();
+            let shown = if src.is_empty() {
+                " ".to_string()
+            } else {
+                src.clone()
+            };
+
+            // The source pane: real caret + selection on the markdown-lite source.
+            let source_pane = Element {
+                role: Role::TextInput,
+                focusable: true,
+                label: src.clone(),
+                value: Some(src.clone()),
+                actions: vec![Action::Focus, Action::SetValue],
+                background: Some(Color::srgb8(0xf2, 0xf2, 0xf2, 0xff)),
+                corner_radius: 4.0,
+                style: LayoutStyle {
+                    padding: Edges::all(Dim::px(6.0)),
+                    min_width: Dim::px(220.0),
+                    min_height: Dim::px(56.0),
+                    width: Dim::px(300.0),
+                    ..LayoutStyle::default()
+                },
+                content: crate::NodeContent::Text(shown, lumen_text::TextStyle::default()),
+                caret_byte: Some(ed.cursor()),
+                selection: ed.has_selection().then(|| ed.selection()),
+                on_text: Some(Rc::new(move |rt, t| {
+                    editor.update(rt, |e| e.insert(t));
+                    mirror.set(rt, editor.get(rt).text().to_string());
+                })),
+                on_caret_set: Some(Rc::new(move |rt, byte, extend| {
+                    editor.update(rt, |e| e.place(byte, extend));
+                })),
+                on_key: Some(Rc::new(move |rt, ke| {
+                    crate::text_input::edit_key(rt, ke, editor, mirror, true);
+                })),
+                ..Element::default()
+            }
+            .id(name);
+
+            // The live preview: the parsed RichDoc (lists, links, images).
+            let doc = crate::richdoc::RichDoc::parse(&src);
+            let mut preview = doc.render(|_, _| {});
+            preview = preview.id(format!("{name}-preview"));
+
+            let mut col = crate::widgets::column(vec![source_pane, preview]);
+            col.style.row_gap = Dim::px(8.0);
+            col
+        };
+        RichTextEditor { el }
+    }
+}
+
+impl_common!(RichTextEditor);
+
+/// M.4: the rich-text editor — the `RichDoc` model edited at the SOURCE
+/// level with the full [`lumen_text::TextEditor`] caret/selection/clipboard/
+/// undo machinery (same engine as `TextField`), plus a live parsed preview.
+/// State: `{name}` holds the `TextEditor`; `{name}.text` mirrors the source
+/// for plain reads. The semantic value is the source; the preview subtree
+/// carries the rendered document (links/lists/images per [`crate::richdoc`]).
+/// *(Thin shim over [`RichTextEditor`] — the typed form is preferred.)*
+pub fn rich_text_editor(cx: &BuildCx, name: &str, initial: &str) -> Element {
+    RichTextEditor::new(cx, name, initial).into()
+}
+
+/// [`FindReplaceBar`] — find/replace over a [`RichTextEditor`]'s source;
+/// inputs under `name` (typed form of [`find_replace_bar`]).
+/// # Example
+///
+/// ```
+/// # use lumen_widgets::App;
+/// use lumen_widgets::{centered, widgets, FindReplaceBar, RichTextEditor, BuildCx, Element};
+///
+/// fn build(cx: &mut BuildCx) -> Element {
+///     let col = widgets::column(vec![
+///         RichTextEditor::new(cx, "doc", "hello world").into(),
+///         FindReplaceBar::new(cx, "fr", "doc").into(),
+///     ]);
+///     centered(cx, col)
+/// }
+/// # let app = App::new(build);
+/// # lumen_widgets::doc_shot(app, 400.0, 170.0, "find_replace_bar");
+/// ```
+///
+/// Renders:
+///
+/// ![Find Replace Bar example render](https://raw.githubusercontent.com/aleanon/Lumen/main/crates/lumen-widgets/src/doc_shots/find_replace_bar.png)
+///
+/// The picture above is `src/doc_shots/find_replace_bar.png` — this exact example's
+/// output. `doc_shot` re-renders it every test run and fails if the render
+/// drifts from that committed image, so the picture is always current.
+pub struct FindReplaceBar {
+    el: Element,
+}
+
+impl FindReplaceBar {
+    /// M.4: a find/replace bar operating on a [`rich_text_editor`]'s source.
+    /// `{name}.find` / `{name}.replace` hold the inputs; the count label shows
+    /// live match counts and the button rewrites every occurrence (caret resets
+    /// to the end; the editor's undo history keeps the previous text).
+    pub fn new(cx: &BuildCx, name: &str, editor_name: &str) -> FindReplaceBar {
+        let el = {
+            use lumen_text::TextEditor;
+            let editor = cx.signal(editor_name, || TextEditor::new(""));
+            let mirror = cx.signal(format!("{editor_name}.text"), String::new);
+            let find = cx.signal(format!("{name}.find"), String::new);
+            let needle = find.get(cx.runtime());
+            let count = crate::richdoc::RichDoc::find(&mirror.get(cx.runtime()), &needle).len();
+
+            let replace = cx.signal(format!("{name}.replace"), String::new);
+            let apply = {
+                move |rt: &lumen_core::state::Runtime| {
+                    let needle = find.get(rt);
+                    let with = replace.get(rt);
+                    if needle.is_empty() {
+                        return;
+                    }
+                    editor.update(rt, |e| {
+                        let (next, n) =
+                            crate::richdoc::RichDoc::replace_all(e.text(), &needle, &with);
+                        if n > 0 {
+                            e.select_all();
+                            e.insert(&next);
+                        }
+                    });
+                    mirror.set(rt, editor.get(rt).text().to_string());
+                }
+            };
+
+            let mut row = crate::widgets::row(vec![
+                crate::widgets::text_field_basic(cx, &format!("{name}.find"), &needle)
+                    .id(format!("{name}-find")),
+                crate::widgets::text_field_basic(
+                    cx,
+                    &format!("{name}.replace"),
+                    &replace.get(cx.runtime()),
+                )
+                .id(format!("{name}-replace")),
+                crate::widgets::text(format!("{count} match(es)")).id(format!("{name}-count")),
+                crate::widgets::button("Replace all", apply).id(format!("{name}-apply")),
+            ]);
+            row.style.column_gap = Dim::px(8.0);
+            row
+        };
+        FindReplaceBar { el }
+    }
+}
+
+impl_common!(FindReplaceBar);
+
+/// M.4: a find/replace bar operating on a [`rich_text_editor`]'s source.
+/// `{name}.find` / `{name}.replace` hold the inputs; the count label shows
+/// live match counts and the button rewrites every occurrence (caret resets
+/// to the end; the editor's undo history keeps the previous text).
+/// *(Thin shim over [`FindReplaceBar`] — the typed form is preferred.)*
+pub fn find_replace_bar(cx: &BuildCx, name: &str, editor_name: &str) -> Element {
+    FindReplaceBar::new(cx, name, editor_name).into()
+}
