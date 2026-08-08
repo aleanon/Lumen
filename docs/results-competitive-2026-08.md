@@ -80,13 +80,50 @@ Note this was *not* the O(scopes² × span) `copy_span` defect the CP-series
 targets: this app has no `cx.scope` at all. Two independent complexity defects,
 neither costed by any document, both found only by measurement.
 
-## What remains
+## What remains — measured, not guessed
 
 Lumen's marginal cost per row still grows with N — 1.06 µs/row over 100→500,
 2.33 over 1000→2000, 2.99 over 2000→3000 — where egui's is flat at ~0.26. So the
 *cliff* is gone and the scaling now matches egui's over 500→2000, but a gentle
-superlinearity remains and is unexplained. The residual is a ~6× constant factor
-plus that drift, which is an optimization backlog rather than a ceiling.
+superlinearity remains. Per-stage, per frame (µs, temporary instrumentation over
+200 frames):
+
+| rows | lower | layout | paint | semantics | closure | frame |
+|-----:|------:|-------:|------:|----------:|--------:|------:|
+| 500 | 302.0 | 70.7 | 670.3 | 34.2 | 33.0 | 1 151.7 |
+| 1000 | 972.5 | 142.2 | 513.5 | 67.7 | 64.8 | 1 876.5 |
+| 2000 | 2 716.8 | 292.7 | 378.7 | 138.6 | 127.5 | 3 851.4 |
+| 3000 | **5 453.7** | 435.6 | 403.0 | 228.5 | 190.0 | 7 013.9 |
+
+Four things follow, three of which contradict what one would assume:
+
+1. **The drift is entirely in `build_node`** — the lowering pass — which is 78%
+   of the 3000-row frame and grows 18× for 6× the rows (0.60 → 1.82 µs/row).
+   Everything else is linear or better.
+2. **The view closure is not the problem.** User code (3000 `format!` calls plus
+   widget construction) scales 5.8× for 6× rows — linear.
+3. **Paint *falls* as rows grow** (670 → 403 µs). It is viewport-clipped, so
+   only visible rows cost anything. More rows means more rows off-screen.
+4. **OB2 (lazy semantics) is not the lever here.** Semantics is 228 µs of a
+   7014 µs frame — **3%**. Making it lazy is still right for other reasons, but
+   it cannot close a 6× gap, and this document should not have implied it would.
+
+The cost scales with **the size of the individual tree being lowered, not with
+process-wide memory pressure**: three 1000-row apps pumped every frame have the
+same total node count and live footprint as one 3000-row app, but lower 2.17×
+faster (2604 µs vs 5646 µs). Pre-sizing `meta` and `built` from the previous
+frame's node count gained ~2.5% and left that ratio unchanged, so repeated
+reallocation and rehashing are ruled out.
+
+The leading remaining hypothesis is that a single build's working set outgrows
+L2 — 3000 nodes × `size_of::<Element>() == 1024` is ~3 MB before `Tree` and
+`meta`. If that holds it **re-motivates EL (shrinking `Element` / bundling
+handlers) for a different reason than the one that deprioritized it**: EL was
+parked because per-node memory is ~1.22 MB against ~270 MB RSS, i.e. irrelevant
+to *footprint*. Cache residency during lowering is a separate argument, and this
+is the measurement that would support it. Unconfirmed — the per-row curve is
+smooth rather than showing a knee, which is consistent with gradual L2→L3
+degradation but does not prove it.
 
 ## Honest caveats
 
@@ -131,19 +168,20 @@ one is a ceiling" — and the ceiling turned out to be a cache defect, not the
 architecture. A residual gentle superlinearity remains (see *What remains*).
 
 It does not follow that A+ is reachable cheaply, but the remaining work is
-ordinary optimization: OB2 lazy semantics is unlanded and pays every frame here,
-and the per-row marginal drift is uninvestigated. (CP1's copy path has since
-landed; CP2 and LAY1 were retired by measurement — see the campaign record.)
-"Peak performance" should still not be claimed anywhere until this table looks
-different.
+ordinary optimization, and it is now localised: **78% of a 3000-row frame is the
+lowering pass**, and that is where both the constant factor and the residual
+drift live (see *What remains*). (CP1's copy path has since landed; CP2 and LAY1
+were retired by measurement — see the campaign record.) "Peak performance"
+should still not be claimed anywhere until this table looks different.
 
 ## Next
 
 1. ~~Find the >500-node inflection.~~ **Done** — `lumen-text` cache thrash; see
    above and the 2026-08-08 decision-log entry.
-2. **Explain the residual marginal-cost drift** (1.06 → 2.99 µs/row). Now the
-   highest-value open item on this axis, and the same bisect-the-size-axis
-   method applies.
+2. **Explain the residual drift inside `build_node`.** Narrowed to the lowering
+   pass (78% of a 3000-row frame) and shown to scale with individual tree size
+   rather than process footprint; reallocation ruled out. Test the L2 working-set
+   hypothesis — if it holds, EL is back on the table on cache grounds.
 3. Extend the harness to **Slint** (the closest architectural peer — retained,
    Rust, and it has never been compared either) and **GTK4 via gtk4-rs**.
 4. Add the other two owner axes: reaction latency (input → committed frame) and
