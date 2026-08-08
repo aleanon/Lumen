@@ -382,6 +382,7 @@ impl Element {
                     line_height: None,
                     letter_spacing: 0.0,
                     family: None,
+                    align: lumen_text::TextAlign::Start,
                 },
             ),
             ..Element::default()

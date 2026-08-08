@@ -144,6 +144,7 @@ fn nav(cx: &BuildCx, name: &str, items: &[&str], dir: FlexDirection) -> Element 
                         line_height: None,
                         letter_spacing: 0.0,
                         family: None,
+                        align: Default::default(),
                     },
                 ),
                 on_click: Some(Rc::new(move |rt| selected.set(rt, i))),
@@ -226,6 +227,7 @@ impl AppBar {
                         line_height: None,
                         letter_spacing: 0.0,
                         family: None,
+                        align: Default::default(),
                     },
                 ),
                 ..Element::default()
@@ -332,6 +334,7 @@ impl PullToRefresh {
                         line_height: None,
                         letter_spacing: 0.0,
                         family: None,
+                        align: Default::default(),
                     },
                 ),
                 ..Element::default()

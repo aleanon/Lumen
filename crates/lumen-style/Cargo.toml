@@ -16,6 +16,9 @@ snapshot = ["dep:serde_json"]
 [dependencies]
 lumen-core = { workspace = true }
 lumen-layout = { workspace = true }
+# PROP1: text-align resolves to a lumen_text::TextAlign. No cycle: lumen-text
+# does not depend on lumen-style.
+lumen-text = { workspace = true, default-features = false }
 kurbo = { workspace = true }
 serde_json = { workspace = true, optional = true }
 

@@ -164,6 +164,14 @@ pub struct TextStyle {
     /// Register custom fonts via [`TextEngine::register_font`]; select by the
     /// returned family name (B1, no system enumeration).
     pub family: Option<String>,
+    /// Horizontal alignment of wrapped lines (PROP1).
+    ///
+    /// Carried on the style rather than passed per call so a `.lss`
+    /// `text-align` can reach the shaper: the runtime had `TextAlign::Start`
+    /// hardcoded at nine call sites, which is why the property was inert.
+    /// `shaped`/`layout` still TAKE an align argument — it is part of the cache
+    /// key — and callers pass this field.
+    pub align: TextAlign,
 }
 
 impl Default for TextStyle {
@@ -175,6 +183,7 @@ impl Default for TextStyle {
             line_height: None,
             letter_spacing: 0.0,
             family: None,
+            align: TextAlign::Start,
         }
     }
 }
@@ -195,6 +204,12 @@ impl TextStyle {
     /// This style with `px` of extra letter tracking (B2).
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = px;
+        self
+    }
+
+    /// This style with wrapped lines aligned to `align` (PROP1).
+    pub fn align(mut self, align: TextAlign) -> Self {
+        self.align = align;
         self
     }
 
@@ -1288,6 +1303,7 @@ mod glyph_cache_tests {
             line_height: None,
             letter_spacing: 0.0,
             family: None,
+            align: Default::default(),
         }
     }
 

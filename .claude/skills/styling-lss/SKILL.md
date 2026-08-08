@@ -26,7 +26,9 @@ B.3). `.lss` wins over the element's
 text in a child), and a state-part layout rule (`#x:hovered { width: … }`)
 relayouts through the normal rebuild path on pointer motion.
 
-Every layout property now works in `.lss`. `overflow: hidden`
+`text-align` works (`start`/`left`, `center`, `end`/`right`;
+`justify` is rejected — no justification pass). Every layout
+property now works in `.lss`. `overflow: hidden`
 (or `clip`) clips to the border-radius, `visible` disables it;
 `scroll`/`auto` are REJECTED — scrolling is the `Scrollable`
 widget, and a silent alias to `hidden` would hide content with

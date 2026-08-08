@@ -3,7 +3,7 @@
 
 use lumen_core::Color;
 use lumen_render::RgbaImage;
-use lumen_text::{TextEditor, TextEngine, TextStyle};
+use lumen_text::{TextAlign, TextEditor, TextEngine, TextStyle};
 use std::path::PathBuf;
 
 fn check_golden(name: &str, img: &RgbaImage) {
@@ -36,6 +36,7 @@ fn style() -> TextStyle {
         line_height: None,
         letter_spacing: 0.0,
         family: None,
+        align: TextAlign::Start,
     }
 }
 

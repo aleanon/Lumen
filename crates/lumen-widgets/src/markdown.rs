@@ -55,6 +55,7 @@ fn heading(text: &str, size: f32) -> Element {
                 line_height: None,
                 letter_spacing: 0.0,
                 family: None,
+                align: Default::default(),
             },
         ),
         ..Element::default()
@@ -75,6 +76,7 @@ fn code_block(code: &str) -> Element {
                 line_height: None,
                 letter_spacing: 0.0,
                 family: None,
+                align: Default::default(),
             },
         ),
         ..Element::default()
@@ -110,6 +112,7 @@ fn inline(text: &str) -> Element {
                     line_height: None,
                     letter_spacing: 0.0,
                     family: None,
+                    align: Default::default(),
                 },
             ),
             ..Element::default()

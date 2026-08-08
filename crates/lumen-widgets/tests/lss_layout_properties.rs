@@ -398,3 +398,83 @@ fn overflow_scroll_is_rejected_not_silently_clipped() {
         "overflow: scroll must not resolve to a clip, got {styles}"
     );
 }
+
+// --- PROP1, text-align -------------------------------------------------------
+
+/// `text-align` must reach the shaper. The runtime had `TextAlign::Start`
+/// hardcoded at nine call sites, so the declaration was inert; the alignment
+/// now travels on `TextStyle`.
+///
+/// Asserted on rendered pixels rather than bounds: alignment moves glyphs
+/// WITHIN an unchanged box, so bounds cannot witness it.
+#[test]
+fn text_align_moves_glyphs_within_the_box() {
+    fn ink_centre_x(lss: &str) -> f64 {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text("hi").id("a")]).id("root")
+        })
+        .run_headless(Size::new(400.0, 100.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        let img = h.screenshot();
+        let w = img.width() as usize;
+        let (mut sum, mut n) = (0usize, 0usize);
+        for (i, p) in img.pixels().chunks_exact(4).enumerate() {
+            if p[0] < 200 || p[1] < 200 || p[2] < 200 {
+                sum += i % w;
+                n += 1;
+            }
+        }
+        assert!(n > 0, "expected some glyph pixels");
+        sum as f64 / n as f64
+    }
+    let start = ink_centre_x("#a { width: 300px; text-align: start; }");
+    let center = ink_centre_x("#a { width: 300px; text-align: center; }");
+    let end = ink_centre_x("#a { width: 300px; text-align: end; }");
+    assert!(
+        center > start + 10.0 && end > center + 10.0,
+        "alignment must move the glyphs rightwards start<center<end \
+         (start={start:.1}, center={center:.1}, end={end:.1})"
+    );
+}
+
+/// `justify` is rejected: the shaper has no justification pass, so accepting it
+/// would claim support Lumen does not have. It must render exactly as `start`,
+/// not as some other alignment.
+///
+/// Two things this test pins that are easy to get wrong:
+///
+/// * `get_styles` reports the **declared** value with its source span, NOT the
+///   applied one — a rejected value still appears there. So the assertion is on
+///   rendered output, which is the only witness of what actually happened.
+/// * **No diagnostic fires.** `W0107` reports an unimplemented *property*; a
+///   rejected *value* on an implemented property is silent (the value-level
+///   hole, SD5.x, still open — verified here). `ui.explain {kind: "style"}` is
+///   the only way an agent sees this today.
+#[test]
+fn text_align_justify_renders_as_start() {
+    fn ink_centre(lss: &str) -> f64 {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text("hi").id("a")]).id("root")
+        })
+        .run_headless(Size::new(400.0, 100.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        let img = h.screenshot();
+        let w = img.width() as usize;
+        let (mut sum, mut n) = (0usize, 0usize);
+        for (i, p) in img.pixels().chunks_exact(4).enumerate() {
+            if p[0] < 200 || p[1] < 200 || p[2] < 200 {
+                sum += i % w;
+                n += 1;
+            }
+        }
+        sum as f64 / n.max(1) as f64
+    }
+    let start = ink_centre("#a { width: 300px; text-align: start; }");
+    let justify = ink_centre("#a { width: 300px; text-align: justify; }");
+    assert!(
+        (justify - start).abs() < 1.0,
+        "justify must fall back to start, got start={start:.1} justify={justify:.1}"
+    );
+}

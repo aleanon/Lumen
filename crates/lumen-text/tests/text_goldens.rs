@@ -40,6 +40,7 @@ fn black() -> TextStyle {
         line_height: None,
         letter_spacing: 0.0,
         family: None,
+        align: TextAlign::Start,
     }
 }
 fn white() -> Color {
@@ -108,6 +109,7 @@ fn golden_multistyle() {
         line_height: None,
         letter_spacing: 0.0,
         family: None,
+        align: TextAlign::Start,
     };
     let b = e.layout(
         "size and color",

@@ -464,6 +464,7 @@ impl Tabs {
                                 line_height: None,
                                 letter_spacing: 0.0,
                                 family: None,
+                                align: Default::default(),
                             },
                         ),
                         on_click: Some(Rc::new(move |rt| selected.set(rt, i))),

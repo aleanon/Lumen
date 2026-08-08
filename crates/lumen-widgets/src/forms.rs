@@ -138,6 +138,7 @@ pub fn form_field(cx: &BuildCx, name: &str, label: &str, validators: Vec<Validat
                         line_height: None,
                         letter_spacing: 0.0,
                         family: None,
+                        align: Default::default(),
                     },
                 ),
                 ..Element::default()

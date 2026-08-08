@@ -193,6 +193,8 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
+    /// `text-align` (PROP1) — alignment of wrapped lines within the box.
+    pub text_align: Option<lumen_text::TextAlign>,
     /// `font-family` (PROP1) — a family registered via
     /// `TextEngine::register_font`. Unknown names fall back to the bundled
     /// face, matching the Rust-side `TextStyle::family` contract.
@@ -381,6 +383,12 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `text-align` (PROP1).
+    pub fn text_align(mut self, a: lumen_text::TextAlign) -> Self {
+        self.text_align = Some(a);
         self
     }
 
@@ -605,7 +613,6 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     "font-style",
     "font-features",
     "font-variation",
-    "text-align",
     "text-overflow",
     "text-wrap",
     "text-decoration",
@@ -656,6 +663,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "inset-left",
     "letter-spacing",
     "font-family",
+    "text-align",
     "grid-template-columns",
     "grid-template-rows",
     "grid-column",
@@ -734,6 +742,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         // PROP1: typography whose `TextStyle` fields already existed.
         "letter-spacing" => style.letter_spacing = as_px(&v),
         "font-family" => style.font_family = as_font_family(&v),
+        "text-align" => style.text_align = as_text_align(&v),
         "grid-template-columns" => style.grid_template_columns = as_grid_tracks(&v),
         "grid-template-rows" => style.grid_template_rows = as_grid_tracks(&v),
         "grid-column" => style.grid_column = as_grid_line_pair(&v),
@@ -1281,6 +1290,23 @@ fn as_align(v: &Value) -> Option<Align> {
     }
 }
 
+/// `text-align` (PROP1). `justify` is NOT accepted: the shaper has no
+/// justification pass, so accepting it would claim support Lumen does not have.
+/// Rejecting leaves the text at `start` — visually the same, but the property
+/// reads as unset rather than as honoured. (No diagnostic fires for a rejected
+/// value; see `as_overflow` for the open value-level hole.)
+fn as_text_align(v: &Value) -> Option<lumen_text::TextAlign> {
+    match v {
+        Value::Keyword(k) => match k.as_str() {
+            "start" | "left" => Some(lumen_text::TextAlign::Start),
+            "center" => Some(lumen_text::TextAlign::Center),
+            "end" | "right" => Some(lumen_text::TextAlign::End),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// `overflow` (PROP1) mapped onto [`StyleClip`].
 ///
 /// `hidden`/`clip` -> `Rounded`, which follows the node's `border-radius` — the
@@ -1291,7 +1317,12 @@ fn as_align(v: &Value) -> Option<Align> {
 /// scrollbar or wheel routing attached to a style declaration. Accepting them
 /// as a silent alias for `hidden` would produce a box that clips its content
 /// with no way to reach the rest — the failure looks like lost content rather
-/// than an unsupported value. Rejected, so `W0107` names it instead.
+/// than an unsupported value. Rejected, so the property simply does not apply.
+///
+/// NOTE: no diagnostic fires. `W0107` reports an unimplemented *property*; a
+/// rejected *value* on an implemented property is still silent (the value-level
+/// hole, SD5.x, open — verified 2026-08-08). `ui.explain {kind: "style"}` is the
+/// way to see it today.
 fn as_overflow(v: &Value) -> Option<StyleClip> {
     match v {
         Value::Keyword(k) => match k.as_str() {
@@ -1309,7 +1340,8 @@ fn as_overflow(v: &Value) -> Option<StyleClip> {
 /// The whole declaration is rejected if ANY track is unparseable, rather than
 /// silently dropping that track: a grid missing one column would lay out
 /// plausibly but wrongly, which is far harder to notice than the property not
-/// applying at all (and `W0107` then names it).
+/// applying at all. (No diagnostic fires for a rejected *value* — see
+/// `as_overflow` for the open value-level hole.)
 fn as_grid_tracks(v: &Value) -> Option<Vec<GridTrack>> {
     let items: Vec<&Value> = match v {
         Value::List(xs) => xs.iter().collect(),
@@ -1387,8 +1419,9 @@ fn as_position(v: &Value) -> Option<Position> {
 /// helper. `aspect-ratio: 1.778` is the spelling that works today.
 ///
 /// Zero, negative and non-finite values are rejected rather than passed to
-/// taffy, where they collapse the node — a stylesheet typo should surface as an
-/// unset property (and a `W0107` diagnostic), not a vanished element.
+/// taffy, where they collapse the node — a stylesheet typo should leave the
+/// property unset rather than vanish the element. (No diagnostic fires for a
+/// rejected value; see `as_overflow`.)
 fn as_aspect_ratio(v: &Value) -> Option<f32> {
     let ratio = as_number(v)? as f32;
     (ratio.is_finite() && ratio > 0.0).then_some(ratio)

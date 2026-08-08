@@ -463,6 +463,7 @@ impl RichText {
                             line_height: None,
                             letter_spacing: 0.0,
                             family: None,
+                            align: Default::default(),
                         },
                     ),
                     ..Element::default()

@@ -3114,6 +3114,7 @@ dependencies = [
  "kurbo",
  "lumen-core",
  "lumen-layout",
+ "lumen-text",
  "proptest",
  "serde_json",
 ]

@@ -1617,7 +1617,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         for (t, ts, wrap) in texts {
             let missing = self
                 .text
-                .layout(&t, ts, &[], wrap, lumen_text::TextAlign::Start)
+                .layout(&t, ts.clone(), &[], wrap, ts.align)
                 .missing_glyphs();
             if missing > 0 {
                 out.push(lumen_core::Diagnostic::new(
@@ -2283,9 +2283,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // origin, which is painted at the padded corner).
         let lx = (pos.x - b.x0 - padx) as f32;
         let ly = (pos.y - b.y0 - pady) as f32;
-        let block = self
-            .text
-            .layout(&text, ts, &[], wrap, lumen_text::TextAlign::Start);
+        let block = self.text.layout(&text, ts.clone(), &[], wrap, ts.align);
         let byte = block.hit_to_byte(lx, ly);
         handler(&self.rt, byte, extend);
     }
@@ -2304,9 +2302,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }) else {
             return;
         };
-        let block = self
-            .text
-            .layout(&text, ts, &[], wrap, lumen_text::TextAlign::Start);
+        let block = self.text.layout(&text, ts.clone(), &[], wrap, ts.align);
         let (x, y, h) = block.caret_pos(caret);
         // Probe into the neighbouring line (above the caret top, or below its
         // baseline); hit_to_byte clamps to the nearest cluster on that line.
@@ -3705,9 +3701,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 Dim::Px(w) => Some((w - (pl + pr) as f32).max(0.0)),
                 _ => None,
             };
-            let block = self
-                .text
-                .shaped(txt, ts, wrap, lumen_text::TextAlign::Start);
+            let block = self.text.shaped(txt, ts, wrap, ts.align);
             if wrap.is_none() {
                 style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
             }
@@ -4266,7 +4260,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                         let avail = (bounds.width() - 2.0 * m.pad.0).max(0.0);
                         let caret_x = self
                             .text
-                            .shaped(txt, &ts, m.wrap_width, lumen_text::TextAlign::Start)
+                            .shaped(txt, &ts, m.wrap_width, ts.align)
                             .caret_pos(caret)
                             .0 as f64;
                         (caret_x - avail).max(0.0)
@@ -4292,13 +4286,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // before the origin is added, so translation commutes. Ink +
                 // metrics come from the cache.
                 let (run, run_rect, metrics) = {
-                    let cached = self.text.shaped_run(
-                        txt,
-                        &ts,
-                        m.wrap_width,
-                        lumen_text::TextAlign::Start,
-                        scale,
-                    );
+                    let cached = self
+                        .text
+                        .shaped_run(txt, &ts, m.wrap_width, ts.align, scale);
                     let mut run = cached.run.clone();
                     for g in &mut run.glyphs {
                         g.x += tx as f32;
@@ -4318,9 +4308,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 if focused && m.caret_byte.is_some() {
                     if let Some((a, b)) = m.selection.filter(|(a, b)| a != b) {
                         let sel = Color::srgb8(0x1a, 0x73, 0xe8, 0x55);
-                        let block =
-                            self.text
-                                .shaped(txt, &ts, m.wrap_width, lumen_text::TextAlign::Start);
+                        let block = self.text.shaped(txt, &ts, m.wrap_width, ts.align);
                         for (x0, y0, x1, y1) in block.selection_rects(a, b) {
                             dl.push(DrawCmd::Rect {
                                 rect: Rect::new(
@@ -4349,9 +4337,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // Caret (in front) for a focused editor — re-shape (cached) for
                 // the caret geometry.
                 if let Some(caret) = m.caret_byte.filter(|_| focused) {
-                    let block =
-                        self.text
-                            .shaped(txt, &ts, m.wrap_width, lumen_text::TextAlign::Start);
+                    let block = self.text.shaped(txt, &ts, m.wrap_width, ts.align);
                     let (cx, cy, ch) = block.caret_pos(caret);
                     let w = 1.5;
                     let cr = Rect::new(
@@ -4406,6 +4392,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             line_height: None,
             letter_spacing: 0.0,
             family: None,
+            align: lumen_text::TextAlign::Start,
         };
         let [cr, cg, cb, ca] = ts.color.to_srgb8();
         let key = (
@@ -4418,7 +4405,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let img = if let Some(cached) = cache.get(&key) {
             cached.clone()
         } else {
-            let block = text.layout(&t.text, ts, &[], None, lumen_text::TextAlign::Start);
+            let align = ts.align;
+            let block = text.layout(&t.text, ts, &[], None, align);
             let img = block.render(0, 0, Color::srgb8(255, 255, 255, 0));
             const CAP: usize = 512;
             if cache.len() >= CAP {
@@ -4821,6 +4809,7 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
         || css.line_height.is_some()
         || css.letter_spacing.is_some()
         || css.font_family.is_some()
+        || css.text_align.is_some()
     {
         if let NodeContent::Text(_, ts) = &mut el.content {
             if let Some(fs) = css.font_size {
@@ -4839,6 +4828,9 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
             }
             if let Some(fam) = &css.font_family {
                 ts.family = Some(fam.clone());
+            }
+            if let Some(a) = css.text_align {
+                ts.align = a;
             }
         }
     }
