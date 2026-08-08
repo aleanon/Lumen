@@ -9,6 +9,9 @@ publish = false
 
 [dependencies]
 lumen-core = { workspace = true }
+# EXPLAIN1: ui.explain names PARSE_ONLY_PROPERTIES/KNOWN_PROPERTIES so it can
+# tell an agent that a property parses but is never applied.
+lumen-style = { workspace = true }
 # Direct path dep, defaults OFF. As a `{ workspace = true }` link this crate
 # was the last one re-enabling `lumen-widgets`'s defaults (and with them the
 # 15.5 MB pan-Unicode face) for every platform shell that depends on the agent

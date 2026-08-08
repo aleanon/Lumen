@@ -384,6 +384,154 @@ fn handle<R: Renderer, E: Spawner>(
             }
             Ok(out)
         }
+        // EXPLAIN1: one introspection primitive with several resolution kinds,
+        // rather than accreting a verb per blind spot. Every answer is a list of
+        // structured `reasons` (a stable `code` plus human detail), so an agent
+        // can branch on the code instead of scraping prose.
+        "ui.explain" => {
+            let node = resolve(app, sel(params)?)?;
+            let kind = params
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("click");
+            let root = app.semantics_elided();
+            let mut reasons: Vec<serde_json::Value> = Vec::new();
+            let reason = |code: &str, detail: String| json!({ "code": code, "detail": detail });
+
+            match kind {
+                "click" => {
+                    // The single most common agent dead end: the click was
+                    // dispatched, nothing happened, and no error was reported.
+                    let b = node.bounds;
+                    if b.width() <= 0.0 || b.height() <= 0.0 {
+                        reasons.push(reason(
+                            "zero_size",
+                            format!("bounds are {}x{} — nothing to hit", b.width(), b.height()),
+                        ));
+                    }
+                    if node
+                        .states
+                        .contains(&lumen_core::semantics::State::Disabled)
+                    {
+                        reasons.push(reason(
+                            "disabled",
+                            "the node is disabled, so pointer events are ignored".into(),
+                        ));
+                    }
+                    if !node.actions.contains(&lumen_core::semantics::Action::Click) {
+                        reasons.push(reason(
+                            "no_click_action",
+                            format!(
+                                "`{}` declares no Click action; it may be a container.                                  Declared: {:?}",
+                                node.type_name, node.actions
+                            ),
+                        ));
+                    }
+                    // Occlusion: an overlay drawn on top swallows the press.
+                    // Checked against the CENTRE, which is the point
+                    // `input.click` actually uses.
+                    let c = center(b);
+                    let mut covered = Vec::new();
+                    collect_overlays_at(&root, c, node.node, &mut covered);
+                    for o in &covered {
+                        reasons.push(reason(
+                            "occluded",
+                            format!(
+                                "overlay `{}`{} covers the click point ({:.1}, {:.1})",
+                                o.type_name,
+                                o.id.as_ref()
+                                    .map(|i| format!(" #{}", i.as_str()))
+                                    .unwrap_or_default(),
+                                c.x,
+                                c.y
+                            ),
+                        ));
+                    }
+                    if let Some(ink) = node.ink {
+                        let hidden = (ink.y1 - b.y1).max(b.y0 - ink.y0);
+                        if hidden > 0.5 {
+                            reasons.push(reason(
+                                "clipped",
+                                format!("content overflows its box by {hidden:.1}px"),
+                            ));
+                        }
+                    }
+                }
+                "style" => {
+                    // "My .lss did nothing." The commonest cause is a property
+                    // the parser accepts and the runtime never applies, which is
+                    // invisible from the stylesheet alone.
+                    let styles = app.get_styles(sel(params)?);
+                    if let Some(prop) = params.get("property").and_then(|v| v.as_str()) {
+                        if lumen_style::PARSE_ONLY_PROPERTIES.contains(&prop) {
+                            reasons.push(reason(
+                                "parse_only",
+                                format!(
+                                    "`{prop}` parses but the runtime does not apply it yet                                      (see 04 §8); it will never affect rendering"
+                                ),
+                            ));
+                        } else if !lumen_style::KNOWN_PROPERTIES.contains(&prop) {
+                            reasons.push(reason(
+                                "unknown_property",
+                                format!("`{prop}` is not a known .lss property"),
+                            ));
+                        } else if styles.get(prop).is_none() {
+                            reasons.push(reason(
+                                "not_matched",
+                                format!(
+                                    "`{prop}` is applied by the runtime, but no rule set it                                      on this node — check the selector"
+                                ),
+                            ));
+                        }
+                    }
+                    return Ok(json!({
+                        "kind": kind,
+                        "node": node.node.to_wire(),
+                        "computed": styles,
+                        "reasons": reasons,
+                    }));
+                }
+                "layout" => {
+                    let b = node.bounds;
+                    if let Some(tm) = node.text_metrics {
+                        reasons.push(reason(
+                            "text_measured",
+                            format!(
+                                "height comes from text measurement ({} line(s),                                  content {:.1}px) — an explicit height or aspect-ratio                                  must beat it",
+                                tm.line_count, tm.content_height
+                            ),
+                        ));
+                    }
+                    if b.width() <= 0.0 || b.height() <= 0.0 {
+                        reasons.push(reason(
+                            "collapsed",
+                            "the node has zero area — usually an empty container with no                              size, or a rejected constraint"
+                                .into(),
+                        ));
+                    }
+                    return Ok(json!({
+                        "kind": kind,
+                        "node": node.node.to_wire(),
+                        "bounds": { "x": b.x0, "y": b.y0, "w": b.width(), "h": b.height() },
+                        "reasons": reasons,
+                    }));
+                }
+                other => {
+                    return Err((
+                        -32602,
+                        format!("unknown explain kind `{other}` — expected click|style|layout"),
+                    ))
+                }
+            }
+
+            Ok(json!({
+                "kind": kind,
+                "node": node.node.to_wire(),
+                // An empty list is a real answer: "nothing I can see is wrong",
+                // which tells an agent to look at the handler rather than the UI.
+                "reasons": reasons,
+            }))
+        }
         "ui.screenshot" => {
             // Zoomed, overlaid crop of one element (magnify a small defect).
             if let Some(s) = params.get("selector").and_then(|v| v.as_str()) {
@@ -1038,6 +1186,30 @@ fn downscale(img: &lumen_widgets::RgbaImage, max_width: u32) -> lumen_widgets::R
         }
     }
     lumen_widgets::RgbaImage::from_raw(nw, nh, out)
+}
+
+/// EXPLAIN1: overlay nodes whose bounds contain `p`, excluding `target` and its
+/// own subtree.
+///
+/// Only `overlay` nodes are reported. Normal siblings overlapping in the layout
+/// are not evidence of anything — flex children can share bounds legitimately —
+/// whereas an overlay is drawn in a later pass and DOES win hit-testing
+/// (`OVERLAY_Z`), which is exactly the case that silently eats a click.
+fn collect_overlays_at<'a>(
+    n: &'a SemanticsNode,
+    p: kurbo::Point,
+    target: lumen_core::identity::NodeHandle,
+    out: &mut Vec<&'a SemanticsNode>,
+) {
+    if n.node == target {
+        return; // the target and everything under it cannot occlude itself
+    }
+    if n.overlay && n.bounds.contains(p) {
+        out.push(n);
+    }
+    for c in &n.children {
+        collect_overlays_at(c, p, target, out);
+    }
 }
 
 fn find_node(root: &SemanticsNode, id: lumen_core::identity::NodeHandle) -> Option<&SemanticsNode> {

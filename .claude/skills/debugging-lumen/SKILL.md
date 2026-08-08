@@ -47,6 +47,12 @@ Run against the live window (`just run-agent <name>` +
    states, actions, bounds. Most "invisible/unclickable/wrong place" bugs
    are obvious here.
 4. **`ui.getLayout {selector}`** — box vs ink vs clipped; text metrics.
+4b. **`ui.explain {selector}`** — start here when something silently did
+   nothing. `kind: "click"` names why a click was a no-op (disabled, no Click
+   action, occluded by an overlay, zero-size); `kind: "style", property: "x"`
+   says whether `x` is parse-only (never renders), unknown, or simply not
+   matched on this node; `kind: "layout"` gives size provenance. Branch on
+   `reasons[].code`. No reasons = nothing observable is wrong.
 5. **Reactive triple** — `ui.getDeps` (what it reads),
    `ui.whatDependsOn {signal}` (what a write should touch), act, then
    `ui.lastChange` (what actually happened: idle/patch/rebuild + nodes).
