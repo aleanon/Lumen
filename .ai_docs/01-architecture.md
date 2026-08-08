@@ -95,6 +95,39 @@ Every reload emits a structured result event (tier, status, components swapped, 
   no combination of feature flags gets there. The largest lever that *is*
   available is the font (`pan-unicode`: 15 MB face → ~355 KB subset).
 
+## 9a. Swappable internals — the seams (MOD-series)
+
+Each seam is a **narrow trait derived from what the runtime actually calls**,
+not a mirror of the concrete type's inherent API. Mirroring would tax every
+implementor with methods the runtime never uses, and would bake today's
+implementation choices into the interface.
+
+| seam | trait | surface | verified by |
+|---|---|---|---|
+| renderer | `lumen_render::Renderer` | `App<R>` is generic over it (dual-mode: zero-cost by default, `Box<dyn>` opt-in) | the two shipped backends (tiny-skia, wgpu) |
+| executor | `lumen_core::tasks::Spawner` | `App<R, E>` is generic over it | `InlineSpawner` + `ThreadPoolSpawner` |
+| layout (MOD2) | `lumen_layout::LayoutEngine` | 7 methods | `lumen-layout/tests/engine_seam.rs` |
+| text (MOD3) | `lumen_text::TextEngineApi` + `TextBlockApi` | 4 + 9 methods | `lumen-text/tests/engine_seam.rs` |
+| style properties (MOD4) | `lumen_style::register_property` | runtime registration | `lumen-style` registry tests |
+| platform shell (MOD5) | `lumen-shell-core` | shared `render_into` | the iOS + web shells |
+
+**Every seam is verified by a third-party implementation written outside the
+crate, using only public API.** A trait the framework declares and only the
+framework implements is not an extension point — it is an interface with one
+caller and one callee, which proves nothing about substitutability. Both
+`engine_seam.rs` tests therefore implement a complete alternative engine
+(deliberately trivial: a fixed grid, a monospace grid) and drive *both* it and
+the bundled one through the same generic function.
+
+**Layout and text are not yet wired into `App` as type parameters.** That is
+deliberate, and it is MOD1's job: `App<R, E, L, T, S, …>` would add a parameter
+per seam, which strains coherence and hurts build times on a 4,600-line file.
+The intended shape is a single `PlatformConfig` bundle carrying associated
+`Layout`/`Text`/`Style` types, so the seams compose as one parameter. Until MOD1
+lands, the traits are the *contract* and the concrete types are the only wiring
+— which is enough to keep the contract honest (the tests prove it), but is not
+yet runtime substitutability.
+
 ## 9b. Hardening & privacy (E.3)
 
 - **Fuzzing**: the four security-surface parsers (`.lss`, selector, agent

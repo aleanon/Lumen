@@ -327,6 +327,139 @@ pub struct CachedRun {
     pub metrics: TextMetrics,
 }
 
+/// MOD3: the text seam — shaping, measurement and rasterization behind a trait,
+/// so an alternative text stack can be supplied without forking.
+///
+/// Like the layout seam (MOD2), the surface is deliberately **narrow**: it is
+/// derived from what `lumen-widgets` actually calls, not from everything
+/// [`TextEngine`] exposes. Mirroring the whole inherent API would force an
+/// implementor to reproduce methods the runtime never uses — `outlines`,
+/// `render_with_selection` and `layout_ellipsized` have zero call sites in the
+/// runtime, and baking them into the seam would tax every implementor for
+/// features only the bundled engine offers.
+///
+/// `begin_frame` IS included despite being a cache-lifecycle hook rather than a
+/// text operation: any implementation with a cache needs a frame boundary to
+/// evict against, and leaving it out would force each one to invent its own
+/// (the alternative — inferring frames from call patterns — is exactly the bug
+/// the epoch policy replaced). An engine with no cache implements it empty.
+pub trait TextEngineApi {
+    /// The shaped block this engine produces.
+    type Block: TextBlockApi;
+
+    /// Advance the frame epoch. Called once per frame that shapes; see
+    /// [`TextEngine::begin_frame`] for why it must not be called when idle.
+    fn begin_frame(&mut self);
+
+    /// Register a font, returning its family name.
+    fn register_font(&mut self, bytes: Vec<u8>) -> Option<String>;
+
+    /// Shape (or fetch a cached) block for `text` under `base`.
+    fn shaped(
+        &mut self,
+        text: &str,
+        base: &TextStyle,
+        max_width: Option<f32>,
+        align: TextAlign,
+    ) -> &Self::Block;
+
+    /// Lay out a block with per-range styles, bypassing the cache.
+    fn layout(
+        &mut self,
+        text: &str,
+        base: TextStyle,
+        ranges: &[(std::ops::Range<usize>, TextStyle)],
+        max_width: Option<f32>,
+        align: TextAlign,
+    ) -> Self::Block;
+}
+
+/// The measurement + hit-testing surface of a shaped block (MOD3).
+///
+/// `render` is here rather than on the engine because rasterization depends on
+/// the shaped result, and an engine that shapes but cannot rasterize is not a
+/// substitute for this one.
+pub trait TextBlockApi {
+    /// Advance width of the widest line.
+    fn width(&self) -> f32;
+    /// Total laid-out height.
+    fn height(&self) -> f32;
+    /// `(width, height)`.
+    fn size(&self) -> Size;
+    /// Typographic metrics.
+    fn metrics(&self) -> TextMetrics;
+    /// Glyphs that fell back to `.notdef` — the tofu detector.
+    fn missing_glyphs(&self) -> usize;
+    /// Caret `(x, y, height)` at a byte offset.
+    fn caret_pos(&self, byte: usize) -> (f32, f32, f32);
+    /// Byte offset nearest a point.
+    fn hit_to_byte(&self, x: f32, y: f32) -> usize;
+    /// Selection rectangles `(x, y, w, h)` between two byte offsets.
+    fn selection_rects(&self, a: usize, b: usize) -> Vec<(f32, f32, f32, f32)>;
+    /// Rasterize onto `background`.
+    fn render(&self, width: u32, height: u32, background: Color) -> RgbaImage;
+}
+
+impl TextEngineApi for TextEngine {
+    type Block = TextBlock;
+
+    fn begin_frame(&mut self) {
+        TextEngine::begin_frame(self)
+    }
+    fn register_font(&mut self, bytes: Vec<u8>) -> Option<String> {
+        TextEngine::register_font(self, bytes)
+    }
+    fn shaped(
+        &mut self,
+        text: &str,
+        base: &TextStyle,
+        max_width: Option<f32>,
+        align: TextAlign,
+    ) -> &TextBlock {
+        TextEngine::shaped(self, text, base, max_width, align)
+    }
+    fn layout(
+        &mut self,
+        text: &str,
+        base: TextStyle,
+        ranges: &[(std::ops::Range<usize>, TextStyle)],
+        max_width: Option<f32>,
+        align: TextAlign,
+    ) -> TextBlock {
+        TextEngine::layout(self, text, base, ranges, max_width, align)
+    }
+}
+
+impl TextBlockApi for TextBlock {
+    fn width(&self) -> f32 {
+        TextBlock::width(self)
+    }
+    fn height(&self) -> f32 {
+        TextBlock::height(self)
+    }
+    fn size(&self) -> Size {
+        TextBlock::size(self)
+    }
+    fn metrics(&self) -> TextMetrics {
+        TextBlock::metrics(self)
+    }
+    fn missing_glyphs(&self) -> usize {
+        TextBlock::missing_glyphs(self)
+    }
+    fn caret_pos(&self, byte: usize) -> (f32, f32, f32) {
+        TextBlock::caret_pos(self, byte)
+    }
+    fn hit_to_byte(&self, x: f32, y: f32) -> usize {
+        TextBlock::hit_to_byte(self, x, y)
+    }
+    fn selection_rects(&self, a: usize, b: usize) -> Vec<(f32, f32, f32, f32)> {
+        TextBlock::selection_rects(self, a, b)
+    }
+    fn render(&self, width: u32, height: u32, background: Color) -> RgbaImage {
+        TextBlock::render(self, width, height, background)
+    }
+}
+
 /// The text engine: owns the bundled-font context. Reuse across layouts.
 pub struct TextEngine {
     font_cx: FontContext,
