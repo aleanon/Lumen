@@ -30,13 +30,15 @@ pub use lumen_widgets::{AppSnapshot, Checkpoint};
 #[doc(inline)]
 pub use lumen_widgets::renderer_override;
 
-/// The built-in widget library (02 §10): M0 primitives plus the M1/M3/M4 and
-/// remaining widget sets, the accessibility bridge, and the M5 app-building
+/// The built-in widget library (02 §10): the whole catalogue under one
+/// `widgets` namespace, the accessibility bridge, and the M5 app-building
 /// modules (forms, navigation, undo, i18n, desktop system integration).
-pub use lumen_widgets::{
-    a11y, forms, i18n, nav, system, undo, widgets, widgets_extra, widgets_m1, widgets_m3,
-    widgets_m4,
-};
+///
+/// SD2 retired the milestone-named modules (`widgets_m1`/`m3`/`m4`/`extra`).
+/// They exposed *when* a widget was added — an internal scheduling fact that
+/// meant nothing to a consumer and could not be reorganized without a breaking
+/// change. Everything now lives in `widgets`.
+pub use lumen_widgets::{a11y, forms, i18n, nav, system, undo, widgets};
 
 /// The ShaderWidget (GPU; `wgpu` feature, not available on wasm).
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]

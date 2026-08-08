@@ -4,7 +4,7 @@
 use lumen_core::semantics::Role;
 use lumen_core::Color;
 use lumen_layout::{Align, Dim, Display, FlexDirection, LayoutStyle};
-use lumen_widgets::widgets_extra::pane_grid;
+use lumen_widgets::widgets::pane_grid;
 use lumen_widgets::{theme, App, BuildCx, Element};
 
 /// Build the pane-grid app.

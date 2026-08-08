@@ -296,6 +296,12 @@ and is now pinned to the `codes` module by
 `crates/lumen-core/tests/diagnostics_registry.rs`.
 
 ## 10. Built-in widget set
+
+*(SD2, 2026-08-08: the milestone groupings below are **history, not API**. Every
+widget is reachable from the single flat `lumen::widgets` namespace; the
+`widgets_m1`/`m3`/`m4`/`extra` and `misc_w2` modules are private. They exposed
+*when* a widget was added — meaningless to a consumer and unreorganizable
+without a breaking change.)*
 **M0 primitives (10):** Text, Image, Row, Column, Stack, Scroll, Button, TextFieldBasic (single-style, pre-IME), Checkbox, Slider.
 **M1 additions (to 30 total):** RichText, Icon, Spacer, Divider, Grid, Wrap, Padding, Align, SplitPane, TextField (full IME), TextArea, Radio, Switch, Stepper, Select, Tooltip, Popover, Menu, Tabs, VirtualList.
 **M2:** Dialog, Sheet, Drawer, Toast, ProgressBar, Spinner, Badge, Chip, Accordion, SearchField.

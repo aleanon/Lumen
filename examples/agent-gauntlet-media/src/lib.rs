@@ -7,7 +7,7 @@ use lumen_render::media::{TestPattern, VideoSource};
 use lumen_render::svg;
 use lumen_style::anim::Easing;
 use lumen_style::motion::SharedElement;
-use lumen_widgets::{widgets, widgets_m4, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Element};
 
 const LOGO: &str =
     "<svg width=\"48\" height=\"48\"><circle cx=\"24\" cy=\"24\" r=\"20\" fill=\"#1a73e8\"/><rect x=\"18\" y=\"18\" width=\"12\" height=\"12\" fill=\"#ffffff\"/></svg>";
@@ -46,7 +46,7 @@ fn build(cx: &mut BuildCx) -> Element {
     .id("hero");
 
     let next = widgets::button("Next frame", move |rt| frame.update(rt, |x| *x += 1)).id("next");
-    let editor = widgets_m4::rich_text_editor(cx, "notes", "type *notes*");
+    let editor = widgets::rich_text_editor(cx, "notes", "type *notes*");
 
     widgets::column(vec![
         widgets::row(vec![

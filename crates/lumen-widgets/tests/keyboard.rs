@@ -10,7 +10,7 @@ use kurbo::Size;
 use lumen_core::events::{Event, Key, KeyEvent, Modifiers, NamedKey};
 use lumen_core::state::Signal;
 use lumen_widgets::{
-    widgets_m1, App, BuildCx, Element, Headless, PickList, RangeSlider, Scrollable, Slider,
+    widgets, App, BuildCx, Element, Headless, PickList, RangeSlider, Scrollable, Slider,
 };
 
 fn key(h: &mut Headless, named: NamedKey) {
@@ -92,7 +92,7 @@ fn arrow_keys_move_a_range_sliders_ends() {
 #[test]
 fn arrow_keys_traverse_a_tab_bar() {
     let mut h = App::new(|cx: &mut BuildCx| {
-        widgets_m1::Tabs::new(cx, "t", &["One", "Two", "Three"])
+        widgets::Tabs::new(cx, "t", &["One", "Two", "Three"])
             .id("t")
             .into()
     })

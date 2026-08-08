@@ -6,7 +6,7 @@ use lumen_widgets::forms::{form_field, validate, Validator};
 use lumen_widgets::i18n::{Catalog, Locale};
 use lumen_widgets::nav::Router;
 use lumen_widgets::undo::History;
-use lumen_widgets::{widgets, widgets_m1, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Element};
 
 fn catalog() -> Catalog {
     let mut c = Catalog::new().with_fallback(Locale::new("en"));
@@ -34,7 +34,7 @@ fn build(cx: &mut BuildCx) -> Element {
 
     let header = widgets::row(vec![
         widgets::text(cat.t(&loc, "title", &[])).id("title"),
-        widgets_m1::spacer(),
+        widgets::spacer(),
         widgets::button("EN/AR", move |rt| {
             locale.update(rt, |l| {
                 *l = if l.is_rtl() {
@@ -90,7 +90,7 @@ fn build(cx: &mut BuildCx) -> Element {
         widgets::column(col)
     };
 
-    widgets::column(vec![header, widgets_m1::divider(), body]).id("root")
+    widgets::column(vec![header, widgets::divider(), body]).id("root")
 }
 
 // Save the new contact (validating) then return to the list.

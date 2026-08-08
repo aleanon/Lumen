@@ -10,7 +10,7 @@ use lumen_core::identity::{fold_id, hash_id, ScopePath};
 use lumen_core::state::Runtime;
 use lumen_layout::{Dim, LayoutStyle, LayoutTree};
 use lumen_render::scene::cull_visible;
-use lumen_widgets::{widgets, widgets_m1, widgets_m4, App};
+use lumen_widgets::{widgets, App};
 
 /// 100k-node scene: cull a large scene against a viewport (multi-threaded, T6.6).
 fn cull_100k(c: &mut Criterion) {
@@ -50,7 +50,7 @@ fn layout_10k_dirty_subtree(c: &mut Criterion) {
 /// materialises the visible rows, so cost is independent of row count.
 fn vlist_1m_scroll(c: &mut Criterion) {
     let app = App::new(|cx| {
-        widgets_m1::virtual_list(cx, "vl", 1_000_000, 20.0, 600.0, |i| {
+        widgets::virtual_list(cx, "vl", 1_000_000, 20.0, 600.0, |i| {
             widgets::text(format!("row {i}"))
         })
     });
@@ -72,7 +72,7 @@ fn vlist_1m_scroll(c: &mut Criterion) {
 /// the grid windows its rows, so cost is independent of row count (T4.2 gate).
 fn data_grid_1m_scroll(c: &mut Criterion) {
     let app = App::new(|cx| {
-        widgets_m4::data_grid(
+        widgets::data_grid(
             cx,
             "grid",
             &["A", "B", "C"],

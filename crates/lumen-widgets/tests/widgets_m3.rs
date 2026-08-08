@@ -5,7 +5,7 @@ use kurbo::{Point, Size, Vec2};
 use lumen_core::events::{Event, Modifiers, PointerEvent, WheelEvent};
 use lumen_core::semantics::{Role, SemanticsNode, State};
 use lumen_widgets::audit::audit_touch_targets;
-use lumen_widgets::{widgets, widgets_m3, App, BuildCx, Element, Headless};
+use lumen_widgets::{widgets, App, BuildCx, Element, Headless};
 
 fn run(w: f64, h: f64, build: impl Fn(&mut BuildCx) -> Element + 'static) -> Headless {
     App::new(build).run_headless(Size::new(w, h))
@@ -45,7 +45,7 @@ fn center(n: &SemanticsNode) -> Point {
 #[test]
 fn bottom_nav_selects_and_is_tappable() {
     let mut h = run(360.0, 80.0, |cx| {
-        widgets_m3::bottom_nav(cx, "nav", &["Home", "Search", "Profile"])
+        widgets::bottom_nav(cx, "nav", &["Home", "Search", "Profile"])
     });
     let root = sem(&h);
     assert_eq!(root.role, Role::TabList);
@@ -64,7 +64,7 @@ fn bottom_nav_selects_and_is_tappable() {
 #[test]
 fn navigation_rail_is_vertical_and_tappable() {
     let h = run(120.0, 360.0, |cx| {
-        widgets_m3::navigation_rail(cx, "rail", &["A", "B", "C"])
+        widgets::navigation_rail(cx, "rail", &["A", "B", "C"])
     });
     assert_eq!(sem(&h).role, Role::TabList);
     // Vertically stacked: each item below the previous.
@@ -77,7 +77,7 @@ fn navigation_rail_is_vertical_and_tappable() {
 fn app_bar_shows_title_and_actions() {
     let h = run(360.0, 56.0, |cx| {
         let _ = cx;
-        widgets_m3::app_bar("Inbox", vec![widgets::button("⋯", |_| {}).id("menu")])
+        widgets::app_bar("Inbox", vec![widgets::button("⋯", |_| {}).id("menu")])
     });
     // W4: the bar carries the title as its own label rather than id-ing the
     // title node `#title` (which would squat on an id apps commonly use).
@@ -94,7 +94,7 @@ fn app_bar_shows_title_and_actions() {
 fn pull_to_refresh_triggers_on_overpull() {
     let mut h = run(300.0, 400.0, |cx| {
         let lines: Vec<Element> = (0..5).map(|i| widgets::text(format!("item {i}"))).collect();
-        widgets_m3::pull_to_refresh(cx, "feed", 30.0, |_| {}, lines)
+        widgets::pull_to_refresh(cx, "feed", 30.0, |_| {}, lines)
     });
     assert_eq!(
         by_id(&sem(&h), "feed-refresh-indicator").unwrap().label,
@@ -118,7 +118,7 @@ fn pull_to_refresh_triggers_on_overpull() {
 #[test]
 fn date_picker_selects_a_day_from_the_calendar() {
     // Tall enough for the whole month grid (6 weeks of 44px touch targets).
-    let mut h = run(360.0, 420.0, |cx| widgets_m3::date_picker(cx, "dob"));
+    let mut h = run(360.0, 420.0, |cx| widgets::date_picker(cx, "dob"));
     let before = by_id(&sem(&h), "dob").unwrap().value.clone().unwrap();
     assert_eq!(before, "2026-06-16");
 
@@ -141,7 +141,7 @@ fn date_picker_selects_a_day_from_the_calendar() {
 
 #[test]
 fn date_picker_navigates_months() {
-    let mut h = run(360.0, 420.0, |cx| widgets_m3::date_picker(cx, "dob"));
+    let mut h = run(360.0, 420.0, |cx| widgets::date_picker(cx, "dob"));
     let next = center(by_id(&sem(&h), "dob-date-next").expect("next-month button"));
     click(&mut h, next);
     assert_eq!(
@@ -154,7 +154,7 @@ fn date_picker_navigates_months() {
 #[test]
 fn time_picker_value_and_targets() {
     // Tall enough for the digital header + the 240px dial + the minute row.
-    let mut h = run(300.0, 400.0, |cx| widgets_m3::time_picker(cx, "alarm"));
+    let mut h = run(300.0, 400.0, |cx| widgets::time_picker(cx, "alarm"));
     assert_eq!(
         by_id(&sem(&h), "alarm").unwrap().value.as_deref(),
         Some("09:30")
@@ -170,7 +170,7 @@ fn time_picker_value_and_targets() {
 
 #[test]
 fn time_picker_dial_sets_the_hour() {
-    let mut h = run(300.0, 400.0, |cx| widgets_m3::time_picker(cx, "alarm"));
+    let mut h = run(300.0, 400.0, |cx| widgets::time_picker(cx, "alarm"));
     // The dial drives the hour: tap "4 o'clock".
     let four = center(by_id(&sem(&h), "alarm-hour-4").expect("dial hour 4"));
     click(&mut h, four);

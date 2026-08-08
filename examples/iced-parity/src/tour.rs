@@ -1,6 +1,6 @@
 //! tour — a multi-page walkthrough using tabs + a back stack (router).
 use lumen_widgets::nav::Router;
-use lumen_widgets::{theme, widgets, widgets_m1, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the tour app.
 pub fn main_app() -> App {
@@ -34,7 +34,7 @@ fn body(cx: &mut BuildCx) -> Element {
     widgets::column(vec![
         theme::caption(format!("Page {}/{}: {}", idx + 1, PAGES.len(), PAGES[idx])).id("page"),
         theme::heading(PAGES[idx]),
-        widgets_m1::divider(),
+        widgets::divider(),
         widgets::text(format!("This is the {} page of the tour.", PAGES[idx])).id("body"),
         theme::button_row(vec![back, next]),
     ])

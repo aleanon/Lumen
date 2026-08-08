@@ -1,5 +1,5 @@
 //! todos — add and toggle a list of tasks.
-use lumen_widgets::{theme, widgets, widgets_m1, App, BuildCx, Element};
+use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the todos app.
 pub fn main_app() -> App {
@@ -33,7 +33,7 @@ fn body(cx: &mut BuildCx) -> Element {
         .enumerate()
         .map(|(i, (name, done))| {
             let toggle =
-                widgets_m1::switch(cx, &format!("done-{i}"), name.clone()).id(format!("task-{i}"));
+                widgets::switch(cx, &format!("done-{i}"), name.clone()).id(format!("task-{i}"));
             let mark = if *done { "[x] " } else { "[ ] " };
             widgets::row(vec![
                 widgets::text(format!("{mark}{name}")).id(format!("label-{i}")),

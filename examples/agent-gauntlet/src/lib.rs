@@ -6,7 +6,7 @@
 
 use lumen_render::RgbaImage;
 use lumen_widgets::shader::ShaderWidget;
-use lumen_widgets::{widgets, widgets_m1, widgets_m4, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Element};
 
 /// The app stylesheet (themeable; hot-reloadable).
 pub const STYLESHEET: &str = r#"
@@ -38,10 +38,10 @@ fn build(cx: &mut BuildCx, shader: &RgbaImage) -> Element {
 
     let header = widgets::row(vec![
         widgets::text("Gauntlet").id("title"),
-        widgets_m1::spacer(),
+        widgets::spacer(),
         widgets::button("Fix layout", move |rt| bug.set(rt, false)).id("fix"),
     ]);
-    let nav = widgets_m1::tabs(cx, "tab", &["Home", "Shader", "Data"]);
+    let nav = widgets::tabs(cx, "tab", &["Home", "Shader", "Data"]);
 
     let screen = match current {
         0 => home(buggy),
@@ -51,7 +51,7 @@ fn build(cx: &mut BuildCx, shader: &RgbaImage) -> Element {
         ]),
         _ => widgets::column(vec![
             widgets::text("Data").id("data-label"),
-            widgets_m4::data_grid(cx, "grid", &["#", "Name"], 1000, 20.0, 160.0, |r, c| {
+            widgets::data_grid(cx, "grid", &["#", "Name"], 1000, 20.0, 160.0, |r, c| {
                 if c == 0 {
                     format!("{r}")
                 } else {
@@ -61,7 +61,7 @@ fn build(cx: &mut BuildCx, shader: &RgbaImage) -> Element {
         ]),
     };
 
-    widgets::column(vec![header, nav, widgets_m1::divider(), screen]).id("root")
+    widgets::column(vec![header, nav, widgets::divider(), screen]).id("root")
 }
 
 fn home(buggy: bool) -> Element {

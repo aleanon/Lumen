@@ -37,7 +37,7 @@ pub mod label;
 mod macros;
 pub mod markdown;
 /// W.2 small widgets: Skeleton, Avatar, Pagination, AlignBox.
-pub mod misc_w2;
+mod misc_w2;
 pub mod motion;
 pub mod nav;
 pub mod pick_list;
@@ -65,10 +65,21 @@ mod widget;
 pub mod shader;
 pub mod tasks;
 pub mod widgets;
-pub mod widgets_extra;
-pub mod widgets_m1;
-pub mod widgets_m3;
-pub mod widgets_m4;
+
+// SD2: the milestone-named modules (`widgets_m1`/`m3`/`m4`/`extra`,
+// `misc_w2`) are now private. They recorded WHEN a widget was built — an
+// internal scheduling fact that is meaningless to a consumer, impossible to
+// reorganize without a breaking change, and was reachable as
+// `lumen::widgets_m3::DatePicker`. Their contents are re-exported from the one
+// flat `widgets` namespace instead (the shape iced and egui use), which is
+// where a consumer would look first anyway.
+//
+// Verified collision-free: 77 public items across the six modules, no
+// duplicate names.
+mod widgets_extra;
+mod widgets_m1;
+mod widgets_m3;
+mod widgets_m4;
 
 pub use app::{center, App, FrameStats, Headless, ReloadResult};
 #[cfg(feature = "snapshot")]

@@ -4,7 +4,7 @@
 use kurbo::{Point, Size, Vec2};
 use lumen_core::events::{Event, Modifiers, PointerEvent, TextInputEvent, WheelEvent};
 use lumen_core::semantics::{Role, SemanticsNode, State};
-use lumen_widgets::widgets_m4::{self, TreeRow};
+use lumen_widgets::widgets::{self, TreeRow};
 use lumen_widgets::{App, BuildCx, Element, Headless};
 
 fn run(w: f64, h: f64, build: impl Fn(&mut BuildCx) -> Element + 'static) -> Headless {
@@ -41,7 +41,7 @@ fn mid(n: &SemanticsNode) -> Point {
 #[test]
 fn data_grid_windows_a_million_rows() {
     let mut h = run(400.0, 200.0, |cx| {
-        widgets_m4::data_grid(cx, "grid", &["A", "B"], 1_000_000, 20.0, 200.0, |r, c| {
+        widgets::data_grid(cx, "grid", &["A", "B"], 1_000_000, 20.0, 200.0, |r, c| {
             format!("r{r}c{c}")
         })
     });
@@ -99,7 +99,7 @@ fn tree_expands_and_collapses() {
             has_children: false,
         },
     ];
-    let mut h = run(240.0, 200.0, move |cx| widgets_m4::tree(cx, "t", &rows));
+    let mut h = run(240.0, 200.0, move |cx| widgets::tree(cx, "t", &rows));
     assert_eq!(sem(&h).role, Role::Tree);
 
     // Collapsed by default: children hidden, parent marked collapsed.
@@ -122,7 +122,7 @@ fn tree_expands_and_collapses() {
 #[test]
 fn bar_chart_renders_and_reports_count() {
     let h = run(120.0, 80.0, |_| {
-        widgets_m4::bar_chart(&[1.0, 4.0, 2.0, 8.0, 3.0], 120.0, 80.0)
+        widgets::bar_chart(&[1.0, 4.0, 2.0, 8.0, 3.0], 120.0, 80.0)
     });
     let root = sem(&h);
     assert_eq!(root.role, Role::Group);
@@ -136,7 +136,7 @@ fn rich_text_editor_types_and_styles() {
     // M.4: the editor is now source pane (full TextEditor caret machinery)
     // + live RichDoc preview; the pane's value is the markdown-lite source.
     let mut h = run(360.0, 200.0, |cx| {
-        widgets_m4::rich_text_editor(cx, "doc", "hi ")
+        widgets::rich_text_editor(cx, "doc", "hi ")
     });
     fn pane(n: &lumen_core::semantics::SemanticsNode) -> lumen_core::semantics::SemanticsNode {
         fn find(

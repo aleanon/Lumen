@@ -6,7 +6,7 @@ use accesskit::{Role as AkRole, Toggled};
 use kurbo::Size;
 use lumen_core::semantics::Role;
 use lumen_widgets::a11y::{build_tree, role_to_accesskit};
-use lumen_widgets::{widgets, widgets_m1, widgets_m4, App, BuildCx, Element, Headless};
+use lumen_widgets::{widgets, App, BuildCx, Element, Headless};
 
 fn run(build: impl Fn(&mut BuildCx) -> Element + 'static) -> Headless {
     App::new(build).run_headless(Size::new(300.0, 240.0))
@@ -27,7 +27,7 @@ fn accesskit_tree_matches_semantics() {
     let mut h = run(|cx| {
         widgets::column(vec![
             widgets::button("Save", |_| {}).id("save"),
-            widgets_m1::switch(cx, "wifi", "Wi-Fi").id("wifi"),
+            widgets::switch(cx, "wifi", "Wi-Fi").id("wifi"),
         ])
     });
     // Toggle the switch on so it carries a checked state.
@@ -69,7 +69,7 @@ fn accesskit_tree_matches_semantics() {
 
 #[test]
 fn tree_widget_exposes_expanded_state() {
-    use lumen_widgets::widgets_m4::TreeRow;
+    use lumen_widgets::widgets::TreeRow;
     let rows = [
         TreeRow {
             id: "a",
@@ -84,7 +84,7 @@ fn tree_widget_exposes_expanded_state() {
             has_children: false,
         },
     ];
-    let mut h = run(move |cx| widgets_m4::tree(cx, "t", &rows));
+    let mut h = run(move |cx| widgets::tree(cx, "t", &rows));
     h.pump();
     let elided = h.semantics_doc().root.elided();
     let update = build_tree(&elided);
@@ -108,7 +108,7 @@ fn adapter_tree_equals_semantics_tree_node_for_node() {
     let mut h = run(|cx| {
         widgets::column(vec![
             widgets::text("Profile").id("title"),
-            widgets_m1::switch(cx, "wifi", "Wi-Fi").id("wifi"),
+            widgets::switch(cx, "wifi", "Wi-Fi").id("wifi"),
             widgets::button("Save", |_| {}).id("save"),
             widgets::text_field_basic(cx, "name", "Ada").id("name"),
         ])

@@ -3,7 +3,7 @@
 use kurbo::{Point, Size};
 use lumen_core::events::{Event, PointerEvent};
 use lumen_core::semantics::{Role, SemanticsNode, State};
-use lumen_widgets::{widgets, widgets_extra, App, BuildCx, Element, Headless};
+use lumen_widgets::{widgets, App, BuildCx, Element, Headless};
 
 fn run(build: impl Fn(&mut BuildCx) -> Element + 'static) -> Headless {
     App::new(build).run_headless(Size::new(300.0, 240.0))
@@ -34,8 +34,8 @@ fn mid(n: &SemanticsNode) -> Point {
 fn radio_group_is_single_select() {
     let mut h = run(|cx| {
         widgets::column(vec![
-            widgets_extra::radio(cx, "g", 0, "A").id("a"),
-            widgets_extra::radio(cx, "g", 1, "B").id("b"),
+            widgets::radio(cx, "g", 0, "A").id("a"),
+            widgets::radio(cx, "g", 1, "B").id("b"),
         ])
     });
     // A checked by default (group = 0), B unchecked.
@@ -72,7 +72,7 @@ fn radio_group_is_single_select() {
 
 #[test]
 fn select_cycles_options() {
-    let mut h = run(|cx| widgets_extra::select(cx, "s", &["Red", "Green", "Blue"]));
+    let mut h = run(|cx| widgets::select(cx, "s", &["Red", "Green", "Blue"]));
     assert_eq!(sem(&h).value.as_deref(), Some("Red"));
     let p = mid(&sem(&h));
     click(&mut h, p);
@@ -83,24 +83,23 @@ fn select_cycles_options() {
 fn tooltip_menu_grid_wrap_split_textarea_render() {
     // A tooltip is transient: nothing is shown until the target is hovered
     // (it used to render permanently, stacked under the target).
-    let h = run(|cx| widgets_extra::tooltip(cx, "t", widgets::text("hover me"), "the tip"));
+    let h = run(|cx| widgets::tooltip(cx, "t", widgets::text("hover me"), "the tip"));
     assert!(
         by_role(&sem(&h), Role::Tooltip).is_none(),
         "no tip before hover"
     );
 
-    let h = run(|_| widgets_extra::menu(&["New", "Open", "Save"], |_, _| {}));
+    let h = run(|_| widgets::menu(&["New", "Open", "Save"], |_, _| {}));
     assert_eq!(sem(&h).role, Role::Menu);
     assert_eq!(count(&sem(&h), Role::MenuItem), 3);
 
-    let h =
-        run(|_| widgets_extra::grid(3, (0..6).map(|i| widgets::text(format!("c{i}"))).collect()));
+    let h = run(|_| widgets::grid(3, (0..6).map(|i| widgets::text(format!("c{i}"))).collect()));
     assert_eq!(sem(&h).children.len(), 6);
 
-    let h = run(|_| widgets_extra::wrap((0..4).map(|i| widgets::text(format!("w{i}"))).collect()));
+    let h = run(|_| widgets::wrap((0..4).map(|i| widgets::text(format!("w{i}"))).collect()));
     assert_eq!(sem(&h).children.len(), 4);
 
-    let h = run(|_| widgets_extra::split_pane(widgets::text("L"), widgets::text("R"), 0.3));
+    let h = run(|_| widgets::split_pane(widgets::text("L"), widgets::text("R"), 0.3));
     assert_eq!(sem(&h).children.len(), 2);
     // First pane is narrower than the second (ratio 0.3).
     assert!(sem(&h).children[0].bounds.width() < sem(&h).children[1].bounds.width());
@@ -109,7 +108,7 @@ fn tooltip_menu_grid_wrap_split_textarea_render() {
 #[test]
 fn text_area_accepts_multiline_input() {
     use lumen_core::events::TextInputEvent;
-    let mut h = run(|cx| widgets_extra::text_area(cx, "ta", ""));
+    let mut h = run(|cx| widgets::text_area(cx, "ta", ""));
     assert_eq!(sem(&h).role, Role::TextInput);
     let p = mid(&sem(&h));
     h.inject(Event::PointerDown(PointerEvent::at(p)));
@@ -129,7 +128,7 @@ fn a_tooltip_appears_on_hover_and_does_not_move_the_layout() {
 
     let mut h = run(|cx| {
         widgets::column(vec![
-            widgets_extra::tooltip(cx, "t", widgets::text("hover me").id("target"), "the tip"),
+            widgets::tooltip(cx, "t", widgets::text("hover me").id("target"), "the tip"),
             widgets::text("below").id("below"),
         ])
     });
@@ -192,7 +191,7 @@ mod legacy_shims_behave_like_the_typed_widgets {
 
         let mut h = App::new(move |_cx: &mut BuildCx| -> Element {
             let sink = Rc::clone(&sink);
-            widgets_extra::menu(&["New", "Open", "Save"], move |_rt, i| {
+            widgets::menu(&["New", "Open", "Save"], move |_rt, i| {
                 sink.borrow_mut().push(i)
             })
             .id("m")

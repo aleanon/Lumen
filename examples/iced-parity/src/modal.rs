@@ -1,6 +1,6 @@
 //! modal — open a centered dialog over the page with a dimmed backdrop (E8.2),
 //! both the page and the dialog presented as soft-shadowed panels.
-use lumen_widgets::widgets_extra::modal;
+use lumen_widgets::widgets::modal;
 use lumen_widgets::{theme, widgets, App, BuildCx, Element};
 
 /// Build the modal app.

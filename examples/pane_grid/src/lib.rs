@@ -2,7 +2,7 @@
 //! Explorer sidebar on the left, a source view on the right. Drag the divider
 //! to move the split (the `pane_grid` helper owns the ratio signal). Themed via
 //! `app.lss`.
-use lumen_widgets::widgets_extra::pane_grid;
+use lumen_widgets::widgets::pane_grid;
 use lumen_widgets::{widgets, App, BuildCx, Element};
 
 use lumen_layout::{Align, Dim, Edges};

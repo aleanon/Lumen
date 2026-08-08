@@ -2,7 +2,7 @@
 //! parses into blocks (headings, paragraphs, bullet/numbered list items,
 //! images) of styled spans (bold, italic, links); the document renders as an
 //! element tree, round-trips back to source, and supports find/replace over
-//! the source. The editor (`widgets_m4::rich_text_editor`) edits the SOURCE
+//! the source. The editor (`widgets::rich_text_editor`) edits the SOURCE
 //! with the full `TextEditor` caret/selection/undo machinery and renders the
 //! parsed preview live.
 //!

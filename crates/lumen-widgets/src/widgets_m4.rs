@@ -203,7 +203,7 @@ pub struct TreeRow<'a> {
 ///
 /// ```
 /// # use lumen_widgets::App;
-/// use lumen_widgets::widgets_m4::TreeRow;
+/// use lumen_widgets::widgets::TreeRow;
 /// use lumen_widgets::{centered, Tree, BuildCx, Element};
 /// use std::collections::HashSet;
 ///
@@ -419,7 +419,7 @@ pub struct Run<'a> {
 ///
 /// ```
 /// # use lumen_widgets::App;
-/// use lumen_widgets::widgets_m4::Run;
+/// use lumen_widgets::widgets::Run;
 /// use lumen_widgets::{centered, RichText, BuildCx, Element};
 /// use lumen_core::Color;
 ///

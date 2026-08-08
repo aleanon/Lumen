@@ -3,8 +3,8 @@
 //! scrubber**, and a **trace replay**. Because it is an ordinary Lumen app it is
 //! driveable through `lumen-agent` like any other (see `tests/self_drive.rs`).
 
-use lumen_widgets::widgets_m4::TreeRow;
-use lumen_widgets::{widgets, widgets_m1, widgets_m4, App, BuildCx, Element};
+use lumen_widgets::widgets::TreeRow;
+use lumen_widgets::{widgets, App, BuildCx, Element};
 
 /// A fixed sample trace the replay panel steps through.
 const TRACE: &[&str] = &[
@@ -24,9 +24,9 @@ fn build(cx: &mut BuildCx) -> Element {
 
     let header = widgets::row(vec![
         widgets::text("Lumen Inspector").id("title"),
-        widgets_m1::spacer(),
+        widgets::spacer(),
     ]);
-    let nav = widgets_m1::tabs(cx, "tab", &["Tree", "Style", "Scrub", "Trace"]);
+    let nav = widgets::tabs(cx, "tab", &["Tree", "Style", "Scrub", "Trace"]);
 
     let panel = match current {
         0 => tree_panel(cx),
@@ -35,7 +35,7 @@ fn build(cx: &mut BuildCx) -> Element {
         _ => trace_panel(cx),
     };
 
-    widgets::column(vec![header, nav, widgets_m1::divider(), panel]).id("root")
+    widgets::column(vec![header, nav, widgets::divider(), panel]).id("root")
 }
 
 /// Tree view: the (sample) semantic tree of the inspected app.
@@ -68,7 +68,7 @@ fn tree_panel(cx: &BuildCx) -> Element {
     ];
     widgets::column(vec![
         widgets::text("Semantic tree").id("panel-tree"),
-        widgets_m4::tree(cx, "insp-tree", &rows),
+        widgets::tree(cx, "insp-tree", &rows),
     ])
 }
 
@@ -80,7 +80,7 @@ fn style_panel(cx: &BuildCx) -> Element {
         widgets::text("Style editor").id("panel-style"),
         widgets::row(vec![
             widgets::text("font-size").id("style-prop"),
-            widgets_m1::stepper(cx, "font-size", 8, 72).id("font-size-stepper"),
+            widgets::stepper(cx, "font-size", 8, 72).id("font-size-stepper"),
         ]),
         widgets::text(format!("preview: {v}px")).id("style-preview"),
     ])

@@ -3,14 +3,14 @@
 
 use kurbo::Size;
 use lumen_test::{block_on, expect, TestApp};
-use lumen_widgets::{widgets, widgets_m1, App};
+use lumen_widgets::{widgets, App};
 
 fn demo() -> App {
     App::new(|cx| {
         widgets::column(vec![
             widgets::button("A", |_| {}).id("a"),
             widgets::button("B", |_| {}).id("b"),
-            widgets_m1::switch(cx, "chk", "Agree").id("chk"),
+            widgets::switch(cx, "chk", "Agree").id("chk"),
             widgets::slider(cx, "sld", 0.0, 100.0).id("sld"),
         ])
     })

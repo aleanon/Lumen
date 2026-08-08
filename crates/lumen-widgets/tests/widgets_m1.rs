@@ -5,7 +5,7 @@ use kurbo::{Point, Size, Vec2};
 use lumen_core::events::{Event, Modifiers, PointerEvent, WheelEvent};
 use lumen_core::semantics::{Role, SemanticsNode, State};
 use lumen_render::RgbaImage;
-use lumen_widgets::{center, widgets, widgets_m1, App, BuildCx, Element, Headless};
+use lumen_widgets::{center, widgets, App, BuildCx, Element, Headless};
 use std::path::PathBuf;
 
 fn run(w: f64, h: f64, build: impl Fn(&mut BuildCx) -> Element + 'static) -> Headless {
@@ -55,7 +55,7 @@ fn check_golden(name: &str, img: &RgbaImage) {
 #[test]
 fn virtual_list_materializes_only_visible() {
     let mut h = run(180.0, 200.0, |cx| {
-        widgets_m1::virtual_list(cx, "vl", 1_000_000, 20.0, 200.0, |i| {
+        widgets::virtual_list(cx, "vl", 1_000_000, 20.0, 200.0, |i| {
             widgets::text(format!("row {i}"))
         })
     });
@@ -75,7 +75,7 @@ fn virtual_list_materializes_only_visible() {
 #[test]
 fn virtual_list_scroll_changes_window() {
     let mut h = run(180.0, 200.0, |cx| {
-        widgets_m1::virtual_list(cx, "vl", 1_000_000, 20.0, 200.0, |i| {
+        widgets::virtual_list(cx, "vl", 1_000_000, 20.0, 200.0, |i| {
             widgets::text(format!("row {i}"))
         })
     });
@@ -103,9 +103,7 @@ fn virtual_list_scroll_changes_window() {
 
 #[test]
 fn switch_toggles() {
-    let mut h = run(160.0, 40.0, |cx| {
-        widgets_m1::switch(cx, "sw", "Wifi").id("sw")
-    });
+    let mut h = run(160.0, 40.0, |cx| widgets::switch(cx, "sw", "Wifi").id("sw"));
     assert_eq!(sem(&h).role, Role::Switch);
     assert!(sem(&h).states.contains(&State::Unchecked));
     check_golden("switch_off", &h.screenshot());
@@ -117,7 +115,7 @@ fn switch_toggles() {
 #[test]
 fn tabs_select() {
     let mut h = run(240.0, 40.0, |cx| {
-        widgets_m1::tabs(cx, "tabs", &["One", "Two", "Three"])
+        widgets::tabs(cx, "tabs", &["One", "Two", "Three"])
     });
     assert_eq!(sem(&h).role, Role::TabList);
     let s = sem(&h);
@@ -137,7 +135,7 @@ fn tabs_select() {
 
 #[test]
 fn stepper_inc_dec() {
-    let mut h = run(160.0, 40.0, |cx| widgets_m1::stepper(cx, "st", 0, 10));
+    let mut h = run(160.0, 40.0, |cx| widgets::stepper(cx, "st", 0, 10));
     assert_eq!(by_id(&sem(&h), "st-value").unwrap().label, "0");
     check_golden("stepper", &h.screenshot());
     let inc = by_id(&sem(&h), "st-inc").unwrap().bounds;
@@ -153,10 +151,10 @@ fn stepper_inc_dec() {
 fn structural_widgets_render() {
     let mut h = run(200.0, 80.0, |_| {
         widgets::row(vec![
-            widgets_m1::icon("home"),
-            widgets_m1::spacer(),
-            widgets_m1::divider(),
-            widgets_m1::padding(8.0, widgets::text("x")),
+            widgets::icon("home"),
+            widgets::spacer(),
+            widgets::divider(),
+            widgets::padding(8.0, widgets::text("x")),
         ])
     });
     h.pump();

@@ -1,7 +1,7 @@
 //! M1-exit: the "settings app" — 3 screens (Tabs), themed and styleable from
 //! `.lss`, with a text input, hot-reloadable, and drivable by `lumen-agent`.
 
-use lumen_widgets::{widgets, widgets_m1, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Element};
 
 /// The default stylesheet (hot-reloadable at runtime). Tokens drive the theme.
 pub const STYLESHEET: &str = r#"
@@ -18,17 +18,17 @@ pub fn build(cx: &mut BuildCx) -> Element {
 
     let header = widgets::row(vec![
         widgets::text("Settings").id("title"),
-        widgets_m1::spacer(),
+        widgets::spacer(),
     ]);
-    let nav = widgets_m1::tabs(cx, "tab", &["General", "Appearance", "About"]);
+    let nav = widgets::tabs(cx, "tab", &["General", "Appearance", "About"]);
 
     let screen = match current {
         0 => widgets::column(vec![
-            widgets_m1::switch(cx, "notifications", "Notifications").id("notifications"),
-            widgets_m1::stepper(cx, "volume", 0, 10).id("volume"),
+            widgets::switch(cx, "notifications", "Notifications").id("notifications"),
+            widgets::stepper(cx, "volume", 0, 10).id("volume"),
         ]),
         1 => widgets::column(vec![
-            widgets_m1::switch(cx, "dark_mode", "Dark mode").id("dark_mode"),
+            widgets::switch(cx, "dark_mode", "Dark mode").id("dark_mode"),
             widgets::text("Accent color").id("accent_label"),
         ]),
         _ => widgets::column(vec![
@@ -37,7 +37,7 @@ pub fn build(cx: &mut BuildCx) -> Element {
         ]),
     };
 
-    widgets::column(vec![header, nav, widgets_m1::divider(), screen]).id("screen")
+    widgets::column(vec![header, nav, widgets::divider(), screen]).id("screen")
 }
 
 /// Build the settings application.

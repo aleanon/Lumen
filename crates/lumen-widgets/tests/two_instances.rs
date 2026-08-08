@@ -12,7 +12,7 @@
 use kurbo::Size;
 use lumen_core::semantics::SemanticsNode;
 use lumen_core::state::Signal;
-use lumen_widgets::{widgets, widgets_m1, widgets_m3, App, BuildCx, Element, Headless};
+use lumen_widgets::{widgets, App, BuildCx, Element, Headless};
 
 fn sem(h: &Headless) -> SemanticsNode {
     h.semantics_doc().root.elided()
@@ -46,8 +46,8 @@ fn assert_ids_unique(h: &Headless, what: &str) {
 fn two_steppers_are_independent() {
     let mut h = App::new(|cx: &mut BuildCx| {
         widgets::column(vec![
-            widgets_m1::Stepper::new(cx, "qty-a", 0, 10).into(),
-            widgets_m1::Stepper::new(cx, "qty-b", 0, 10).into(),
+            widgets::Stepper::new(cx, "qty-a", 0, 10).into(),
+            widgets::Stepper::new(cx, "qty-b", 0, 10).into(),
         ])
     })
     .run_headless(Size::new(320.0, 200.0));
@@ -69,8 +69,8 @@ fn two_steppers_are_independent() {
 fn two_date_pickers_are_independent() {
     let mut h = App::new(|cx: &mut BuildCx| {
         widgets::column(vec![
-            widgets_m3::DatePicker::new(cx, "from").into(),
-            widgets_m3::DatePicker::new(cx, "to").into(),
+            widgets::DatePicker::new(cx, "from").into(),
+            widgets::DatePicker::new(cx, "to").into(),
         ])
     })
     .run_headless(Size::new(360.0, 900.0));
@@ -90,8 +90,8 @@ fn two_date_pickers_are_independent() {
 fn two_time_pickers_are_independent() {
     let mut h = App::new(|cx: &mut BuildCx| {
         widgets::column(vec![
-            widgets_m3::TimePicker::new(cx, "start").into(),
-            widgets_m3::TimePicker::new(cx, "end").into(),
+            widgets::TimePicker::new(cx, "start").into(),
+            widgets::TimePicker::new(cx, "end").into(),
         ])
     })
     .run_headless(Size::new(320.0, 900.0));
@@ -130,8 +130,8 @@ fn two_dropdowns_are_independent() {
 fn two_tab_bars_are_independent() {
     let mut h = App::new(|cx: &mut BuildCx| {
         widgets::column(vec![
-            widgets_m1::Tabs::new(cx, "top", &["A", "B"]).into(),
-            widgets_m1::Tabs::new(cx, "bottom", &["A", "B"]).into(),
+            widgets::Tabs::new(cx, "top", &["A", "B"]).into(),
+            widgets::Tabs::new(cx, "bottom", &["A", "B"]).into(),
         ])
     })
     .run_headless(Size::new(300.0, 200.0));
@@ -152,7 +152,7 @@ fn two_tab_bars_are_independent() {
 fn an_app_bar_does_not_squat_on_a_common_id() {
     let mut h = App::new(|_cx: &mut BuildCx| {
         widgets::column(vec![
-            widgets_m3::AppBar::new("Inbox", vec![]).into(),
+            widgets::AppBar::new("Inbox", vec![]).into(),
             widgets::text("My heading").id("title"),
         ])
     })
@@ -174,11 +174,11 @@ fn a_screen_of_paired_widgets_has_no_duplicate_ids() {
     let mut h = App::new(|cx: &mut BuildCx| {
         let mut kids: Vec<Element> = Vec::new();
         for tag in ["one", "two"] {
-            kids.push(widgets_m1::Stepper::new(cx, &format!("{tag}-n"), 0, 5).into());
-            kids.push(widgets_m1::Tabs::new(cx, &format!("{tag}-t"), &["A", "B"]).into());
+            kids.push(widgets::Stepper::new(cx, &format!("{tag}-n"), 0, 5).into());
+            kids.push(widgets::Tabs::new(cx, &format!("{tag}-t"), &["A", "B"]).into());
             kids.push(lumen_widgets::PickList::new(cx, &format!("{tag}-p"), "…", ["x"]).into());
-            kids.push(widgets_m3::DatePicker::new(cx, &format!("{tag}-d")).into());
-            kids.push(widgets_m3::TimePicker::new(cx, &format!("{tag}-tm")).into());
+            kids.push(widgets::DatePicker::new(cx, &format!("{tag}-d")).into());
+            kids.push(widgets::TimePicker::new(cx, &format!("{tag}-tm")).into());
         }
         widgets::column(kids)
     })

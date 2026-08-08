@@ -9,7 +9,7 @@
 
 use kurbo::Size;
 use lumen_core::state::Signal;
-use lumen_widgets::{widgets, widgets_m1, App, BuildCx, Element, Headless, Menu, Slider};
+use lumen_widgets::{widgets, App, BuildCx, Element, Headless, Menu, Slider};
 
 fn slider_app() -> Headless {
     App::new(|cx: &mut BuildCx| Slider::new(cx, "vol", 0.0, 100.0).id("vol").into())
@@ -81,7 +81,7 @@ fn a_fractional_slider_reports_a_meaningful_value() {
 #[test]
 fn the_agent_can_drive_a_stepper() {
     let mut h =
-        App::new(|cx: &mut BuildCx| widgets_m1::Stepper::new(cx, "qty", 0, 10).id("qty").into())
+        App::new(|cx: &mut BuildCx| widgets::Stepper::new(cx, "qty", 0, 10).id("qty").into())
             .run_headless(Size::new(300.0, 80.0));
     h.pump();
 
@@ -146,9 +146,9 @@ fn no_widget_declares_an_action_it_does_not_implement() {
         let picked = cx.signal("picked", || 0i64);
         let items: Vec<Element> = vec![
             Slider::new(cx, "s", 0.0, 10.0).into(),
-            widgets_m1::Stepper::new(cx, "n", 0, 5).into(),
-            widgets_m1::Switch::new(cx, "sw", "Wi-Fi").into(),
-            widgets_m1::Tabs::new(cx, "t", &["A", "B"]).into(),
+            widgets::Stepper::new(cx, "n", 0, 5).into(),
+            widgets::Switch::new(cx, "sw", "Wi-Fi").into(),
+            widgets::Tabs::new(cx, "t", &["A", "B"]).into(),
             widgets::button("Go", |_| {}),
             widgets::text("static"),
             Menu::new(&["One", "Two"])

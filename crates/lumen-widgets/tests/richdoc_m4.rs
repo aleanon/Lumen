@@ -5,7 +5,7 @@ use kurbo::Size;
 use lumen_core::events::{Event, Key, KeyEvent, Modifiers, NamedKey, PointerEvent};
 use lumen_core::geometry::Point;
 use lumen_widgets::richdoc::{Block, RichDoc};
-use lumen_widgets::{widgets, widgets_m4, App, Headless};
+use lumen_widgets::{widgets, App, Headless};
 
 const DOC: &str = "# Title\n\
 Intro with **bold** and *italic* and a [link](https://lumen.dev).\n\
@@ -89,9 +89,8 @@ fn key(h: &mut Headless, k: Key, mods: Modifiers) {
 
 #[test]
 fn editor_caret_selection_editing_on_the_source() {
-    let mut h =
-        App::new(|cx| widgets::column(vec![widgets_m4::rich_text_editor(cx, "doc", "# Hi")]))
-            .run_headless(Size::new(500.0, 300.0));
+    let mut h = App::new(|cx| widgets::column(vec![widgets::rich_text_editor(cx, "doc", "# Hi")]))
+        .run_headless(Size::new(500.0, 300.0));
     h.pump();
 
     // Focus the source pane by clicking it.
@@ -132,8 +131,8 @@ fn editor_caret_selection_editing_on_the_source() {
 fn find_replace_bar_counts_and_rewrites() {
     let mut h = App::new(|cx| {
         widgets::column(vec![
-            widgets_m4::rich_text_editor(cx, "doc", "good day, good night"),
-            widgets_m4::find_replace_bar(cx, "fr", "doc"),
+            widgets::rich_text_editor(cx, "doc", "good day, good night"),
+            widgets::find_replace_bar(cx, "fr", "doc"),
         ])
     })
     .run_headless(Size::new(600.0, 400.0));
