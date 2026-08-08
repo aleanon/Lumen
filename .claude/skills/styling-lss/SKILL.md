@@ -26,8 +26,11 @@ B.3). `.lss` wins over the element's
 text in a child), and a state-part layout rule (`#x:hovered { width: … }`)
 relayouts through the normal rebuild path on pointer motion.
 
-Still Rust-only (parse-only in `.lss`): `grid-*` track lists
-and `overflow`. Everything else in the flex/box family now
+Still Rust-only (parse-only in `.lss`): `overflow`.
+`grid-template-columns/rows` take a space-separated track
+list (`1fr 2fr 100px auto`; no `repeat()`), and
+`grid-column`/`grid-row` take `auto`, `span <n>` or a line
+number — the CSS `<start> / <end>` form is not lexable yet. Everything else in the flex/box family now
 works in `.lss` — `flex-grow/shrink/basis/wrap`,
 `justify-content`, `align-items/self/content`, `min/max-*`,
 `aspect-ratio`, `position: absolute` + `inset` (+ per-side

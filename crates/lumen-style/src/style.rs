@@ -9,7 +9,9 @@ use crate::ast::{Unit, Value};
 #[cfg(feature = "snapshot")]
 use crate::Origin;
 use lumen_core::Color;
-use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, FlexWrap, Position};
+use lumen_layout::{
+    Align, Dim, Display, Edges, FlexDirection, FlexWrap, GridLine, GridTrack, Position,
+};
 #[cfg(feature = "snapshot")]
 use serde_json::{json, Value as Json};
 use std::collections::HashMap;
@@ -195,6 +197,14 @@ pub struct Style {
     /// `TextEngine::register_font`. Unknown names fall back to the bundled
     /// face, matching the Rust-side `TextStyle::family` contract.
     pub font_family: Option<String>,
+    /// `grid-template-columns` (PROP1).
+    pub grid_template_columns: Option<Vec<GridTrack>>,
+    /// `grid-template-rows` (PROP1).
+    pub grid_template_rows: Option<Vec<GridTrack>>,
+    /// `grid-column` placement (PROP1), as `(start, end)`.
+    pub grid_column: Option<(GridLine, GridLine)>,
+    /// `grid-row` placement (PROP1), as `(start, end)`.
+    pub grid_row: Option<(GridLine, GridLine)>,
     /// `background` color.
     pub background: Option<Color>,
     /// `background: linear-gradient(…)|radial-gradient(…)` (B.3).
@@ -341,6 +351,30 @@ impl Style {
     /// `flex-wrap`.
     pub fn flex_wrap(mut self, w: FlexWrap) -> Self {
         self.flex_wrap = Some(w);
+        self
+    }
+
+    /// `grid-template-columns` (PROP1).
+    pub fn grid_template_columns(mut self, tracks: Vec<GridTrack>) -> Self {
+        self.grid_template_columns = Some(tracks);
+        self
+    }
+
+    /// `grid-template-rows` (PROP1).
+    pub fn grid_template_rows(mut self, tracks: Vec<GridTrack>) -> Self {
+        self.grid_template_rows = Some(tracks);
+        self
+    }
+
+    /// `grid-column` placement (PROP1).
+    pub fn grid_column(mut self, start: GridLine, end: GridLine) -> Self {
+        self.grid_column = Some((start, end));
+        self
+    }
+
+    /// `grid-row` placement (PROP1).
+    pub fn grid_row(mut self, start: GridLine, end: GridLine) -> Self {
+        self.grid_row = Some((start, end));
         self
     }
 
@@ -561,10 +595,6 @@ impl Style {
 /// parsed value into the existing field.
 pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     // Layout — the field exists in LayoutStyle; apply() doesn't populate it.
-    "grid-template-columns",
-    "grid-template-rows",
-    "grid-column",
-    "grid-row",
     "overflow",
     // Visual — needs render support, not just a field.
     "filter",
@@ -627,6 +657,10 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "inset-left",
     "letter-spacing",
     "font-family",
+    "grid-template-columns",
+    "grid-template-rows",
+    "grid-column",
+    "grid-row",
     "background",
     "color",
     "border-radius",
@@ -700,6 +734,10 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         // PROP1: typography whose `TextStyle` fields already existed.
         "letter-spacing" => style.letter_spacing = as_px(&v),
         "font-family" => style.font_family = as_font_family(&v),
+        "grid-template-columns" => style.grid_template_columns = as_grid_tracks(&v),
+        "grid-template-rows" => style.grid_template_rows = as_grid_tracks(&v),
+        "grid-column" => style.grid_column = as_grid_line_pair(&v),
+        "grid-row" => style.grid_row = as_grid_line_pair(&v),
         "background" => match &v {
             Value::Function(name, args)
                 if name == "linear-gradient" || name == "radial-gradient" =>
@@ -1228,6 +1266,57 @@ fn as_align(v: &Value) -> Option<Align> {
             "baseline" => Some(Align::Baseline),
             "space-between" => Some(Align::SpaceBetween),
             "space-around" => Some(Align::SpaceAround),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `grid-template-columns` / `-rows` (PROP1): a space-separated track list, e.g.
+/// `1fr 2fr 100px auto`. `repeat()` is not supported — write the tracks out.
+///
+/// The whole declaration is rejected if ANY track is unparseable, rather than
+/// silently dropping that track: a grid missing one column would lay out
+/// plausibly but wrongly, which is far harder to notice than the property not
+/// applying at all (and `W0107` then names it).
+fn as_grid_tracks(v: &Value) -> Option<Vec<GridTrack>> {
+    let items: Vec<&Value> = match v {
+        Value::List(xs) => xs.iter().collect(),
+        single => vec![single],
+    };
+    let tracks: Option<Vec<GridTrack>> = items.into_iter().map(as_grid_track).collect();
+    tracks.filter(|t| !t.is_empty())
+}
+
+fn as_grid_track(v: &Value) -> Option<GridTrack> {
+    match v {
+        Value::Keyword(k) if k == "auto" => Some(GridTrack::Auto),
+        Value::Number(n, Unit::Fr) => Some(GridTrack::Fr(*n as f32)),
+        Value::Number(n, Unit::Px) => Some(GridTrack::Px(*n as f32)),
+        Value::Number(n, Unit::Percent) => Some(GridTrack::Percent(*n as f32)),
+        _ => None,
+    }
+}
+
+/// `grid-column` / `grid-row` (PROP1): `auto`, `span <n>`, or a line number.
+///
+/// CSS's `<start> / <end>` form is NOT accepted — the lexer treats `/` only as
+/// a comment opener, so supporting it needs lexer work rather than a parse
+/// helper (the same limitation `aspect-ratio` has). A single value sets the
+/// START edge and leaves the end `Auto`, which is what CSS does too.
+fn as_grid_line_pair(v: &Value) -> Option<(GridLine, GridLine)> {
+    Some((as_grid_line(v)?, GridLine::Auto))
+}
+
+fn as_grid_line(v: &Value) -> Option<GridLine> {
+    match v {
+        Value::Keyword(k) if k == "auto" => Some(GridLine::Auto),
+        Value::Number(n, Unit::None) => Some(GridLine::Line(*n as i16)),
+        Value::List(xs) => match xs.as_slice() {
+            [Value::Keyword(k), Value::Number(n, Unit::None)] if k == "span" => {
+                let n = *n as i64;
+                (n > 0).then_some(GridLine::Span(n as u16))
+            }
             _ => None,
         },
         _ => None,

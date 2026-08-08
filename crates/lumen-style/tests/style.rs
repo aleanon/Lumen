@@ -122,6 +122,24 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         assert_eq!(from_lss, want, "{prop}");
     }
     covered.extend(["inset-top", "inset-right", "inset-bottom", "inset-left"]);
+    style_parity!(covered, "grid-template-columns", "1fr 2fr", |s: Style| s
+        .grid_template_columns(vec![
+            lumen_layout::GridTrack::Fr(1.0),
+            lumen_layout::GridTrack::Fr(2.0),
+        ]));
+    style_parity!(covered, "grid-template-rows", "1fr 2fr", |s: Style| s
+        .grid_template_rows(vec![
+            lumen_layout::GridTrack::Fr(1.0),
+            lumen_layout::GridTrack::Fr(2.0),
+        ]));
+    style_parity!(covered, "grid-column", "2", |s: Style| s.grid_column(
+        lumen_layout::GridLine::Line(2),
+        lumen_layout::GridLine::Auto
+    ));
+    style_parity!(covered, "grid-row", "2", |s: Style| s.grid_row(
+        lumen_layout::GridLine::Line(2),
+        lumen_layout::GridLine::Auto
+    ));
     style_parity!(covered, "letter-spacing", "8px", |s: Style| s
         .letter_spacing(8.0));
     style_parity!(covered, "font-family", "Inter", |s: Style| s
@@ -218,6 +236,8 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "position" => "absolute",
         "aspect-ratio" => "1.5",
         "font-family" => "Inter",
+        "grid-template-columns" | "grid-template-rows" => "1fr 2fr",
+        "grid-column" | "grid-row" => "2",
         _ => "8px", // the lengths
     };
     for &p in lumen_style::APPLIED_PROPERTIES {

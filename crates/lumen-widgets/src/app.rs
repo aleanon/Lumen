@@ -4651,6 +4651,18 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
     if let Some(i) = css.inset {
         el.style.inset = i;
     }
+    if let Some(t) = &css.grid_template_columns {
+        el.style.grid_template_columns = t.clone();
+    }
+    if let Some(t) = &css.grid_template_rows {
+        el.style.grid_template_rows = t.clone();
+    }
+    if let Some(p) = css.grid_column {
+        el.style.grid_column = p;
+    }
+    if let Some(p) = css.grid_row {
+        el.style.grid_row = p;
+    }
     if let Some(d) = css.min_width {
         el.style.min_width = d;
     }

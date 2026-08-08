@@ -141,7 +141,7 @@ cannot drift from the code again. The three lists live in the crate —
 `KNOWN_PROPERTIES`, `APPLIED_PROPERTIES`, `PARSE_ONLY_PROPERTIES` — and
 `crates/lumen-style/tests/property_parity.rs` asserts `KNOWN == APPLIED ∪
 PARSE_ONLY`, so a property that parses without an implementation is a **build
-failure**. Current split: **78 known, 60 applied, 18 parse-only** (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
+failure**. Current split: **78 known, 64 applied, 14 parse-only** (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
 declaration now reports `W0107` at parse time instead of silently doing
 nothing.)*
 
@@ -155,7 +155,7 @@ Plan tasks: layout → A.2, visual/typography → B.3/B.4, motion → B.5.
 |---|---|
 | **rendered** | `background` (solid color, `linear-gradient(<angle>deg, stops…)` — CSS angles, optional `%` positions, Oklab interpolation — and `radial-gradient(stops…)` centered/farthest-corner; conic still unexposed), `border` (shorthand width+color), `border-radius` (1–4 values, CSS expansion `[tl tr br bl]` — the shadow sprite uses the uniform top-left fallback), `shadow` (B.3 — single outer shadow `<dx> <dy> [blur] [spread] <color>`; `inset`/comma lists still unsupported and an `inset` keyword disables the declaration), `visibility` (B.3 — `hidden` removes the subtree from paint, hit-testing, and semantics while keeping its layout space), `clip` (B.3 — `none|bounds|rounded`, overriding the element clip flag; `bounds` squares the corners), `blend-mode` (B.3 — `normal|multiply|screen|overlay|darken|lighten`, subtree compositing layer shared with `opacity`), per-side `border-(top|right|bottom|left)` (B.3 — `<w> <color>` strips on top of the fill; border-radius ignored for per-side strokes), `backdrop-filter` (blur/saturate + beyond-spec `refraction`/`specular`), `color` (text); **layout (A.2, 2026-07-09):** `display`, `flex-direction`, `width`, `height`, `gap` (both axes), `padding`/`margin` (whole-side + per-side longhands `padding-top` … `margin-left`, component-wise override) — note text-bearing nodes still derive `height` from their glyphs (the text-height rule), and state-part layout rules (`:hovered { width: … }`) relayout via the normal rebuild path |
 | **applied, no effect** | *(empty since B.4a)* — `font-size`, `font-weight` (synthesized bold on the single face), and `line-height` reach the text stack (measure **and** paint); `opacity` renders since B.3a (subtree compositing layer) |
-| **parse-only** | `grid-*` (track lists unparsed), `overflow`, `filter`, `transform(-origin)`, `z-index`, `cursor`, `font-style/features/variation`, `text-align/overflow/wrap/decoration`, `selection-color` |
+| **parse-only** | `overflow`, `filter`, `transform(-origin)`, `z-index`, `cursor`, `font-style/features/variation`, `text-align/overflow/wrap/decoration`, `selection-color` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 + `!important` **work**; nested `&` rules **applied** (B.1 ✅ — flattened at

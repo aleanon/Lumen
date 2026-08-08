@@ -331,6 +331,8 @@ impl LayoutStyle {
             },
             ..Default::default()
         };
+        // Track lists are CONTAINER properties: only meaningful on the grid
+        // itself, so they stay gated on this node being a grid.
         if self.display == Display::Grid {
             s.grid_template_columns = self
                 .grid_template_columns
@@ -339,15 +341,21 @@ impl LayoutStyle {
                 .map(track)
                 .collect();
             s.grid_template_rows = self.grid_template_rows.iter().copied().map(track).collect();
-            s.grid_column = taffy::geometry::Line {
-                start: placement(self.grid_column.0),
-                end: placement(self.grid_column.1),
-            };
-            s.grid_row = taffy::geometry::Line {
-                start: placement(self.grid_row.0),
-                end: placement(self.grid_row.1),
-            };
         }
+        // `grid-column`/`grid-row` are ITEM properties — they are set on a
+        // CHILD of a grid, whose own display is whatever it likes (usually the
+        // default). Gating these on `self.display == Grid` meant a placement
+        // was only honoured on a node that was itself a grid, i.e. essentially
+        // never, and the property looked implemented while doing nothing.
+        // Found by an effect-asserting test (PROP1), not by inspection.
+        s.grid_column = taffy::geometry::Line {
+            start: placement(self.grid_column.0),
+            end: placement(self.grid_column.1),
+        };
+        s.grid_row = taffy::geometry::Line {
+            start: placement(self.grid_row.0),
+            end: placement(self.grid_row.1),
+        };
         s
     }
 }

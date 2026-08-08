@@ -266,3 +266,80 @@ fn an_unknown_font_family_falls_back_to_the_bundled_face() {
         named.width()
     );
 }
+
+// --- PROP1, grid batch -------------------------------------------------------
+
+/// `display: grid` + `grid-template-columns` must actually place children into
+/// tracks. `GridTrack`/`GridLine` and the taffy conversion already existed;
+/// only `.lss` parsing was missing, so the declaration was inert.
+#[test]
+fn grid_template_columns_sizes_tracks() {
+    // Two columns, 1fr and 3fr, in a 400px container: 100px and 300px.
+    let a = box_bounds(
+        "#root { display: grid; width: 400px; grid-template-columns: 1fr 3fr; }",
+        "boxa",
+    );
+    let b = box_bounds(
+        "#root { display: grid; width: 400px; grid-template-columns: 1fr 3fr; }",
+        "boxb",
+    );
+    assert!(
+        (a.width() - 100.0).abs() < 1.0,
+        "first track should be 1fr of 400 = 100, got {}",
+        a.width()
+    );
+    assert!(
+        (b.width() - 300.0).abs() < 1.0,
+        "second track should be 3fr of 400 = 300, got {}",
+        b.width()
+    );
+    assert!(b.x0 > a.x0, "children must be placed in separate columns");
+}
+
+#[test]
+fn fixed_and_auto_tracks_parse_alongside_fr() {
+    let a = box_bounds(
+        "#root { display: grid; width: 400px; grid-template-columns: 120px 1fr; }",
+        "boxa",
+    );
+    assert!(
+        (a.width() - 120.0).abs() < 1.0,
+        "a px track should be exactly that wide, got {}",
+        a.width()
+    );
+}
+
+/// A single unparseable track rejects the WHOLE declaration rather than
+/// silently dropping that track — a grid missing one column lays out plausibly
+/// but wrongly, which is much harder to notice than the property not applying.
+#[test]
+fn one_bad_track_rejects_the_whole_track_list() {
+    let good = box_bounds(
+        "#root { display: grid; width: 400px; grid-template-columns: 1fr 3fr; }",
+        "boxa",
+    );
+    let bad = box_bounds(
+        "#root { display: grid; width: 400px; grid-template-columns: 1fr bogus; }",
+        "boxa",
+    );
+    assert_ne!(
+        (bad.width() * 10.0) as i64,
+        (good.width() * 10.0) as i64,
+        "a bogus track must not leave a partially-applied grid"
+    );
+}
+
+#[test]
+fn grid_column_places_a_child_in_a_named_track() {
+    // Put `boxa` in column 2 of a 2-track grid: it should start halfway across.
+    let placed = box_bounds(
+        "#root { display: grid; width: 400px; grid-template-columns: 1fr 1fr; } \
+         #boxa { grid-column: 2; }",
+        "boxa",
+    );
+    assert!(
+        (placed.x0 - 200.0).abs() < 1.0,
+        "grid-column: 2 should start the child at 200, got {}",
+        placed.x0
+    );
+}
