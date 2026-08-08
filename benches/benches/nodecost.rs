@@ -444,6 +444,73 @@ fn restyle_hover_frame(c: &mut Criterion) {
     });
 }
 
+// --- CP2.3: what does minting taffy nodes actually cost? --------------------
+
+/// The measurement CP5's gate is supposed to decide on.
+///
+/// `rebuild_inner` calls `LayoutTree::new()` every rebuild (`app.rs`), so every
+/// node's taffy node is re-created from scratch and taffy's per-node layout
+/// cache is discarded wholesale. The retained-arena work (CP6) exists to stop
+/// that — but `docs/plan-incremental-path.md` (CP2.3) is explicit that the cost
+/// must be measured FIRST: *"if it is <5% it is not worth the retention
+/// machinery."* Nobody had measured it. This bench is that number.
+///
+/// It isolates the two halves:
+///   * `mint` — build a 500-node taffy tree from scratch (what happens today).
+///   * `restyle` — keep the tree and push new styles through `set_style`
+///     (what a retained arena would do instead).
+///
+/// Both then compute layout, since that cost is paid either way and excluding
+/// it would flatter the retained path.
+fn taffy_node_cost(c: &mut Criterion) {
+    use lumen_layout::{LayoutStyle, LayoutTree};
+    const N: usize = 500;
+    let mut g = c.benchmark_group("taffy_500_nodes");
+
+    let style = || LayoutStyle {
+        width: Dim::px(100.0),
+        height: Dim::px(20.0),
+        ..LayoutStyle::default()
+    };
+
+    g.bench_function("mint", |b| {
+        b.iter(|| {
+            let mut lt = LayoutTree::new();
+            let kids: Vec<_> = (0..N).map(|_| lt.leaf(style())).collect();
+            let root = lt.container(LayoutStyle::default(), &kids);
+            lt.compute(root, Size::new(400.0, 800.0));
+            std::hint::black_box(lt.bounds(root));
+        });
+    });
+
+    // Retained: build once, then only push styles and recompute.
+    let mut lt = LayoutTree::new();
+    let kids: Vec<_> = (0..N).map(|_| lt.leaf(style())).collect();
+    let root = lt.container(LayoutStyle::default(), &kids);
+    lt.compute(root, Size::new(400.0, 800.0));
+    let mut h = 0.0f32;
+    g.bench_function("restyle", |b| {
+        b.iter(|| {
+            // Vary one dimension so the work is real and the cache is dirtied
+            // the way a rebuild would dirty it.
+            h = if h == 20.0 { 21.0 } else { 20.0 };
+            for k in &kids {
+                lt.set_style(
+                    *k,
+                    LayoutStyle {
+                        width: Dim::px(100.0),
+                        height: Dim::px(h),
+                        ..LayoutStyle::default()
+                    },
+                );
+            }
+            lt.compute(root, Size::new(400.0, 800.0));
+            std::hint::black_box(lt.bounds(root));
+        });
+    });
+    g.finish();
+}
+
 criterion_group!(
     nodecost,
     allocs_per_frame,
@@ -451,6 +518,7 @@ criterion_group!(
     text_list_scoped_changed_frame,
     scope_scaling,
     semantics_share,
-    restyle_hover_frame
+    restyle_hover_frame,
+    taffy_node_cost
 );
 criterion_main!(nodecost);
