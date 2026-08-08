@@ -141,6 +141,7 @@ pub fn run(app: App, size: Size) {
         force_present: false,
         #[cfg(feature = "desktop-integration")]
         tray: None,
+        cursor_shape: None,
         secondary: std::collections::HashMap::new(),
         os_clipboard: arboard::Clipboard::new().ok(),
         os_clip_last: String::new(),
@@ -327,6 +328,10 @@ struct Shell {
     /// this channel; elsewhere the TrayIcon is held directly.
     #[cfg(feature = "desktop-integration")]
     tray: Option<TrayState>,
+    /// PROP1: the cursor SHAPE currently applied (distinct from `cursor`, which
+    /// is the pointer position), so a frame only calls the platform when the
+    /// shape actually changes.
+    cursor_shape: Option<lumen_core::CursorShape>,
     /// Whether an IME composition context is active (then text arrives via
     /// `Ime::Commit`, not `KeyEvent::text`).
     ime_active: bool,
@@ -739,6 +744,27 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     // Present only when the frame actually changed (R2): an idle
                     // tick repaints nothing, so the surface keeps its last frame.
                     let stats = h.pump();
+                    // PROP1: apply the `.lss` `cursor` for whatever the pointer
+                    // is over. Only on CHANGE — `set_cursor` is a platform call
+                    // per invocation, and a frame does not need to re-assert a
+                    // shape that is already showing.
+                    let want = h.cursor_shape();
+                    if want != self.cursor_shape {
+                        self.cursor_shape = want;
+                        if let Some(w) = &self.window {
+                            match want {
+                                // No rule applies: leave whatever is showing.
+                                // Forcing an arrow here would stomp a cursor set
+                                // by a drag or an IME.
+                                None => {}
+                                Some(lumen_core::CursorShape::None) => w.set_cursor_visible(false),
+                                Some(shape) => {
+                                    w.set_cursor_visible(true);
+                                    w.set_cursor(winit_cursor(shape));
+                                }
+                            }
+                        }
+                    }
                     // P.3b: fulfil recorded system requests natively (file
                     // dialogs are modal; the loop resumes after the pick).
                     let mut reqs = h.take_system_requests();
@@ -1216,6 +1242,23 @@ impl Shell {
 }
 
 // --- P.4: assistive-technology action routing --------------------------------
+
+/// PROP1: map the first-party [`CursorShape`](lumen_core::CursorShape) onto
+/// winit's icon set. The enum is first-party so the style engine and runtime
+/// never name winit; this is the single place the two vocabularies meet.
+fn winit_cursor(shape: lumen_core::CursorShape) -> winit::window::CursorIcon {
+    use lumen_core::CursorShape as C;
+    use winit::window::CursorIcon as W;
+    match shape {
+        C::Default | C::None => W::Default,
+        C::Pointer => W::Pointer,
+        C::Text => W::Text,
+        C::Wait => W::Wait,
+        C::Crosshair => W::Crosshair,
+        C::Move => W::Move,
+        C::NotAllowed => W::NotAllowed,
+    }
+}
 
 /// Whether to construct the AccessKit adapter for a newly created window.
 ///

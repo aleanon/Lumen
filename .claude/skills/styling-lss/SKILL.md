@@ -30,7 +30,11 @@ relayouts through the normal rebuild path on pointer motion.
 `justify` is rejected — no justification pass), and
 `font-style: italic` renders as SYNTHETIC oblique (the
 bundled face ships one upright style, ADR-005) — the same
-route faux-bold already took for `font-weight`. Every layout
+route faux-bold already took for `font-weight`. `cursor` works
+on desktop (`default/auto`, `pointer`, `text`, `wait/progress`,
+`crosshair`, `move/grab/grabbing`, `not-allowed`, `none`); it
+INHERITS, so set it on the container. Unlisted CSS cursor names
+report W0109 rather than silently doing nothing. Every layout
 property now works in `.lss`. `overflow: hidden`
 (or `clip`) clips to the border-radius, `visible` disables it;
 `scroll`/`auto` are REJECTED — scrolling is the `Scrollable`

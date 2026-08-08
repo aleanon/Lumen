@@ -516,3 +516,59 @@ fn a_bogus_font_style_is_reported() {
         "unsupported font-style must warn, got {ds:?}"
     );
 }
+
+// --- PROP1, cursor -----------------------------------------------------------
+
+/// `cursor` must resolve from the HOVERED node, and inherit: a button's label
+/// should not punch a hole in the button's own pointer shape.
+#[test]
+fn cursor_resolves_from_the_hovered_node_and_inherits() {
+    use lumen_core::CursorShape;
+    let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+        widgets::column(vec![
+            widgets::button("go", |_rt| {}).id("btn"),
+            widgets::text("plain").id("plain"),
+        ])
+        .id("root")
+    })
+    .run_headless(Size::new(200.0, 120.0));
+    h.set_stylesheet("#btn { cursor: pointer; }");
+    h.pump();
+
+    // Nothing hovered yet.
+    assert_eq!(h.cursor_shape(), None);
+
+    // Hovering the button's LABEL (a child) must still report the button's
+    // shape — that is the inheritance walk.
+    let b = h.node_bounds_by_id("btn").expect("button");
+    h.inject(lumen_core::events::Event::PointerMove(
+        lumen_core::events::PointerEvent::at(kurbo::Point::new(
+            b.x0 + b.width() / 2.0,
+            b.y0 + b.height() / 2.0,
+        )),
+    ));
+    h.pump();
+    assert_eq!(h.cursor_shape(), Some(CursorShape::Pointer));
+
+    // A node with no rule anywhere up its chain reports None, so the shell
+    // leaves the platform default alone rather than forcing an arrow.
+    let p = h.node_bounds_by_id("plain").expect("plain");
+    h.inject(lumen_core::events::Event::PointerMove(
+        lumen_core::events::PointerEvent::at(kurbo::Point::new(
+            p.x0 + p.width() / 2.0,
+            p.y0 + p.height() / 2.0,
+        )),
+    ));
+    h.pump();
+    assert_eq!(h.cursor_shape(), None);
+}
+
+/// An unsupported cursor name reports W0109 rather than silently doing nothing.
+#[test]
+fn an_unknown_cursor_is_reported() {
+    let (_, ds) = lumen_style::parse("t.lss", "x { cursor: zoom-in; }");
+    assert!(
+        ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+        "unsupported cursor must warn, got {ds:?}"
+    );
+}

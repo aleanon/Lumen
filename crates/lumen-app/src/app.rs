@@ -1533,6 +1533,41 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         &self.rt
     }
 
+    /// PROP1: the pointer shape for whatever the pointer is currently over.
+    ///
+    /// Resolved from the hovered node's `.lss` `cursor`, walking ancestors —
+    /// CSS `cursor` inherits, and a button's label should not punch a hole in
+    /// the button's own pointer. `None` means "no rule applies"; the shell then
+    /// leaves the platform default alone rather than forcing an arrow, so a
+    /// cursor set by something else (a drag, an IME) is not stomped.
+    ///
+    /// Lives here rather than in the shell because hit-testing and the resolved
+    /// style are both runtime state; the shell only maps the shape to its
+    /// platform's name.
+    pub fn cursor_shape(&self) -> Option<lumen_core::CursorShape> {
+        let mut node = self.hovered_node()?;
+        loop {
+            if let Some(c) = self.node_style.get(&node).and_then(|s| s.cursor) {
+                return Some(c);
+            }
+            let parent = self.tree.parent(node);
+            if parent == NodeIndex::NONE {
+                return None;
+            }
+            node = parent;
+        }
+    }
+
+    /// The node under the pointer, if any (the hit-test result behind
+    /// [`cursor_shape`](Self::cursor_shape)).
+    fn hovered_node(&self) -> Option<NodeIndex> {
+        let id = self.hovered_id.as_ref()?;
+        self.meta
+            .iter()
+            .find(|(_, m)| m.id.as_ref() == Some(id))
+            .map(|(n, _)| *n)
+    }
+
     /// Advance the virtual clock by `ms`.
     pub fn advance_clock(&mut self, ms: f64) {
         self.clock_ms += ms;

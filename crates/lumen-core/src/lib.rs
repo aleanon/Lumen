@@ -21,6 +21,31 @@ pub mod identity;
 #[cfg(feature = "snapshot")]
 pub mod registry;
 pub mod semantics;
+
+/// Pointer cursor shapes (PROP1 `cursor`). A first-party enum: the style
+/// engine and runtime must not name winit, and the shell maps this to whatever
+/// its platform calls the same shape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CursorShape {
+    /// The platform default arrow.
+    #[default]
+    Default,
+    /// A pointing hand — interactive affordance.
+    Pointer,
+    /// Text/I-beam.
+    Text,
+    /// Busy.
+    Wait,
+    /// Crosshair.
+    Crosshair,
+    /// Move/grab.
+    Move,
+    /// The action is not allowed here.
+    NotAllowed,
+    /// Explicitly hidden.
+    None,
+}
+
 pub mod state;
 pub mod tasks;
 // The SoA hot-data tree is an advanced/internal surface (02 §5): public so the
