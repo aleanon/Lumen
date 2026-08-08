@@ -363,6 +363,23 @@ pub trait TextEngineApi {
         align: TextAlign,
     ) -> &Self::Block;
 
+    /// The origin-relative glyph run for `text` (R5): the paint fast path.
+    ///
+    /// This is in the seam because the runtime's paint pass calls it — a seam
+    /// without it would cover measurement and hit-testing but not the path that
+    /// actually emits glyphs, i.e. it could not stand in for this engine. It
+    /// does mean an implementor must produce `lumen_render` glyph types, which
+    /// is the honest cost of substituting a text stack in a framework whose
+    /// renderer consumes positioned glyphs.
+    fn shaped_run(
+        &mut self,
+        text: &str,
+        base: &TextStyle,
+        max_width: Option<f32>,
+        align: TextAlign,
+        scale: f32,
+    ) -> &CachedRun;
+
     /// Lay out a block with per-range styles, bypassing the cache.
     fn layout(
         &mut self,
@@ -417,6 +434,16 @@ impl TextEngineApi for TextEngine {
         align: TextAlign,
     ) -> &TextBlock {
         TextEngine::shaped(self, text, base, max_width, align)
+    }
+    fn shaped_run(
+        &mut self,
+        text: &str,
+        base: &TextStyle,
+        max_width: Option<f32>,
+        align: TextAlign,
+        scale: f32,
+    ) -> &CachedRun {
+        TextEngine::shaped_run(self, text, base, max_width, align, scale)
     }
     fn layout(
         &mut self,

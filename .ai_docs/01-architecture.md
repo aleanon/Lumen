@@ -107,7 +107,7 @@ implementation choices into the interface.
 | renderer | `lumen_render::Renderer` | `App<R>` is generic over it (dual-mode: zero-cost by default, `Box<dyn>` opt-in) | the two shipped backends (tiny-skia, wgpu) |
 | executor | `lumen_core::tasks::Spawner` | `App<R, E>` is generic over it | `InlineSpawner` + `ThreadPoolSpawner` |
 | layout (MOD2) | `lumen_layout::LayoutEngine` | 7 methods | `lumen-layout/tests/engine_seam.rs` |
-| text (MOD3) | `lumen_text::TextEngineApi` + `TextBlockApi` | 4 + 9 methods | `lumen-text/tests/engine_seam.rs` |
+| text (MOD3) | `lumen_text::TextEngineApi` + `TextBlockApi` | 5 + 9 methods | `lumen-text/tests/engine_seam.rs` |
 | style properties (MOD4) | `lumen_style::register_property` | runtime registration | `lumen-style` registry tests |
 | platform shell (MOD5) | `lumen-shell-core` | shared `render_into` | the iOS + web shells |
 

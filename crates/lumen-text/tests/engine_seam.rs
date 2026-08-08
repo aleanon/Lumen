@@ -26,6 +26,7 @@ struct GridEngine {
     epoch: u64,
     families: Vec<String>,
     last: Option<GridBlock>,
+    last_run: Option<lumen_text::CachedRun>,
 }
 
 #[derive(Clone)]
@@ -155,6 +156,27 @@ impl TextEngineApi for GridEngine {
     ) -> &GridBlock {
         self.last = Some(GridBlock::shape(text, base, max_width));
         self.last.as_ref().unwrap()
+    }
+    fn shaped_run(
+        &mut self,
+        text: &str,
+        base: &TextStyle,
+        max_width: Option<f32>,
+        _align: TextAlign,
+        _scale: f32,
+    ) -> &lumen_text::CachedRun {
+        // A run with no glyphs: this engine has no rasterizer, which is a
+        // legitimate implementation (it measures and hit-tests). The point is
+        // that the type is CONSTRUCTIBLE from outside the crate — if it were
+        // not, the seam would be undeclarable rather than merely unimplemented.
+        let block = GridBlock::shape(text, base, max_width);
+        self.last_run = Some(lumen_text::CachedRun {
+            run: lumen_render::GlyphRun::default(),
+            images: Vec::new(),
+            ink: [0.0, 0.0, block.width(), block.height()],
+            metrics: block.metrics(),
+        });
+        self.last_run.as_ref().unwrap()
     }
     fn layout(
         &mut self,
