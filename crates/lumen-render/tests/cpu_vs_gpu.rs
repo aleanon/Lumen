@@ -20,10 +20,34 @@ use common::*;
 use lumen_render::cpu;
 use lumen_render::gpu::Wgpu;
 
+/// GX1: acquire an adapter, or decide whether absence is a skip or a failure.
+///
+/// The self-skip exists so this suite is harmless on adapter-less CI. But a
+/// test that silently passes when it did nothing is worthless as a *gate*: the
+/// GPU job's whole purpose is to prove these ran. `LUMEN_REQUIRE_GPU=1` turns
+/// the absent-adapter branch into a failure, so a GPU runner that loses its
+/// adapter reports a broken job instead of a green one.
+fn require_gpu() -> Option<Wgpu> {
+    match Wgpu::new() {
+        Some(gpu) => Some(gpu),
+        None if std::env::var_os("LUMEN_REQUIRE_GPU").is_some() => {
+            panic!(
+                "LUMEN_REQUIRE_GPU is set but no wgpu adapter was found. On CI \
+                 this means the GPU job lost its driver (check that the \
+                 lavapipe ICD is installed and VK_ICD_FILENAMES points at it); \
+                 locally, unset LUMEN_REQUIRE_GPU to allow skipping."
+            )
+        }
+        None => {
+            eprintln!("cpu_vs_gpu: no wgpu adapter; skipping (GPU-absent policy)");
+            None
+        }
+    }
+}
+
 #[test]
 fn gpu_matches_cpu_for_opaque_and_renders_the_rest() {
-    let Some(gpu) = Wgpu::new() else {
-        eprintln!("cpu_vs_gpu: no wgpu adapter; skipping (GPU-absent policy)");
+    let Some(gpu) = require_gpu() else {
         return;
     };
 
@@ -80,8 +104,7 @@ fn gpu_matches_cpu_for_opaque_and_renders_the_rest() {
 /// images are exact). Skips when no adapter.
 #[test]
 fn gpu_renders_at_2x_and_matches_cpu_for_nearest_images() {
-    let Some(gpu) = Wgpu::new() else {
-        eprintln!("gpu_matches_cpu_at_2x: no wgpu adapter; skipping");
+    let Some(gpu) = require_gpu() else {
         return;
     };
     let scale = 2.0;
