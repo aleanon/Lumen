@@ -19,6 +19,7 @@ same commit. Codes are assigned by `02-spec-core.md §9` and `04-spec-lss-stylin
 | W0104 | warning  | Rendered ink clipped by its own box (e.g. a too-small line-height cutting descenders) | 02 §9 |
 | W0105 | warning  | Interactive node laid out with zero area — clickable but invisible/unhittable | 02 §9 |
 | W0106 | warning  | Node declares a semantic `Action` it does not implement (W2) | 02 §9, 03 §1|
+| W0108 | warning  | Scroll container laying out many children directly; consider `VirtualList` (VL1) | 02 §9, 02 §10 |
 | E0201 | error    | Shader compile error                                  | 02 §9       |
 | W0301 | warning  | Missing semantics on a focusable leaf (no label/value)| 02 §9, 03 §1|
 | W0302 | warning  | Deprecated `node-<index>` agent handle accepted; use `nx-<hex>` (ID2 alias window) | 03 §1, §2 |
@@ -34,7 +35,8 @@ drifted to 9 documented rows against 16 defined consts once already, and a
 proposed `W0105` for parse-only `.lss` properties collided with the live
 zero-area-node code):
 
-- `W01xx` layout/render: next free is **W0107**
+- `W01xx` layout/render: **W0107 is reserved** for parse-only `.lss`
+  properties (SD5.2, unbuilt); next free is **W0109**
 - `W03xx` semantics: next free is **W0303**
 - `W04xx` i18n/text: next free is **W0403**
 - `E01xx` styling: next free is **E0105**

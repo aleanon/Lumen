@@ -124,6 +124,15 @@ pub mod codes {
     /// An interactive node laid out with zero area — clickable but invisible /
     /// unhittable (usually a missing size or empty content).
     pub const W0105: &str = "W0105";
+    /// A scroll container is laying out a large number of children directly
+    /// (VL1). `Scrollable` materializes every child every frame, so cost grows
+    /// with the item count rather than the viewport; `VirtualList` renders only
+    /// the visible window plus overscan and is flat in item count.
+    ///
+    /// Advisory, not an error: a long-but-bounded list is a legitimate choice.
+    /// It exists because the cheap widget is the discoverable one and the
+    /// scalable widget is the one you have to already know about.
+    pub const W0108: &str = "W0108";
     /// A node declares a semantic `Action` it does not implement (W2). The
     /// action list is the contract the agent and assistive tech read to decide
     /// what a node can do, so advertising an unimplemented one makes the

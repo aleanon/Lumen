@@ -165,7 +165,62 @@ pub fn lint(root: &SemanticsNode) -> Vec<Diagnostic> {
     out.extend(check_zero_size(root));
     out.extend(check_duplicate_ids(root));
     check_unnamed_focusable(root, &mut out);
+    check_unvirtualized_list(root, &mut out);
     out
+}
+
+/// VL1: how many direct children a scroll container may lay out before the
+/// lint suggests virtualizing.
+///
+/// Chosen well above "a menu" and well below "a data set". A settings page or a
+/// nav list has tens of rows and should never be nagged; anything laying out
+/// hundreds every frame is paying per-item cost for a viewport-sized result.
+const VIRTUALIZE_HINT_THRESHOLD: usize = 100;
+
+/// VL1: a scroll container laying out a large number of children directly.
+///
+/// `Scrollable` materializes *every* child on *every* frame — its own doc says
+/// "for very long lists, virtualize — this lays out all children" — so frame
+/// cost grows with the item count instead of the viewport. `VirtualList`
+/// renders only the visible window plus overscan and is flat in item count
+/// (measured: 1.15 ms for 1M rows).
+///
+/// Both have existed for a long time; the problem is discoverability. The
+/// cheap-looking widget is the obvious one, and the scalable one is the widget
+/// you have to already know exists. A lint is how the framework says so at the
+/// moment it matters, to an author (or an agent) who cannot see a frame budget.
+///
+/// Advisory: a long-but-bounded list is a legitimate choice, so this warns
+/// rather than errors.
+fn check_unvirtualized_list(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
+    if n.role == lumen_core::semantics::Role::ScrollArea {
+        // Count the whole subtree, not direct children: a scroll container
+        // usually wraps its items in a content node, so `children.len()` is 1
+        // no matter how many rows there are. Subtree size is also the honest
+        // measure of the cost, since everything under it is built and laid out.
+        fn subtree(n: &SemanticsNode) -> usize {
+            1 + n.children.iter().map(subtree).sum::<usize>()
+        }
+        let count = subtree(n) - 1;
+        if count > VIRTUALIZE_HINT_THRESHOLD {
+            let who =
+                n.id.as_ref()
+                    .map(|i| format!("`{}`", i.as_str()))
+                    .unwrap_or_else(|| "a scroll container".to_string());
+            out.push(Diagnostic::new(
+                codes::W0108,
+                format!(
+                    "{who} lays out {count} nodes; every one is built \
+                 and laid out on every frame. `VirtualList` materializes only \
+                 the visible window (flat in item count) — consider it past \
+                 ~{VIRTUALIZE_HINT_THRESHOLD} items."
+                ),
+            ));
+        }
+    }
+    for c in &n.children {
+        check_unvirtualized_list(c, out);
+    }
 }
 
 /// An interactive node whose tappable area is below the minimum.
