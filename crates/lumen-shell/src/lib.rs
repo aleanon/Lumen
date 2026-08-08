@@ -466,10 +466,12 @@ impl ApplicationHandler<ShellEvent> for Shell {
             // first shown — create invisible, attach, then show.
             .with_visible(false);
         let window = Arc::new(el.create_window(attrs).expect("window"));
-        self.a11y = Some(accesskit_winit::Adapter::with_event_loop_proxy(
-            &window,
-            self.proxy.clone(),
-        ));
+        if a11y_enabled() {
+            self.a11y = Some(accesskit_winit::Adapter::with_event_loop_proxy(
+                &window,
+                self.proxy.clone(),
+            ));
+        }
         window.set_visible(true);
         window.set_ime_allowed(true); // receive IME composition + commit
         let app = self.app.take().expect("app");
@@ -1192,6 +1194,46 @@ impl Shell {
 }
 
 // --- P.4: assistive-technology action routing --------------------------------
+
+/// Whether to construct the AccessKit adapter for a newly created window.
+///
+/// # Why this is a switch and not a deferral (GX4)
+///
+/// Constructing the adapter is neither free nor dormant. On Linux,
+/// `accesskit_unix::Adapter::new` calls `get_or_init_messages`, which
+/// **unconditionally spawns a thread** that opens a D-Bus session connection and
+/// runs an event loop — whether or not any assistive technology is present.
+/// Only *tree publication* waits for an AT to activate. `03-spec-semantics-agent.md`
+/// claimed the adapter itself was "dormant until an AT subscribes"; that was
+/// true of the tree, not of the thread, and the spec has been corrected.
+///
+/// It cannot be made lazy from this side: detecting that an AT has appeared
+/// requires the very D-Bus connection the adapter owns, so "create it when
+/// something asks" is circular. The honest options are on or off, which is why
+/// this is an opt-out rather than the deferral the plan originally named.
+///
+/// **Defaults to on.** Accessibility is a correctness property, not an
+/// optimization, so a constrained profile opts out explicitly rather than
+/// having to opt in. `NO_AT_BRIDGE=1` is honoured because GTK and Qt already
+/// use it, so a user who has disabled the AT bridge system-wide should not have
+/// to learn a Lumen-specific variable to be obeyed.
+fn a11y_enabled() -> bool {
+    a11y_enabled_from(
+        std::env::var("LUMEN_A11Y").ok().as_deref(),
+        std::env::var("NO_AT_BRIDGE").ok().as_deref(),
+    )
+}
+
+/// The decision in [`a11y_enabled`], as a pure function of the two variables so
+/// it can be tested without mutating process-global environment state.
+fn a11y_enabled_from(lumen_a11y: Option<&str>, no_at_bridge: Option<&str>) -> bool {
+    if let Some(v) = lumen_a11y {
+        // An explicit Lumen setting wins over the ecosystem variable, in both
+        // directions — including re-enabling under `NO_AT_BRIDGE=1`.
+        return !matches!(v.trim(), "0" | "off" | "false" | "no");
+    }
+    !matches!(no_at_bridge.map(str::trim), Some("1") | Some("true"))
+}
 
 /// Route an AT [`accesskit::ActionRequest`] into the one input queue. The
 /// target id is the runtime node index (the same ids `build_tree` publishes);
@@ -2030,5 +2072,43 @@ mod at_routing_tests {
             );
         }
         assert!(seen.len() >= 2, "expected a non-trivial tree, got {seen:?}");
+    }
+}
+
+#[cfg(test)]
+mod a11y_optout_tests {
+    use super::a11y_enabled_from;
+
+    /// GX4: the default must stay ON. Accessibility is a correctness property;
+    /// a resource win that silently drops AT support would be a regression
+    /// dressed as an optimization.
+    #[test]
+    fn defaults_to_enabled() {
+        assert!(a11y_enabled_from(None, None));
+    }
+
+    #[test]
+    fn lumen_variable_disables() {
+        for v in ["0", "off", "false", "no", " 0 "] {
+            assert!(!a11y_enabled_from(Some(v), None), "LUMEN_A11Y={v:?}");
+        }
+    }
+
+    /// GTK/Qt already define this, so a user who disabled the AT bridge
+    /// system-wide is obeyed without learning a Lumen-specific variable.
+    #[test]
+    fn no_at_bridge_disables() {
+        assert!(!a11y_enabled_from(None, Some("1")));
+        assert!(!a11y_enabled_from(None, Some("true")));
+        // Only the truthy values disable: NO_AT_BRIDGE=0 means "use the bridge".
+        assert!(a11y_enabled_from(None, Some("0")));
+    }
+
+    /// An explicit Lumen setting wins in BOTH directions, so an app that needs
+    /// AT support can re-enable it under a system-wide `NO_AT_BRIDGE=1`.
+    #[test]
+    fn explicit_lumen_setting_overrides_no_at_bridge() {
+        assert!(a11y_enabled_from(Some("1"), Some("1")));
+        assert!(!a11y_enabled_from(Some("0"), Some("0")));
     }
 }
