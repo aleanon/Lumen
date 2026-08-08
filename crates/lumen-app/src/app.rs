@@ -3691,6 +3691,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             if self.hidden_count > 0 {
                 tree.set_flags(node, NodeFlags::empty());
             }
+            // PROP1 `z-index`: applied once the cascade has resolved.
+            // Overlay roots keep OVERLAY_Z — they route to the overlay pass
+            // regardless, and a stylesheet must not be able to demote a
+            // dropdown under the page.
+            if !this_overlay {
+                if let Some(z) = css.z_index {
+                    tree.set_z(node, z.max(0) as u32);
+                }
+            }
             self.node_style.insert(node, css);
             self.node_computed.insert(node, resolved);
             // B.1: this node becomes an ancestor for its children's matching
@@ -3709,6 +3718,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
             if self.hidden_count > 0 {
                 tree.set_flags(node, NodeFlags::empty());
+            }
+            // PROP1 `z-index`: applied once the cascade has resolved.
+            // Overlay roots keep OVERLAY_Z — they route to the overlay pass
+            // regardless, and a stylesheet must not be able to demote a
+            // dropdown under the page.
+            if !this_overlay {
+                if let Some(z) = css.z_index {
+                    tree.set_z(node, z.max(0) as u32);
+                }
             }
             self.node_style.insert(node, css);
             self.node_computed.insert(node, resolved);
@@ -3889,7 +3907,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         self.node_ink.clear(); // repopulated per node as text runs are emitted
         self.node_caret.clear();
         self.node_text_metrics.clear();
-        let order = self.tree.document_order();
+        // PROP1 `z-index`: siblings paint in ascending z. Sibling-scoped, so
+        // the depth-keyed clip stack below still sees a strict preorder — a flat
+        // z sort would not (see `Tree::paint_order`).
+        let order = self.tree.paint_order();
         // Preorder depth of every node, and a partition into the main pass and the
         // overlay pass (nodes inside an `overlay` subtree). Overlays paint last so
         // they sit above the rest of the UI and escape ancestor clips (dropdown

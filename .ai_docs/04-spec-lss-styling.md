@@ -141,7 +141,7 @@ cannot drift from the code again. The three lists live in the crate —
 `KNOWN_PROPERTIES`, `APPLIED_PROPERTIES`, `PARSE_ONLY_PROPERTIES` — and
 `crates/lumen-style/tests/property_parity.rs` asserts `KNOWN == APPLIED ∪
 PARSE_ONLY`, so a property that parses without an implementation is a **build
-failure**. Current split: **78 known, 76 applied, 2 parse-only** — no layout property is parse-only, and of typography only `font-variation` remains (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
+failure**. Current split: **78 known, 77 applied, 1 parse-only** — no layout property is parse-only, and of typography only `font-variation` remains (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
 declaration now reports `W0107` at parse time instead of silently doing
 nothing.)*
 
@@ -224,9 +224,27 @@ a **provided** trait method expressed in terms of `layout`, so the MOD3 seam
 stays as narrow as it was and every implementor gets it free. A test asserts the
 semantic label is still the full string; that assertion is the property's point.
 
-**`z-index` is parse-only for a structural reason, not an oversight** (investigated 2026-08-08). `Tree::hit_test` already maximizes `(z, preorder_pos)`, so wiring `z-index` to `Tree::set_z` would take about five minutes — and would be a **trap**: it would change which node receives a click *without changing what is painted on top*. Paint order is a two-pass scheme (normal, then overlay) keyed on the `overlay` flag, not on `z`, and `emit_pass` maintains its clip stack **by depth**, popping layers as depth decreases — so it requires a strict preorder traversal. Stable-sorting the paint order by `z` therefore breaks clip nesting (layers pop and push against the wrong nodes). Honouring `z-index` visually needs **stacking contexts**: paint each context as a self-contained subtree, then order contexts by `z`. That is real work, and until it exists the property must stay inert rather than half-wired.
+**`z-index` works by sorting SIBLINGS, which is what CSS means** (2026-08-08).
+The earlier objection was correct about the flat approach: `Tree::z_order()`
+sorts the whole document order, and the paint pass tracks clip layers **by
+depth**, so a flat sort breaks clip nesting. `Tree::paint_order()` instead sorts
+each node's children during the preorder walk — parents still precede children,
+subtrees stay contiguous, and the clip stack is untouched.
 
-| **parse-only** | `z-index`, `font-variation` |
+That is also the right semantics rather than a compromise: CSS scopes `z-index`
+to a stacking context, and the parent is the context here, so a high-`z` child
+does not escape a low-`z` ancestor — which is CSS behaviour too. Equal `z` keeps
+document order, so a tree with no `z-index` produces exactly the previous list
+(asserted).
+
+**Non-negative only.** `Tree`'s `z` is a `u32` with `0` as the default, leaving
+no room below an unstyled sibling; a negative value needs that field widened,
+which touches hit-test ordering and `OVERLAY_Z`. Rejected with `W0109` rather
+than clamped, since clamping would make `z-index: -1` look like it worked.
+Overlay roots keep `OVERLAY_Z`: they route to the overlay pass regardless, and a
+stylesheet must not be able to demote a dropdown under the page.
+
+| **parse-only** | `font-variation` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 + `!important` **work**; nested `&` rules **applied** (B.1 ✅ — flattened at

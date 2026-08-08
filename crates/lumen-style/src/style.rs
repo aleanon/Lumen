@@ -193,6 +193,9 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
+    /// `z-index` (PROP1) — paint order among SIBLINGS. CSS scopes z-index to a
+    /// stacking context; the parent is the context here.
+    pub z_index: Option<i32>,
     /// `filter: blur(Npx)` (PROP1) — blurs the element's own content. Distinct
     /// from `backdrop-filter`, which blurs what is behind it.
     pub filter_blur: Option<f32>,
@@ -408,6 +411,12 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `z-index` (PROP1).
+    pub fn z_index(mut self, z: i32) -> Self {
+        self.z_index = Some(z);
         self
     }
 
@@ -689,7 +698,6 @@ impl Style {
 pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     // Layout — the field exists in LayoutStyle; apply() doesn't populate it.
     // Visual — needs render support, not just a field.
-    "z-index",
     // Typography — needs text-stack plumbing.
     "font-variation",
 ];
@@ -763,6 +771,7 @@ pub fn value_applies(property: &str, value: &Value) -> bool {
 /// today. `aspect-ratio` is the one that currently does, rejecting zero and
 /// negatives that would collapse the node in taffy.
 const SCALAR_PROPERTIES: &[&str] = &[
+    "z-index",
     "aspect-ratio",
     "opacity",
     "flex-grow",
@@ -836,6 +845,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "text-wrap",
     "text-overflow",
     "font-features",
+    "z-index",
     "filter",
     "transform",
     "transform-origin",
@@ -925,6 +935,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "text-wrap" => style.text_wrap = as_text_wrap(&v),
         "text-overflow" => style.text_ellipsis = as_text_overflow(&v),
         "font-features" => style.font_features = as_feature_settings(&v),
+        "z-index" => style.z_index = as_z_index(&v),
         "filter" => style.filter_blur = as_filter_blur(&v),
         "transform" => style.transform = as_transform(&v),
         "transform-origin" => style.transform_origin = as_transform_origin(&v),
@@ -1471,6 +1482,22 @@ fn as_align(v: &Value) -> Option<Align> {
             "space-around" => Some(Align::SpaceAround),
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// `z-index` (PROP1). An integer, or `auto` (which is 0 — the default layer).
+///
+/// **Non-negative only.** `Tree`'s per-node `z` is a `u32` with `0` as the
+/// default, so there is no room below an unstyled sibling: a negative value
+/// cannot be represented without widening that field, which would touch the
+/// hit-test ordering and the overlay constant too. Rejected (`W0109`) rather
+/// than silently clamped to 0, since clamping would make `z-index: -1` look
+/// like it worked.
+fn as_z_index(v: &Value) -> Option<i32> {
+    match v {
+        Value::Keyword(k) if k == "auto" => Some(0),
+        Value::Number(n, Unit::None) if *n >= 0.0 => Some(*n as i32),
         _ => None,
     }
 }

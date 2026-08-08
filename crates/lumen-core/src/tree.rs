@@ -236,6 +236,43 @@ impl Tree {
         out
     }
 
+    /// Live nodes in paint order: preorder, with **siblings** stably sorted by
+    /// ascending `z` (PROP1 `z-index`).
+    ///
+    /// Sorting siblings rather than the flat list is what makes this safe. The
+    /// paint pass tracks clip layers **by depth** and so requires a strict
+    /// preorder — a parent must precede its children and a subtree must stay
+    /// contiguous. [`z_order`](Self::z_order) sorts the flat document order and
+    /// breaks both; reordering within a parent breaks neither.
+    ///
+    /// It is also the right semantics rather than a compromise: CSS scopes
+    /// `z-index` to a stacking context, and the parent is the context here. A
+    /// high-`z` child does not escape a low-`z` ancestor, which is what CSS does
+    /// too. Equal `z` keeps document order, so a tree with no `z-index` produces
+    /// exactly the previous list.
+    pub fn paint_order(&self) -> Vec<NodeIndex> {
+        let mut out = Vec::with_capacity(self.live_count);
+        if self.root.is_some() {
+            self.visit_paint_order(self.root, &mut out);
+        }
+        out
+    }
+
+    fn visit_paint_order(&self, node: NodeIndex, out: &mut Vec<NodeIndex>) {
+        out.push(node);
+        let mut kids: Vec<NodeIndex> = Vec::new();
+        let mut c = self.first_child[node.index() as usize];
+        while c.is_some() {
+            kids.push(c);
+            c = self.next_sibling[c.index() as usize];
+        }
+        // Stable: equal `z` keeps document order.
+        kids.sort_by_key(|&k| self.z[k.index() as usize]);
+        for k in kids {
+            self.visit_paint_order(k, out);
+        }
+    }
+
     /// Live nodes in paint (z) order: document order stably sorted by ascending
     /// `z`. Lower `z` paints first; equal `z` keeps document order.
     pub fn z_order(&self) -> Vec<NodeIndex> {

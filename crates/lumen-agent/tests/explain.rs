@@ -93,17 +93,27 @@ fn explains_that_a_property_parses_but_is_never_applied() {
         widgets::column(vec![widgets::text("x").id("lbl")]).id("root")
     })
     .run_headless(Size::new(200.0, 120.0));
-    app.set_stylesheet("#lbl { z-index: 3; }");
+    // PROP1 kept implementing whatever property this test named — four times.
+    // Assert the example is still parse-only, so a future implementation fails
+    // here with an instruction rather than a confusing mismatch.
+    const EXAMPLE: &str = "font-variation";
+    assert!(
+        lumen_style::PARSE_ONLY_PROPERTIES.contains(&EXAMPLE),
+        "`{EXAMPLE}` is no longer parse-only — pick another from \
+         PARSE_ONLY_PROPERTIES: {:?}",
+        lumen_style::PARSE_ONLY_PROPERTIES
+    );
+    app.set_stylesheet("#lbl { font-variation: \"wght\" 700; }");
     app.pump();
 
     let out = call(
         &mut app,
         "ui.explain",
-        json!({ "selector": "#lbl", "kind": "style", "property": "z-index" }),
+        json!({ "selector": "#lbl", "kind": "style", "property": EXAMPLE }),
     );
     assert!(
         codes(&out).contains(&"parse_only".to_string()),
-        "`z-index` is parse-only and must be reported as such, got {out}"
+        "`{EXAMPLE}` is parse-only and must be reported as such, got {out}"
     );
 }
 

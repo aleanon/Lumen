@@ -52,7 +52,9 @@ percentages need the node's box and are rejected) and
 `transform-origin` takes keywords or `%`, defaulting to the
 centre. It is paint-time: the layout box does not move. `filter: blur(Npx)`
 blurs the element's OWN content (unlike `backdrop-filter`);
-only `blur()` and `none` are accepted so far. Every layout
+only `blur()` and `none` are accepted so far. `z-index`
+orders SIBLINGS (CSS scopes it to a stacking context; the
+parent is the context) — non-negative only. Every layout
 property now works in `.lss`. `overflow: hidden`
 (or `clip`) clips to the border-radius, `visible` disables it;
 `scroll`/`auto` are REJECTED — scrolling is the `Scrollable`

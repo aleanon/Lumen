@@ -928,3 +928,76 @@ fn unimplemented_filter_functions_are_reported() {
         );
     }
 }
+
+// --- PROP1, z-index ----------------------------------------------------------
+
+/// `z-index` reorders SIBLINGS. Two overlapping absolutely-positioned boxes:
+/// whichever has the higher z paints last, so its colour survives at the
+/// overlap. Asserted on the pixel at the overlap, which is the only witness.
+#[test]
+fn z_index_reorders_overlapping_siblings() {
+    fn overlap_pixel(lss: &str) -> [u8; 3] {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![
+                widgets::column(vec![]).id("red"),
+                widgets::column(vec![]).id("blue"),
+            ])
+            .id("root")
+        })
+        .run_headless(Size::new(120.0, 120.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        let img = h.screenshot();
+        let w = img.width() as usize;
+        let px = img.pixels();
+        // (50, 50) is inside both boxes.
+        let i = (50 * w + 50) * 4;
+        [px[i], px[i + 1], px[i + 2]]
+    }
+    const BASE: &str = "#root { width: 120px; height: 120px; } \
+        #red, #blue { position: absolute; width: 60px; height: 60px; } \
+        #red { background: #ff0000ff; inset-left: 10px; inset-top: 10px; } \
+        #blue { background: #0000ffff; inset-left: 30px; inset-top: 30px; }";
+
+    // Document order: blue is later, so it wins by default.
+    let d = overlap_pixel(BASE);
+    assert!(d[2] > d[0], "by default the later sibling wins, got {d:?}");
+
+    // Raising red above it must flip that.
+    let r = overlap_pixel(&format!("{BASE} #red {{ z-index: 5; }}"));
+    assert!(
+        r[0] > r[2],
+        "z-index: 5 must lift red above blue, got {r:?}"
+    );
+}
+
+/// A tree with no `z-index` must paint exactly as before — the sort is stable,
+/// so equal z keeps document order.
+#[test]
+fn z_index_absent_leaves_paint_order_untouched() {
+    fn frame() -> Vec<u8> {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![
+                widgets::text("abc").id("a"),
+                widgets::text("def").id("b"),
+            ])
+            .id("root")
+        })
+        .run_headless(Size::new(160.0, 90.0));
+        h.pump();
+        h.screenshot().pixels().to_vec()
+    }
+    assert_eq!(frame(), frame());
+}
+
+/// Negative z-index is rejected, not clamped: `Tree`'s z is unsigned with 0 as
+/// the default, so there is no room below an unstyled sibling. Clamping would
+/// make `z-index: -1` look like it worked.
+#[test]
+fn negative_z_index_is_reported() {
+    let (_, ds) = lumen_style::parse("t.lss", "x { z-index: -1; }");
+    assert!(
+        ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+        "negative z-index must warn, got {ds:?}"
+    );
+}
