@@ -26,10 +26,12 @@ B.3). `.lss` wins over the element's
 text in a child), and a state-part layout rule (`#x:hovered { width: … }`)
 relayouts through the normal rebuild path on pointer motion.
 
-Still Rust-only (parse-only in `.lss` until Phase B):
-`flex-grow/shrink/basis/wrap`, `justify-*`/
-`align-*`, `min/max-*`, `aspect-ratio`, `grid-*` tracks,
-`Position::Absolute` + `inset`, `overflow`.
+Still Rust-only (parse-only in `.lss`): `grid-*` track lists
+and `overflow`. Everything else in the flex/box family now
+works in `.lss` — `flex-grow/shrink/basis/wrap`,
+`justify-content`, `align-items/self/content`, `min/max-*`,
+`aspect-ratio`, `position: absolute` + `inset` (+ per-side
+longhands). PROP1, 2026-08-08.
 
 ## What works in `.lss` today
 

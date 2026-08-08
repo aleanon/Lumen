@@ -105,3 +105,131 @@ fn per_axis_gap_overrides_the_shorthand() {
         only.x0
     );
 }
+
+// --- PROP1, second batch -----------------------------------------------------
+//
+// Nine more properties whose `LayoutStyle` fields already existed. Same
+// discipline as above: assert the laid-out BOUNDS, because a test that checked
+// only the parsed field would pass with the bridge to `LayoutStyle` missing —
+// which is exactly the defect being fixed.
+
+#[test]
+fn position_absolute_with_inset_takes_a_node_out_of_flow() {
+    // In flow, `b` follows `a` horizontally.
+    let flow = bounds_of("#root { width: 400px; }", "b");
+    // Out of flow and pinned 50px from the container's left/top edges.
+    let pinned = bounds_of(
+        "#root { width: 400px; height: 200px; } \
+         #b { position: absolute; inset-left: 50px; inset-top: 30px; }",
+        "b",
+    );
+    assert_ne!(
+        pinned.x0, flow.x0,
+        "position: absolute must not leave the node in flow"
+    );
+    assert!(
+        (pinned.x0 - 50.0).abs() < 1.0,
+        "inset-left should pin x0 to 50, got {}",
+        pinned.x0
+    );
+    assert!(
+        (pinned.y0 - 30.0).abs() < 1.0,
+        "inset-top should pin y0 to 30, got {}",
+        pinned.y0
+    );
+}
+
+#[test]
+fn inset_shorthand_pins_all_four_sides() {
+    let r = bounds_of(
+        "#root { width: 400px; height: 200px; } #b { position: absolute; inset: 20px; }",
+        "b",
+    );
+    assert!(
+        (r.x0 - 20.0).abs() < 1.0 && (r.y0 - 20.0).abs() < 1.0,
+        "inset: 20px should pin the top-left corner to (20, 20), got ({}, {})",
+        r.x0,
+        r.y0
+    );
+}
+
+/// `aspect-ratio` is tested on an empty BOX, not on the text nodes the other
+/// cases use: the runtime writes a measured height onto a text leaf's
+/// `LayoutStyle`, and an explicit height beats the ratio. That is correct
+/// behaviour, but it makes a text node useless as a subject here.
+fn box_bounds(lss: &str, id: &str) -> kurbo::Rect {
+    let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+        widgets::row(vec![
+            widgets::column(vec![]).id("boxa"),
+            widgets::column(vec![]).id("boxb"),
+        ])
+        .id("root")
+    })
+    .run_headless(Size::new(400.0, 200.0));
+    h.set_stylesheet(lss);
+    h.pump();
+    h.node_bounds_by_id(id)
+        .unwrap_or_else(|| panic!("`{id}` should be laid out"))
+}
+
+#[test]
+fn aspect_ratio_derives_height_from_width() {
+    let square = box_bounds("#boxa { width: 80px; aspect-ratio: 1; }", "boxa");
+    assert!(
+        (square.height() - 80.0).abs() < 1.0,
+        "aspect-ratio: 1 at width 80 should give height 80, got {}",
+        square.height()
+    );
+    let wide = box_bounds("#boxa { width: 80px; aspect-ratio: 2; }", "boxa");
+    assert!(
+        (wide.height() - 40.0).abs() < 1.0,
+        "aspect-ratio: 2 at width 80 should give height 40, got {}",
+        wide.height()
+    );
+}
+
+/// A zero or negative ratio would collapse the node in taffy, so `as_aspect_ratio`
+/// rejects it and the property stays unset — the element keeps its natural size
+/// rather than vanishing.
+#[test]
+fn a_nonsense_aspect_ratio_is_rejected_rather_than_collapsing_the_node() {
+    let natural = box_bounds("#boxa { width: 80px; height: 25px; }", "boxa");
+    let zero = box_bounds(
+        "#boxa { width: 80px; height: 25px; aspect-ratio: 0; }",
+        "boxa",
+    );
+    assert!(
+        zero.height() > 0.0,
+        "aspect-ratio: 0 must not collapse the node"
+    );
+    assert!((zero.height() - natural.height()).abs() < 1.0);
+}
+
+#[test]
+fn flex_basis_sets_the_main_axis_base_size() {
+    let base = bounds_of("#root { width: 400px; } #a { flex-basis: 120px; }", "a");
+    assert!(
+        (base.width() - 120.0).abs() < 1.0,
+        "flex-basis: 120px should size `a` to 120 wide, got {}",
+        base.width()
+    );
+}
+
+#[test]
+fn align_content_moves_wrapped_lines_along_the_cross_axis() {
+    // Two lines: each child is forced wider than half the container.
+    let sheet = |ac: &str| {
+        format!(
+            "#root {{ width: 200px; height: 300px; flex-wrap: wrap; align-content: {ac}; }} \
+             #a, #b {{ width: 150px; height: 40px; }}"
+        )
+    };
+    let start = bounds_of(&sheet("start"), "b");
+    let end = bounds_of(&sheet("end"), "b");
+    assert!(
+        end.y0 > start.y0,
+        "align-content: end must push wrapped lines down (start y0={}, end y0={})",
+        start.y0,
+        end.y0
+    );
+}

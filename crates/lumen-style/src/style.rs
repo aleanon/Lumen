@@ -9,7 +9,7 @@ use crate::ast::{Unit, Value};
 #[cfg(feature = "snapshot")]
 use crate::Origin;
 use lumen_core::Color;
-use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, FlexWrap};
+use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, FlexWrap, Position};
 #[cfg(feature = "snapshot")]
 use serde_json::{json, Value as Json};
 use std::collections::HashMap;
@@ -176,6 +176,19 @@ pub struct Style {
     pub padding_sides: [Option<f32>; 4],
     /// Per-side `margin-(top|right|bottom|left)` — as `padding_sides`.
     pub margin_sides: [Option<f32>; 4],
+    /// `flex-basis` (PROP1).
+    pub flex_basis: Option<Dim>,
+    /// `align-content` (PROP1).
+    pub align_content: Option<Align>,
+    /// `aspect-ratio` (PROP1). Accepts a bare number or `w / h`.
+    pub aspect_ratio: Option<f32>,
+    /// `position` (PROP1).
+    pub position: Option<Position>,
+    /// `inset` shorthand (PROP1).
+    pub inset: Option<Edges>,
+    /// `inset-top/right/bottom/left` longhands (PROP1), in that order. Applied
+    /// after the shorthand so per-side values win, matching `padding`/`margin`.
+    pub inset_sides: [Option<f32>; 4],
     /// `background` color.
     pub background: Option<Color>,
     /// `background: linear-gradient(…)|radial-gradient(…)` (B.3).
@@ -322,6 +335,37 @@ impl Style {
     /// `flex-wrap`.
     pub fn flex_wrap(mut self, w: FlexWrap) -> Self {
         self.flex_wrap = Some(w);
+        self
+    }
+
+    /// `flex-basis` (PROP1).
+    pub fn flex_basis(mut self, d: Dim) -> Self {
+        self.flex_basis = Some(d);
+        self
+    }
+
+    /// `align-content` (PROP1).
+    pub fn align_content(mut self, a: Align) -> Self {
+        self.align_content = Some(a);
+        self
+    }
+
+    /// `aspect-ratio` (PROP1) as width ÷ height.
+    pub fn aspect_ratio(mut self, ratio: f32) -> Self {
+        self.aspect_ratio = Some(ratio);
+        self
+    }
+
+    /// `position` (PROP1). `Absolute` takes the node out of flow; place it
+    /// with [`inset`](Self::inset).
+    pub fn position(mut self, p: Position) -> Self {
+        self.position = Some(p);
+        self
+    }
+
+    /// `inset` (PROP1) — the offsets an `Absolute` node is placed by.
+    pub fn inset(mut self, e: Edges) -> Self {
+        self.inset = Some(e);
         self
     }
 
@@ -498,19 +542,10 @@ impl Style {
 /// parsed value into the existing field.
 pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     // Layout — the field exists in LayoutStyle; apply() doesn't populate it.
-    "flex-basis",
-    "align-content",
     "grid-template-columns",
     "grid-template-rows",
     "grid-column",
     "grid-row",
-    "aspect-ratio",
-    "position",
-    "inset",
-    "inset-top",
-    "inset-right",
-    "inset-bottom",
-    "inset-left",
     "overflow",
     // Visual — needs render support, not just a field.
     "filter",
@@ -564,6 +599,15 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "margin-right",
     "margin-bottom",
     "margin-left",
+    "flex-basis",
+    "align-content",
+    "aspect-ratio",
+    "position",
+    "inset",
+    "inset-top",
+    "inset-right",
+    "inset-bottom",
+    "inset-left",
     "background",
     "color",
     "border-radius",
@@ -622,6 +666,18 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "margin-right" => style.margin_sides[1] = as_px(&v),
         "margin-bottom" => style.margin_sides[2] = as_px(&v),
         "margin-left" => style.margin_sides[3] = as_px(&v),
+        // PROP1: layout properties whose `LayoutStyle` fields already existed —
+        // taffy has implemented them all along; `apply` had simply never
+        // learned to read them, so they parsed and were silently discarded.
+        "flex-basis" => style.flex_basis = as_dim(&v),
+        "align-content" => style.align_content = as_align(&v),
+        "aspect-ratio" => style.aspect_ratio = as_aspect_ratio(&v),
+        "position" => style.position = as_position(&v),
+        "inset" => style.inset = as_dim(&v).map(Edges::all),
+        "inset-top" => style.inset_sides[0] = as_px(&v),
+        "inset-right" => style.inset_sides[1] = as_px(&v),
+        "inset-bottom" => style.inset_sides[2] = as_px(&v),
+        "inset-left" => style.inset_sides[3] = as_px(&v),
         "background" => match &v {
             Value::Function(name, args)
                 if name == "linear-gradient" || name == "radial-gradient" =>
@@ -1154,6 +1210,33 @@ fn as_align(v: &Value) -> Option<Align> {
         },
         _ => None,
     }
+}
+
+/// `position: relative | absolute` (PROP1).
+fn as_position(v: &Value) -> Option<Position> {
+    match v {
+        Value::Keyword(s) => match s.as_str() {
+            "relative" => Some(Position::Relative),
+            "absolute" => Some(Position::Absolute),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `aspect-ratio` (PROP1) as a bare number: width ÷ height, so `2` is twice as
+/// wide as tall.
+///
+/// CSS's `16 / 9` form is **not** accepted: the lexer only treats `/` as the
+/// start of a comment, so supporting it needs lexer work rather than a parse
+/// helper. `aspect-ratio: 1.778` is the spelling that works today.
+///
+/// Zero, negative and non-finite values are rejected rather than passed to
+/// taffy, where they collapse the node — a stylesheet typo should surface as an
+/// unset property (and a `W0107` diagnostic), not a vanished element.
+fn as_aspect_ratio(v: &Value) -> Option<f32> {
+    let ratio = as_number(v)? as f32;
+    (ratio.is_finite() && ratio > 0.0).then_some(ratio)
 }
 
 fn as_flex_wrap(v: &Value) -> Option<FlexWrap> {

@@ -101,6 +101,27 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         "margin-bottom",
         "margin-left",
     ]);
+    // PROP1's second batch: layout properties whose `LayoutStyle` fields
+    // already existed but which `apply()` never read.
+    style_parity!(covered, "flex-basis", "8px", |s: Style| s
+        .flex_basis(lumen_layout::Dim::px(8.0)));
+    style_parity!(covered, "align-content", "center", |s: Style| s
+        .align_content(lumen_layout::Align::Center));
+    style_parity!(covered, "aspect-ratio", "1.5", |s: Style| s
+        .aspect_ratio(1.5));
+    style_parity!(covered, "position", "absolute", |s: Style| s
+        .position(lumen_layout::Position::Absolute));
+    style_parity!(covered, "inset", "8px", |s: Style| s
+        .inset(lumen_layout::Edges::all(lumen_layout::Dim::px(8.0))));
+    for (i, side) in ["top", "right", "bottom", "left"].iter().enumerate() {
+        let prop = format!("inset-{side}");
+        let mut from_lss = Style::new();
+        apply(&mut from_lss, &prop, &val(&prop, "8px"), &Tokens::new());
+        let mut want = Style::new();
+        want.inset_sides[i] = Some(8.0);
+        assert_eq!(from_lss, want, "{prop}");
+    }
+    covered.extend(["inset-top", "inset-right", "inset-bottom", "inset-left"]);
     style_parity!(covered, "visibility", "hidden", |s: Style| s
         .visibility(false));
     style_parity!(covered, "clip", "rounded", |s: Style| s
@@ -189,6 +210,9 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "justify-content" | "align-items" | "align-self" => "center",
         "flex-wrap" => "wrap",
         "flex-grow" | "flex-shrink" => "1",
+        "align-content" => "center",
+        "position" => "absolute",
+        "aspect-ratio" => "1.5",
         _ => "8px", // the lengths
     };
     for &p in lumen_style::APPLIED_PROPERTIES {

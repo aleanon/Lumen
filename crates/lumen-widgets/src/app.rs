@@ -4633,6 +4633,24 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
     if let Some(n) = css.flex_shrink {
         el.style.flex_shrink = n;
     }
+    // PROP1: these `LayoutStyle` fields existed and taffy has always
+    // implemented them; only this bridge and `Style::apply` were missing, so
+    // the properties parsed and were silently discarded.
+    if let Some(d) = css.flex_basis {
+        el.style.flex_basis = d;
+    }
+    if let Some(a) = css.align_content {
+        el.style.align_content = Some(a);
+    }
+    if let Some(r) = css.aspect_ratio {
+        el.style.aspect_ratio = Some(r);
+    }
+    if let Some(p) = css.position {
+        el.style.position = p;
+    }
+    if let Some(i) = css.inset {
+        el.style.inset = i;
+    }
     if let Some(d) = css.min_width {
         el.style.min_width = d;
     }
@@ -4678,6 +4696,20 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
     }
     if let Some(v) = ml {
         el.style.margin.left = Dim::px(v);
+    }
+    // PROP1: `inset` longhands, after the shorthand, same rule as padding/margin.
+    let [it, ir, ib, il] = css.inset_sides;
+    if let Some(v) = it {
+        el.style.inset.top = Dim::px(v);
+    }
+    if let Some(v) = ir {
+        el.style.inset.right = Dim::px(v);
+    }
+    if let Some(v) = ib {
+        el.style.inset.bottom = Dim::px(v);
+    }
+    if let Some(v) = il {
+        el.style.inset.left = Dim::px(v);
     }
     // B.4: typography reaches the text stack — the measured and the painted
     // TextStyle are the same object (content moves into NodeMeta), so one
