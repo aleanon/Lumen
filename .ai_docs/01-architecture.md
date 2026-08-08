@@ -110,6 +110,7 @@ implementation choices into the interface.
 | text (MOD3) | `lumen_text::TextEngineApi` + `TextBlockApi` | 5 + 9 methods | `lumen-text/tests/engine_seam.rs` |
 | style properties (MOD4) | `lumen_style::register_property` | runtime registration | `lumen-style` registry tests |
 | platform shell (MOD5) | `lumen-shell-core` | shared `render_into` | the iOS + web shells |
+| state store (MOD6) | — | **declined, measured** | `docs/mod6-state-store-decision.md` |
 
 **Every seam is verified by a third-party implementation written outside the
 crate, using only public API.** A trait the framework declares and only the
@@ -134,6 +135,17 @@ defaults do not apply to inference of a function's *return*, so generalising
 `Style` is deliberately absent from the bundle: MOD4's extension point is
 runtime registration (`register_property`), not a type swap, so there is nothing
 for an associated type to name.
+
+**The state store is deliberately NOT swappable — seven axes, not eight.**
+Keeping `ui.getDeps`' exact attribution out of a third party's hands forces the
+values and the attribution into separate maps, i.e. two lookups where there is
+now one: measured **+117.6%** on signal writes, about a third of ADR-021's
+reactive-identity win handed back on the hottest path in the framework. The
+alternative shape (+27.6%) puts attribution *inside* the swappable component,
+which trades the observability pillar for the modularity checkbox. Full
+reasoning and numbers in `docs/mod6-state-store-decision.md`; persistence — the
+use case usually meant by "swappable storage" — is already served by the
+snapshot/restore seam (ADR-011) without touching the read path.
 
 Verified by `lumen-widgets/tests/platform_config.rs`, which runs an `App` on a
 text engine with deliberately wrong metrics (10px advance, 30px line) and
