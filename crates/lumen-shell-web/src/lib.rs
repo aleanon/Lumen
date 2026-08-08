@@ -14,11 +14,16 @@
 
 use lumen::{App, BuildCx, Element};
 use lumen_core::geometry::Size;
-use lumen_render::RgbaImage;
 
 /// Render `build` at `w`×`h` (optionally with a `.lss` stylesheet) into `out`
 /// (`w*h*4` straight-RGBA8 bytes). Returns bytes written, or 0 if `out` is too
 /// small. The canvas presenter uploads these bytes into `ImageData`.
+/// Render one frame into `out` as RGBA8, returning bytes written.
+///
+/// MOD5: delegates to [`lumen_shell_core::render_into`]. This was a
+/// character-for-character copy of the same function in the other platform
+/// shell — the kind of duplication that rots asymmetrically, since a fix lands
+/// on whichever platform reported the bug.
 pub fn render_into(
     build: impl Fn(&mut BuildCx) -> Element + 'static,
     w: u32,
@@ -26,21 +31,7 @@ pub fn render_into(
     lss: Option<&str>,
     out: &mut [u8],
 ) -> usize {
-    let need = (w as usize) * (h as usize) * 4;
-    if out.len() < need {
-        return 0;
-    }
-    let mut app = App::new(build);
-    if let Some(src) = lss {
-        app = app.stylesheet(src);
-    }
-    let mut hl = app.run_headless(Size::new(w as f64, h as f64));
-    hl.pump();
-    let frame: RgbaImage = hl.screenshot();
-    let px = frame.pixels();
-    let n = need.min(px.len());
-    out[..n].copy_from_slice(&px[..n]);
-    n
+    lumen_shell_core::render_into(build, w, h, lss, out)
 }
 
 // --- P.2: persistent browser session ----------------------------------------

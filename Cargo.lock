@@ -3057,6 +3057,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumen-shell-core"
+version = "0.0.0"
+dependencies = [
+ "kurbo",
+ "lumen",
+ "lumen-core",
+ "lumen-render",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "lumen-shell-ios"
 version = "0.0.0"
 dependencies = [
@@ -3064,6 +3075,7 @@ dependencies = [
  "lumen",
  "lumen-core",
  "lumen-render",
+ "lumen-shell-core",
 ]
 
 [[package]]
@@ -3074,6 +3086,7 @@ dependencies = [
  "lumen-agent",
  "lumen-core",
  "lumen-render",
+ "lumen-shell-core",
  "serde_json",
 ]
 

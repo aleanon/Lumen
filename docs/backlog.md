@@ -32,6 +32,25 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
 - Prior: live-window agent endpoint; design-analysis APCA contrast; resize fix;
   paint caches (text/shadow) + shadow-ring blit + hover.
 
+## 🧩 Shared shell crate (MOD5, 2026-08-08)
+
+`lumen-shell-core` now holds the platform-agnostic half of a shell. Both
+`lumen-shell-ios` and `lumen-shell-web` had grown a character-for-character copy
+of `render_into`; they now delegate.
+
+The point is not line count. Duplicated platform code rots *asymmetrically* — a
+fix lands on whichever platform reported the bug, and the other copy keeps the
+defect until someone hits it there too. The 2026-08 modularity review found
+exactly that shape already: iOS lacked key, wheel and agent-bridge support that
+web had. Neither copy of `render_into` had a test; the shared one has three.
+
+Android's blit path stays platform-specific — it genuinely is. Session
+lifecycle (how frames are driven, how input arrives) also stays per-platform,
+because that is the part that legitimately differs.
+
+*Next:* the session surfaces are the remaining divergence — web has
+`session_key`, `session_wheel` and `session_agent`; iOS does not.
+
 ## 📱 Mobile memory pressure (MOB1/MOB2, 2026-08-08)
 
 Both platforms now respond to OS memory pressure, which neither did before:

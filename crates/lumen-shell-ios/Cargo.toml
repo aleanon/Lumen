@@ -19,6 +19,7 @@ snapshot = ["lumen/snapshot"]
 [dependencies]
 lumen = { workspace = true }
 lumen-core = { workspace = true }
+lumen-shell-core = { workspace = true }
 lumen-render = { workspace = true }
 
 [dev-dependencies]

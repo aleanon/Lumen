@@ -30,6 +30,7 @@ members = [
     "examples/inspector",
     "examples/agent-gauntlet",
     "crates/lumen-shell-web",
+    "crates/lumen-shell-core",
     "examples/hello_web",
     "examples/agent-gauntlet-web",
     "examples/agent-gauntlet-media",
@@ -112,6 +113,7 @@ lumen-cli = { path = "crates/lumen-cli" }
 lumen-shell-android = { path = "crates/lumen-shell-android" }
 lumen-shell-ios = { path = "crates/lumen-shell-ios" }
 lumen-shell-web = { path = "crates/lumen-shell-web" }
+lumen-shell-core = { path = "crates/lumen-shell-core" }
 lumen = { path = "crates/lumen" }
 
 # whitelisted runtime deps (ADR-003) — added to crates as tasks need them

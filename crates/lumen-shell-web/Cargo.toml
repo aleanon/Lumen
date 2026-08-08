@@ -13,6 +13,7 @@ name = "lumen_shell_web"
 [dependencies]
 lumen = { workspace = true }
 lumen-core = { workspace = true }
+lumen-shell-core = { workspace = true }
 lumen-render = { workspace = true }
 # P.2: the agent bridge — dispatch only; the browser owns the transport
 # (WebSocket/CDP), so the native ws serving loop stays off. Direct path dep:

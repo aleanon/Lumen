@@ -1,0 +1,23 @@
+# MOD5: the platform-agnostic half of a shell.
+#
+# `lumen-shell-ios` and `lumen-shell-web` had grown byte-identical copies of the
+# same logic. Duplication across platform shells is the kind that rots quietly:
+# a fix lands on the platform whose bug was reported, and the other keeps the
+# defect until someone happens to hit it there too.
+[package]
+name = "lumen-shell-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+lumen = { workspace = true }
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+kurbo = { workspace = true }
+
+[dev-dependencies]
+lumen-widgets = { workspace = true }
