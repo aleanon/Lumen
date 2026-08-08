@@ -12,6 +12,7 @@ fn ink(weight: f32) -> u64 {
         line_height: None,
         letter_spacing: 0.0,
         family: None,
+        italic: false,
         align: TextAlign::Start,
     };
     let block = eng.layout("Bold", style, &[], None, TextAlign::Start);

@@ -193,6 +193,8 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
+    /// `font-style: italic | normal` (PROP1).
+    pub font_italic: Option<bool>,
     /// `text-align` (PROP1) — alignment of wrapped lines within the box.
     pub text_align: Option<lumen_text::TextAlign>,
     /// `font-family` (PROP1) — a family registered via
@@ -383,6 +385,12 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `font-style` (PROP1).
+    pub fn font_italic(mut self, yes: bool) -> Self {
+        self.font_italic = Some(yes);
         self
     }
 
@@ -610,7 +618,6 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     "z-index",
     "cursor",
     // Typography — needs text-stack plumbing.
-    "font-style",
     "font-features",
     "font-variation",
     "text-overflow",
@@ -703,6 +710,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "letter-spacing",
     "font-family",
     "text-align",
+    "font-style",
     "grid-template-columns",
     "grid-template-rows",
     "grid-column",
@@ -782,6 +790,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "letter-spacing" => style.letter_spacing = as_px(&v),
         "font-family" => style.font_family = as_font_family(&v),
         "text-align" => style.text_align = as_text_align(&v),
+        "font-style" => style.font_italic = as_font_style(&v),
         "grid-template-columns" => style.grid_template_columns = as_grid_tracks(&v),
         "grid-template-rows" => style.grid_template_rows = as_grid_tracks(&v),
         "grid-column" => style.grid_column = as_grid_line_pair(&v),
@@ -1323,6 +1332,20 @@ fn as_align(v: &Value) -> Option<Align> {
             "baseline" => Some(Align::Baseline),
             "space-between" => Some(Align::SpaceBetween),
             "space-around" => Some(Align::SpaceAround),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `font-style` (PROP1). `oblique` is accepted as a synonym for `italic`:
+/// the bundled face has neither, so both resolve to the same synthetic skew and
+/// pretending to distinguish them would be a lie about what is rendered.
+fn as_font_style(v: &Value) -> Option<bool> {
+    match v {
+        Value::Keyword(k) => match k.as_str() {
+            "italic" | "oblique" => Some(true),
+            "normal" => Some(false),
             _ => None,
         },
         _ => None,

@@ -478,3 +478,41 @@ fn text_align_justify_renders_as_start() {
         "justify must fall back to start, got start={start:.1} justify={justify:.1}"
     );
 }
+
+// --- PROP1, font-style -------------------------------------------------------
+
+/// `font-style: italic` must change the rendered glyphs. The bundled face ships
+/// one upright style (ADR-005), so this is synthetic oblique — the same route
+/// the existing faux-bold takes. Asserted on pixels, because the whole question
+/// is whether the skew reached the rasterizer.
+#[test]
+fn font_style_italic_changes_the_rendered_glyphs() {
+    fn frame(lss: &str) -> Vec<u8> {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text("Hll").id("a")]).id("root")
+        })
+        .run_headless(Size::new(200.0, 60.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        h.screenshot().pixels().to_vec()
+    }
+    let upright = frame("#a { font-size: 32px; font-style: normal; }");
+    let italic = frame("#a { font-size: 32px; font-style: italic; }");
+    assert_ne!(
+        upright, italic,
+        "italic must render differently from upright"
+    );
+    // And `normal` must be identical to saying nothing at all.
+    assert_eq!(upright, frame("#a { font-size: 32px; }"));
+}
+
+/// An unsupported value reports W0109 rather than silently rendering upright —
+/// the value-level hole this session closed for keywords.
+#[test]
+fn a_bogus_font_style_is_reported() {
+    let (_, ds) = lumen_style::parse("t.lss", "x { font-style: slanted; }");
+    assert!(
+        ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+        "unsupported font-style must warn, got {ds:?}"
+    );
+}

@@ -4392,6 +4392,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             line_height: None,
             letter_spacing: 0.0,
             family: None,
+            italic: false,
             align: lumen_text::TextAlign::Start,
         };
         let [cr, cg, cb, ca] = ts.color.to_srgb8();
@@ -4810,6 +4811,7 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
         || css.letter_spacing.is_some()
         || css.font_family.is_some()
         || css.text_align.is_some()
+        || css.font_italic.is_some()
     {
         if let NodeContent::Text(_, ts) = &mut el.content {
             if let Some(fs) = css.font_size {
@@ -4831,6 +4833,9 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
             }
             if let Some(a) = css.text_align {
                 ts.align = a;
+            }
+            if let Some(i) = css.font_italic {
+                ts.italic = i;
             }
         }
     }

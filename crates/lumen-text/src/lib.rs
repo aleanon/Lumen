@@ -69,6 +69,7 @@ struct GlyphKey {
     glyph_id: u32,
     size_bits: u32,
     embolden_bits: u32,
+    skew_bits: u32,
     coords_hash: u64,
 }
 
@@ -83,6 +84,7 @@ impl GlyphKey {
             self.glyph_id as u64,
             self.size_bits as u64,
             self.embolden_bits as u64,
+            self.skew_bits as u64,
             self.coords_hash,
         ] {
             h = (h ^ word).wrapping_mul(0x100000001b3);
@@ -164,6 +166,10 @@ pub struct TextStyle {
     /// Register custom fonts via [`TextEngine::register_font`]; select by the
     /// returned family name (B1, no system enumeration).
     pub family: Option<String>,
+    /// Render italic (PROP1). The bundled face ships one upright style
+    /// (ADR-005), so this is satisfied by **synthetic oblique** — the same
+    /// route the existing faux-bold takes for weight.
+    pub italic: bool,
     /// Horizontal alignment of wrapped lines (PROP1).
     ///
     /// Carried on the style rather than passed per call so a `.lss`
@@ -183,6 +189,7 @@ impl Default for TextStyle {
             line_height: None,
             letter_spacing: 0.0,
             family: None,
+            italic: false,
             align: TextAlign::Start,
         }
     }
@@ -204,6 +211,13 @@ impl TextStyle {
     /// This style with `px` of extra letter tracking (B2).
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = px;
+        self
+    }
+
+    /// This style rendered italic (PROP1) — synthetic oblique, see
+    /// [`TextStyle::italic`].
+    pub fn italic(mut self, yes: bool) -> Self {
+        self.italic = yes;
         self
     }
 
@@ -760,6 +774,14 @@ impl TextEngine {
         builder.push_default(StyleProperty::FontWeight(parley::FontWeight::new(
             base.weight,
         )));
+        // PROP1: with a single upright face registered, fontique cannot match an
+        // italic and reports a `skew` synthesis instead — handled beside the
+        // existing faux-bold in the rasterizer.
+        builder.push_default(StyleProperty::FontStyle(if base.italic {
+            parley::FontStyle::Italic
+        } else {
+            parley::FontStyle::Normal
+        }));
         builder.push_default(StyleProperty::Brush(base.color.to_srgb8()));
         // Line height as a multiple of font size. parley's low-level builder
         // defaults to 1.0, which is too tight for this font — ascenders/descenders
@@ -1135,6 +1157,12 @@ impl TextBlock {
                 } else {
                     0.0
                 };
+                // PROP1 faux italic, exactly parallel to the faux bold above:
+                // with one upright face registered fontique cannot match an
+                // italic, so it reports a skew (in degrees) for the rasterizer
+                // to apply. zeno's skew is in the opposite sense, hence the
+                // negation — a positive fontique skew leans the glyph right.
+                let skew = run.synthesis().skew().unwrap_or(0.0);
                 let coords = run.normalized_coords();
                 let mut scaler = ctx
                     .builder(font_ref)
@@ -1148,6 +1176,7 @@ impl TextBlock {
                     glyph_id: 0,
                     size_bits: phys_size.to_bits(),
                     embolden_bits: strength.to_bits(),
+                    skew_bits: skew.to_bits(),
                     coords_hash: coords_hash(coords),
                 };
                 for glyph in glyph_run.positioned_glyphs() {
@@ -1172,6 +1201,12 @@ impl TextBlock {
                             render.format(Format::Alpha);
                             if strength != 0.0 {
                                 render.embolden(strength);
+                            }
+                            if skew != 0.0 {
+                                render.transform(Some(swash::zeno::Transform::skew(
+                                    swash::zeno::Angle::from_degrees(-skew),
+                                    swash::zeno::Angle::ZERO,
+                                )));
                             }
                             render
                                 .render(&mut scaler, glyph.id as u16)
@@ -1303,6 +1338,7 @@ mod glyph_cache_tests {
             line_height: None,
             letter_spacing: 0.0,
             family: None,
+            italic: false,
             align: Default::default(),
         }
     }

@@ -143,6 +143,8 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         lumen_layout::GridLine::Line(2),
         lumen_layout::GridLine::Auto
     ));
+    style_parity!(covered, "font-style", "italic", |s: Style| s
+        .font_italic(true));
     style_parity!(covered, "text-align", "center", |s: Style| s
         .text_align(lumen_text::TextAlign::Center));
     style_parity!(covered, "letter-spacing", "8px", |s: Style| s
@@ -242,6 +244,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "aspect-ratio" => "1.5",
         "font-family" => "Inter",
         "text-align" => "center",
+        "font-style" => "italic",
         "grid-template-columns" | "grid-template-rows" => "1fr 2fr",
         "grid-column" | "grid-row" => "2",
         "overflow" => "hidden",
