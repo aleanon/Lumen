@@ -193,14 +193,6 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
-    /// `transform` (PROP1) — a 2D affine, already composed from the CSS
-    /// function list. Stored as the matrix rather than the source list because
-    /// the paint layer wants one `Affine`, and composing at parse time means
-    /// the hot path never re-derives it.
-    pub transform: Option<kurbo::Affine>,
-    /// `transform-origin` (PROP1) as a fraction of the node's box — `(0.5, 0.5)`
-    /// is the centre, which is CSS's default.
-    pub transform_origin: Option<(f64, f64)>,
     /// `font-features` (PROP1) — CSS `font-feature-settings` syntax.
     pub font_features: Option<String>,
     /// `text-wrap` (PROP1). `Some(false)` = `nowrap`.
@@ -403,18 +395,6 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
-        self
-    }
-
-    /// `transform` (PROP1).
-    pub fn transform(mut self, t: kurbo::Affine) -> Self {
-        self.transform = Some(t);
-        self
-    }
-
-    /// `transform-origin` (PROP1), as a fraction of the box.
-    pub fn transform_origin(mut self, x: f64, y: f64) -> Self {
-        self.transform_origin = Some((x, y));
         self
     }
 
@@ -673,6 +653,8 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     // Layout — the field exists in LayoutStyle; apply() doesn't populate it.
     // Visual — needs render support, not just a field.
     "filter",
+    "transform",
+    "transform-origin",
     "z-index",
     // Typography — needs text-stack plumbing.
     "font-variation",
@@ -716,13 +698,6 @@ pub fn value_applies(property: &str, value: &Value) -> bool {
         // A bare number, but only where the number is the WHOLE value — see
         // `SCALAR_PROPERTIES`.
         Value::Number(..) => SCALAR_PROPERTIES.contains(&property),
-        // A function call, or a list of them, where the function list IS the
-        // whole value — see `FUNCTION_VALUED_PROPERTIES`.
-        Value::Function(..) => FUNCTION_VALUED_PROPERTIES.contains(&property),
-        Value::List(items) => {
-            FUNCTION_VALUED_PROPERTIES.contains(&property)
-                && items.iter().all(|i| matches!(i, Value::Function(..)))
-        }
         _ => false,
     };
     if !judgeable {
@@ -755,19 +730,6 @@ const SCALAR_PROPERTIES: &[&str] = &[
     "font-weight",
     "line-height",
 ];
-
-/// Applied properties whose entire value is a function call (or a list of
-/// them), so a function `apply` refuses is unambiguously a rejected value.
-///
-/// Same opt-in discipline as [`SCALAR_PROPERTIES`], and for the same reason:
-/// `background: linear-gradient(...)` is also function-valued but has fallback
-/// paths, so judging it here would risk warning about input that works.
-///
-/// `transform` earns its place because its rejections are silent AND wrong-
-/// looking: `translate(50%)` parses, is refused (a percentage is relative to
-/// the node's own box, which this layer cannot see), and without a diagnostic
-/// the author sees an untransformed node with nothing to read.
-const FUNCTION_VALUED_PROPERTIES: &[&str] = &["transform"];
 
 /// The `.lss` properties `apply` actually consumes — the runtime's applied
 /// set, in `apply` arm order. The parity test asserts (a) each entry really
@@ -820,8 +782,6 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "selection-color",
     "text-wrap",
     "font-features",
-    "transform",
-    "transform-origin",
     "grid-template-columns",
     "grid-template-rows",
     "grid-column",
@@ -907,8 +867,6 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "selection-color" => style.selection_color = as_color(&v),
         "text-wrap" => style.text_wrap = as_text_wrap(&v),
         "font-features" => style.font_features = as_feature_settings(&v),
-        "transform" => style.transform = as_transform(&v),
-        "transform-origin" => style.transform_origin = as_transform_origin(&v),
         "grid-template-columns" => style.grid_template_columns = as_grid_tracks(&v),
         "grid-template-rows" => style.grid_template_rows = as_grid_tracks(&v),
         "grid-column" => style.grid_column = as_grid_line_pair(&v),
@@ -1453,85 +1411,6 @@ fn as_align(v: &Value) -> Option<Align> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-/// `transform` (PROP1): a CSS function list composed into one affine, applied
-/// left-to-right as CSS specifies.
-///
-/// Supported: `translate(x[, y])`, `translateX/Y`, `scale(s[, sy])`,
-/// `scaleX/Y`, `rotate(deg)`, `skewX/Y(deg)`, `none`. Lengths are px;
-/// percentages are NOT accepted for translate, because a percentage there is
-/// relative to the node's own box, which the style engine cannot see — honouring
-/// it needs the resolved bounds, so it belongs to a later pass rather than a
-/// silent misinterpretation here.
-fn as_transform(v: &Value) -> Option<kurbo::Affine> {
-    let items: Vec<&Value> = match v {
-        Value::List(xs) => xs.iter().collect(),
-        single => vec![single],
-    };
-    if let [Value::Keyword(k)] = items.as_slice() {
-        if k.as_str() == "none" {
-            return Some(kurbo::Affine::IDENTITY);
-        }
-    }
-    let mut out = kurbo::Affine::IDENTITY;
-    let mut any = false;
-    for item in items {
-        let Value::Function(name, args) = item else {
-            return None;
-        };
-        // NOT `as_number`: it ignores the unit, which would silently read
-        // `translate(50%)` as 50 PX. A percentage there is relative to the
-        // node's own box, which this layer cannot see, so it must be rejected
-        // rather than misread. Angles are accepted for the rotate/skew
-        // functions; the unit is checked by the caller's choice of function.
-        let num = |i: usize| -> Option<f64> {
-            match args.get(i) {
-                Some(Value::Number(n, Unit::None | Unit::Px | Unit::Deg)) => Some(*n),
-                _ => None,
-            }
-        };
-        let t = match name.as_str() {
-            "translate" => kurbo::Affine::translate((num(0)?, num(1).unwrap_or(0.0))),
-            "translateX" => kurbo::Affine::translate((num(0)?, 0.0)),
-            "translateY" => kurbo::Affine::translate((0.0, num(0)?)),
-            "scale" => {
-                let sx = num(0)?;
-                kurbo::Affine::scale_non_uniform(sx, num(1).unwrap_or(sx))
-            }
-            "scaleX" => kurbo::Affine::scale_non_uniform(num(0)?, 1.0),
-            "scaleY" => kurbo::Affine::scale_non_uniform(1.0, num(0)?),
-            "rotate" => kurbo::Affine::rotate(num(0)?.to_radians()),
-            "skewX" => kurbo::Affine::skew(num(0)?.to_radians().tan(), 0.0),
-            "skewY" => kurbo::Affine::skew(0.0, num(0)?.to_radians().tan()),
-            _ => return None,
-        };
-        out *= t;
-        any = true;
-    }
-    any.then_some(out)
-}
-
-/// `transform-origin` (PROP1) as a fraction of the box. Keywords and
-/// percentages only — a px origin would need the resolved bounds, same reason
-/// as translate percentages.
-fn as_transform_origin(v: &Value) -> Option<(f64, f64)> {
-    fn axis(v: &Value) -> Option<f64> {
-        match v {
-            Value::Keyword(k) => match k.as_str() {
-                "left" | "top" => Some(0.0),
-                "center" => Some(0.5),
-                "right" | "bottom" => Some(1.0),
-                _ => None,
-            },
-            Value::Number(n, Unit::Percent) => Some(n / 100.0),
-            _ => None,
-        }
-    }
-    match v {
-        Value::List(xs) if xs.len() == 2 => Some((axis(&xs[0])?, axis(&xs[1])?)),
-        single => axis(single).map(|a| (a, a)),
     }
 }
 

@@ -141,7 +141,7 @@ cannot drift from the code again. The three lists live in the crate —
 `KNOWN_PROPERTIES`, `APPLIED_PROPERTIES`, `PARSE_ONLY_PROPERTIES` — and
 `crates/lumen-style/tests/property_parity.rs` asserts `KNOWN == APPLIED ∪
 PARSE_ONLY`, so a property that parses without an implementation is a **build
-failure**. Current split: **78 known, 74 applied, 4 parse-only** — no layout property is parse-only, and of typography only `font-features`/`font-variation`/`text-overflow`/`text-wrap`/`text-decoration` remain (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
+failure**. Current split: **78 known, 72 applied, 6 parse-only** — no layout property is parse-only, and of typography only `font-features`/`font-variation`/`text-overflow`/`text-wrap`/`text-decoration` remain (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
 declaration now reports `W0107` at parse time instead of silently doing
 nothing.)*
 
@@ -194,6 +194,18 @@ text layers actually offer today.
   `PushLayer` has no filter field, so this is a change to both renderers (CPU
   and wgpu) plus golden re-baselining — a real render-pass addition, not a
   bridge.
+* **`transform` / `transform-origin`** — **implemented on the CPU renderer and
+  reverted** (2026-08-08). `PushLayer` carries a `transform: Affine` the CPU
+  backend honours, so composing CSS functions into it worked and its tests
+  passed. But `gpu.rs` **ignores `PushLayer::transform` entirely** (zero
+  mentions; `blend` and `opacity` are handled, `transform` is not), so a
+  `--wgpu` app would get a silent no-op. That is the same defect class as
+  `z-index` below — correct on one backend, inert on the other — and ADR-002's
+  parity contract does not tolerate it. Unblocking it is bounded and known:
+  extend `CompositeInstance` with the affine (its `params` has only 2 spare
+  floats, so the struct and vertex layout must grow) and apply it in the
+  composite shader's vertex stage. The parse side was correct and is recoverable
+  from the reverted commit.
 * **`z-index`** — needs stacking contexts; see below.
 * **`font-variation`** — the bundled face is **static** (no `fvar` axes, checked
   with fontTools). parley exposes `StyleProperty::FontVariations` and wiring it
@@ -214,7 +226,7 @@ semantic one; that is a design change, not a bridge.
 
 **`z-index` is parse-only for a structural reason, not an oversight** (investigated 2026-08-08). `Tree::hit_test` already maximizes `(z, preorder_pos)`, so wiring `z-index` to `Tree::set_z` would take about five minutes — and would be a **trap**: it would change which node receives a click *without changing what is painted on top*. Paint order is a two-pass scheme (normal, then overlay) keyed on the `overlay` flag, not on `z`, and `emit_pass` maintains its clip stack **by depth**, popping layers as depth decreases — so it requires a strict preorder traversal. Stable-sorting the paint order by `z` therefore breaks clip nesting (layers pop and push against the wrong nodes). Honouring `z-index` visually needs **stacking contexts**: paint each context as a self-contained subtree, then order contexts by `z`. That is real work, and until it exists the property must stay inert rather than half-wired.
 
-| **parse-only** | `filter`, `z-index`, `font-variation`, `text-overflow` |
+| **parse-only** | `filter`, `transform(-origin)`, `z-index`, `font-variation`, `text-overflow` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 + `!important` **work**; nested `&` rules **applied** (B.1 ✅ — flattened at

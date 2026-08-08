@@ -3999,31 +3999,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 Some(lumen_style::StyleBlend::Lighten) => BlendMode::Lighten,
                 Some(lumen_style::StyleBlend::Normal) | None => BlendMode::SourceOver,
             };
-            // PROP1 `transform`: `PushLayer` already carries an `Affine`
-            // applied at composite time, and both backends honour it — so this
-            // is a bridge, not a new render pass.
-            //
-            // The matrix is re-anchored about `transform-origin` (default the
-            // node's centre, as in CSS) by translating the origin to 0,0,
-            // applying, and translating back. Without that, `rotate` would
-            // swing the node around the window's top-left.
-            //
-            // Folded into the SAME layer as opacity/blend when one is already
-            // open, so a transformed translucent node costs one layer, not two.
-            let node_transform = css
-                .and_then(|s| s.transform)
-                .filter(|t| *t != kurbo::Affine::IDENTITY);
-            let composed = node_transform.map(|t| {
-                let (ox, oy) = css.and_then(|s| s.transform_origin).unwrap_or((0.5, 0.5));
-                let px = bounds.x0 + bounds.width() * ox;
-                let py = bounds.y0 + bounds.height() * oy;
-                kurbo::Affine::translate((px, py)) * t * kurbo::Affine::translate((-px, -py))
-            });
-            if opacity < 1.0 || blend != BlendMode::SourceOver || composed.is_some() {
+            if opacity < 1.0 || blend != BlendMode::SourceOver {
                 dl.push(DrawCmd::PushLayer {
                     clip: None,
                     opacity: opacity.clamp(0.0, 1.0),
-                    transform: composed.unwrap_or(kurbo::Affine::IDENTITY),
+                    transform: kurbo::Affine::IDENTITY,
                     blend,
                 });
                 clip_stack.push(d);

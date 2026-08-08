@@ -143,10 +143,6 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         lumen_layout::GridLine::Line(2),
         lumen_layout::GridLine::Auto
     ));
-    style_parity!(covered, "transform", "scale(2)", |s: Style| s
-        .transform(kurbo::Affine::scale_non_uniform(2.0, 2.0)));
-    style_parity!(covered, "transform-origin", "left top", |s: Style| s
-        .transform_origin(0.0, 0.0));
     style_parity!(covered, "font-features", "\"smcp\"", |s: Style| s
         .font_features("\"smcp\""));
     style_parity!(covered, "text-wrap", "nowrap", |s: Style| s
@@ -263,8 +259,6 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "text-decoration" => "underline",
         "text-wrap" => "nowrap",
         "font-features" => "\"smcp\"",
-        "transform" => "scale(2)",
-        "transform-origin" => "left top",
         "grid-template-columns" | "grid-template-rows" => "1fr 2fr",
         "grid-column" | "grid-row" => "2",
         "overflow" => "hidden",
