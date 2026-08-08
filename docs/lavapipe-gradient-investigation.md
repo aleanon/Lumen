@@ -75,7 +75,57 @@ works under lavapipe; the ramp path does not. The only remaining difference is
 the texture's **dimensions** (512×1, or 512×2 after hypothesis 1) versus an
 image's.
 
+## Localised again: `textureSample` fails, `textureLoad` works
+
+Three further probes narrow it to one operation:
+
+| probe | result |
+|---|---|
+| `textureLoad(img_tex, …)` instead of `textureSample` | **works** — 23 400 px, matching NVIDIA exactly |
+| `textureSample` bound to the *image* sampler (`self.sampler`, the object the working image path uses) | still blank |
+| `textureSample` hoisted **above** all branching, at a literal `(0.5, 0.5)` | still blank |
+
+So, in the gradient pipeline under lavapipe:
+
+- the texture content is **correct** — `textureLoad` reads it back fine, which
+  also proves the `write_texture` landed;
+- `textureSample` returns zeros **regardless** of coordinate, sampler object, or
+  position relative to control flow;
+- the *image* pipeline's `textureSample`, on the same format, same layout, and
+  the same sampler object, works.
+
+The uniformity theory is dead too: sampling before any branch, at a constant
+coordinate, still fails.
+
 ## Where that leaves it
+
+Every difference between the two pipelines has now been tested and equalised
+except the pipeline object itself. This is a lavapipe defect in sampled-texture
+reads for the gradient pipeline, not a bug in Lumen — still a conclusion by
+exhaustion, but a much tighter one.
+
+### The available workaround, and its cost
+
+`textureLoad` works. It is also *nearly* right on the merits: the ramp is a
+512-texel lookup table, so nearest-texel indexing gives 512 discrete steps
+across a gradient that is typically a few hundred pixels wide.
+
+But it is **not** a free swap. Linear filtering interpolates between texels, so
+switching to `textureLoad` changes output on **every** backend — including the
+real GPU — and would need the GPU parity allow-list re-baselined. Taking it
+would mean accepting slight banding everywhere to work around one software
+driver.
+
+Recommended: keep `textureSample`, and either
+
+1. file upstream with this repro and wait, or
+2. run GPU CI on a **self-hosted** adapter, where the parity suite already
+   passes today — which was the alternative GX0 identified before lavapipe was
+   assumed to be free coverage.
+
+Do not adopt `textureLoad` solely to make CI green; it degrades real output to
+satisfy a driver nothing ships on.
+
 
 The elimination points at a driver-level defect in lavapipe for this texture
 configuration, rather than a bug in Lumen. That is a *conclusion by exhaustion*,
