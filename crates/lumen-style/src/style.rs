@@ -595,7 +595,6 @@ impl Style {
 /// parsed value into the existing field.
 pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     // Layout — the field exists in LayoutStyle; apply() doesn't populate it.
-    "overflow",
     // Visual — needs render support, not just a field.
     "filter",
     "transform",
@@ -661,6 +660,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "grid-template-rows",
     "grid-column",
     "grid-row",
+    "overflow",
     "background",
     "color",
     "border-radius",
@@ -738,6 +738,15 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "grid-template-rows" => style.grid_template_rows = as_grid_tracks(&v),
         "grid-column" => style.grid_column = as_grid_line_pair(&v),
         "grid-row" => style.grid_row = as_grid_line_pair(&v),
+        // PROP1: `overflow` writes the EXISTING `clip` field rather than
+        // adding a parallel one — CSS `overflow: hidden` and Lumen's `clip`
+        // are the same operation, and two fields racing for one behaviour is
+        // how contradictory declarations get silently resolved by arm order.
+        "overflow" => {
+            if let Some(c) = as_overflow(&v) {
+                style.clip = Some(c);
+            }
+        }
         "background" => match &v {
             Value::Function(name, args)
                 if name == "linear-gradient" || name == "radial-gradient" =>
@@ -1266,6 +1275,28 @@ fn as_align(v: &Value) -> Option<Align> {
             "baseline" => Some(Align::Baseline),
             "space-between" => Some(Align::SpaceBetween),
             "space-around" => Some(Align::SpaceAround),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `overflow` (PROP1) mapped onto [`StyleClip`].
+///
+/// `hidden`/`clip` -> `Rounded`, which follows the node's `border-radius` — the
+/// same thing CSS does (a rounded box clips to its curve). `visible` -> `None`.
+///
+/// **`scroll` and `auto` are deliberately rejected.** Scrolling in Lumen is a
+/// widget (`Scrollable`), not a paint property: there is no scroll offset,
+/// scrollbar or wheel routing attached to a style declaration. Accepting them
+/// as a silent alias for `hidden` would produce a box that clips its content
+/// with no way to reach the rest — the failure looks like lost content rather
+/// than an unsupported value. Rejected, so `W0107` names it instead.
+fn as_overflow(v: &Value) -> Option<StyleClip> {
+    match v {
+        Value::Keyword(k) => match k.as_str() {
+            "hidden" | "clip" => Some(StyleClip::Rounded),
+            "visible" => Some(StyleClip::None),
             _ => None,
         },
         _ => None,

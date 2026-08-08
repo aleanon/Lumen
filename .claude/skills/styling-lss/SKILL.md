@@ -26,7 +26,11 @@ B.3). `.lss` wins over the element's
 text in a child), and a state-part layout rule (`#x:hovered { width: … }`)
 relayouts through the normal rebuild path on pointer motion.
 
-Still Rust-only (parse-only in `.lss`): `overflow`.
+Every layout property now works in `.lss`. `overflow: hidden`
+(or `clip`) clips to the border-radius, `visible` disables it;
+`scroll`/`auto` are REJECTED — scrolling is the `Scrollable`
+widget, and a silent alias to `hidden` would hide content with
+no way to reach it.
 `grid-template-columns/rows` take a space-separated track
 list (`1fr 2fr 100px auto`; no `repeat()`), and
 `grid-column`/`grid-row` take `auto`, `span <n>` or a line

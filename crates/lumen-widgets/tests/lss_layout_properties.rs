@@ -343,3 +343,58 @@ fn grid_column_places_a_child_in_a_named_track() {
         placed.x0
     );
 }
+
+// --- PROP1, overflow ---------------------------------------------------------
+
+/// `overflow: hidden` must actually clip. Asserted on RENDERED PIXELS: a
+/// container's `ink` is not a reliable witness here (it is the node's own ink,
+/// and a clip changes what its CHILDREN draw), whereas the frame is the thing
+/// the property is supposed to change.
+#[test]
+fn overflow_hidden_clips_and_visible_does_not() {
+    fn ink_pixels(lss: &str) -> usize {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text(
+                "a deliberately long line of text that will not fit in the box",
+            )
+            .id("a")])
+            .id("root")
+        })
+        .run_headless(Size::new(400.0, 200.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        let img = h.screenshot();
+        // Count non-white pixels: the glyphs that actually reached the frame.
+        img.pixels()
+            .chunks_exact(4)
+            .filter(|p| p[0] < 200 || p[1] < 200 || p[2] < 200)
+            .count()
+    }
+    let visible = ink_pixels("#root { width: 40px; height: 20px; overflow: visible; }");
+    let hidden = ink_pixels("#root { width: 40px; height: 20px; overflow: hidden; }");
+    assert!(
+        hidden < visible,
+        "overflow: hidden must draw fewer pixels than visible \
+         (visible={visible}, hidden={hidden})"
+    );
+}
+
+/// `overflow: scroll` is rejected rather than aliased to `hidden`: scrolling is
+/// a widget, and a silent alias would clip content with no way to reach the
+/// rest — which looks like lost content, not an unsupported value.
+#[test]
+fn overflow_scroll_is_rejected_not_silently_clipped() {
+    let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+        widgets::column(vec![widgets::text("x").id("a")]).id("root")
+    })
+    .run_headless(Size::new(400.0, 200.0));
+    h.set_stylesheet("#root { overflow: scroll; }");
+    h.pump();
+    // Unsupported VALUE ⇒ the property stays unset, so the diagnostic surfaces
+    // rather than the declaration quietly doing something else.
+    let styles = h.get_styles("#root");
+    assert!(
+        styles.get("clip").is_none(),
+        "overflow: scroll must not resolve to a clip, got {styles}"
+    );
+}

@@ -122,6 +122,9 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         assert_eq!(from_lss, want, "{prop}");
     }
     covered.extend(["inset-top", "inset-right", "inset-bottom", "inset-left"]);
+    // `overflow` is the CSS spelling of `clip`; both write the same field.
+    style_parity!(covered, "overflow", "hidden", |s: Style| s
+        .clip(lumen_style::StyleClip::Rounded));
     style_parity!(covered, "grid-template-columns", "1fr 2fr", |s: Style| s
         .grid_template_columns(vec![
             lumen_layout::GridTrack::Fr(1.0),
@@ -238,6 +241,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "font-family" => "Inter",
         "grid-template-columns" | "grid-template-rows" => "1fr 2fr",
         "grid-column" | "grid-row" => "2",
+        "overflow" => "hidden",
         _ => "8px", // the lengths
     };
     for &p in lumen_style::APPLIED_PROPERTIES {
