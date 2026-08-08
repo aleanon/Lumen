@@ -94,7 +94,7 @@ jobs:
             cargo check -p "$crate" --no-default-features --all-targets
           done
           # Tier 2: lib only (see the note above).
-          for crate in lumen-widgets lumen-shell lumen; do
+          for crate in lumen-app lumen-widgets lumen-shell lumen; do
             echo "==> $crate (lean, lib only)"
             cargo check -p "$crate" --no-default-features
           done

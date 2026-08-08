@@ -1,0 +1,35 @@
+# SD1: the application RUNTIME, extracted from lumen-widgets.
+#
+# lumen-widgets had grown to hold two unrelated things: a 4.6k-line runtime
+# (build → reconcile → layout → paint → semantics) and a ~9k-line widget
+# catalogue. They change for different reasons and are read by different people,
+# and the runtime is where the performance work lands — so it now compiles,
+# tests and is reviewed on its own.
+#
+# The dependency runs ONE WAY: lumen-widgets depends on lumen-app and
+# re-exports it. The runtime knows nothing about buttons.
+[package]
+name = "lumen-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["wgpu", "snapshot", "pan-unicode"]
+wgpu = ["lumen-render/wgpu"]
+snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot"]
+pan-unicode = ["lumen-text/pan-unicode"]
+
+[dependencies]
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+lumen-layout = { workspace = true }
+lumen-text = { workspace = true }
+lumen-style = { workspace = true }
+kurbo = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true, optional = true }
+accesskit = { workspace = true }

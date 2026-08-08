@@ -29,7 +29,9 @@ pub fn muted() -> Color {
 }
 /// Accent colour (buttons, highlights).
 pub fn accent() -> Color {
-    Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
+    // Single source of truth: the runtime's focus ring uses the same constant
+    // (SD1 — see `element::ACCENT` for why it lives there).
+    crate::element::accent_color()
 }
 /// Success / positive colour.
 pub fn success() -> Color {

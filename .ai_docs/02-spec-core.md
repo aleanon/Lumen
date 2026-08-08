@@ -8,7 +8,7 @@ This document defines the public contracts of `lumen-core`, `lumen-layout`, and 
 > and items not yet built are marked *planned* with their plan task.
 
 ## 1. Workspace & naming
-Workspace crates: `lumen-core`, `lumen-layout`, `lumen-render`, `lumen-text`, `lumen-style`, `lumen-widgets`, `lumen-shell`, `lumen-test`, `lumen-agent`, `lumen-cli`, plus `lumen` (facade re-exporting the public API; user code depends only on `lumen` and `lumen-test`). Examples live in `examples/`, benchmarks in `benches/`, golden images in `tests/golden/<platform>/`.
+Workspace crates: `lumen-core`, `lumen-layout`, `lumen-render`, `lumen-text`, `lumen-style`, `lumen-app` (the frame runtime — build/reconcile/layout/paint/semantics, `Element`, the OS-service model, the async data layer; SD1 extracted it from `lumen-widgets`, which re-exports it so every existing path keeps working), `lumen-widgets`, `lumen-shell`, `lumen-test`, `lumen-agent`, `lumen-cli`, plus `lumen` (facade re-exporting the public API; user code depends only on `lumen` and `lumen-test`). Examples live in `examples/`, benchmarks in `benches/`, golden images in `tests/golden/<platform>/`.
 
 Geometry types: re-export from `kurbo` (`Point`, `Size`, `Rect`, `Affine`, `Vec2`, `Insets`). Color: `lumen_core::Color` — f32 RGBA, linear-light internally, sRGB at API boundaries; constructors `Color::srgb8(r,g,b,a)`, `Color::from_hex("#rrggbbaa")`.
 

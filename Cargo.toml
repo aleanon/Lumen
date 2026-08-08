@@ -9,6 +9,7 @@ members = [
     "crates/lumen-render",
     "crates/lumen-text",
     "crates/lumen-style",
+    "crates/lumen-app",
     "crates/lumen-widgets",
     "crates/lumen-shell",
     "crates/lumen-test",

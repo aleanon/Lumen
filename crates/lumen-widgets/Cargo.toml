@@ -20,13 +20,16 @@ default = ["wgpu", "snapshot", "pan-unicode", "codecs"]
 # ADR-M1: jpeg/gif/webp decode (`asset::decode`/`asset::animation`). Off in
 # the lean profile — PNG always works via tiny-skia.
 codecs = ["dep:image"]
-wgpu = ["lumen-render/wgpu"]
-snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot"]
-pan-unicode = ["lumen-text/pan-unicode"]
+wgpu = ["lumen-render/wgpu", "lumen-app/wgpu"]
+snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot", "lumen-app/snapshot"]
+pan-unicode = ["lumen-text/pan-unicode", "lumen-app/pan-unicode"]
 
 [dependencies]
 # ADR-M1: optional raster codecs (jpeg/gif/webp), pure-Rust decoders.
 image = { workspace = true, optional = true }
+# SD1: the runtime, re-exported so `crate::app`/`crate::element` paths
+# inside this crate and every downstream `lumen_widgets::app` path keep working.
+lumen-app = { path = "../lumen-app", default-features = false }
 lumen-core = { workspace = true }
 lumen-macros = { workspace = true }
 lumen-render = { workspace = true }

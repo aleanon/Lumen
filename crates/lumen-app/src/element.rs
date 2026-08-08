@@ -129,6 +129,16 @@ pub enum NodeContent {
     Custom(Rc<dyn LeafWidget>),
 }
 
+/// The accent colour (buttons, highlights, the focus ring).
+///
+/// SD1: this lives here rather than in `theme` because the runtime's focus ring
+/// needs it, and `theme` builds `Element`s from the widget catalogue — so a
+/// runtime → theme reference is the one edge that would make the `lumen-app`
+/// split cyclic. `theme::accent()` reads this, reversing the direction.
+pub fn accent_color() -> Color {
+    Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
+}
+
 /// A description of one node: type + props + children.
 #[derive(Clone)]
 pub struct Element {

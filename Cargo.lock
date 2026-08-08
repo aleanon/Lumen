@@ -2951,6 +2951,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumen-app"
+version = "0.0.0"
+dependencies = [
+ "accesskit",
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-style",
+ "lumen-text",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lumen-benches"
 version = "0.0.0"
 dependencies = [
@@ -3137,6 +3152,7 @@ dependencies = [
  "accesskit",
  "image 0.25.10",
  "kurbo",
+ "lumen-app",
  "lumen-core",
  "lumen-layout",
  "lumen-macros",

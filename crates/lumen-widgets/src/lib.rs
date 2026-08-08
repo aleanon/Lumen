@@ -10,9 +10,9 @@
 
 pub mod a11y;
 pub mod accordion;
-pub mod app;
+pub use lumen_app::app;
 pub mod asset;
-pub mod audit;
+pub use lumen_app::audit;
 pub mod boundary;
 pub mod button;
 pub mod card;
@@ -25,12 +25,11 @@ pub mod container;
 /// behind `snapshot` (drops `serde_json` in a lean build).
 #[cfg(feature = "snapshot")]
 pub mod design;
-pub mod element;
+pub use lumen_app::element;
 /// W.1 promotions: Toast, Spinner, Chip.
 pub mod feedback;
 pub mod file_picker;
 pub mod forms;
-mod fxhash;
 pub mod grid;
 pub mod i18n;
 pub mod label;
@@ -52,7 +51,7 @@ pub mod search_field;
 pub mod sheet;
 pub mod slider;
 pub mod space;
-pub mod system;
+pub use lumen_app::system;
 pub mod text_field;
 pub mod text_input;
 pub mod theme;
@@ -63,7 +62,7 @@ mod widget;
 // wasm; on the web, shaders are a WebGPU presenter concern.
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 pub mod shader;
-pub mod tasks;
+pub use lumen_app::tasks;
 pub mod widgets;
 
 // SD2: the milestone-named modules (`widgets_m1`/`m3`/`m4`/`extra`,

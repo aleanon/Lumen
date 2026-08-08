@@ -4115,7 +4115,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             let focused = self.tree.flags(node).contains(NodeFlags::FOCUSED);
             let focus_border = (focused && m.on_caret_set.is_some()).then(|| Border {
                 width: 2.0,
-                color: crate::theme::accent(),
+                color: crate::element::accent_color(),
             });
             // `.lss` border (shorthand or longhands) wins over an element border,
             // which wins over the focus ring.

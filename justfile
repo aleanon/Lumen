@@ -126,7 +126,7 @@ check-lean:
         cargo check -q -p "$crate" --no-default-features --all-targets && echo "OK (with tests)"
     done
     # Tier 2: lib only — see .github/workflows/ci.yml for why.
-    for crate in lumen-widgets lumen-shell lumen; do
+    for crate in lumen-app lumen-widgets lumen-shell lumen; do
         printf '%-18s ' "$crate"
         cargo check -q -p "$crate" --no-default-features && echo "OK (lib)"
     done
