@@ -54,6 +54,32 @@ pub trait State: 'static {}
 #[cfg(not(feature = "snapshot"))]
 impl<T: 'static> State for T {}
 
+/// SD6a: the message for a same-key-different-type signal collision.
+///
+/// Signal keys are strings (`cx.signal("count", …)`), so nothing at compile
+/// time stops two call sites sharing a key with different value types. When
+/// they do, the second site's `downcast` fails and the old message —
+/// `"signal type mismatch"` — named neither the key nor either type, so the
+/// reader had no way to find the other site.
+///
+/// Note that same-key-**same**-type sharing is deliberate and supported: it is
+/// how widget state works (`{name}.open` across Sheet/Drawer/Popover/Combobox).
+/// Only a *type* disagreement is an error, which is why this is a panic on
+/// mismatch rather than a warning on reuse.
+fn type_mismatch_msg<T: ?Sized>(key: Option<&str>, found: &'static str) -> String {
+    let key = key.unwrap_or("<unknown>");
+    format!(
+        "signal key {key:?} is already stored as `{found}`, but was just \
+         accessed as `{}`.\n\
+         Signal keys are strings, so two call sites can collide on one key. \
+         Either give this signal a distinct key, or make both sites agree on \
+         the type. Sharing a key with the SAME type is fine and intentional \
+         (that is how widget state like `{{name}}.open` is shared) — only the \
+         type disagreement is the bug.",
+        std::any::type_name::<T>(),
+    )
+}
+
 /// Type-erased stored value: downcast always; serialize only under `snapshot`.
 /// Runtime-only (never part of a snapshot), so trait objects are fine here.
 trait StoredValue: 'static {
@@ -186,6 +212,15 @@ struct Slot {
     /// GC). Recorded per slot because identity is a hash: unlike the string
     /// keys this replaced, a scope's descendants cannot be found by prefix.
     owner: IdHash,
+    /// Concrete type name of `value`, captured at construction where `T` is
+    /// still known (SD6a diagnostics only).
+    ///
+    /// Recorded rather than derived through the trait object: dispatching a
+    /// `StoredValue` method on `dyn StoredValue` ties the receiver borrow to
+    /// the trait's `'static` supertrait, which the lean build rejects inside
+    /// `Signal::update`'s `borrow_mut` scope. Capturing it here sidesteps that
+    /// and costs one word on a struct that already holds a `HashSet`.
+    type_name: &'static str,
 }
 
 impl Slot {
@@ -193,6 +228,10 @@ impl Slot {
     /// object explicitly (see the field note).
     fn stored(&self) -> &dyn Any {
         <dyn StoredValue as StoredValue>::as_any(&*self.value)
+    }
+    /// The concrete type name of the stored value (SD6a diagnostics).
+    fn stored_type_name(&self) -> &'static str {
+        self.type_name
     }
     /// Mutable counterpart of [`stored`](Self::stored).
     fn stored_mut(&mut self) -> &mut dyn Any {
@@ -638,6 +677,7 @@ impl Runtime {
                     subs: HashSet::new(),
                     version: 0,
                     owner,
+                    type_name: std::any::type_name::<T>(),
                 },
             );
         }
@@ -947,10 +987,15 @@ impl Runtime {
         self.note_read(id);
         let b = self.inner.borrow();
         let slot = b.slots.get(&id).expect("signal slot missing");
-        let v = slot
-            .stored()
-            .downcast_ref::<T>()
-            .expect("signal type mismatch");
+        let v = slot.stored().downcast_ref::<T>().unwrap_or_else(|| {
+            panic!(
+                "{}",
+                type_mismatch_msg::<T>(
+                    b.id_to_key.get(id.0 as usize).map(String::as_str),
+                    slot.stored_type_name(),
+                )
+            )
+        });
         f(v)
     }
 
@@ -1010,6 +1055,7 @@ impl Runtime {
                         subs: HashSet::new(),
                         version: ver,
                         owner,
+                        type_name: std::any::type_name::<T>(),
                     },
                 );
                 Vec::new()
@@ -1094,12 +1140,13 @@ impl<T: State> Signal<T> {
             let ver = b.write_gen.wrapping_add(1);
             b.write_gen = ver;
             {
+                let key = b.id_to_key.get(self.id.0 as usize).cloned();
                 let slot = b.slots.get_mut(&self.id).expect("signal slot missing");
                 slot.version = ver;
-                let v = slot
-                    .stored_mut()
-                    .downcast_mut::<T>()
-                    .expect("signal type mismatch");
+                let found = slot.stored_type_name();
+                let v = slot.stored_mut().downcast_mut::<T>().unwrap_or_else(|| {
+                    panic!("{}", type_mismatch_msg::<T>(key.as_deref(), found))
+                });
                 f(v);
             }
             let subs: Vec<ScopeId> = b
