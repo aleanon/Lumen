@@ -2,7 +2,7 @@
 //! (04 §7), and light/dark theme-token resolution.
 
 use lumen_layout::Display;
-use lumen_style::{apply, canonical, computed_json, tokens_for, Origin, Style, ThemeKind, Tokens};
+use lumen_style::{apply, tokens_for, Style, ThemeKind, Tokens};
 use lumen_style::{Item, Value};
 
 /// Parse a single `prop: val;` declaration's value.
@@ -224,8 +224,14 @@ fn applied_properties_change_a_style_and_only_they_do() {
     }
 }
 
+/// Snapshot-only: `canonical`/`computed_json` are the JSON export, which lean
+/// builds do not compile. The imports live here rather than at module scope so
+/// the rest of the file stays profile-agnostic.
+#[cfg(feature = "snapshot")]
 #[test]
 fn computed_value_serialization() {
+    use lumen_style::{canonical, computed_json, Origin};
+
     assert_eq!(
         canonical(&val("width", "8px")),
         serde_json::json!({ "px": 8.0 })

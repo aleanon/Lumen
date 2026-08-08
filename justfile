@@ -119,8 +119,14 @@ check-lean:
     #!/usr/bin/env bash
     set -euo pipefail
     export RUSTFLAGS="-D warnings"
+    # Tier 1: lib + tests (these crates' snapshot-only tests are cfg-gated).
     for crate in lumen-core lumen-style lumen-text lumen-render \
-                 lumen-layout lumen-widgets lumen-shell lumen; do
-        printf '%-16s ' "$crate"
-        cargo check -q -p "$crate" --no-default-features && echo OK
+                 lumen-layout lumen-shell-core; do
+        printf '%-18s ' "$crate"
+        cargo check -q -p "$crate" --no-default-features --all-targets && echo "OK (with tests)"
+    done
+    # Tier 2: lib only — see .github/workflows/ci.yml for why.
+    for crate in lumen-widgets lumen-shell lumen; do
+        printf '%-18s ' "$crate"
+        cargo check -q -p "$crate" --no-default-features && echo "OK (lib)"
     done

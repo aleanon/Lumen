@@ -64,6 +64,8 @@ fn fixture() -> SemanticsNode {
     win
 }
 
+/// Only the snapshot-gated schema test builds a whole document.
+#[cfg(feature = "snapshot")]
 fn doc() -> SemanticsDoc {
     SemanticsDoc {
         window: WindowInfo {
@@ -91,6 +93,10 @@ fn elision_splices_pure_layout_children() {
     );
 }
 
+/// Snapshot-only: it validates the JSON export, which lean builds do not have.
+/// Gated rather than made profile-agnostic — the test's whole subject is the
+/// serialization, so there is nothing left of it without `snapshot`.
+#[cfg(feature = "snapshot")]
 #[test]
 fn document_validates_against_schema() {
     let schema: serde_json::Value =

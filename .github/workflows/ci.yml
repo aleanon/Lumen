@@ -63,13 +63,20 @@ jobs:
   # Each crate is checked ALONE (`-p <crate>`), because checking several at once
   # re-introduces the unification this job exists to defeat.
   #
-  # SCOPE: library targets only, deliberately — no `--all-targets`. Several test
-  # targets are legitimately snapshot-specific without being cfg-gated (e.g.
-  # lumen-core's semantics tests call the snapshot-only `to_json`; lumen-widgets
-  # has 27 such errors). Making the test suites lean-compatible is real work and
-  # partly undesirable — some of those tests exist precisely to test snapshot
-  # behavior. The lib target is what actually ships, so that is what is gated
-  # here; extending to test targets is tracked separately.
+  # SCOPE: two tiers, because the crates are not in the same state.
+  #
+  # Six crates now compile lean WITH their tests: the handful of genuinely
+  # snapshot-specific tests were cfg-gated rather than made profile-agnostic,
+  # since a test whose whole subject is the JSON export has nothing left of it
+  # without `snapshot`. Those get `--all-targets`, so a lean break in test code
+  # is caught too.
+  #
+  # lumen-widgets, lumen-shell and the facade stay lib-only: lumen-widgets has
+  # 27 such errors and triaging them is real work — some of those tests exist
+  # precisely to exercise snapshot behavior and should be gated, others are
+  # incidental and could be made profile-agnostic, which is added coverage
+  # rather than bookkeeping. The lib is what ships, so the lib is gated
+  # everywhere; the remainder is tracked.
   lean:
     name: lean profile (--no-default-features)
     runs-on: ubuntu-latest
@@ -80,9 +87,15 @@ jobs:
       - name: check each crate with default features off
         run: |
           set -euo pipefail
+          # Tier 1: lib + tests.
           for crate in lumen-core lumen-style lumen-text lumen-render \
-                       lumen-layout lumen-widgets lumen-shell lumen; do
-            echo "==> $crate (lean)"
+                       lumen-layout lumen-shell-core; do
+            echo "==> $crate (lean, with tests)"
+            cargo check -p "$crate" --no-default-features --all-targets
+          done
+          # Tier 2: lib only (see the note above).
+          for crate in lumen-widgets lumen-shell lumen; do
+            echo "==> $crate (lean, lib only)"
             cargo check -p "$crate" --no-default-features
           done
 
