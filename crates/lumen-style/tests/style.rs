@@ -31,7 +31,7 @@ macro_rules! style_parity {
 #[test]
 fn lss_matches_typed_mirror_over_the_whole_applied_set() {
     use lumen_core::Color;
-    use lumen_layout::FlexDirection;
+    use lumen_layout::{Align, FlexDirection, FlexWrap};
     let red = || Color::from_hex("#ff0000ff").unwrap();
     let mut covered: Vec<&str> = Vec::new();
     style_parity!(covered, "background", "#1a73e8ff", |s: Style| s
@@ -45,6 +45,23 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
     style_parity!(covered, "font-weight", "600", |s: Style| s.font_weight(600));
     style_parity!(covered, "width", "100px", |s: Style| s.width(100.0));
     style_parity!(covered, "gap", "8px", |s: Style| s.gap(8.0));
+    // PROP1's mechanical batch.
+    style_parity!(covered, "row-gap", "8px", |s: Style| s.row_gap(8.0));
+    style_parity!(covered, "column-gap", "8px", |s: Style| s.column_gap(8.0));
+    style_parity!(covered, "justify-content", "center", |s: Style| s
+        .justify_content(Align::Center));
+    style_parity!(covered, "align-items", "center", |s: Style| s
+        .align_items(Align::Center));
+    style_parity!(covered, "align-self", "center", |s: Style| s
+        .align_self(Align::Center));
+    style_parity!(covered, "flex-wrap", "wrap", |s: Style| s
+        .flex_wrap(FlexWrap::Wrap));
+    style_parity!(covered, "flex-grow", "1", |s: Style| s.flex_grow(1.0));
+    style_parity!(covered, "flex-shrink", "1", |s: Style| s.flex_shrink(1.0));
+    style_parity!(covered, "min-width", "8px", |s: Style| s.min_width(8.0));
+    style_parity!(covered, "min-height", "8px", |s: Style| s.min_height(8.0));
+    style_parity!(covered, "max-width", "8px", |s: Style| s.max_width(8.0));
+    style_parity!(covered, "max-height", "8px", |s: Style| s.max_height(8.0));
     style_parity!(covered, "display", "flex", |s: Style| s
         .display(Display::Flex));
     style_parity!(covered, "flex-direction", "column", |s: Style| s
@@ -167,6 +184,11 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "border" | "border-top" | "border-right" | "border-bottom" | "border-left" => {
             "2px #ff0000ff"
         }
+        // PROP1's mechanical batch: keywords and bare numbers need their own
+        // samples, since the "8px" fallback is not a valid value for them.
+        "justify-content" | "align-items" | "align-self" => "center",
+        "flex-wrap" => "wrap",
+        "flex-grow" | "flex-shrink" => "1",
         _ => "8px", // the lengths
     };
     for &p in lumen_style::APPLIED_PROPERTIES {

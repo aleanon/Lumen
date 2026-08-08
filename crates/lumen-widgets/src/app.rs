@@ -4587,6 +4587,45 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
         el.style.row_gap = g;
         el.style.column_gap = g;
     }
+    // PROP1: per-axis gaps come after the shorthand so they override it,
+    // matching CSS source-order intuition (same rule the padding longhands use
+    // below).
+    if let Some(g) = css.row_gap {
+        el.style.row_gap = g;
+    }
+    if let Some(g) = css.column_gap {
+        el.style.column_gap = g;
+    }
+    if let Some(a) = css.justify_content {
+        el.style.justify_content = Some(a);
+    }
+    if let Some(a) = css.align_items {
+        el.style.align_items = Some(a);
+    }
+    if let Some(a) = css.align_self {
+        el.style.align_self = Some(a);
+    }
+    if let Some(w) = css.flex_wrap {
+        el.style.flex_wrap = w;
+    }
+    if let Some(n) = css.flex_grow {
+        el.style.flex_grow = n;
+    }
+    if let Some(n) = css.flex_shrink {
+        el.style.flex_shrink = n;
+    }
+    if let Some(d) = css.min_width {
+        el.style.min_width = d;
+    }
+    if let Some(d) = css.min_height {
+        el.style.min_height = d;
+    }
+    if let Some(d) = css.max_width {
+        el.style.max_width = d;
+    }
+    if let Some(d) = css.max_height {
+        el.style.max_height = d;
+    }
     if let Some(p) = css.padding {
         el.style.padding = p;
     }

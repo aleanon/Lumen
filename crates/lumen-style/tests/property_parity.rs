@@ -66,8 +66,9 @@ fn the_gap_is_recorded_and_shrinking() {
     // Entries leave PARSE_ONLY by being implemented; if this fails upward,
     // something added a property without implementing it.
     assert!(
-        PARSE_ONLY_PROPERTIES.len() <= 41,
-        "the unimplemented-property backlog grew to {} (was 41 on 2026-08-08)",
+        PARSE_ONLY_PROPERTIES.len() <= 29,
+        "the unimplemented-property backlog grew to {} (41 on 2026-08-08, \
+         ratcheted to 29 after PROP1's mechanical batch)",
         PARSE_ONLY_PROPERTIES.len()
     );
 }

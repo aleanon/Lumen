@@ -9,7 +9,7 @@ use crate::ast::{Unit, Value};
 #[cfg(feature = "snapshot")]
 use crate::Origin;
 use lumen_core::Color;
-use lumen_layout::{Dim, Display, Edges, FlexDirection};
+use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, FlexWrap};
 #[cfg(feature = "snapshot")]
 use serde_json::{json, Value as Json};
 use std::collections::HashMap;
@@ -127,6 +127,36 @@ pub struct Style {
     pub height: Option<Dim>,
     /// `gap` (both axes).
     pub gap: Option<Dim>,
+    /// SD5/PROP1: the mechanical batch — `LayoutStyle` and taffy already
+    /// implement every one of these; `apply()` simply never read the parsed
+    /// value into the existing field, so the declarations parsed clean and did
+    /// nothing.
+    ///
+    /// `row-gap`/`column-gap` (per-axis; override the `gap` shorthand).
+    pub row_gap: Option<Dim>,
+    /// See [`row_gap`](Self::row_gap).
+    pub column_gap: Option<Dim>,
+    /// `justify-content` — main-axis distribution.
+    pub justify_content: Option<Align>,
+    /// `align-items` — cross-axis alignment of children.
+    pub align_items: Option<Align>,
+    /// `align-self` — cross-axis alignment of this item, overriding the
+    /// parent's `align-items`.
+    pub align_self: Option<Align>,
+    /// `flex-wrap`.
+    pub flex_wrap: Option<FlexWrap>,
+    /// `flex-grow`.
+    pub flex_grow: Option<f32>,
+    /// `flex-shrink`.
+    pub flex_shrink: Option<f32>,
+    /// `min-width` / `min-height` / `max-width` / `max-height`.
+    pub min_width: Option<Dim>,
+    /// See [`min_width`](Self::min_width).
+    pub min_height: Option<Dim>,
+    /// See [`min_width`](Self::min_width).
+    pub max_width: Option<Dim>,
+    /// See [`min_width`](Self::min_width).
+    pub max_height: Option<Dim>,
     /// `padding` (all sides).
     pub padding: Option<Edges>,
     /// `margin` (all sides).
@@ -248,6 +278,81 @@ impl Style {
         self
     }
     /// Set `display`.
+    /// PROP1 typed setters. ADR-016 requires the typed mirror to cover exactly
+    /// the applied set, so implementing a `.lss` property means adding its
+    /// setter in the same change — the parity test enforces it.
+    pub fn row_gap(mut self, px: f32) -> Self {
+        self.row_gap = Some(Dim::px(px));
+        self
+    }
+
+    /// See [`row_gap`](Self::row_gap).
+    pub fn column_gap(mut self, px: f32) -> Self {
+        self.column_gap = Some(Dim::px(px));
+        self
+    }
+
+    /// `justify-content`.
+    pub fn justify_content(mut self, a: Align) -> Self {
+        self.justify_content = Some(a);
+        self
+    }
+
+    /// `align-items`.
+    pub fn align_items(mut self, a: Align) -> Self {
+        self.align_items = Some(a);
+        self
+    }
+
+    /// `align-self`.
+    pub fn align_self(mut self, a: Align) -> Self {
+        self.align_self = Some(a);
+        self
+    }
+
+    /// `flex-wrap`.
+    pub fn flex_wrap(mut self, w: FlexWrap) -> Self {
+        self.flex_wrap = Some(w);
+        self
+    }
+
+    /// `flex-grow`.
+    pub fn flex_grow(mut self, n: f32) -> Self {
+        self.flex_grow = Some(n);
+        self
+    }
+
+    /// `flex-shrink`.
+    pub fn flex_shrink(mut self, n: f32) -> Self {
+        self.flex_shrink = Some(n);
+        self
+    }
+
+    /// `min-width`.
+    pub fn min_width(mut self, px: f32) -> Self {
+        self.min_width = Some(Dim::px(px));
+        self
+    }
+
+    /// `min-height`.
+    pub fn min_height(mut self, px: f32) -> Self {
+        self.min_height = Some(Dim::px(px));
+        self
+    }
+
+    /// `max-width`.
+    pub fn max_width(mut self, px: f32) -> Self {
+        self.max_width = Some(Dim::px(px));
+        self
+    }
+
+    /// `max-height`.
+    pub fn max_height(mut self, px: f32) -> Self {
+        self.max_height = Some(Dim::px(px));
+        self
+    }
+
+    /// `display`.
     pub fn display(mut self, d: Display) -> Self {
         self.display = Some(d);
         self
@@ -384,24 +489,12 @@ impl Style {
 /// parsed value into the existing field.
 pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     // Layout — the field exists in LayoutStyle; apply() doesn't populate it.
-    "flex-wrap",
-    "flex-grow",
-    "flex-shrink",
     "flex-basis",
-    "justify-content",
-    "align-items",
-    "align-self",
     "align-content",
-    "row-gap",
-    "column-gap",
     "grid-template-columns",
     "grid-template-rows",
     "grid-column",
     "grid-row",
-    "min-width",
-    "min-height",
-    "max-width",
-    "max-height",
     "aspect-ratio",
     "position",
     "inset",
@@ -435,6 +528,18 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
 /// mirror covers exactly this set — so this const, `apply`, and the setters
 /// cannot drift apart silently (04 §8).
 pub const APPLIED_PROPERTIES: &[&str] = &[
+    "flex-wrap",
+    "flex-grow",
+    "flex-shrink",
+    "justify-content",
+    "align-items",
+    "align-self",
+    "row-gap",
+    "column-gap",
+    "min-width",
+    "min-height",
+    "max-width",
+    "max-height",
     "display",
     "flex-direction",
     "width",
@@ -484,6 +589,20 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "width" => style.width = as_dim(&v),
         "height" => style.height = as_dim(&v),
         "gap" => style.gap = as_dim(&v),
+        // PROP1: the mechanical batch — parse straight into fields taffy
+        // already honours.
+        "row-gap" => style.row_gap = as_dim(&v),
+        "column-gap" => style.column_gap = as_dim(&v),
+        "justify-content" => style.justify_content = as_align(&v),
+        "align-items" => style.align_items = as_align(&v),
+        "align-self" => style.align_self = as_align(&v),
+        "flex-wrap" => style.flex_wrap = as_flex_wrap(&v),
+        "flex-grow" => style.flex_grow = as_number(&v).map(|n| n as f32),
+        "flex-shrink" => style.flex_shrink = as_number(&v).map(|n| n as f32),
+        "min-width" => style.min_width = as_dim(&v),
+        "min-height" => style.min_height = as_dim(&v),
+        "max-width" => style.max_width = as_dim(&v),
+        "max-height" => style.max_height = as_dim(&v),
         "padding" => style.padding = as_dim(&v).map(Edges::all),
         "margin" => style.margin = as_dim(&v).map(Edges::all),
         "padding-top" => style.padding_sides[0] = as_px(&v),
@@ -996,6 +1115,38 @@ fn as_display(v: &Value) -> Option<Display> {
             "flex" => Some(Display::Flex),
             "grid" => Some(Display::Grid),
             "none" => Some(Display::None),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// PROP1: CSS alignment keywords → [`Align`].
+///
+/// `flex-start`/`flex-end` are accepted alongside `start`/`end` because CSS
+/// authors write both and the difference is not meaningful here.
+fn as_align(v: &Value) -> Option<Align> {
+    match v {
+        Value::Keyword(k) => match k.as_str() {
+            "start" | "flex-start" => Some(Align::Start),
+            "end" | "flex-end" => Some(Align::End),
+            "center" => Some(Align::Center),
+            "stretch" => Some(Align::Stretch),
+            "baseline" => Some(Align::Baseline),
+            "space-between" => Some(Align::SpaceBetween),
+            "space-around" => Some(Align::SpaceAround),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn as_flex_wrap(v: &Value) -> Option<FlexWrap> {
+    match v {
+        Value::Keyword(k) => match k.as_str() {
+            "nowrap" => Some(FlexWrap::NoWrap),
+            "wrap" => Some(FlexWrap::Wrap),
+            "wrap-reverse" => Some(FlexWrap::WrapReverse),
             _ => None,
         },
         _ => None,
