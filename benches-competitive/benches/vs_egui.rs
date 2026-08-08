@@ -48,7 +48,13 @@ use kurbo::Size;
 use lumen_core::state::Signal;
 use lumen_widgets::{widgets, App};
 
-const SIZES: [usize; 3] = [100, 500, 2000];
+/// Eight sizes rather than three. The original `[100, 500, 2000]` could show
+/// that Lumen's cost inflected somewhere above 500 rows but not where; bisecting
+/// the size axis located it in a single run (a *cliff* between 1400 and 2000,
+/// not a curve — which is what identified it as cache thrash rather than a
+/// scaling property). Keep the density: it is what makes this harness
+/// diagnostic instead of merely comparative.
+const SIZES: [usize; 8] = [100, 250, 500, 750, 1000, 1400, 2000, 3000];
 
 /// Lumen: N rows, one of which reads a signal, so a write dirties the view.
 fn lumen_frame(c: &mut Criterion) {

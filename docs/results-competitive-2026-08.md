@@ -24,31 +24,69 @@ harness would benchmark a differently-compiled Lumen than users get.
 
 ## Result
 
+Measured at eight sizes after the cache fix below (criterion, 2 s warm-up /
+4 s measurement; egui at 1 s / 2 s).
+
 | rows | Lumen | egui | Lumen / egui |
 |-----:|------:|-----:|-------------:|
-| 100 | 395.6 µs | 37.5 µs | **10.6×** |
-| 500 | 818.3 µs | 138.6 µs | **5.9×** |
-| 2000 | 7 789.8 µs | 539.6 µs | **14.4×** |
+| 100 | 382.7 µs | 37.1 µs | **10.3×** |
+| 250 | 529.2 µs | 75.2 µs | **7.0×** |
+| 500 | 805.5 µs | 138.3 µs | **5.8×** |
+| 750 | 1 131.5 µs | 204.5 µs | **5.5×** |
+| 1000 | 1 731.9 µs | 266.6 µs | **6.5×** |
+| 1400 | 2 380.0 µs | 368.9 µs | **6.5×** |
+| 2000 | 4 061.7 µs | 690.4 µs | **5.9×** |
+| 3000 | 7 051.9 µs | 797.0 µs | **8.8×** |
 
-## The scaling is the real finding
+(egui's 2000-row point was the noisiest measurement on either side, CI
+632–767 µs; the 3000-row ratio inherits that noise. Don't read the 8.8×.)
+
+## The scaling was the real finding — and it was a cache defect
 
 | | 100 → 500 (5× rows) | 500 → 2000 (4× rows) |
 |---|---|---|
-| **Lumen** | 2.07× | **9.52×** |
-| **egui** | 3.70× | 3.89× |
+| **Lumen, as first measured** | 2.07× | **9.52×** |
+| **Lumen, after the fix** | 2.11× | **5.04×** |
+| **egui** | 3.73× | 4.99× |
 
-egui scales linearly and predictably. Lumen scales *better* than linear up to
-500 rows, then **sharply superlinear** above it — 4× the rows costs 9.5× the
-time. Something changes behaviour past ~500 nodes.
+The original run showed Lumen scaling *better* than linear to 500 rows and then
+sharply superlinear — 4× the rows costing 9.5× the time. That was called out as
+a ceiling rather than a backlog item, and as the most valuable thing the
+benchmark surfaced. It was.
 
-That matters more than the headline ratio, because it lands directly on the
-owner's third performance axis — **how many nodes can the UI hold while staying
-performant**. A constant-factor gap is an optimization backlog; a superlinear
-one is a ceiling.
+**It was `lumen-text`'s shape/run cache thrashing, not a scaling property of the
+architecture.** Both caches evicted by dropping an arbitrary half (`retain` over
+hash order, no recency information). That is safe only while the live working
+set fits in `cap / 2`; past that, the sweep drops to `cap / 2`, the same frame
+re-shapes what it still needs, and the cache re-crosses the cap — locking into
+permanent thrash after a *single* crossing. At 2000 rows this cost **1183
+re-shapes per frame**. Full reasoning, the rejected alternatives, and the
+epoch-based replacement are in `.ai_docs/07-decision-log.md` (2026-08-08).
 
-Note this is *not* the O(scopes² × span) `copy_span` defect the CP-series
-targets: this app has no `cx.scope` at all. It is a separate, unidentified
-inflection, and it is the single most valuable thing this benchmark surfaced.
+Two things are worth carrying forward from how this looked before it was found:
+
+* **The benchmark's own 2000-row number was measuring a pathology, not the
+  framework.** A cliff between two adjacent sizes is a much better signal than a
+  ratio; bisecting the size axis (100 → 3000 in eight steps) located it in one
+  run, where the original three-point table could only show that *something*
+  happened.
+* **It was never a 2000-node problem.** The trigger (cumulative distinct strings
+  crossing 2048) and the lock-in condition (live set above 1024) are different,
+  so 1400 rows measured clean while sitting 31 frames away from the same cliff.
+  Any app holding more than ~1024 distinct strings would have hit this
+  eventually, from a single changing label.
+
+Note this was *not* the O(scopes² × span) `copy_span` defect the CP-series
+targets: this app has no `cx.scope` at all. Two independent complexity defects,
+neither costed by any document, both found only by measurement.
+
+## What remains
+
+Lumen's marginal cost per row still grows with N — 1.06 µs/row over 100→500,
+2.33 over 1000→2000, 2.99 over 2000→3000 — where egui's is flat at ~0.26. So the
+*cliff* is gone and the scaling now matches egui's over 500→2000, but a gentle
+superlinearity remains and is unexplained. The residual is a ~6× constant factor
+plus that drift, which is an optimization backlog rather than a ceiling.
 
 ## Honest caveats
 
@@ -75,21 +113,38 @@ is easy to quote the ratio and drop the caveats.
 work at 2000 rows despite the 400×800 viewport. The gap is not a
 culling artifact.
 
+There is an irony worth recording in that second bullet: egui's galley cache is
+the *same kind of cache* serving the *same purpose*, and it is the reason egui's
+steady state is as good as it is. The gap at 2000 rows was never mainly about
+immediate-mode versus retained — it was one framework's string cache working and
+the other's defeating itself.
+
 ## What this says about the grade
 
 On this axis, against a same-language peer, Lumen is **not** matching the
-leader, so it is not at A — let alone A+. The gap is 6-14× and, more
-importantly, the wrong shape.
+leader, so it is not at A — let alone A+. The gap is ~6×.
 
-It does not follow that A+ is unreachable — the campaign's unlanded work
-(CP1/CP2 copy path, OB2 lazy semantics, LAY1 persistent taffy cache) all targets
-exactly this frame. But "peak performance" should not be claimed anywhere until
-this table looks different.
+But the *shape* is no longer wrong: over 500→2000 rows Lumen now scales at 5.04×
+against egui's 4.99×. That distinction is the one this document originally
+insisted on — "a constant-factor gap is an optimization backlog; a superlinear
+one is a ceiling" — and the ceiling turned out to be a cache defect, not the
+architecture. A residual gentle superlinearity remains (see *What remains*).
+
+It does not follow that A+ is reachable cheaply, but the remaining work is
+ordinary optimization: OB2 lazy semantics is unlanded and pays every frame here,
+and the per-row marginal drift is uninvestigated. (CP1's copy path has since
+landed; CP2 and LAY1 were retired by measurement — see the campaign record.)
+"Peak performance" should still not be claimed anywhere until this table looks
+different.
 
 ## Next
 
-1. **Find the >500-node inflection.** Highest value; unidentified.
-2. Extend the harness to **Slint** (the closest architectural peer — retained,
+1. ~~Find the >500-node inflection.~~ **Done** — `lumen-text` cache thrash; see
+   above and the 2026-08-08 decision-log entry.
+2. **Explain the residual marginal-cost drift** (1.06 → 2.99 µs/row). Now the
+   highest-value open item on this axis, and the same bisect-the-size-axis
+   method applies.
+3. Extend the harness to **Slint** (the closest architectural peer — retained,
    Rust, and it has never been compared either) and **GTK4 via gtk4-rs**.
-3. Add the other two owner axes: reaction latency (input → committed frame) and
+4. Add the other two owner axes: reaction latency (input → committed frame) and
    node capacity at a fixed frame budget.

@@ -923,6 +923,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // full rebuild when a state rule touches layout/typography (the A.2
         // risk note) so layout stays correct.
         let restyle_only = visual_changed && !needs_rebuild && !full_rebuild_forced();
+        // The shape/run caches evict by frame epoch: entries used this frame or
+        // last are the live working set and must survive a cap crossing. Advance
+        // the epoch only on frames that actually shape — an idle pump shapes
+        // nothing, and advancing through an idle stretch would age the whole
+        // live set out and hand the next sweep a full re-shape stall.
+        if needs_rebuild || restyle_only {
+            self.text.begin_frame();
+        }
         if needs_rebuild || (restyle_only && !self.restyle_visual(&visual_before)) {
             // Scope memoization keys off signal versions only, so a rebuild
             // driven by a forced invalidation (resize/scale/stylesheet/theme —

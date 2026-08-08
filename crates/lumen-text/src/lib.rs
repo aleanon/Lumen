@@ -230,11 +230,78 @@ impl ShapeKey {
     }
 }
 
-/// Clear the shaped-layout cache above this many entries (bounds a long session
+/// Sweep the shaped-layout cache above this many entries (bounds a long session
 /// with many distinct strings, e.g. an animated numeric readout).
+///
+/// This is a *soft* cap: crossing it triggers [`sweep`], which drops entries not
+/// used in the last two frames. If the live working set alone exceeds it, the
+/// cap is retargeted at that set rather than evicting entries the next frame
+/// will immediately re-shape — see [`sweep`] for why.
 const SHAPE_CACHE_CAP: usize = 2048;
-/// Cap for the glyph-run cache (R5). Same rationale as the shape cache.
+/// Soft cap for the glyph-run cache (R5). Same rationale as the shape cache.
 const RUN_CACHE_CAP: usize = 4096;
+/// Absolute ceilings. Past these the live working set is larger than any cache
+/// should hold (a non-virtualized list of tens of thousands of distinct labels),
+/// so we stop growing and accept eviction; `VirtualList` is the answer there,
+/// not more memory.
+const SHAPE_CACHE_HARD_CAP: usize = 16_384;
+/// Absolute ceiling for the glyph-run cache. See [`SHAPE_CACHE_HARD_CAP`].
+const RUN_CACHE_HARD_CAP: usize = 32_768;
+
+/// A cache entry tagged with the frame epoch it was last used in.
+struct Aged<V> {
+    value: V,
+    epoch: u64,
+}
+
+/// Reclaim a cache that has crossed its soft cap, then retarget the cap.
+///
+/// # Why not simply drop half
+///
+/// The previous policy retained an arbitrary half (`retain` over hash order,
+/// carrying no recency information). That is sound only while the live working
+/// set fits in `cap / 2`. Past that it is self-sustaining: the sweep drops to
+/// `cap / 2`, the same frame re-shapes the entries it still needs, refilling
+/// past `cap` again — so a *single* crossing locks the cache into thrashing on
+/// every subsequent frame, permanently.
+///
+/// Measured on an N-row list (`benches-competitive`, 400 frames): at 2000 rows
+/// this cost **1183 re-shapes per frame** and 1.16 evictions per frame, for a
+/// 2.2x frame-time penalty (3.8 ms → 8.5 ms). The trigger is cumulative distinct
+/// strings crossing `cap`; the lock-in condition is a live set above `cap / 2`.
+/// One changing label (a clock, a counter) is enough to drive any app with more
+/// than ~1024 distinct strings there, given enough frames — 1400 rows measured
+/// clean only because it had not crossed *yet*.
+///
+/// # The policy
+///
+/// Keep entries used **this frame or last**, drop the rest. "Or last" is
+/// load-bearing: a crossing happens mid-frame, so entries not yet reached this
+/// frame still carry the previous epoch, and dropping them would re-shape them
+/// moments later — reintroducing the sequential-scan worst case that defeats
+/// plain LRU. Stale strings (the growth source) are exactly what this reclaims.
+fn sweep<K: Eq + std::hash::Hash, V>(
+    map: &mut HashMap<K, Aged<V>>,
+    epoch: u64,
+    cap: &mut usize,
+    base_cap: usize,
+    hard_cap: usize,
+) {
+    map.retain(|_, e| e.epoch + 1 >= epoch);
+    if map.len() >= hard_cap {
+        // The live set alone is over the ceiling: fall back to dropping half.
+        let mut keep = map.len() / 2;
+        map.retain(|_, _| {
+            let k = keep > 0;
+            keep = keep.saturating_sub(1);
+            k
+        });
+    }
+    // Retarget at the live set, so the next crossing is a frame away rather than
+    // an insert away (which would make every insert an O(n) scan). Shrinks back
+    // toward the base cap as the working set does.
+    *cap = base_cap.max(map.len().saturating_mul(2)).min(hard_cap);
+}
 
 /// A cached, **origin-relative** glyph run (R5 incremental paint): the positioned
 /// glyphs (laid out at origin 0,0), their coverage images, the ink bounds
@@ -263,11 +330,18 @@ pub struct TextEngine {
     /// is the dominant per-frame cost; the runtime shapes each label both to
     /// measure it and to paint it, every frame — this collapses that to one
     /// shaping per `(text, geometry, wrap)` and reuses it across frames.
-    shape_cache: HashMap<ShapeKey, TextBlock>,
+    shape_cache: HashMap<ShapeKey, Aged<TextBlock>>,
     /// Cache of origin-relative glyph runs keyed by `(ShapeKey, scale)` (R5). The
     /// paint layer translates + interns these instead of re-building the run each
     /// frame — the dominant display-list-emission cost for text.
-    run_cache: HashMap<(ShapeKey, u32), CachedRun>,
+    run_cache: HashMap<(ShapeKey, u32), Aged<CachedRun>>,
+    /// Frame counter, advanced by [`TextEngine::begin_frame`]. Entries record the
+    /// epoch they were last used in so [`sweep`] can tell the live working set
+    /// from strings that merely passed through.
+    epoch: u64,
+    /// Current soft caps. Start at the base and retarget on each sweep.
+    shape_cap: usize,
+    run_cap: usize,
 }
 
 impl Default for TextEngine {
@@ -323,7 +397,23 @@ impl TextEngine {
             family,
             shape_cache: HashMap::new(),
             run_cache: HashMap::new(),
+            epoch: 0,
+            shape_cap: SHAPE_CACHE_CAP,
+            run_cap: RUN_CACHE_CAP,
         }
+    }
+
+    /// Mark the start of a frame, so the shape/run caches can tell the live
+    /// working set from strings that merely passed through.
+    ///
+    /// Call once per frame that actually shapes text. Skipping it is safe — the
+    /// caches then fall back to the hard ceilings — but calling it on *idle*
+    /// frames is not: advancing the epoch through a stretch where nothing is
+    /// shaped would make the whole live set look stale, and the next sweep would
+    /// discard it. `Headless::pump` calls this only on frames that build or
+    /// restyle, which is the rule to copy for any other host.
+    pub fn begin_frame(&mut self) {
+        self.epoch = self.epoch.wrapping_add(1);
     }
 
     /// Register an additional font from its `bytes` and return its family name —
@@ -362,22 +452,29 @@ impl TextEngine {
         align: TextAlign,
     ) -> &TextBlock {
         let key = ShapeKey::new(text, base, max_width, align);
-        if !self.shape_cache.contains_key(&key) {
+        if let Some(entry) = self.shape_cache.get_mut(&key) {
+            entry.epoch = self.epoch;
+        } else {
             let block = self.layout(text, base.clone(), &[], max_width, align);
-            if self.shape_cache.len() >= SHAPE_CACHE_CAP {
-                // R.5: drop ~half instead of everything — a cap crossing
-                // costs one half-refill, not a full re-shape stall. Iteration
-                // order is arbitrary but caches are output-transparent.
-                let mut keep = self.shape_cache.len() / 2;
-                self.shape_cache.retain(|_, _| {
-                    let k = keep > 0;
-                    keep = keep.saturating_sub(1);
-                    k
-                });
+            if self.shape_cache.len() >= self.shape_cap {
+                sweep(
+                    &mut self.shape_cache,
+                    self.epoch,
+                    &mut self.shape_cap,
+                    SHAPE_CACHE_CAP,
+                    SHAPE_CACHE_HARD_CAP,
+                );
             }
-            self.shape_cache.insert(key.clone(), block);
+            let epoch = self.epoch;
+            self.shape_cache.insert(
+                key.clone(),
+                Aged {
+                    value: block,
+                    epoch,
+                },
+            );
         }
-        &self.shape_cache[&key]
+        &self.shape_cache[&key].value
     }
 
     /// Like [`shaped`](Self::shaped) but returns the **origin-relative glyph run**
@@ -393,7 +490,9 @@ impl TextEngine {
         scale: f32,
     ) -> &CachedRun {
         let key = (ShapeKey::new(text, base, max_width, align), scale.to_bits());
-        if !self.run_cache.contains_key(&key) {
+        if let Some(entry) = self.run_cache.get_mut(&key) {
+            entry.epoch = self.epoch;
+        } else {
             let cached = {
                 let block = self.shaped(text, base, max_width, align);
                 let (run, images) = block.glyph_run(0.0, 0.0, scale);
@@ -413,20 +512,25 @@ impl TextEngine {
                     metrics: block.metrics(),
                 }
             };
-            if self.run_cache.len() >= RUN_CACHE_CAP {
-                // R.5: drop ~half instead of everything — a cap crossing
-                // costs one half-refill, not a full re-shape stall. Iteration
-                // order is arbitrary but caches are output-transparent.
-                let mut keep = self.run_cache.len() / 2;
-                self.run_cache.retain(|_, _| {
-                    let k = keep > 0;
-                    keep = keep.saturating_sub(1);
-                    k
-                });
+            if self.run_cache.len() >= self.run_cap {
+                sweep(
+                    &mut self.run_cache,
+                    self.epoch,
+                    &mut self.run_cap,
+                    RUN_CACHE_CAP,
+                    RUN_CACHE_HARD_CAP,
+                );
             }
-            self.run_cache.insert(key.clone(), cached);
+            let epoch = self.epoch;
+            self.run_cache.insert(
+                key.clone(),
+                Aged {
+                    value: cached,
+                    epoch,
+                },
+            );
         }
-        &self.run_cache[&key]
+        &self.run_cache[&key].value
     }
 
     /// Shape and lay out `text`. `ranges` apply per-byte-range style overrides
@@ -1066,23 +1170,96 @@ mod glyph_cache_tests {
 mod eviction_tests {
     use super::*;
 
-    /// R.5: crossing the shape-cache cap retains ~half the entries instead
-    /// of clearing — the hot working set partially survives, so a crossing
-    /// costs one half-refill rather than a full re-shape stall.
+    /// **The regression this policy exists for.** A live working set above
+    /// `SHAPE_CACHE_CAP / 2`, plus one changing string per frame, used to lock
+    /// the cache into permanent thrash: the sweep dropped to `cap / 2`, the same
+    /// frame re-shaped what it still needed, and the cache re-crossed the cap
+    /// immediately — measured at 1183 re-shapes/frame and a 2.2x frame-time
+    /// penalty on a 2000-row list. Every live entry must survive.
     #[test]
-    fn shape_cache_overflow_keeps_half() {
+    fn live_working_set_survives_a_cap_crossing() {
         let mut engine = TextEngine::new();
         let style = TextStyle::default();
-        for i in 0..SHAPE_CACHE_CAP {
-            engine.shaped(&format!("s{i}"), &style, None, TextAlign::Start);
+        // Above cap/2 — this is the lock-in condition, not merely the trigger.
+        let live = SHAPE_CACHE_CAP * 3 / 4;
+        // Long enough that cumulative distinct strings crosses the cap (and then
+        // keeps going), which is what used to trip the old policy.
+        for frame in 0..(SHAPE_CACHE_CAP + live) {
+            engine.begin_frame();
+            engine.shaped(
+                &format!("transient {frame}"),
+                &style,
+                None,
+                TextAlign::Start,
+            );
+            for i in 0..live {
+                engine.shaped(&format!("live {i}"), &style, None, TextAlign::Start);
+            }
         }
-        assert_eq!(engine.shape_cache.len(), SHAPE_CACHE_CAP);
-        // The insert that crosses the cap halves the cache first.
-        engine.shaped("overflow", &style, None, TextAlign::Start);
-        let len = engine.shape_cache.len();
+        for i in 0..live {
+            let key = ShapeKey::new(&format!("live {i}"), &style, None, TextAlign::Start);
+            assert!(
+                engine.shape_cache.contains_key(&key),
+                "live entry {i} was evicted — the working set is thrashing"
+            );
+        }
         assert!(
-            len > SHAPE_CACHE_CAP / 4 && len <= SHAPE_CACHE_CAP / 2 + 1,
-            "half retained, got {len} of {SHAPE_CACHE_CAP}"
+            engine.shape_cache.len() <= SHAPE_CACHE_HARD_CAP,
+            "cache grew past its ceiling: {}",
+            engine.shape_cache.len()
         );
+    }
+
+    /// The other half of the contract: strings that merely pass through must
+    /// still be reclaimed, or the cap would mean nothing. With no live set at
+    /// all, the cache must stay bounded rather than growing to the hard cap.
+    #[test]
+    fn transient_strings_are_reclaimed() {
+        let mut engine = TextEngine::new();
+        let style = TextStyle::default();
+        for frame in 0..(SHAPE_CACHE_CAP + SHAPE_CACHE_CAP / 2) {
+            engine.begin_frame();
+            engine.shaped(&format!("t{frame}"), &style, None, TextAlign::Start);
+        }
+        assert!(
+            engine.shape_cache.len() <= SHAPE_CACHE_CAP,
+            "transient strings accumulated: {}",
+            engine.shape_cache.len()
+        );
+    }
+
+    /// `sweep` in isolation, so the two branches are covered without paying for
+    /// tens of thousands of real shaping calls.
+    #[test]
+    fn sweep_drops_stale_and_keeps_the_last_two_epochs() {
+        let mut map: HashMap<u32, Aged<u32>> = HashMap::new();
+        map.insert(0, Aged { value: 0, epoch: 1 }); // stale
+        map.insert(1, Aged { value: 1, epoch: 9 }); // last frame
+        map.insert(
+            2,
+            Aged {
+                value: 2,
+                epoch: 10,
+            },
+        ); // this frame
+        let mut cap = 2;
+        sweep(&mut map, 10, &mut cap, 2, 100);
+        assert!(!map.contains_key(&0), "stale entry retained");
+        assert!(map.contains_key(&1), "previous frame dropped mid-frame");
+        assert!(map.contains_key(&2), "current frame dropped");
+    }
+
+    #[test]
+    fn sweep_falls_back_to_halving_past_the_hard_cap() {
+        let mut map: HashMap<u32, Aged<u32>> = HashMap::new();
+        for i in 0..100u32 {
+            map.insert(i, Aged { value: i, epoch: 5 });
+        }
+        let mut cap = 10;
+        // Everything is live, so the epoch pass frees nothing and the ceiling
+        // has to do the work.
+        sweep(&mut map, 5, &mut cap, 10, 50);
+        assert_eq!(map.len(), 50);
+        assert_eq!(cap, 50, "cap must clamp to the hard ceiling");
     }
 }
