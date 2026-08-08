@@ -4,6 +4,13 @@
 #
 # Usage: android_build_apk.sh <crate> <lib_name> <abi> <out.apk>
 #   e.g. android_build_apk.sh hello_android hello_android x86_64 /tmp/hello.apk
+#
+# LUMEN_APK_LEAN=1 builds with --no-default-features, which is the profile
+# CFG1/LN3 describe: no embedded pan-Unicode face, no snapshot surfaces. For
+# that switch to bite, the example must declare its own feature passthrough and
+# spell out its `lumen` dependency — a workspace-inherited one silently ignores
+# `default-features = false` and the lean leg measures nothing. See
+# examples/hello_android/Cargo.toml.
 set -euo pipefail
 
 CRATE="${1:?crate}"; LIB="${2:?lib_name}"; ABI="${3:-x86_64}"; OUT="${4:?out.apk}"
@@ -20,8 +27,11 @@ MANIFEST="$ROOT/crates/lumen-shell-android/android/AndroidManifest.xml"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
-echo "==> cross-compiling $CRATE ($ABI)"
-cargo ndk -t "$ABI" -o "$STAGE/jniLibs" build -p "$CRATE" --release >/dev/null
+FEATURES=()
+[ "${LUMEN_APK_LEAN:-0}" = "1" ] && FEATURES=(--no-default-features)
+
+echo "==> cross-compiling $CRATE ($ABI${FEATURES:+, lean})"
+cargo ndk -t "$ABI" -o "$STAGE/jniLibs" build -p "$CRATE" --release "${FEATURES[@]}" >/dev/null
 
 echo "==> linking base APK (aapt2)"
 # Point the NativeActivity's lib_name at this crate's .so.
@@ -33,13 +43,19 @@ echo "==> adding native lib"
 # aapt2 ABI dir is e.g. x86_64; APK expects lib/<abi>/lib<name>.so
 mkdir -p "$STAGE/lib/$ABI"
 cp "$STAGE/jniLibs/$ABI/lib$LIB.so" "$STAGE/lib/$ABI/"
-( cd "$STAGE" && zip -q -r base.apk "lib/$ABI/lib$LIB.so" )
+# `-0` stores the .so uncompressed and `zipalign -p` page-aligns it, which is
+# what lets Android 6+ map the library straight out of the APK instead of
+# extracting a second copy at install time. Compressing it (plain `zip -r`)
+# still produces a working APK, so nothing here would have failed — it just
+# costs the user a duplicate of the library on disk.
+( cd "$STAGE" && zip -q -0 -X base.apk "lib/$ABI/lib$LIB.so" )
 
 echo "==> zipalign + sign"
-"$BT/zipalign" -f 4 "$STAGE/base.apk" "$STAGE/aligned.apk"
+"$BT/zipalign" -p -f 4 "$STAGE/base.apk" "$STAGE/aligned.apk"
 "$BT/apksigner" sign \
     --ks "$HOME/.android/debug.keystore" \
     --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android \
     --out "$OUT" "$STAGE/aligned.apk"
 
-echo "==> built $OUT"
+SZ=$(stat -c %s "$OUT")
+echo "==> built $OUT — $((SZ / 1024 / 1024)).$(((SZ / 1024 / 100) % 10)) MB"

@@ -67,9 +67,16 @@ bytes, so the cost is a re-decode and the UI is unchanged. `lumen::asset` is now
 re-exported through the facade, which it wasn't: an app previously had no way to
 respond to a low-memory warning even if it wanted to.
 
-*Still open:* no APK or IPA has ever been built in this repo (MOB3), so the
-mobile size and behaviour numbers remain unmeasured. See
-`docs/cp4-arm-measurement-blocked.md` for the related hardware gap.
+*MOB3 closed 2026-08-08* — the "no APK has ever been built" reason was
+inherited and false: `scripts/android_build_apk.sh` already existed and the
+toolchain was installed. A signed arm64 APK builds, and the x86_64 one installs,
+launches and responds to taps on an API-34 emulator (three taps, counter reads
+3). Sizes: **22.8 MB default, 7.0 MB `--no-default-features`** — confirming the
+facade's own "22 MB → ~7 MB" estimate. `docs/mob3-apk-measured.md`.
+
+*Still open:* **iOS** — no macOS, so no IPA (genuinely blocked, unlike MOB3).
+**CP4** — the emulator is x86_64 under KVM; an ARM timing needs hardware, not an
+emulator that would measure QEMU. See `docs/cp4-arm-measurement-blocked.md`.
 
 ## ⏸ Sandbox-blocked (need hardware / OS / external infra to *verify*)
 

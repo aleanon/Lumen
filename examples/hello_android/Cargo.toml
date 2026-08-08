@@ -11,9 +11,22 @@ publish = false
 name = "hello_android"
 crate-type = ["cdylib", "lib"]
 
+# The facade is spelled out rather than inherited with `workspace = true`.
+# `default-features = false` is SILENTLY IGNORED on a workspace-inherited
+# dependency whose root entry leaves defaults on, so an inherited `lumen` would
+# drag `pan-unicode` in no matter what this crate's features said — and
+# `--no-default-features` would appear to work while changing nothing. The APK
+# size table in 05 §7 is measured through these features, so they have to bite.
 [dependencies]
-lumen = { workspace = true }
+lumen = { path = "../../crates/lumen", default-features = false }
 
 [target.'cfg(target_os = "android")'.dependencies]
-lumen-shell-android = { workspace = true }
+lumen-shell-android = { path = "../../crates/lumen-shell-android", default-features = false }
 android-activity = { workspace = true, features = ["native-activity"] }
+
+[features]
+default = ["pan-unicode", "snapshot"]
+# The 15 MB embedded pan-Unicode face. Off => the ~350 KB Latin subset, and an
+# app that needs CJK/RTL registers a wider face at runtime via `App::font`.
+pan-unicode = ["lumen/pan-unicode", "lumen-shell-android/pan-unicode"]
+snapshot = ["lumen/snapshot", "lumen-shell-android/snapshot"]
