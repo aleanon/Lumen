@@ -312,10 +312,16 @@ impl Menu {
 
 impl_common!(Menu);
 
-/// A vertical menu of selectable items.
+/// A vertical menu of selectable items; `on_select` receives the item index.
+///
 /// *(Thin shim over [`Menu`] — the typed form is preferred.)*
-pub fn menu(items: &[&str]) -> Element {
-    Menu::new(items).into()
+///
+/// SD3: this previously took only `items` and could therefore never reach
+/// [`Menu::on_select`], so every menu built through it was inert — it rendered,
+/// it was clickable, and nothing happened. Selecting is the entire purpose of a
+/// menu, so the handler is a parameter rather than an optional builder step.
+pub fn menu(items: &[&str], on_select: impl Fn(&Runtime, usize) + 'static) -> Element {
+    Menu::new(items).on_select(on_select).into()
 }
 
 /// A CSS grid with `columns` equal-fraction columns.

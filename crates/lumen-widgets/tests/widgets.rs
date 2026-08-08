@@ -188,6 +188,11 @@ fn w_checkbox_space_toggles() {
         sem(&h).states.contains(&State::Checked),
         "space should check it"
     );
+    // SD3: the CHECKED state had no golden, which is why a checkbox that drew
+    // no tick shipped — the state assertion above passed the whole time. The
+    // semantic state and the pixels are independent claims, and only one of
+    // them was being checked.
+    check_golden("w_checkbox_checked", &h.screenshot());
     h.inject(key(NamedKey::Space));
     h.pump();
     assert!(

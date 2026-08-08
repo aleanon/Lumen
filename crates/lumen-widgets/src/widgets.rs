@@ -6,9 +6,9 @@
 
 use crate::element::{BuildCx, Element};
 use crate::widget::impl_common;
-use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
+use lumen_core::semantics::{Action, Role, ScrollInfo};
 use lumen_core::Color;
-use lumen_layout::{Dim, Display, Edges, FlexDirection, LayoutStyle, Position};
+use lumen_layout::{Dim, Edges, LayoutStyle, Position};
 use lumen_render::RgbaImage;
 use lumen_text::TextStyle;
 use std::rc::Rc;
@@ -161,103 +161,13 @@ pub fn button(
 
 /// A checkbox with its own boolean state (`name`). Click or Space toggles it.
 pub fn checkbox(cx: &BuildCx, name: &str, label: impl Into<String>) -> Element {
-    let label = label.into();
-    let checked = cx.signal(name, || false);
-    let is = checked.get(cx.runtime());
-    let box_color = if is {
-        Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
-    } else {
-        Color::srgb8(0xcc, 0xcc, 0xcc, 0xff)
-    };
-    let boxel = Element {
-        background: Some(box_color),
-        corner_radius: 3.0,
-        style: LayoutStyle {
-            width: Dim::px(20.0),
-            height: Dim::px(20.0),
-            ..LayoutStyle::default()
-        },
-        ..Element::default()
-    };
-    Element {
-        role: Role::Checkbox,
-        label: label.clone(),
-        focusable: true,
-        actions: vec![Action::Click, Action::Focus],
-        states: vec![if is {
-            SemState::Checked
-        } else {
-            SemState::Unchecked
-        }],
-        style: LayoutStyle {
-            display: Display::Flex,
-            flex_direction: FlexDirection::Row,
-            column_gap: Dim::px(6.0),
-            ..LayoutStyle::default()
-        },
-        on_click: Some(Rc::new(move |rt| checked.update(rt, |c| *c = !*c))),
-        children: vec![boxel, Element::text(label)],
-        ..Element::default()
-    }
+    crate::check_box::CheckBox::new(cx, name, label).into()
 }
 
 /// A slider over `[min, max]` with its own value state (`name`). Drag/press to
 /// set the value from the pointer position.
 pub fn slider(cx: &BuildCx, name: &str, min: f64, max: f64) -> Element {
-    let value = cx.signal(name, || min);
-    let v = value.get(cx.runtime());
-    let frac = ((v - min) / (max - min)).clamp(0.0, 1.0);
-    const W: f64 = 200.0;
-    const THUMB: f64 = 16.0;
-    let track = Element {
-        background: Some(Color::srgb8(0xcc, 0xcc, 0xcc, 0xff)),
-        corner_radius: 2.0,
-        style: LayoutStyle {
-            position: Position::Absolute,
-            inset: Edges {
-                left: Dim::px(0.0),
-                top: Dim::px(8.0),
-                ..Edges::AUTO
-            },
-            width: Dim::px(W as f32),
-            height: Dim::px(4.0),
-            ..LayoutStyle::default()
-        },
-        ..Element::default()
-    };
-    let thumb = Element {
-        background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
-        corner_radius: (THUMB / 2.0),
-        style: LayoutStyle {
-            position: Position::Absolute,
-            inset: Edges {
-                left: Dim::px((frac * (W - THUMB)) as f32),
-                top: Dim::px(0.0),
-                ..Edges::AUTO
-            },
-            width: Dim::px(THUMB as f32),
-            height: Dim::px(THUMB as f32),
-            ..LayoutStyle::default()
-        },
-        ..Element::default()
-    };
-    Element {
-        role: Role::Slider,
-        focusable: true,
-        value: Some(format!("{v:.0}")),
-        actions: vec![Action::SetValue, Action::Increment, Action::Decrement],
-        style: LayoutStyle {
-            position: Position::Relative,
-            width: Dim::px(W as f32),
-            height: Dim::px(THUMB as f32),
-            ..LayoutStyle::default()
-        },
-        on_drag: Some(Rc::new(move |rt, f, _, _| {
-            value.set(rt, min + f * (max - min))
-        })),
-        children: vec![track, thumb],
-        ..Element::default()
-    }
+    crate::slider::Slider::new(cx, name, min, max).into()
 }
 
 /// A scroll container with its own vertical offset state (`name`). The wheel
