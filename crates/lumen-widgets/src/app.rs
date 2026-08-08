@@ -3003,12 +3003,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             child_lnodes.push(l);
             c = self.prev_tree.next_sibling(c);
         }
-        self.node_layout_style.insert(node, lstyle.clone());
+        // CP2.2: build the taffy node from a BORROW, then retain the style.
+        // This used to clone the LayoutStyle (256 bytes) purely because
+        // `leaf`/`container` took ownership while `node_layout_style` also
+        // needed a copy — on the memo-hit path, per node.
         let lnode = if child_lnodes.is_empty() {
-            layout.leaf(lstyle)
+            layout.leaf_ref(&lstyle)
         } else {
-            layout.container(lstyle, &child_lnodes)
+            layout.container_ref(&lstyle, &child_lnodes)
         };
+        self.node_layout_style.insert(node, lstyle);
         built.push((node, lnode));
         self.nodes_copied += 1;
         (node, lnode)

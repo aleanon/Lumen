@@ -39,11 +39,27 @@ impl LayoutTree {
 
     /// Create a childless node.
     pub fn leaf(&mut self, style: LayoutStyle) -> LayoutNode {
+        self.leaf_ref(&style)
+    }
+
+    /// [`leaf`](Self::leaf) without taking ownership.
+    ///
+    /// CP2.2: `copy_node` holds a `LayoutStyle` it must also retain in
+    /// `node_layout_style`, so with an owning API it had to clone — 256 bytes
+    /// per copied node, on the memo-hit path this campaign exists to make
+    /// cheap. `to_taffy` already borrows, so ownership was never needed.
+    pub fn leaf_ref(&mut self, style: &LayoutStyle) -> LayoutNode {
         LayoutNode(self.taffy.new_leaf(style.to_taffy()).expect("new_leaf"))
     }
 
     /// Create a node with the given children.
     pub fn container(&mut self, style: LayoutStyle, children: &[LayoutNode]) -> LayoutNode {
+        self.container_ref(&style, children)
+    }
+
+    /// [`container`](Self::container) without taking ownership (see
+    /// [`leaf_ref`](Self::leaf_ref)).
+    pub fn container_ref(&mut self, style: &LayoutStyle, children: &[LayoutNode]) -> LayoutNode {
         let ids: Vec<NodeId> = children.iter().map(|c| c.0).collect();
         LayoutNode(
             self.taffy
