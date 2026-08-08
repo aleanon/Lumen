@@ -248,6 +248,12 @@ struct ShapeKey {
     family: Option<String>,
     wrap: Option<u32>,
     align: u8,
+    /// PROP1. Load-bearing for CORRECTNESS, not just completeness: `italic`
+    /// changes which face parley selects and therefore the synthesis flag the
+    /// shaped run carries. Omitted from this key, the first block shaped for a
+    /// given string wins and every later node with a different `font-style`
+    /// silently reuses it.
+    italic: bool,
 }
 
 impl ShapeKey {
@@ -261,6 +267,7 @@ impl ShapeKey {
             family: s.family.clone(),
             wrap: wrap.map(f32::to_bits),
             align: align as u8,
+            italic: s.italic,
         }
     }
 }

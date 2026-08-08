@@ -34,3 +34,34 @@ fn heavier_weight_renders_more_ink() {
         "bold ({bold}) should lay down more ink than regular ({regular})"
     );
 }
+
+/// PROP1 cache correctness: `italic` must be part of the shape-cache key.
+///
+/// This uses ONE engine deliberately. An earlier version of the `font-style`
+/// test built a fresh `App` per case, so every shape was a cache miss and the
+/// missing key field was invisible — the bug only appears when two differently
+/// styled runs of the SAME string share an engine, which is the normal case in
+/// a real app.
+#[test]
+fn italic_is_part_of_the_shape_cache_key() {
+    let mut te = lumen_text::TextEngine::new();
+    let upright = TextStyle {
+        font_size: 32.0,
+        ..Default::default()
+    };
+    let italic = TextStyle {
+        italic: true,
+        ..upright.clone()
+    };
+    let a =
+        te.shaped("Hll", &upright, None, TextAlign::Start)
+            .render(64, 48, lumen_core::Color::WHITE);
+    let b =
+        te.shaped("Hll", &italic, None, TextAlign::Start)
+            .render(64, 48, lumen_core::Color::WHITE);
+    assert_ne!(
+        a.pixels(),
+        b.pixels(),
+        "italic and upright must not share a shape-cache entry"
+    );
+}
