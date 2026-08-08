@@ -1,7 +1,8 @@
 # Gradients render blank under lavapipe — investigation
 
-*2026-08-08. Narrowed, not fixed. Recorded because six plausible causes are now
-eliminated, and re-deriving that costs more than reading it.*
+*2026-08-08. Narrowed to a single operation, not fixed. Recorded because ten
+probes were run to get here, and re-deriving that costs far more than reading
+it.*
 
 This blocks making the `gpu` CI job a required check, which in turn blocks R6
 (see `docs/r6-gpu-damage-scope.md`): GPU regressions are invisible to the CPU
@@ -56,6 +57,7 @@ Each was tested by modifying the code and re-running the probe:
 | 4 | Texture/view freed before the pass executes | pushed both into `KeepAlive` | still blank |
 | 5 | Sample coordinate is NaN or out of range | sampled a **literal** `(0.5, 0.5)` | still blank |
 | 6 | Bind group index or shader binding mismatch | read both: group 1, bindings 0/1 — identical to the image path | not the cause |
+| 7 | Texture is below some minimum dimension | ramp built 512×64 | still blank |
 
 No wgpu validation errors are emitted at any point (`RUST_LOG=wgpu_core=warn`).
 
@@ -126,23 +128,6 @@ Recommended: keep `textureSample`, and either
 Do not adopt `textureLoad` solely to make CI green; it degrades real output to
 satisfy a driver nothing ships on.
 
-
-The elimination points at a driver-level defect in lavapipe for this texture
-configuration, rather than a bug in Lumen. That is a *conclusion by exhaustion*,
-not a proof, and it is worth saying which is which.
-
-Next steps, cheapest first:
-
-1. **Try a larger ramp** — e.g. 512×64. If it renders, the bound is a minimum
-   dimension and the workaround is trivial (and would be worth taking purely to
-   unblock GPU CI, even as a driver workaround).
-2. **Read the texels back** with `copy_texture_to_buffer` immediately after the
-   write. That distinguishes "the write never landed" from "the sample fails",
-   which is the one question the probes above cannot separate.
-3. **Try `Rgba8Unorm`** (non-sRGB) for the ramp. sRGB sampling is the one format
-   behaviour not yet isolated.
-4. If it is lavapipe, file upstream and pin the workaround with a comment
-   pointing here.
 
 ## What must not happen
 
