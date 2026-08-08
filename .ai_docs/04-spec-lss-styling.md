@@ -188,12 +188,31 @@ hardcoded literal, `text-wrap`→`wrap_width`, `transform`→`PushLayer`'s unuse
 `Affine`). Each of the four below was re-checked against what the render and
 text layers actually offer today.
 
-* **`filter`** — needs a *layer* filter. `BackdropFilter` exists but blurs what
-  is painted BEHIND a region; `filter` must blur the element's own content,
-  i.e. render the subtree to an offscreen layer, filter that, then composite.
-  `PushLayer` has no filter field, so this is a change to both renderers (CPU
-  and wgpu) plus golden re-baselining — a real render-pass addition, not a
-  bridge.
+* **`filter`** — needs a *layer* filter. `BackdropFilter` blurs what is painted
+  BEHIND a region; `filter` must blur the element's own content: render the
+  subtree to an offscreen layer, filter that, composite.
+
+  **Fully scoped as of 2026-08-08** (the `PushLayer::transform` work established
+  the pattern), in dependency order:
+
+  1. `DrawCmd::PushLayer` gains `filter: f32` (blur radius in logical px, `0` =
+     none). 18 construction sites, nearly all of which just gain `filter: 0.0`.
+  2. **CPU** — in `pop_layer`, blur the layer pixmap before compositing. The
+     blur already exists: the backdrop path calls `.blurred()` on a region.
+  3. **GPU** — the harder half. The 3-box ping-pong blur exists but is *inline*
+     in the backdrop-filter path (`gpu.rs`, the `blur_pass` closure over
+     `view_a`/`view_b`). It must be factored into a helper taking a source
+     texture and returning a blurred one, then called on the child texture
+     before the composite draw. This is a refactor of working, golden-tested
+     glass rendering — the reason it is called out separately rather than
+     bundled with the CPU half.
+  4. Add a `PushLayer::filter` case to `field_coverage.rs`, which then gates
+     both backends consuming it.
+
+  Deliberately blur-only to start. CSS's other filter functions (`brightness`,
+  `contrast`, `saturate`, …) are per-pixel colour maps and cheap to add once the
+  layer-filter plumbing exists; `blur` is the one that needs the texture passes,
+  so it is the one that decides the design.
 * **`z-index`** — needs stacking contexts; see below.
 * **`font-variation`** — the bundled face is **static** (no `fvar` axes, checked
   with fontTools). parley exposes `StyleProperty::FontVariations` and wiring it
