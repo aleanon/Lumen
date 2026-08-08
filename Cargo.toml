@@ -170,6 +170,14 @@ accesskit_winit = "0.23"
 tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
 # The tray thread's gtk loop (Linux only; same gtk 0.18 muda/tray-icon link).
 gtk = "0.18"
+# ADR-003 amendment (2026-08-08, owner-approved via BLOCKED.md option A):
+# CPU presentation. `winit` deliberately does not provide a pixel-buffer
+# surface, and without one the desktop shell can only reach the screen through
+# wgpu — which is why `<5 MB` and CFG1's no-GPU profile were unreachable by any
+# feature combination. Measured before approval: softbuffer's tree is 52 crates,
+# 45 already present via winit, so the marginal cost is SEVEN
+# (softbuffer, tiny-xlib, drm, drm-ffi, drm-fourcc, drm-sys, ctor).
+softbuffer = "0.4"
 libloading = "0.8"
 # M.6 (ADR-M1 umbrella): pure-Rust QR encoder — example-scoped, zero deps.
 qrcodegen = "1.8"

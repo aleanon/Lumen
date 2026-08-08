@@ -118,8 +118,14 @@ pub fn run(app: App, size: Size) {
     // or `LUMEN_RENDERER` env wins; otherwise the live window defaults to
     // GPU-with-CPU-fallback (paths, gradients, layers, text sprites rasterized on
     // the GPU when an adapter is present, else the CPU reference). R1.1.
+    // Without the GPU backend compiled there is nothing to fall back FROM, so
+    // the CPU reference renderer is the only default (ADR-003 amendment).
+    #[cfg(feature = "wgpu")]
     let renderer: ShellRenderer = lumen_widgets::renderer_override()
         .unwrap_or_else(|| Box::new(lumen_render::WgpuFallbackTinySkia::new()));
+    #[cfg(not(feature = "wgpu"))]
+    let renderer: ShellRenderer =
+        lumen_widgets::renderer_override().unwrap_or_else(|| Box::new(lumen_render::TinySkia));
     eprintln!("lumen: renderer = {}", renderer.name());
     let app = app.with_renderer(renderer);
     let mut shell = Shell {
@@ -356,6 +362,9 @@ struct SecondaryWindow {
     headless: ShellHeadless,
     window: Arc<Window>,
     presenter: Option<Presenter>,
+    /// Only read when a swapchain exists; without the GPU backend the
+    /// softbuffer presenter is the only path and this is always false.
+    #[cfg_attr(not(feature = "wgpu"), allow(dead_code))]
     direct: bool,
     size: Size,
     scale: f64,
@@ -506,8 +515,20 @@ impl ApplicationHandler<ShellEvent> for Shell {
         // device, no GPU→CPU→GPU readback per frame. Falls back to a CPU-readback
         // Presenter when the backend can't present (CPU renderer / unsupported
         // adapter).
-        self.direct =
-            headless.attach_surface(window.clone().into(), phys.width.max(1), phys.height.max(1));
+        // Without the GPU backend compiled there is no swapchain to present to,
+        // so the softbuffer `Presenter` is the only path (ADR-003 amendment).
+        #[cfg(feature = "wgpu")]
+        {
+            self.direct = headless.attach_surface(
+                window.clone().into(),
+                phys.width.max(1),
+                phys.height.max(1),
+            );
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            self.direct = false;
+        }
         self.presenter = if self.direct {
             None
         } else {
@@ -734,9 +755,11 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         // pump, so there's no redundant relayout).
                         let pw = (self.size.width * self.scale).round().max(1.0) as u32;
                         let ph = (self.size.height * self.scale).round().max(1.0) as u32;
+                        #[cfg(feature = "wgpu")]
                         if self.direct {
                             h.resize_surface(pw, ph);
-                        } else if let Some(p) = &mut self.presenter {
+                        }
+                        if let Some(p) = &mut self.presenter {
                             p.resize(pw, ph);
                         }
                         h.prepare_resize(self.size, self.scale);
@@ -817,10 +840,14 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     }
                     let force = std::mem::take(&mut self.force_present);
                     if stats.painted || resized || force {
+                        #[cfg(feature = "wgpu")]
                         if self.direct {
                             // GPU → swapchain directly, no readback (1c).
                             h.present_to_surface();
-                        } else if let Some(p) = &mut self.presenter {
+                        }
+                        // `presenter` is None in direct mode, so this covers
+                        // both paths without a second `direct` test.
+                        if let Some(p) = &mut self.presenter {
                             let frame = h.screenshot();
                             p.present(&frame);
                         }
@@ -921,8 +948,12 @@ impl Shell {
     /// renderer, and `Headless` pipeline over the shared `Runtime`).
     fn open_secondary(&mut self, el: &ActiveEventLoop, d: &lumen_widgets::system::WindowDesc) {
         let Some(main) = &self.headless else { return };
+        #[cfg(feature = "wgpu")]
         let renderer: ShellRenderer = lumen_widgets::renderer_override()
             .unwrap_or_else(|| Box::new(lumen_render::WgpuFallbackTinySkia::new()));
+        #[cfg(not(feature = "wgpu"))]
+        let renderer: ShellRenderer =
+            lumen_widgets::renderer_override().unwrap_or_else(|| Box::new(lumen_render::TinySkia));
         let Some(mut h) = main.open_window_with(
             &d.id,
             renderer,
@@ -948,7 +979,10 @@ impl Shell {
             (phys.height.max(1) as f64 / scale).max(1.0),
         );
         h.prepare_resize(size, scale);
+        #[cfg(feature = "wgpu")]
         let direct = h.attach_surface(window.clone().into(), phys.width.max(1), phys.height.max(1));
+        #[cfg(not(feature = "wgpu"))]
+        let direct = false;
         let presenter = if direct {
             None
         } else {
@@ -1081,18 +1115,22 @@ impl Shell {
                 if std::mem::take(&mut sw.pending_resize) {
                     let pw = (sw.size.width * sw.scale).round().max(1.0) as u32;
                     let ph = (sw.size.height * sw.scale).round().max(1.0) as u32;
+                    #[cfg(feature = "wgpu")]
                     if sw.direct {
                         sw.headless.resize_surface(pw, ph);
-                    } else if let Some(p) = &mut sw.presenter {
+                    }
+                    if let Some(p) = &mut sw.presenter {
                         p.resize(pw, ph);
                     }
                     sw.headless.prepare_resize(sw.size, sw.scale);
                 }
                 let stats = sw.headless.pump();
                 if stats.painted {
+                    #[cfg(feature = "wgpu")]
                     if sw.direct {
                         sw.headless.present_to_surface();
-                    } else if let Some(p) = &mut sw.presenter {
+                    }
+                    if let Some(p) = &mut sw.presenter {
                         let frame = sw.headless.screenshot();
                         p.present(&frame);
                     }
@@ -1527,7 +1565,77 @@ fn map_key(k: &winit::keyboard::Key) -> Option<Key> {
     }
 }
 
+/// Presents a CPU-rendered frame with **softbuffer** — no GPU (ADR-003
+/// amendment, 2026-08-08).
+///
+/// This is what makes a no-GPU desktop build possible at all. Before it, the
+/// shell had exactly one presentation path and it went through wgpu, so
+/// `01 §9`'s `<5 MB` budget and CFG1's "no-GPU, software-render" profile were
+/// unreachable by any combination of feature flags — the capability was absent,
+/// not merely unconfigured.
+///
+/// Deliberately the same three-method shape as the wgpu presenter
+/// (`new`/`resize`/`present`), so the call sites do not branch: which one exists
+/// is a compile-time choice, not a runtime one.
+#[cfg(not(feature = "wgpu"))]
+struct Presenter {
+    /// `Context` must outlive every `Surface` made from it, so it is held here
+    /// rather than dropped after construction.
+    _context: softbuffer::Context<Arc<Window>>,
+    surface: softbuffer::Surface<Arc<Window>, Arc<Window>>,
+    size: (u32, u32),
+}
+
+#[cfg(not(feature = "wgpu"))]
+impl Presenter {
+    fn new(window: Arc<Window>) -> Presenter {
+        let context = softbuffer::Context::new(window.clone()).expect("softbuffer context");
+        let surface =
+            softbuffer::Surface::new(&context, window.clone()).expect("softbuffer surface");
+        let phys = window.inner_size();
+        let mut p = Presenter {
+            _context: context,
+            surface,
+            size: (0, 0),
+        };
+        p.resize(phys.width.max(1), phys.height.max(1));
+        p
+    }
+
+    fn resize(&mut self, w: u32, h: u32) {
+        let (w, h) = (w.max(1), h.max(1));
+        if self.size == (w, h) {
+            return;
+        }
+        if let (Some(nw), Some(nh)) = (std::num::NonZeroU32::new(w), std::num::NonZeroU32::new(h)) {
+            if self.surface.resize(nw, nh).is_ok() {
+                self.size = (w, h);
+            }
+        }
+    }
+
+    fn present(&mut self, frame: &RgbaImage) {
+        let (fw, fh) = (frame.width().max(1), frame.height().max(1));
+        self.resize(fw, fh);
+        let Ok(mut buf) = self.surface.buffer_mut() else {
+            return;
+        };
+        // softbuffer wants 0RGB in a u32 per pixel, host-endian; the frame is
+        // straight (non-premultiplied) RGBA8. The window is opaque, so alpha is
+        // dropped rather than composited — matching the wgpu presenter, which
+        // clears to opaque white and blits over it.
+        let px = frame.pixels();
+        let n = (fw as usize * fh as usize).min(buf.len());
+        for i in 0..n {
+            let p = &px[i * 4..i * 4 + 4];
+            buf[i] = ((p[0] as u32) << 16) | ((p[1] as u32) << 8) | (p[2] as u32);
+        }
+        let _ = buf.present();
+    }
+}
+
 /// Presents a CPU-rendered frame to a wgpu surface via a fullscreen blit.
+#[cfg(feature = "wgpu")]
 struct Presenter {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -1542,6 +1650,7 @@ struct Presenter {
     staging: Option<(wgpu::Texture, wgpu::BindGroup, u32, u32)>,
 }
 
+#[cfg(feature = "wgpu")]
 impl Presenter {
     fn new(window: Arc<Window>) -> Presenter {
         let size = window.inner_size();
@@ -1748,6 +1857,7 @@ impl Presenter {
     }
 }
 
+#[cfg(feature = "wgpu")]
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
     let waker = std::task::Waker::noop();
     let mut cx = std::task::Context::from_waker(waker);
@@ -1759,6 +1869,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
     }
 }
 
+#[cfg(feature = "wgpu")]
 const BLIT: &str = r#"
 struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
 @vertex

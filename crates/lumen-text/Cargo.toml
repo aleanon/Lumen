@@ -10,7 +10,12 @@ publish = false
 [dependencies]
 lumen-core = { workspace = true }
 # CPU-side types only (RgbaImage, display list) — never the GPU stack.
-lumen-render = { workspace = true }
+# Direct path dep, defaults OFF: `{ workspace = true }` silently ignores
+# `default-features = false`, and lumen-render defaults to `wgpu`. One such
+# link anywhere in the chain keeps the GPU backend in the graph, which is
+# what stopped the no-GPU profile from actually being no-GPU (ADR-003
+# amendment). The `wgpu` feature above forwards it when wanted.
+lumen-render = { path = "../lumen-render", default-features = false }
 kurbo = { workspace = true }
 # TextEditor is persisted in a Signal<T> (State = Serialize + DeserializeOwned).
 serde = { workspace = true }

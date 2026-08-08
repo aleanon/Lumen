@@ -83,17 +83,18 @@ Every reload emits a structured result event (tier, status, components swapped, 
   | default (pan-Unicode face, snapshot, desktop-integration) | 22.0 MB | 70 |
   | lean **windowed** (`--no-default-features --features wgpu`) | **13.3 MB** | 5 |
   | lean **headless** (same features, no `lumen::run`) | 6.8 MB | 5 |
+  | lean windowed, **no GPU** (softbuffer presentation) | **11.0 MB** | 5 |
   | wasm, default | 22.0 MB | — |
   | wasm, lean (`--no-default-features`) | **6.4 MB** | — |
 
-  **<5 MB remains the target and is currently unreachable on desktop**, for a
-  structural reason rather than a dependency-diet one: `lumen-shell` depends on
-  `wgpu` unconditionally because `Presenter` blits the CPU-rendered frame to the
-  window through a wgpu surface — the desktop shell has exactly one presentation
-  path and it is on the GPU, even though the CPU renderer is the renderer of
-  record (ADR-002). Reaching <5 MB needs a **CPU presentation backend** first;
-  no combination of feature flags gets there. The largest lever that *is*
-  available is the font (`pan-unicode`: 15 MB face → ~355 KB subset).
+  **The CPU presentation backend landed 2026-08-08** (ADR-003 amendment,
+  softbuffer): `--no-default-features` on `lumen-shell` now drops wgpu entirely
+  and presents through a software surface, which is what CFG1's "no-GPU"
+  profile asked for. **<5 MB is still not met at 11.0 MB**, but the reason has
+  changed from structural to ordinary: the remaining bulk is the framework
+  itself, not the GPU stack, so it needs a dependency diet rather than a new
+  capability. The largest single lever remains the font (`pan-unicode`: 15 MB
+  face → ~355 KB subset).
 
 ## 9a. Swappable internals — the seams (MOD-series)
 

@@ -19,6 +19,7 @@ lean result entirely.
 | default (pan-Unicode face, snapshot, desktop-integration, wgpu) | 22.0 MB | 70 |
 | lean **windowed** — `default-features = false, features = ["wgpu"]` | **13.3 MB** | 5 |
 | lean **headless** — same features, no `lumen::run` | 6.8 MB | 5 |
+| lean windowed, **no GPU** — `--no-default-features` | **11.0 MB** | 5 |
 
 At `opt-level = 3` the same lean windowed build is 18.3 MB and the full default
 33.8 MB, so the numbers above are the `opt-z` shape, which is what a constrained
@@ -140,9 +141,12 @@ has to.
 
 ## What is left for a complete CFG1
 
-1. **A CPU presentation backend**, so `wgpu` can become optional in
-   `lumen-shell`. This is the gating item — everything below is smaller.
-   **ESCALATED (2026-08-08): see `BLOCKED.md`.** It needs a platform surface
+1. ~~**A CPU presentation backend**~~ — **DONE 2026-08-08** (ADR-003 amendment,
+   softbuffer approved via `BLOCKED.md` option A, now resolved and removed).
+   `--no-default-features` on `lumen-shell` drops wgpu entirely and presents
+   through a software surface: lean windowed **14.06 → 11.02 MB (-21.6%)**,
+   verified live (`renderer = cpu` / `present = cpu-readback`). Historical
+   note: It needs a platform surface
    crate (`softbuffer`) that is not in the ADR-003 whitelist, which `07 §2`
    defines as an owner decision. Measured for the escalation: softbuffer adds
    **7 crates** beyond what `lumen-shell` already pulls via winit (45 of its 52

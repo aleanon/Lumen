@@ -101,4 +101,22 @@ echo "win-app:  $(echo "scale=1; $WSIZE/1048576" | bc -l) MB"
 # unconditional dependency of lumen-shell.
 [ "$WSIZE" -lt $((16 * 1048576)) ] || { echo "FAIL: lean windowed > 16 MB"; exit 1; }
 
+echo "==> NO-GPU windowed (softbuffer presentation, ADR-003 amendment)"
+mkdir -p "$TMP/nogpu-app/src"
+sed 's/name = "win-app"/name = "nogpu-app"/; s/features = \["wgpu"\]//' \
+    "$TMP/win-app/Cargo.toml" > "$TMP/nogpu-app/Cargo.toml"
+cp "$TMP/win-app/src/main.rs" "$TMP/nogpu-app/src/main.rs"
+(cd "$TMP/nogpu-app" && cargo build -q --release)
+NSIZE=$(stat -c%s "$TMP/nogpu-app/target/release/nogpu-app")
+echo "nogpu-app: $(echo "scale=1; $NSIZE/1048576" | bc -l) MB"
+# Must be materially smaller than the wgpu build, or the GPU stack did not
+# actually leave the graph — which it did not, four separate times, until every
+# `{ workspace = true }` link to lumen-render was converted to a path dep.
+[ "$NSIZE" -lt "$WSIZE" ] || {
+  echo "FAIL: the no-GPU build is not smaller than the wgpu one ($NSIZE vs $WSIZE)."
+  echo "      Check with: cargo tree -p lumen-shell --no-default-features -e normal --invert wgpu"
+  exit 1
+}
+[ "$NSIZE" -lt $((13 * 1048576)) ] || { echo "FAIL: no-GPU > 13 MB"; exit 1; }
+
 echo "size gates OK"

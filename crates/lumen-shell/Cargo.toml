@@ -9,12 +9,19 @@ publish = false
 
 [dependencies]
 lumen-core = { workspace = true }
-lumen-render = { workspace = true }
+# Direct path dep, defaults OFF. `{ workspace = true }` silently ignores
+# `default-features = false`, and lumen-render defaults to `wgpu` — so without
+# this the GPU backend stays in the graph even with the shell's own wgpu gated
+# off, and the no-GPU profile is not actually no-GPU. Same trap as GX3.
+lumen-render = { path = "../lumen-render", default-features = false }
 # Direct path dep, defaults off (cargo ignores `default-features = false` on
 # workspace-inherited deps): the shell forwards feature choices instead of
 # forcing them, so the facade's lean profile (T.4) actually reaches
 # lumen-widgets. The facade / direct consumers pick the tiers.
-lumen-widgets = { path = "../lumen-widgets", default-features = false, features = ["wgpu"] }
+# `wgpu` is NOT forced here — the shell's own `wgpu` feature forwards it. Hard-
+# coding it kept the GPU backend in the graph regardless, which is what made the
+# no-GPU profile impossible to actually reach.
+lumen-widgets = { path = "../lumen-widgets", default-features = false }
 kurbo = { workspace = true }
 # Desktop windowing + GPU surface presentation (ADR-001).
 winit = { workspace = true }
@@ -33,7 +40,7 @@ accesskit = { workspace = true }
 accesskit_winit = { workspace = true }
 # P.3e: system tray (lazy — created on the first TrayTooltip request).
 tray-icon = { workspace = true, optional = true }
-wgpu = { workspace = true }
+wgpu = { workspace = true, optional = true }
 # Embedded agent endpoint (LUMEN_AGENT_ADDR): lets an AI observe and drive the
 # *live* window over the same JSON-RPC the headless agent speaks. Behind the
 # default-OFF `agent` feature — production builds ship without the RPC server.
@@ -42,6 +49,9 @@ serde_json = { workspace = true, optional = true }
 # Optional `.lss` live-reload watcher (LUMEN_WATCH_LSS): tier-1 desktop hot
 # reload into the running window (C1).
 notify = { workspace = true }
+# CPU presentation when the wgpu presenter is not compiled in (ADR-003
+# amendment). Small: 7 crates beyond what winit already pulls.
+softbuffer = { workspace = true }
 
 [features]
 # Compile in the live-window agent RPC server. Off by default: a normal build has
@@ -54,10 +64,16 @@ agent = ["dep:lumen-agent", "dep:serde_json", "lumen-widgets/snapshot"]
 # corresponding SystemRequests then report unsupported instead of silently
 # doing nothing, so an app can detect the difference.
 desktop-integration = ["dep:rfd", "dep:muda", "dep:tray-icon", "dep:gtk"]
-default = ["desktop-integration"]
+default = ["desktop-integration", "wgpu"]
 # Forwarded tiers (T.4): consumers (the facade) decide; nothing default here
 # so the lean profile can drop them.
-wgpu = ["lumen-widgets/wgpu"]
+#
+# `wgpu` now gates the shell's OWN dependency as well as forwarding. With it
+# off, the GPU presenter is not compiled and `Presenter` is the softbuffer one,
+# so the build drops wgpu entirely — which is what made `<5 MB` and CFG1's
+# no-GPU profile reachable at all (ADR-003 amendment). Default ON: the GPU path
+# stays the norm, and this only changes what `--no-default-features` can do.
+wgpu = ["dep:wgpu", "lumen-render/wgpu", "lumen-widgets/wgpu"]
 snapshot = ["lumen-widgets/snapshot"]
 pan-unicode = ["lumen-widgets/pan-unicode"]
 

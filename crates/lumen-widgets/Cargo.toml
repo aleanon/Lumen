@@ -32,7 +32,12 @@ image = { workspace = true, optional = true }
 lumen-app = { path = "../lumen-app", default-features = false }
 lumen-core = { workspace = true }
 lumen-macros = { workspace = true }
-lumen-render = { workspace = true }
+# Direct path dep, defaults OFF: `{ workspace = true }` silently ignores
+# `default-features = false`, and lumen-render defaults to `wgpu`. One such
+# link anywhere in the chain keeps the GPU backend in the graph, which is
+# what stopped the no-GPU profile from actually being no-GPU (ADR-003
+# amendment). The `wgpu` feature above forwards it when wanted.
+lumen-render = { path = "../lumen-render", default-features = false }
 lumen-layout = { workspace = true }
 lumen-text = { workspace = true }
 lumen-style = { workspace = true }
