@@ -930,7 +930,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             // (`:hovered` etc.) for every node, so they never copy spans
             // forward; signal/time rebuilds may. A.3.5: LUMEN_FULL_REBUILD=1
             // is the bisect hatch — naive full rebuilds, no retained reuse.
-            self.allow_copy_forward = !visual_changed && !anims_running && !full_rebuild_forced();
+            // AN1: animations no longer veto copy-forward for the WHOLE app.
+            // `anims_active()` is a single global bool, so one hover fade
+            // anywhere turned memoization off for every scope on screen — and
+            // transitions are the common case once an app uses them at all, so
+            // CP1/CP2's wins would never have shown up in a real UI. The check
+            // moved into `copy_span`, which already enumerates a span's nodes
+            // and can ask the narrower question: is anything *in this span*
+            // animating?
+            let _ = anims_running;
+            self.allow_copy_forward = !visual_changed && !full_rebuild_forced();
             self.rebuild(); // baselines force_rebuild + last_build_gen
         } else if restyle_only {
             // restyle_visual already updated flags/styles/semantics/paint.
@@ -2801,6 +2810,27 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// combinators + inherited hidden state), the enclosing container size
     /// (container queries), and overlay membership. Copy-forward is sound
     /// only when this matches the value recorded when the span was lowered.
+    /// AN1: does any node in this span have a running transition/keyframe?
+    ///
+    /// Animations are keyed by `StableId`, so this is a lookup per node that
+    /// has an id — and only ids can animate, so nodes without one are free.
+    /// Cheap enough to run per copied span, and it replaces a global veto.
+    fn span_has_running_anim(&self, nodes: &[NodeIndex]) -> bool {
+        if self.prop_anims.is_empty() && self.key_anims.is_empty() {
+            return false; // the overwhelmingly common case
+        }
+        nodes.iter().any(|n| {
+            let Some(id) = self.prev_meta.get(n).and_then(|m| m.id.as_ref()) else {
+                return false;
+            };
+            self.key_anims.get(id).is_some_and(|(_, done)| !done)
+                || self
+                    .prop_anims
+                    .iter()
+                    .any(|((aid, _), a)| aid == id && !a.committed)
+        })
+    }
+
     fn span_ctx_hash(&self, in_overlay: bool) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -2856,6 +2886,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             }
         }
         if prev_nodes.len() != span.count as usize {
+            return None;
+        }
+        // AN1: refuse to copy a span that contains an animating node. Its
+        // styles are mid-interpolation, so retained work is stale by
+        // definition — but that is true only of the animating span, not of the
+        // rest of the tree, which is what the old app-wide gate assumed.
+        if self.span_has_running_anim(&prev_nodes) {
             return None;
         }
         // Nested scopes inside this span keep working on the next build:
