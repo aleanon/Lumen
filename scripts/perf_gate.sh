@@ -68,15 +68,19 @@ for name, budget in absolute.items():
 ratios = [
     # (label, numerator, denominator, ceiling, note)
     ("scoped_vs_flat",
-     "text_list_scoped_changed_frame", "text_list_changed_frame", 1.52,
-     "memoizing 499 of 500 rows vs rebuilding all 500; >1.0 means the "
-     "incremental path costs more than it saves. Measured 1.442 before the "
-     "Phase-0 OB work and 1.389 after it; ceiling left at 1.52 for noise "
-     "headroom, to be tightened once CP1/CP2 land (M-C targets <= 1.0)"),
+     "text_list_scoped_changed_frame", "text_list_changed_frame", 0.90,
+     "memoizing 499 of 500 rows vs rebuilding all 500. >1.0 means the "
+     "incremental path costs more than it saves, which is where this campaign "
+     "started: 1.442. After OB1/OB3 1.389, after the FxHash swap 1.307, and "
+     "after CP1 removed copy_span's O(S^2*C) nested-span scan, 0.79 — the "
+     "memoized path is finally FASTER than the full rebuild it replaces. "
+     "Ceiling tightened to 0.90 to lock that in; M-C's <=1.0 target is met"),
     ("scope_scaling_300_over_50",
-     "scope_scaling_600_nodes/300_scopes", "scope_scaling_600_nodes/50_scopes", 1.81,
-     "same node count, 6x the scopes; >1.0 means finer granularity costs more "
-     "(measured 1.72 on 2026-08-08)"),
+     "scope_scaling_600_nodes/300_scopes", "scope_scaling_600_nodes/50_scopes", 1.55,
+     "same node count, 6x the scopes; >1.0 means finer granularity costs more. "
+     "1.72 at campaign start, 1.44 after CP1. Still >1.0: the residual is "
+     "copy_node's per-node bookkeeping (8 hashmap ops + a LayoutStyle clone "
+     "per memo hit), which CP2.1/CP2.2 target"),
 ]
 
 print("-- ratios --")

@@ -229,6 +229,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             style_env: None,
             scope_spans: HashMap::default(),
             prev_spans: HashMap::default(),
+            prev_spans_by_root: HashMap::default(),
             prev_tree: Tree::new(),
             prev_meta: HashMap::default(),
             prev_node_style: HashMap::default(),
@@ -595,6 +596,19 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// scope whose recorded context hash matches copies its span's retained
     /// work (meta, styles, layout styles, flags) instead of re-lowering.
     prev_spans: HashMap<IdHash, SpanRec>,
+    /// CP1: `prev_spans` inverted — previous-build span root -> span key.
+    ///
+    /// `copy_span` needs the nested spans rooted inside the span it is copying.
+    /// It used to find them by scanning ALL of `prev_spans` and testing each
+    /// root against a linear `Vec::contains` over the span's nodes: O(S) per
+    /// copied span with an O(C) probe inside, so O(S² · C) across a build. On
+    /// the shape the F-series tells authors to write (one scope per row) S
+    /// grows with the row count, which is why finer granularity got
+    /// *quadratically* worse — 50→300 scopes measured 1.72×.
+    ///
+    /// Inverting it makes the same lookup O(1) per node, so a copied span costs
+    /// O(its own nodes) instead of O(every span in the app).
+    prev_spans_by_root: HashMap<NodeIndex, IdHash>,
     prev_tree: Tree,
     prev_meta: HashMap<NodeIndex, NodeMeta>,
     prev_node_style: HashMap<NodeIndex, lumen_style::Style>,
@@ -2598,6 +2612,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         // source; this build's maps start empty and are filled by lowering
         // or by moving entries across from `prev_*`.
         self.prev_spans = std::mem::take(&mut self.scope_spans);
+        // CP1: rebuild the inverted index alongside, once per rebuild, so
+        // `copy_span` never scans the whole span table.
+        self.prev_spans_by_root.clear();
+        self.prev_spans_by_root
+            .extend(self.prev_spans.iter().map(|(k, r)| (r.root, *k)));
         self.prev_meta = std::mem::take(&mut self.meta);
         self.prev_node_style = std::mem::take(&mut self.node_style);
         self.prev_node_computed = std::mem::take(&mut self.node_computed);
@@ -2897,11 +2916,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         // Nested scopes inside this span keep working on the next build:
         // remap their span records onto the copied nodes as we go.
-        let nested: Vec<(IdHash, SpanRec)> = self
-            .prev_spans
+        let nested: Vec<(IdHash, SpanRec)> = prev_nodes
             .iter()
-            .filter(|(k, r)| **k != key && prev_nodes.contains(&r.root))
-            .map(|(k, r)| (*k, *r))
+            .filter_map(|n| self.prev_spans_by_root.get(n))
+            .filter(|k| **k != key)
+            .filter_map(|k| self.prev_spans.get(k).map(|r| (*k, *r)))
             .collect();
         let mut root_map: HashMap<NodeIndex, NodeIndex> = HashMap::default();
         let (node, lnode) =
