@@ -22,6 +22,20 @@ pub mod identity;
 pub mod registry;
 pub mod semantics;
 
+/// Text decoration lines (PROP1 `text-decoration`). A first-party enum for the
+/// same reason as [`CursorShape`]: the style engine names it, the paint layer
+/// consumes it, and neither should name the other's types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TextDecoration {
+    /// No line.
+    #[default]
+    None,
+    /// A line along the baseline.
+    Underline,
+    /// A line through the middle of the x-height.
+    LineThrough,
+}
+
 /// Pointer cursor shapes (PROP1 `cursor`). A first-party enum: the style
 /// engine and runtime must not name winit, and the shell maps this to whatever
 /// its platform calls the same shape.

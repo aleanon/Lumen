@@ -4369,6 +4369,36 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     brush: Brush::Solid(text_color),
                     rect: run_rect,
                 });
+                // PROP1 `text-decoration`: a filled rect, drawn AFTER the run so
+                // it sits over the glyphs — which is what a strike-through must
+                // do, and is harmless for an underline (they do not overlap).
+                //
+                // Geometry comes from the font's own metrics rather than a
+                // fraction of the box: the underline sits just below the
+                // baseline (ascent from the top), and the strike at the middle
+                // of the x-height, so both track font size and line height
+                // instead of drifting as either changes.
+                let decoration = css
+                    .and_then(|s| s.text_decoration)
+                    .unwrap_or(lumen_core::TextDecoration::None);
+                if decoration != lumen_core::TextDecoration::None && run_rect.width() > 0.0 {
+                    // ~7% of font size, floored at one physical pixel so the
+                    // line never vanishes at small sizes or low scale.
+                    let thickness = (ts.font_size as f64 * 0.07).max(1.0 / scale as f64);
+                    let baseline = ty + metrics.ascent as f64;
+                    let y = match decoration {
+                        lumen_core::TextDecoration::Underline => baseline + thickness,
+                        // Half the ascent approximates the x-height midpoint
+                        // without needing an OS/2 table read.
+                        _ => baseline - metrics.ascent as f64 * 0.5,
+                    };
+                    dl.push(DrawCmd::Rect {
+                        rect: Rect::new(run_rect.x0, y, run_rect.x1, y + thickness),
+                        brush: Brush::Solid(text_color),
+                        radii: CornerRadii::all(0.0),
+                        border: None,
+                    });
+                }
                 // Caret (in front) for a focused editor — re-shape (cached) for
                 // the caret geometry.
                 if let Some(caret) = m.caret_byte.filter(|_| focused) {

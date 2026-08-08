@@ -193,6 +193,8 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
+    /// `text-decoration` (PROP1) — underline / line-through.
+    pub text_decoration: Option<lumen_core::TextDecoration>,
     /// `cursor` (PROP1) — the pointer shape while over this node.
     pub cursor: Option<lumen_core::CursorShape>,
     /// `font-style: italic | normal` (PROP1).
@@ -387,6 +389,12 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `text-decoration` (PROP1).
+    pub fn text_decoration(mut self, d: lumen_core::TextDecoration) -> Self {
+        self.text_decoration = Some(d);
         self
     }
 
@@ -629,7 +637,6 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     "font-variation",
     "text-overflow",
     "text-wrap",
-    "text-decoration",
     "selection-color",
 ];
 
@@ -750,6 +757,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "text-align",
     "font-style",
     "cursor",
+    "text-decoration",
     "grid-template-columns",
     "grid-template-rows",
     "grid-column",
@@ -831,6 +839,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "text-align" => style.text_align = as_text_align(&v),
         "font-style" => style.font_italic = as_font_style(&v),
         "cursor" => style.cursor = as_cursor(&v),
+        "text-decoration" => style.text_decoration = as_text_decoration(&v),
         "grid-template-columns" => style.grid_template_columns = as_grid_tracks(&v),
         "grid-template-rows" => style.grid_template_rows = as_grid_tracks(&v),
         "grid-column" => style.grid_column = as_grid_line_pair(&v),
@@ -1372,6 +1381,23 @@ fn as_align(v: &Value) -> Option<Align> {
             "baseline" => Some(Align::Baseline),
             "space-between" => Some(Align::SpaceBetween),
             "space-around" => Some(Align::SpaceAround),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `text-decoration` (PROP1). Only the two lines the paint layer can draw as a
+/// rect. CSS's `overline`, and the `text-decoration-style`/`-color` longhands,
+/// are not accepted — a dotted or coloured underline needs more than a filled
+/// rect, and claiming them would be the silent no-op this series removes.
+fn as_text_decoration(v: &Value) -> Option<lumen_core::TextDecoration> {
+    use lumen_core::TextDecoration as D;
+    match v {
+        Value::Keyword(k) => match k.as_str() {
+            "none" => Some(D::None),
+            "underline" => Some(D::Underline),
+            "line-through" => Some(D::LineThrough),
             _ => None,
         },
         _ => None,

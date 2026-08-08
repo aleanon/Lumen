@@ -34,7 +34,10 @@ route faux-bold already took for `font-weight`. `cursor` works
 on desktop (`default/auto`, `pointer`, `text`, `wait/progress`,
 `crosshair`, `move/grab/grabbing`, `not-allowed`, `none`); it
 INHERITS, so set it on the container. Unlisted CSS cursor names
-report W0109 rather than silently doing nothing. Every layout
+report W0109 rather than silently doing nothing.
+`text-decoration: underline | line-through | none` draws from
+the FONT's metrics, so the line tracks font size; `overline`
+and the `-style`/`-color` longhands are not accepted. Every layout
 property now works in `.lss`. `overflow: hidden`
 (or `clip`) clips to the border-radius, `visible` disables it;
 `scroll`/`auto` are REJECTED — scrolling is the `Scrollable`

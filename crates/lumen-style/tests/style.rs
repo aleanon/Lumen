@@ -143,6 +143,8 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         lumen_layout::GridLine::Line(2),
         lumen_layout::GridLine::Auto
     ));
+    style_parity!(covered, "text-decoration", "underline", |s: Style| s
+        .text_decoration(lumen_core::TextDecoration::Underline));
     style_parity!(covered, "cursor", "pointer", |s: Style| s
         .cursor(lumen_core::CursorShape::Pointer));
     style_parity!(covered, "font-style", "italic", |s: Style| s
@@ -248,6 +250,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "text-align" => "center",
         "font-style" => "italic",
         "cursor" => "pointer",
+        "text-decoration" => "underline",
         "grid-template-columns" | "grid-template-rows" => "1fr 2fr",
         "grid-column" | "grid-row" => "2",
         "overflow" => "hidden",

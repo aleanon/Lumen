@@ -572,3 +572,74 @@ fn an_unknown_cursor_is_reported() {
         "unsupported cursor must warn, got {ds:?}"
     );
 }
+
+// --- PROP1, text-decoration --------------------------------------------------
+
+/// `text-decoration` draws a rect from the FONT's metrics, so the line tracks
+/// font size instead of drifting. Asserted on pixels: the whole question is
+/// whether anything reaches the frame.
+#[test]
+fn text_decoration_draws_a_line_and_none_does_not() {
+    fn ink(lss: &str) -> usize {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text("xx").id("a")]).id("root")
+        })
+        .run_headless(Size::new(200.0, 80.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        h.screenshot()
+            .pixels()
+            .chunks_exact(4)
+            .filter(|p| p[0] < 200 || p[1] < 200 || p[2] < 200)
+            .count()
+    }
+    let plain = ink("#a { font-size: 24px; }");
+    let under = ink("#a { font-size: 24px; text-decoration: underline; }");
+    let strike = ink("#a { font-size: 24px; text-decoration: line-through; }");
+    assert!(
+        under > plain,
+        "underline must add pixels ({plain} -> {under})"
+    );
+    assert!(
+        strike > plain,
+        "line-through must add pixels ({plain} -> {strike})"
+    );
+    // The two lines sit at different heights, so they are not the same frame.
+    assert_ne!(under, strike, "underline and strike must differ");
+    // `none` must be byte-identical to saying nothing.
+    assert_eq!(ink("#a { font-size: 24px; text-decoration: none; }"), plain);
+}
+
+/// The line must scale with the font, not with the box — that is why the
+/// geometry reads the font metrics rather than a fraction of the bounds.
+#[test]
+fn the_decoration_thickness_tracks_font_size() {
+    fn ink(size: u32) -> usize {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text("xx").id("a")]).id("root")
+        })
+        .run_headless(Size::new(300.0, 160.0));
+        h.set_stylesheet(&format!(
+            "#a {{ font-size: {size}px; text-decoration: underline; }}"
+        ));
+        h.pump();
+        h.screenshot()
+            .pixels()
+            .chunks_exact(4)
+            .filter(|p| p[0] < 200 || p[1] < 200 || p[2] < 200)
+            .count()
+    }
+    assert!(
+        ink(48) > ink(16),
+        "a larger font must draw a larger underline"
+    );
+}
+
+#[test]
+fn an_unsupported_decoration_is_reported() {
+    let (_, ds) = lumen_style::parse("t.lss", "x { text-decoration: overline; }");
+    assert!(
+        ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+        "overline is not drawable and must warn, got {ds:?}"
+    );
+}
