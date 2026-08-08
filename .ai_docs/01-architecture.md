@@ -73,7 +73,25 @@ Every reload emits a structured result event (tier, status, components swapped, 
 - 120 fps capable desktop; 60 fps floor mid-range mobile.
 - 1M-row virtual table scroll at full frame rate. *(gated benchmark from M2)*
 - Layout of 10k-node dirty subtree < 2 ms desktop release. *(gated)*
-- Cold start: <300 ms desktop, <800 ms mobile. Hello-world binary <5 MB.
+- Cold start: <300 ms desktop, <800 ms mobile.
+- Hello-world binary — a **span**, not one number (LN3/CFG1, measured 2026-08-08,
+  release + LTO + strip + `opt-level = "z"`, x86-64 Linux; see
+  `docs/constrained-profile.md`):
+
+  | profile | binary | shared libs |
+  |---|---:|---:|
+  | default (pan-Unicode face, snapshot, desktop-integration) | 22.0 MB | 70 |
+  | lean **windowed** (`--no-default-features --features wgpu`) | **13.3 MB** | 5 |
+  | lean **headless** (same features, no `lumen::run`) | 6.8 MB | 5 |
+
+  **<5 MB remains the target and is currently unreachable on desktop**, for a
+  structural reason rather than a dependency-diet one: `lumen-shell` depends on
+  `wgpu` unconditionally because `Presenter` blits the CPU-rendered frame to the
+  window through a wgpu surface — the desktop shell has exactly one presentation
+  path and it is on the GPU, even though the CPU renderer is the renderer of
+  record (ADR-002). Reaching <5 MB needs a **CPU presentation backend** first;
+  no combination of feature flags gets there. The largest lever that *is*
+  available is the font (`pan-unicode`: 15 MB face → ~355 KB subset).
 
 ## 9b. Hardening & privacy (E.3)
 
