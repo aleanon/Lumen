@@ -106,6 +106,7 @@ lumen-render = { path = "crates/lumen-render" }
 # feature unification; lumen-widgets' default turns pan-unicode back on.
 lumen-text = { path = "crates/lumen-text", default-features = false }
 lumen-style = { path = "crates/lumen-style", default-features = false }
+lumen-app = { path = "crates/lumen-app" }
 lumen-widgets = { path = "crates/lumen-widgets" }
 lumen-shell = { path = "crates/lumen-shell" }
 lumen-test = { path = "crates/lumen-test" }

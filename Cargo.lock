@@ -3032,6 +3032,7 @@ version = "0.0.0"
 dependencies = [
  "criterion",
  "kurbo",
+ "lumen-app",
  "lumen-core",
  "lumen-layout",
  "lumen-render",

@@ -260,6 +260,32 @@ impl Tree {
 
     fn visit_paint_order(&self, node: NodeIndex, out: &mut Vec<NodeIndex>) {
         out.push(node);
+
+        // Fast path: walk the sibling chain directly when no child sets `z`.
+        //
+        // `z-index` is set on approximately nothing — but the sort ran for every
+        // node on every frame regardless, which made a container's paint cost
+        // O(k log k) in its child count where document order had been O(k). On a
+        // 6000-row column that is a 6000-element sort and a 6000-element
+        // allocation per frame, to reproduce the order the chain was already in.
+        let mut c = self.first_child[node.index() as usize];
+        let mut any_z = false;
+        while c.is_some() {
+            if self.z[c.index() as usize] != 0 {
+                any_z = true;
+                break;
+            }
+            c = self.next_sibling[c.index() as usize];
+        }
+        if !any_z {
+            let mut c = self.first_child[node.index() as usize];
+            while c.is_some() {
+                self.visit_paint_order(c, out);
+                c = self.next_sibling[c.index() as usize];
+            }
+            return;
+        }
+
         let mut kids: Vec<NodeIndex> = Vec::new();
         let mut c = self.first_child[node.index() as usize];
         while c.is_some() {
