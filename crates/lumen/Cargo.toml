@@ -31,6 +31,7 @@ lumen-core = { workspace = true }
 lumen-render = { workspace = true }
 lumen-layout = { workspace = true }
 lumen-text = { workspace = true }
+lumen-style = { workspace = true }
 # Direct path dep (not workspace-inherited): `default-features = false` on a
 # `workspace = true` dep is silently ignored by cargo, which would make the
 # lean profile impossible — the facade's own defaults re-enable everything.

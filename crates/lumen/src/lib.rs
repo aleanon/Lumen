@@ -23,6 +23,19 @@ pub use lumen_core::semantics;
 /// The application and headless runtime (02 §8).
 #[doc(inline)]
 pub use lumen_widgets::{app::FrameStats, App, BuildCx, Element, Handler, Headless};
+
+/// Types named in `Element`'s public builders, so those builders are actually
+/// callable through the facade (SD4).
+///
+/// `Shadow` is `.shadow()`'s parameter and `Dynamic<T>` is the parameter of all
+/// three reactive binders (`bind_text`/`bind_background`/`bind_class`). Both
+/// were missing, which made five public methods impossible to *name* — not
+/// deprecated, not gated, simply unreachable for anyone depending on `lumen`
+/// rather than on `lumen-widgets`. Pinned by `tests/facade_complete.rs`.
+#[doc(inline)]
+pub use lumen_core::{Dynamic, Signal};
+#[doc(inline)]
+pub use lumen_widgets::element::Shadow;
 #[cfg(feature = "snapshot")]
 pub use lumen_widgets::{AppSnapshot, Checkpoint};
 
@@ -38,7 +51,7 @@ pub use lumen_widgets::renderer_override;
 /// They exposed *when* a widget was added — an internal scheduling fact that
 /// meant nothing to a consumer and could not be reorganized without a breaking
 /// change. Everything now lives in `widgets`.
-pub use lumen_widgets::{a11y, forms, i18n, nav, system, undo, widgets};
+pub use lumen_widgets::{a11y, forms, i18n, nav, system, theme, undo, widgets};
 
 /// Cached decoded assets, and the hook to release them.
 ///
@@ -60,6 +73,11 @@ pub use lumen_render as render;
 
 /// Text shaping and layout (ADR-005).
 pub use lumen_text as text;
+
+/// The `.lss` style engine (04): `Style`, the parser, and the property
+/// registry. `Element::css` takes a `lumen_style::Style`, so without this the
+/// facade exposed a builder whose argument type it did not export (SD4).
+pub use lumen_style as style;
 
 /// The desktop window shell. `use lumen::RunExt` to call `app.run(size)` (02 §8).
 /// Desktop-only; mobile + web targets use their own shells.
