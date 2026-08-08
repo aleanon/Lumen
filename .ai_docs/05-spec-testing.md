@@ -17,7 +17,9 @@ silent no-op under `--wgpu`. Reverted.
 Method: for each field, two display lists differing in **that field alone** must
 render differently on each backend. Each backend is only ever compared with
 itself, so the assertion is exact and the failure names the field and the
-backend. Known gaps live in `GPU_IGNORES` and are asserted to still BE gaps — a
+backend. Known gaps live in `GPU_IGNORES` — **empty as of 2026-08-08**, since the one
+entry (`PushLayer::transform`) was implemented in the composite shader once this
+test made the gap explicit. Entries are asserted to still BE gaps — a
 tripwire in both directions, so implementing one fails the test until the entry
 goes, and a new gap fails immediately. Skipping would let the set grow silently,
 which is the defect class the file exists to close.

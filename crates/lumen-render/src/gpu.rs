@@ -152,8 +152,13 @@ struct CompositeInstance {
     rect: [f32; 4],
     /// Clip corner radii `[tl, tr, br, bl]`.
     radii: [f32; 4],
-    /// `[opacity, has_clip (0/1), _, _]`.
+    /// `[opacity, has_clip (0/1), tx, ty]` — the translation half of the
+    /// composite transform rides in the two spare slots, so honouring an affine
+    /// costs ONE extra vertex attribute rather than two.
     params: [f32; 4],
+    /// The linear half of the composite transform, `[a, b, c, d]` from kurbo's
+    /// `[a, b, c, d, e, f]` (`x' = a·x + c·y + e`). Identity is `[1,0,0,1]`.
+    xform: [f32; 4],
 }
 
 /// GPU resources that must outlive `queue.submit` (textures referenced by the
@@ -721,7 +726,7 @@ impl Wgpu {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<CompositeInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4],
                 }],
                 compilation_options: Default::default(),
             },
@@ -807,7 +812,7 @@ impl Wgpu {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<CompositeInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4],
                 }],
                 compilation_options: Default::default(),
             },
@@ -1289,7 +1294,12 @@ impl Wgpu {
         let mut i = 0;
         while i < cmds.len() {
             match &cmds[i] {
-                DrawCmd::PushLayer { clip, opacity, .. } => {
+                DrawCmd::PushLayer {
+                    clip,
+                    opacity,
+                    transform,
+                    ..
+                } => {
                     flush_rects(device, &mut ops, &mut pend_rects);
                     flush_paths(device, &mut ops, &mut pend_paths);
                     // Find the matching PopLayer (accounting for nesting).
@@ -1355,12 +1365,17 @@ impl Wgpu {
                         ),
                         None => ([0.0, 0.0, width as f32, height as f32], [0.0; 4], 0.0),
                     };
+                    let m = transform.as_coeffs();
                     let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("composite-instance"),
                         contents: bytemuck_lite::bytes_of(&CompositeInstance {
                             rect,
                             radii,
-                            params: [*opacity, has_clip, 0.0, 0.0],
+                            // The affine splits across `params` (translation)
+                            // and `xform` (linear part) so one attribute
+                            // carries it; see `CompositeInstance`.
+                            params: [*opacity, has_clip, m[4] as f32, m[5] as f32],
+                            xform: [m[0] as f32, m[1] as f32, m[2] as f32, m[3] as f32],
                         }),
                         usage: wgpu::BufferUsages::VERTEX,
                     });
@@ -2012,7 +2027,10 @@ impl Wgpu {
         });
         let instance = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("backdrop-instance"),
+            // The backdrop blit is never transformed: identity linear part and
+            // zero translation, which reproduces the pre-transform geometry.
             contents: bytemuck_lite::bytes_of(&CompositeInstance {
+                xform: [1.0, 0.0, 0.0, 1.0],
                 rect: [
                     rect.x0 as f32,
                     rect.y0 as f32,
@@ -2866,28 +2884,41 @@ struct CompVsOut {
     @location(1) rect: vec4<f32>,
     @location(2) radii: vec4<f32>,
     @location(3) params: vec4<f32>,
+    // Untransformed position: the child texture is sampled HERE, while the quad
+    // is drawn at the transformed position. That is what makes a transform move
+    // the layer rather than smear its contents.
+    @location(4) src: vec2<f32>,
 };
 
 @vertex
 fn composite_vs(@builtin(vertex_index) vi: u32,
                 @location(0) rect: vec4<f32>,
                 @location(1) radii: vec4<f32>,
-                @location(2) params: vec4<f32>) -> CompVsOut {
+                @location(2) params: vec4<f32>,
+                @location(3) xform: vec4<f32>) -> CompVsOut {
     let c = corner(vi);
-    let px = rect.xy + c * rect.zw;
+    let src = rect.xy + c * rect.zw;
+    // x' = a·x + c·y + e ; y' = b·x + d·y + f  (kurbo coefficient order).
+    // Identity is [1,0,0,1] + (0,0), which reproduces the previous geometry
+    // exactly — existing goldens are untouched.
+    let dst = vec2<f32>(
+        xform.x * src.x + xform.z * src.y + params.z,
+        xform.y * src.x + xform.w * src.y + params.w,
+    );
     var o: CompVsOut;
-    o.pos = to_ndc(px);
-    o.wpx = px;
+    o.pos = to_ndc(dst);
+    o.wpx = dst;
     o.rect = rect;
     o.radii = radii;
     o.params = params;
+    o.src = src;
     return o;
 }
 
 @fragment
 fn composite_fs(in: CompVsOut) -> @location(0) vec4<f32> {
     // Child stored premultiplied at physical resolution; sample at this pixel.
-    let child = textureSample(img_tex, img_samp, in.wpx * viewport.scale / viewport.size);
+    let child = textureSample(img_tex, img_samp, in.src * viewport.scale / viewport.size);
     var cov = 1.0;
     if (in.params.y > 0.5) {
         let center = in.rect.xy + in.rect.zw * 0.5;

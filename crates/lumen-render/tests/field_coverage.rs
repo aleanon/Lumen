@@ -43,12 +43,10 @@ use lumen_render::{cpu, RgbaImage};
 
 /// Fields `gpu.rs` does not read today. Each entry needs a reason and a cost.
 ///
-/// * `PushLayer::transform` — the composite path emits a `CompositeInstance`
-///   with `rect`/`radii`/`params` and blits the child texture axis-aligned.
-///   Honouring the affine means growing that struct (its `params` has only two
-///   spare floats) and applying the matrix in the composite shader's vertex
-///   stage. Bounded, not started.
-const GPU_IGNORES: &[&str] = &["PushLayer::transform"];
+/// Empty as of 2026-08-08: `PushLayer::transform` was the only entry, and the
+/// composite shader now applies the affine (the linear part rides in a new
+/// vertex attribute, the translation in `params`' two spare slots).
+const GPU_IGNORES: &[&str] = &[];
 
 fn size() -> (u32, u32) {
     (200, 140)
