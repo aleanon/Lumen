@@ -143,6 +143,8 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         lumen_layout::GridLine::Line(2),
         lumen_layout::GridLine::Auto
     ));
+    style_parity!(covered, "selection-color", "#ff0000ff", |s: Style| s
+        .selection_color(red()));
     style_parity!(covered, "text-decoration", "underline", |s: Style| s
         .text_decoration(lumen_core::TextDecoration::Underline));
     style_parity!(covered, "cursor", "pointer", |s: Style| s
@@ -222,7 +224,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
     let repr = |p: &str| match p {
         "display" => "flex",
         "flex-direction" => "column",
-        "background" | "color" | "border-color" => "#ff0000ff",
+        "background" | "color" | "border-color" | "selection-color" => "#ff0000ff",
         "border-radius" => "6px",
         "opacity" => "0.5",
         "font-weight" => "600",

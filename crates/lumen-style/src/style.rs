@@ -193,6 +193,8 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
+    /// `selection-color` (PROP1) — the text-selection highlight.
+    pub selection_color: Option<Color>,
     /// `text-decoration` (PROP1) — underline / line-through.
     pub text_decoration: Option<lumen_core::TextDecoration>,
     /// `cursor` (PROP1) — the pointer shape while over this node.
@@ -389,6 +391,12 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `selection-color` (PROP1).
+    pub fn selection_color(mut self, c: Color) -> Self {
+        self.selection_color = Some(c);
         self
     }
 
@@ -637,7 +645,6 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     "font-variation",
     "text-overflow",
     "text-wrap",
-    "selection-color",
 ];
 
 /// SD5.x: does `value` actually apply to `property`?
@@ -758,6 +765,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "font-style",
     "cursor",
     "text-decoration",
+    "selection-color",
     "grid-template-columns",
     "grid-template-rows",
     "grid-column",
@@ -840,6 +848,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "font-style" => style.font_italic = as_font_style(&v),
         "cursor" => style.cursor = as_cursor(&v),
         "text-decoration" => style.text_decoration = as_text_decoration(&v),
+        "selection-color" => style.selection_color = as_color(&v),
         "grid-template-columns" => style.grid_template_columns = as_grid_tracks(&v),
         "grid-template-rows" => style.grid_template_rows = as_grid_tracks(&v),
         "grid-column" => style.grid_column = as_grid_line_pair(&v),

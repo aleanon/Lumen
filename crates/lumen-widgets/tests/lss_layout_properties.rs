@@ -643,3 +643,44 @@ fn an_unsupported_decoration_is_reported() {
         "overline is not drawable and must warn, got {ds:?}"
     );
 }
+
+// --- PROP1, selection-color --------------------------------------------------
+
+/// `selection-color` overrides the built-in highlight tint. Asserted on the
+/// rendered frame: the selection is a painted rect, so the only witness that the
+/// property reached the paint layer is the pixels it changed.
+#[test]
+fn selection_color_overrides_the_builtin_highlight() {
+    fn frame(lss: &str) -> Vec<u8> {
+        let mut h = App::new(|cx: &mut BuildCx| -> Element {
+            widgets::column(vec![lumen_widgets::TextField::new(
+                cx,
+                "sel",
+                "hello world",
+            )
+            .id("f")
+            .into()])
+            .id("root")
+        })
+        .run_headless(Size::new(300.0, 80.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        // Focus the field and DRAG across the text, so a real selection range
+        // exists — the highlight only paints for a focused editor with a
+        // non-empty selection.
+        let b = h.node_bounds_by_id("f").expect("field");
+        let y = b.y0 + b.height() / 2.0;
+        let ev = |x: f64| lumen_core::events::PointerEvent::at(kurbo::Point::new(x, y));
+        h.inject(lumen_core::events::Event::PointerDown(ev(b.x0 + 4.0)));
+        h.inject(lumen_core::events::Event::PointerMove(ev(b.x0 + 70.0)));
+        h.inject(lumen_core::events::Event::PointerUp(ev(b.x0 + 70.0)));
+        h.pump();
+        h.screenshot().pixels().to_vec()
+    }
+    let default = frame("#f { font-size: 16px; }");
+    let green = frame("#f { font-size: 16px; selection-color: #00ff0088; }");
+    assert_ne!(
+        default, green,
+        "selection-color must change the rendered highlight"
+    );
+}

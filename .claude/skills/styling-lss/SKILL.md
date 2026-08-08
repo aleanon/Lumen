@@ -37,7 +37,9 @@ INHERITS, so set it on the container. Unlisted CSS cursor names
 report W0109 rather than silently doing nothing.
 `text-decoration: underline | line-through | none` draws from
 the FONT's metrics, so the line tracks font size; `overline`
-and the `-style`/`-color` longhands are not accepted. Every layout
+and the `-style`/`-color` longhands are not accepted.
+`selection-color` retints the text-selection highlight (it
+paints BEHIND the glyphs, so keep some alpha). Every layout
 property now works in `.lss`. `overflow: hidden`
 (or `clip`) clips to the border-radius, `visible` disables it;
 `scroll`/`auto` are REJECTED — scrolling is the `Scrollable`

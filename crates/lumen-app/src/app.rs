@@ -4342,7 +4342,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // re-shape (cached, cheap) for the selection geometry.
                 if focused && m.caret_byte.is_some() {
                     if let Some((a, b)) = m.selection.filter(|(a, b)| a != b) {
-                        let sel = Color::srgb8(0x1a, 0x73, 0xe8, 0x55);
+                        // PROP1: `.lss` `selection-color` overrides the
+                        // built-in tint. The default keeps its own alpha
+                        // (0x55) because the highlight paints BEHIND the
+                        // glyphs and an opaque default would hide them; an
+                        // author who sets an opaque colour has chosen that.
+                        let sel = css
+                            .and_then(|s| s.selection_color)
+                            .unwrap_or_else(|| Color::srgb8(0x1a, 0x73, 0xe8, 0x55));
                         let block = self.text.shaped(txt, &ts, m.wrap_width, ts.align);
                         for (x0, y0, x1, y1) in block.selection_rects(a, b) {
                             dl.push(DrawCmd::Rect {
