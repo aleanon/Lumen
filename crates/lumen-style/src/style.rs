@@ -657,13 +657,44 @@ pub fn value_applies(property: &str, value: &Value) -> bool {
     // (`aspect-ratio: 0`) are therefore still silent — the remaining sliver of
     // the value-level hole, and the reason this const is named for what it
     // checks rather than for the hole it closes.
-    if !matches!(value, Value::Keyword(_)) {
+    let judgeable = match value {
+        // A keyword either is in a property's accepted set or is not.
+        Value::Keyword(_) => true,
+        // A bare number, but only where the number is the WHOLE value — see
+        // `SCALAR_PROPERTIES`.
+        Value::Number(..) => SCALAR_PROPERTIES.contains(&property),
+        _ => false,
+    };
+    if !judgeable {
         return true;
     }
     let mut probe = Style::new();
     apply(&mut probe, property, value, &Tokens::new());
     probe != Style::new()
 }
+
+/// Applied properties whose entire value is a single scalar, so a `Number` that
+/// `apply` refuses is unambiguously a rejected value (SD5.x).
+///
+/// An explicit list rather than "everything that is not a shorthand", because
+/// the failure modes are not symmetric: a missing entry costs a warning that
+/// does not fire, while a wrongly-included compound property costs a warning on
+/// a stylesheet that works. `transition: 120ms` is the case that proves the
+/// point — a duration with no property or easing, which applies nothing and yet
+/// is legal input the general check flagged. New properties therefore opt IN.
+///
+/// Most entries here can never warn (`opacity` accepts any number); they are
+/// listed because they are single-scalar, not because they reject anything
+/// today. `aspect-ratio` is the one that currently does, rejecting zero and
+/// negatives that would collapse the node in taffy.
+const SCALAR_PROPERTIES: &[&str] = &[
+    "aspect-ratio",
+    "opacity",
+    "flex-grow",
+    "flex-shrink",
+    "font-weight",
+    "line-height",
+];
 
 /// The `.lss` properties `apply` actually consumes — the runtime's applied
 /// set, in `apply` arm order. The parity test asserts (a) each entry really

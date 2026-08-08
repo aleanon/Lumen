@@ -390,3 +390,32 @@ fn accepted_values_do_not_report_w0109() {
         );
     }
 }
+
+/// SD5.x, the numeric half: `aspect-ratio: 0` would collapse the node in taffy,
+/// so it is rejected — and must now say so instead of leaving the property
+/// quietly unset.
+#[test]
+fn an_unusable_number_reports_w0109() {
+    for bad in ["0", "-1"] {
+        let src = format!("x {{ aspect-ratio: {bad}; }}");
+        let (_, ds) = lumen_style::parse("t.lss", &src);
+        assert!(
+            ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+            "`aspect-ratio: {bad}` must report W0109, got {ds:?}"
+        );
+    }
+    // Valid ratios and other scalars stay silent.
+    for (prop, good) in [
+        ("aspect-ratio", "1.5"),
+        ("opacity", "0"),
+        ("flex-grow", "0"),
+        ("line-height", "1.5"),
+    ] {
+        let src = format!("x {{ {prop}: {good}; }}");
+        let (_, ds) = lumen_style::parse("t.lss", &src);
+        assert!(
+            !ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+            "`{prop}: {good}` is valid and must not warn, got {ds:?}"
+        );
+    }
+}

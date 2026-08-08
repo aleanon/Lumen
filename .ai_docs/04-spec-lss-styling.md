@@ -160,12 +160,18 @@ an unimplemented *property*; **`W0109` now reports an unusable value on an
 implemented one** — `text-align: justify`, `overflow: scroll`, `display: flext`
 were all silent before. Raised once per declaration at parse time, like W0107.
 
-The check is **deliberately narrow: bare keywords only.** A keyword either is in
-a property's accepted set or is not, so there is no false-positive risk; compound
-values are not judged, because partial-value nuance would make the check reject
-stylesheets that work (`transition: 120ms` applies nothing and the general form
-of the check flagged it). **Numeric rejections such as `aspect-ratio: 0` are
-therefore still silent** — the remaining sliver.
+The check judges **bare keywords, and numbers on single-scalar properties**
+(`SCALAR_PROPERTIES`: `aspect-ratio`, `opacity`, `flex-grow`, `flex-shrink`,
+`font-weight`, `line-height`). A keyword either is in a property's accepted set
+or is not; a number is judged only where the number is the *whole* value.
+
+Compound values are still not judged, and the list is opt-in rather than
+"everything that is not a shorthand", because the failure modes are not
+symmetric: **a missing entry costs a warning that does not fire; a wrongly
+included compound property costs a warning on a stylesheet that works.**
+`transition: 120ms` is the case that proves it — a duration with no property or
+easing, which applies nothing and is nonetheless legal input the general form of
+the check flagged.
 
 Note `get_styles` does *not* answer this question: it reports the **declared**
 value and its source span, not what was applied, so a rejected value still
