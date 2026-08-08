@@ -12,6 +12,7 @@ fn style(line_height: Option<f32>) -> TextStyle {
         line_height,
         letter_spacing: 0.0,
         family: None,
+        features: None,
         italic: false,
         align: TextAlign::Start,
     }

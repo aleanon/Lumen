@@ -40,6 +40,7 @@ fn black() -> TextStyle {
         line_height: None,
         letter_spacing: 0.0,
         family: None,
+        features: None,
         italic: false,
         align: TextAlign::Start,
     }
@@ -110,6 +111,7 @@ fn golden_multistyle() {
         line_height: None,
         letter_spacing: 0.0,
         family: None,
+        features: None,
         italic: false,
         align: TextAlign::Start,
     };

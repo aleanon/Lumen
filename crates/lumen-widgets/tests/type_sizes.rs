@@ -47,7 +47,24 @@ fn element_size_is_pinned() {
     // a 1041-node datagrid's whole Tree+Element footprint (~1.22 MB) is ~200x
     // smaller than the GPU-context tax on the same app. So this is a
     // watch-it-doesn't-grow assertion, not a target.
-    assert_size!(Element, 1024);
+    //
+    // 1024 -> 1040 on 2026-08-08: PROP1 added three fields to the `TextStyle`
+    // an `Element` carries inline — `align` (1 byte), `italic` (1 byte) and
+    // `features: Option<String>` (24), netting +16 after packing. Accepted
+    // rather than shaved:
+    //
+    //   * it buys `text-align`, `font-style` and `font-features`, three
+    //     properties that previously parsed and did nothing;
+    //   * at 3 000 nodes it is ~48 KB per frame's element tree, against the
+    //     ~270 MB RSS the same app carries — the 200x finding above says this
+    //     is not where per-node memory matters;
+    //   * `Option<Box<str>>` would recover 8 of the 16 bytes at the cost of
+    //     conversion friction on every call site, which is a poor trade for a
+    //     figure this far below the noise floor of what dominates.
+    //
+    // The assertion still earns its place: it made that a decision with a
+    // number attached instead of an unnoticed drift.
+    assert_size!(Element, 1040);
 }
 
 #[test]

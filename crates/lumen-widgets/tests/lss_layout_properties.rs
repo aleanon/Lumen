@@ -728,3 +728,29 @@ fn unsupported_text_wrap_modes_are_reported() {
         );
     }
 }
+
+// --- PROP1, font-features ----------------------------------------------------
+
+/// `font-features` must reach the shaper through `.lss`. `smcp` is in the
+/// bundled face, so enabling it substitutes small-cap glyphs — visible in the
+/// frame, which is the only proof the setting travelled the whole way.
+#[test]
+fn font_features_change_the_rendered_glyphs() {
+    fn frame(lss: &str) -> Vec<u8> {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text("hello").id("a")]).id("root")
+        })
+        .run_headless(Size::new(240.0, 60.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        h.screenshot().pixels().to_vec()
+    }
+    let plain = frame("#a { font-size: 28px; }");
+    let smcp = frame("#a { font-size: 28px; font-features: \"smcp\"; }");
+    assert_ne!(plain, smcp, "`smcp` must substitute small-cap glyphs");
+    // `normal` clears the setting, so it must equal saying nothing.
+    assert_eq!(
+        frame("#a { font-size: 28px; font-features: normal; }"),
+        plain
+    );
+}

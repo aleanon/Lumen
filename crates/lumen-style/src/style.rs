@@ -193,6 +193,8 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
+    /// `font-features` (PROP1) — CSS `font-feature-settings` syntax.
+    pub font_features: Option<String>,
     /// `text-wrap` (PROP1). `Some(false)` = `nowrap`.
     pub text_wrap: Option<bool>,
     /// `selection-color` (PROP1) — the text-selection highlight.
@@ -393,6 +395,12 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `font-features` (PROP1).
+    pub fn font_features(mut self, settings: impl Into<String>) -> Self {
+        self.font_features = Some(settings.into());
         self
     }
 
@@ -649,7 +657,6 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     "transform-origin",
     "z-index",
     // Typography — needs text-stack plumbing.
-    "font-features",
     "font-variation",
     "text-overflow",
 ];
@@ -774,6 +781,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "text-decoration",
     "selection-color",
     "text-wrap",
+    "font-features",
     "grid-template-columns",
     "grid-template-rows",
     "grid-column",
@@ -858,6 +866,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "text-decoration" => style.text_decoration = as_text_decoration(&v),
         "selection-color" => style.selection_color = as_color(&v),
         "text-wrap" => style.text_wrap = as_text_wrap(&v),
+        "font-features" => style.font_features = as_feature_settings(&v),
         "grid-template-columns" => style.grid_template_columns = as_grid_tracks(&v),
         "grid-template-rows" => style.grid_template_rows = as_grid_tracks(&v),
         "grid-column" => style.grid_column = as_grid_line_pair(&v),
@@ -1401,6 +1410,38 @@ fn as_align(v: &Value) -> Option<Align> {
             "space-around" => Some(Align::SpaceAround),
             _ => None,
         },
+        _ => None,
+    }
+}
+
+/// `font-features` (PROP1). The value is handed to the shaper verbatim in CSS
+/// `font-feature-settings` syntax, so any tag the face carries works and any it
+/// does not is ignored — matching CSS, and avoiding a hardcoded tag allow-list
+/// that would go stale against whatever font an app registers.
+///
+/// `normal` clears it. A bare keyword other than `normal` is rejected: feature
+/// settings are quoted tags, and an unquoted word is a typo rather than a
+/// setting.
+fn as_feature_settings(v: &Value) -> Option<String> {
+    match v {
+        // The lexer strips the quotes, but the shaper parses CSS syntax and
+        // needs them back — an unquoted tag is not a valid setting.
+        Value::Str(s) => Some(format!("\"{s}\"")),
+        Value::Keyword(k) if k == "normal" => Some(String::new()),
+        // `"tnum" 1` lexes as a list; rebuild the source text for the shaper.
+        Value::List(items) => {
+            let parts: Vec<String> = items
+                .iter()
+                .map(|i| match i {
+                    Value::Str(s) => format!("\"{s}\""),
+                    Value::Number(n, _) => format!("{n}"),
+                    Value::Keyword(k) => k.clone(),
+                    _ => String::new(),
+                })
+                .collect();
+            let joined = parts.join(" ");
+            (!joined.trim().is_empty()).then_some(joined)
+        }
         _ => None,
     }
 }

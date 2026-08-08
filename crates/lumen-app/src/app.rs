@@ -4472,6 +4472,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             line_height: None,
             letter_spacing: 0.0,
             family: None,
+            features: None,
             italic: false,
             align: lumen_text::TextAlign::Start,
         };
@@ -4892,6 +4893,7 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
         || css.font_family.is_some()
         || css.text_align.is_some()
         || css.font_italic.is_some()
+        || css.font_features.is_some()
     {
         if let NodeContent::Text(_, ts) = &mut el.content {
             if let Some(fs) = css.font_size {
@@ -4916,6 +4918,9 @@ fn apply_css_to_element(el: &mut Element, css: &lumen_style::Style) {
             }
             if let Some(i) = css.font_italic {
                 ts.italic = i;
+            }
+            if let Some(f) = &css.font_features {
+                ts.features = (!f.is_empty()).then(|| f.clone());
             }
         }
     }

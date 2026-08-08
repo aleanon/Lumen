@@ -41,7 +41,10 @@ and the `-style`/`-color` longhands are not accepted.
 `selection-color` retints the text-selection highlight (it
 paints BEHIND the glyphs, so keep some alpha).
 `text-wrap: nowrap` keeps the box width but shapes on one
-line — pair with `overflow: hidden` to clip the overflow. Every layout
+line — pair with `overflow: hidden` to clip the overflow.
+`font-features: "smcp"` (CSS font-feature-settings syntax)
+goes to the shaper verbatim; the bundled face carries smcp,
+tnum, onum, zero, frac, liga and more. `normal` clears it. Every layout
 property now works in `.lss`. `overflow: hidden`
 (or `clip`) clips to the border-radius, `visible` disables it;
 `scroll`/`auto` are REJECTED — scrolling is the `Scrollable`

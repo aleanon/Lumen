@@ -166,6 +166,10 @@ pub struct TextStyle {
     /// Register custom fonts via [`TextEngine::register_font`]; select by the
     /// returned family name (B1, no system enumeration).
     pub family: Option<String>,
+    /// OpenType feature settings in CSS `font-feature-settings` syntax
+    /// (PROP1) — e.g. `"smcp" 1, "tnum" 1`. Passed to the shaper verbatim;
+    /// tags the face does not carry are ignored by it, as in CSS.
+    pub features: Option<String>,
     /// Render italic (PROP1). The bundled face ships one upright style
     /// (ADR-005), so this is satisfied by **synthetic oblique** — the same
     /// route the existing faux-bold takes for weight.
@@ -189,6 +193,7 @@ impl Default for TextStyle {
             line_height: None,
             letter_spacing: 0.0,
             family: None,
+            features: None,
             italic: false,
             align: TextAlign::Start,
         }
@@ -211,6 +216,13 @@ impl TextStyle {
     /// This style with `px` of extra letter tracking (B2).
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = px;
+        self
+    }
+
+    /// This style with OpenType `features` (PROP1), CSS
+    /// `font-feature-settings` syntax.
+    pub fn features(mut self, settings: impl Into<String>) -> Self {
+        self.features = Some(settings.into());
         self
     }
 
@@ -248,6 +260,10 @@ struct ShapeKey {
     family: Option<String>,
     wrap: Option<u32>,
     align: u8,
+    /// PROP1. Feature settings change glyph SELECTION (`smcp` substitutes small
+    /// caps), so like `italic` they must key the cache or differently-featured
+    /// runs of one string collide.
+    features: Option<String>,
     /// PROP1. Load-bearing for CORRECTNESS, not just completeness: `italic`
     /// changes which face parley selects and therefore the synthesis flag the
     /// shaped run carries. Omitted from this key, the first block shaped for a
@@ -267,6 +283,7 @@ impl ShapeKey {
             family: s.family.clone(),
             wrap: wrap.map(f32::to_bits),
             align: align as u8,
+            features: s.features.clone(),
             italic: s.italic,
         }
     }
@@ -784,6 +801,11 @@ impl TextEngine {
         // PROP1: with a single upright face registered, fontique cannot match an
         // italic and reports a `skew` synthesis instead — handled beside the
         // existing faux-bold in the rasterizer.
+        if let Some(f) = &base.features {
+            builder.push_default(StyleProperty::FontFeatures(parley::FontFeatures::Source(
+                std::borrow::Cow::Borrowed(f.as_str()),
+            )));
+        }
         builder.push_default(StyleProperty::FontStyle(if base.italic {
             parley::FontStyle::Italic
         } else {
@@ -1345,6 +1367,7 @@ mod glyph_cache_tests {
             line_height: None,
             letter_spacing: 0.0,
             family: None,
+            features: None,
             italic: false,
             align: Default::default(),
         }

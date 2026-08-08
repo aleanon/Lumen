@@ -12,6 +12,7 @@ fn ink(weight: f32) -> u64 {
         line_height: None,
         letter_spacing: 0.0,
         family: None,
+        features: None,
         italic: false,
         align: TextAlign::Start,
     };
@@ -63,5 +64,37 @@ fn italic_is_part_of_the_shape_cache_key() {
         a.pixels(),
         b.pixels(),
         "italic and upright must not share a shape-cache entry"
+    );
+}
+
+/// PROP1: OpenType feature settings must reach the shaper AND key the cache.
+///
+/// `smcp` (small caps) is in the bundled face, so enabling it substitutes
+/// different glyphs — a visible, pixel-level difference. One engine for both,
+/// for the same reason as the italic test: a fresh engine per case would make a
+/// missing `ShapeKey` field invisible.
+#[test]
+fn font_features_reach_the_shaper_and_key_the_cache() {
+    let mut te = lumen_text::TextEngine::new();
+    let plain = TextStyle {
+        font_size: 32.0,
+        ..Default::default()
+    };
+    let smallcaps = TextStyle {
+        features: Some("\"smcp\" 1".into()),
+        ..plain.clone()
+    };
+    let a = te.shaped("hello", &plain, None, TextAlign::Start).render(
+        160,
+        48,
+        lumen_core::Color::WHITE,
+    );
+    let b = te
+        .shaped("hello", &smallcaps, None, TextAlign::Start)
+        .render(160, 48, lumen_core::Color::WHITE);
+    assert_ne!(
+        a.pixels(),
+        b.pixels(),
+        "`smcp` must substitute small-cap glyphs, and must not share a cache entry"
     );
 }
