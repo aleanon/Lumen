@@ -24,6 +24,7 @@ use lumen_render::{
 use lumen_text::TextEngine;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Hit-test z for overlay subtrees (dropdown menus, popovers, tooltips). They
 /// paint on top in a final pass, so they must also win hit-testing over the
@@ -270,6 +271,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> App<R, E> {
             scope_live: RefCell::new(std::collections::HashSet::new()),
             bg_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
+            elided_cache: RefCell::new(None),
             last_change: ChangeReport {
                 kind: "idle",
                 nodes: Vec::new(),
@@ -707,6 +709,15 @@ pub struct Headless<R = lumen_render::DefaultRenderer, E = lumen_core::tasks::In
     /// binding reads; paint-only bindings are isolated out). `is_current` false ⇒
     /// rebuild; else a paint-only binding change can be patched (F3.4).
     structural_reads: lumen_core::state::ReadSet,
+    /// OB4: memoized `sem_root.elided()`.
+    ///
+    /// `semantics_doc()` deep-clones the whole tree, and almost every caller
+    /// immediately calls `.root.elided()`, which clones the surviving subtree
+    /// again — twice per agent RPC, per assertion, per a11y publish. The elided
+    /// projection is a pure function of `sem_root`, so it is computed once and
+    /// shared as an `Rc`; `invalidate_semantics_cache` clears it wherever
+    /// `sem_root` is reassigned.
+    elided_cache: RefCell<Option<Rc<lumen_core::semantics::SemanticsNode>>>,
     /// What the last `pump` actually did (F4.3 change attribution).
     last_change: ChangeReport,
 }
@@ -1639,6 +1650,28 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.rtl
     }
 
+    /// The elided semantics root, computed once per rebuild and shared (OB4).
+    ///
+    /// Prefer this over `semantics_doc().root.elided()`, which deep-clones the
+    /// tree twice on every call. Returns an `Rc` rather than a borrow so the
+    /// interior-mutable cache doesn't leak a `RefCell` guard into callers.
+    pub fn semantics_elided(&self) -> Rc<lumen_core::semantics::SemanticsNode> {
+        if let Some(cached) = self.elided_cache.borrow().as_ref() {
+            return Rc::clone(cached);
+        }
+        let built = Rc::new(match self.sem_root.as_ref() {
+            Some(r) => r.elided(),
+            None => lumen_core::semantics::SemanticsNode::new(0, Role::Window),
+        });
+        *self.elided_cache.borrow_mut() = Some(Rc::clone(&built));
+        built
+    }
+
+    /// Drop the memoized elided tree — call wherever `sem_root` is reassigned.
+    fn invalidate_semantics_cache(&self) {
+        self.elided_cache.borrow_mut().take();
+    }
+
     /// The semantics document (typed).
     pub fn semantics_doc(&self) -> SemanticsDoc {
         let focused = self.focused_node().map(|n| n.index());
@@ -2234,6 +2267,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
 
         self.sem_root = Some(self.build_semantics(self.tree.root()));
+
+        self.invalidate_semantics_cache();
         self.last_damage = self.paint();
         self.last_change = ChangeReport {
             kind: "restyle",
@@ -2667,6 +2702,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         self.last_damage = self.paint();
         self.sem_root = Some(self.build_semantics(self.tree.root()));
+        self.invalidate_semantics_cache();
     }
 
     /// F4.2: the nodes depending on `signal`, gathered on demand.
@@ -2964,7 +3000,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// to exactly one node. Snapshot builds only (the agent introspection path).
     #[cfg(feature = "snapshot")]
     pub fn get_styles(&self, selector: &str) -> serde_json::Value {
-        let root = self.semantics_doc().root.elided();
+        let root = self.semantics_elided();
         let Ok(id) = lumen_core::semantics::resolve_one(&root, selector) else {
             return serde_json::Value::Null;
         };
@@ -2995,7 +3031,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// exactly one node. Snapshot builds only.
     #[cfg(feature = "snapshot")]
     pub fn get_deps(&self, selector: &str) -> serde_json::Value {
-        let root = self.semantics_doc().root.elided();
+        let root = self.semantics_elided();
         let Ok(id) = lumen_core::semantics::resolve_one(&root, selector) else {
             return serde_json::Value::Null;
         };
@@ -3065,7 +3101,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         action: &str,
         value: Option<&str>,
     ) -> Result<u32, String> {
-        let root = self.semantics_doc().root.elided();
+        let root = self.semantics_elided();
         let id = lumen_core::semantics::resolve_one(&root, selector)
             .map_err(|_| format!("selector `{selector}` did not resolve to one node"))?;
         let node = self

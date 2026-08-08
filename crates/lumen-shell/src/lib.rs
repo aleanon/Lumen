@@ -789,7 +789,7 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         // when none is active).
                         if let Some(a) = &mut self.a11y {
                             a.update_if_active(|| {
-                                lumen_widgets::a11y::build_tree(&h.semantics_doc().root.elided())
+                                lumen_widgets::a11y::build_tree(&h.semantics_elided())
                             });
                         }
                     }
@@ -1066,7 +1066,7 @@ impl Shell {
         let Some(h) = &self.headless else { return };
         if let Some(a) = &mut self.a11y {
             a.update_if_active(|| {
-                lumen_widgets::a11y::build_tree(&h.semantics_doc().root.elided())
+                lumen_widgets::a11y::build_tree(&h.semantics_elided())
             });
         }
     }
@@ -1211,7 +1211,7 @@ fn route_at_action<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner>(
         }
         n.children.iter().find_map(|c| find_bounds(c, id))
     }
-    let root = h.semantics_doc().root.elided();
+    let root = h.semantics_elided();
     // Published ids carry a structural-path salt in the high 32 bits (see
     // `lumen_widgets::a11y::build_tree`); the runtime index is the low half.
     let Some(bounds) = find_bounds(&root, req.target.0 & 0xFFFF_FFFF) else {

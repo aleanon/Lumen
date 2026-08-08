@@ -405,7 +405,7 @@ fn handle<R: Renderer, E: Spawner>(
                 "height": img.height(),
             });
             if annotate {
-                let root = app.semantics_doc().root.elided();
+                let root = app.semantics_elided();
                 let mut anns = Vec::new();
                 collect_annotations(&root, &mut anns);
                 out["annotations"] = Value::Array(anns);
@@ -445,7 +445,7 @@ fn handle<R: Renderer, E: Spawner>(
             fn count_nodes(n: &SemanticsNode) -> usize {
                 1 + n.children.iter().map(count_nodes).sum::<usize>()
             }
-            let node_count = count_nodes(&app.semantics_doc().root.elided());
+            let node_count = count_nodes(&app.semantics_elided());
             Ok(json!({
                 "frame_ms_p50": p50,
                 "frame_ms_p95": p95,
@@ -535,7 +535,7 @@ fn handle<R: Renderer, E: Spawner>(
             let deadline = Deadline::after_ms(timeout_ms);
             loop {
                 app.pump();
-                let root = app.semantics_doc().root.elided();
+                let root = app.semantics_elided();
                 if let Ok(id) = resolve_selector(&root, &selector) {
                     if let Some(n) = find_node(&root, id) {
                         let state_ok = want_state
@@ -915,7 +915,7 @@ fn resolve<R: Renderer, E: Spawner>(
     app: &Headless<R, E>,
     selector: &str,
 ) -> Result<SemanticsNode, (i64, String)> {
-    let root = app.semantics_doc().root.elided();
+    let root = app.semantics_elided();
     match resolve_selector(&root, selector) {
         Ok(id) => find_node(&root, id)
             .cloned()
@@ -943,7 +943,7 @@ fn resolve_action<R: Renderer, E: Spawner>(
     let deadline = Deadline::after_ms(timeout_ms);
     loop {
         app.pump();
-        let root = app.semantics_doc().root.elided();
+        let root = app.semantics_elided();
         match resolve_selector(&root, &selector) {
             Ok(id) => {
                 if let Some(n) = find_node(&root, id) {
