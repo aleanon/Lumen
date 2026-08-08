@@ -115,15 +115,43 @@ faster (2604 µs vs 5646 µs). Pre-sizing `meta` and `built` from the previous
 frame's node count gained ~2.5% and left that ratio unchanged, so repeated
 reallocation and rehashing are ruled out.
 
-The leading remaining hypothesis is that a single build's working set outgrows
-L2 — 3000 nodes × `size_of::<Element>() == 1024` is ~3 MB before `Tree` and
-`meta`. If that holds it **re-motivates EL (shrinking `Element` / bundling
-handlers) for a different reason than the one that deprioritized it**: EL was
-parked because per-node memory is ~1.22 MB against ~270 MB RSS, i.e. irrelevant
-to *footprint*. Cache residency during lowering is a separate argument, and this
-is the measurement that would support it. Unconfirmed — the per-row curve is
-smooth rather than showing a knee, which is consistent with gradual L2→L3
-degradation but does not prove it.
+### The working-set hypothesis, tested and falsified
+
+The obvious explanation was that a single build's working set outgrows L2 —
+3000 nodes × `size_of::<Element>() == 1024` is ~3 MB before `Tree` and `meta`.
+That would have **re-motivated EL (shrinking `Element`)** on cache-residency
+grounds, a different argument from the RSS one that parked it.
+
+It was tested by padding `Element` to 2048 bytes behind a temporary feature and
+re-measuring. If footprint drove the drift, 1500 padded rows should behave like
+3000 unpadded ones. They do not:
+
+| rows | 1 KB nodes | 2 KB nodes |
+|-----:|-----------:|-----------:|
+| 750 | 0.812 µs/row | 0.841 µs/row |
+| 1500 | 1.166 (×1.43) | 1.096 (×1.30) |
+| 3000 | 1.834 (×2.26) | 1.972 (×2.35) |
+
+Doubling the per-node footprint changed neither the absolute lowering cost nor
+the shape of the curve. **EL does not return as a performance lever** — that is
+now supported by a direct measurement rather than only by the RSS argument.
+
+### What is left
+
+Splitting lowering once more: **taffy node creation is flat** — 0.157 → 0.198
+µs/row across 4× the rows, and only ~10% of lowering. The drift is in
+`build_node`'s own per-node work, which goes 0.670 → 1.759 µs/row.
+
+Ruled out so far: `Element` footprint, collection reallocation/rehashing, taffy
+node minting, and process-wide memory pressure. What remains is per-node
+allocation churn (each node builds a `desc` with cloned classes and a `to_string`
+role, and the style-memo *hit* path clones a `(Style, HashMap)` pair) together
+with hash-map access over tables that grow with N.
+
+Settling which of those it is needs a profiler, and this box has none available:
+`perf_event_paranoid` is 4 (blocks user-space `perf` without root) and valgrind
+is not installed. That is the same class of blocker as the ARM and lavapipe
+items — recorded rather than guessed at.
 
 ## Honest caveats
 
@@ -178,10 +206,13 @@ should still not be claimed anywhere until this table looks different.
 
 1. ~~Find the >500-node inflection.~~ **Done** — `lumen-text` cache thrash; see
    above and the 2026-08-08 decision-log entry.
-2. **Explain the residual drift inside `build_node`.** Narrowed to the lowering
-   pass (78% of a 3000-row frame) and shown to scale with individual tree size
-   rather than process footprint; reallocation ruled out. Test the L2 working-set
-   hypothesis — if it holds, EL is back on the table on cache grounds.
+2. **Explain the residual drift inside `build_node`.** Narrowed to its per-node
+   work (78% of a 3000-row frame, taffy excluded and flat). `Element` footprint,
+   reallocation, taffy minting and process-wide memory pressure are all ruled
+   out by measurement. **Blocked on a profiler** — no `perf` (paranoid=4), no
+   valgrind. Unblock by lowering `perf_event_paranoid` or installing valgrind;
+   an allocation-counting harness already exists (`benches/identity.rs`) and
+   would test the allocation-churn candidate without one.
 3. Extend the harness to **Slint** (the closest architectural peer — retained,
    Rust, and it has never been compared either) and **GTK4 via gtk4-rs**.
 4. Add the other two owner axes: reaction latency (input → committed frame) and
