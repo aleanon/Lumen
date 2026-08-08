@@ -146,6 +146,20 @@ pub mod codes {
     /// semantic tree lie — `input.invokeAction` fails and AT offers a control
     /// that does nothing.
     pub const W0106: &str = "W0106";
+    /// A known, implemented `.lss` property was given a **value** the runtime
+    /// cannot use, so the declaration silently does nothing (SD5.x).
+    ///
+    /// Distinct from [`W0107`], which reports a property that is not
+    /// implemented at all. This is the other half of the same defect class and
+    /// was the one still open: `text-align: justify`, `overflow: scroll` and
+    /// `aspect-ratio: 0` all parse, fail their value check, and leave the
+    /// property unset. Nothing reported it — not the diagnostics, and not
+    /// `get_styles`, which returns the *declared* value rather than the applied
+    /// one, so a rejected value still appears there.
+    ///
+    /// Reported once per declaration at parse time, like `W0107`: the author
+    /// needs to hear it once and the hot path must not pay for it.
+    pub const W0109: &str = "W0109";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).

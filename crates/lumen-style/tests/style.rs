@@ -344,3 +344,46 @@ fn light_and_dark_themes_resolve_differently() {
     assert!(dark.background.is_some());
     assert_ne!(light.background, dark.background, "themes must differ");
 }
+
+/// SD5.x: a known, implemented property given a value the runtime cannot use
+/// must report `W0109`. These three were all silent before — they parse, fail
+/// their value check, and leave the property unset, with nothing to read.
+#[test]
+fn an_unusable_value_on_an_implemented_property_reports_w0109() {
+    for (prop, bad) in [
+        ("text-align", "justify"),
+        ("overflow", "scroll"),
+        ("display", "flext"),
+    ] {
+        let src = format!("x {{ {prop}: {bad}; }}");
+        let (_, ds) = lumen_style::parse("t.lss", &src);
+        assert!(
+            ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+            "`{prop}: {bad}` must report W0109, got {ds:?}"
+        );
+    }
+}
+
+/// The complement, and the reason the check is narrow: every accepted value
+/// must stay silent. A diagnostic that fires on working stylesheets is worse
+/// than the silence it replaced.
+#[test]
+fn accepted_values_do_not_report_w0109() {
+    for (prop, good) in [
+        ("text-align", "center"),
+        ("overflow", "hidden"),
+        ("display", "grid"),
+        ("align-items", "center"),
+        ("flex-wrap", "wrap"),
+        ("width", "10px"),
+        ("color", "#ff0000ff"),
+        ("transition", "background 120ms linear"),
+    ] {
+        let src = format!("x {{ {prop}: {good}; }}");
+        let (_, ds) = lumen_style::parse("t.lss", &src);
+        assert!(
+            !ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+            "`{prop}: {good}` is valid and must not warn, got {ds:?}"
+        );
+    }
+}

@@ -155,14 +155,21 @@ Plan tasks: layout → A.2, visual/typography → B.3/B.4, motion → B.5.
 |---|---|
 | **rendered** | `background` (solid color, `linear-gradient(<angle>deg, stops…)` — CSS angles, optional `%` positions, Oklab interpolation — and `radial-gradient(stops…)` centered/farthest-corner; conic still unexposed), `border` (shorthand width+color), `border-radius` (1–4 values, CSS expansion `[tl tr br bl]` — the shadow sprite uses the uniform top-left fallback), `shadow` (B.3 — single outer shadow `<dx> <dy> [blur] [spread] <color>`; `inset`/comma lists still unsupported and an `inset` keyword disables the declaration), `visibility` (B.3 — `hidden` removes the subtree from paint, hit-testing, and semantics while keeping its layout space), `clip` (B.3 — `none|bounds|rounded`, overriding the element clip flag; `bounds` squares the corners), `blend-mode` (B.3 — `normal|multiply|screen|overlay|darken|lighten`, subtree compositing layer shared with `opacity`), per-side `border-(top|right|bottom|left)` (B.3 — `<w> <color>` strips on top of the fill; border-radius ignored for per-side strokes), `backdrop-filter` (blur/saturate + beyond-spec `refraction`/`specular`), `color` (text); **layout (A.2, 2026-07-09):** `display`, `flex-direction`, `width`, `height`, `gap` (both axes), `padding`/`margin` (whole-side + per-side longhands `padding-top` … `margin-left`, component-wise override) — note text-bearing nodes still derive `height` from their glyphs (the text-height rule), and state-part layout rules (`:hovered { width: … }`) relayout via the normal rebuild path |
 | **applied, no effect** | *(empty since B.4a)* — `font-size`, `font-weight` (synthesized bold on the single face), and `line-height` reach the text stack (measure **and** paint); `opacity` renders since B.3a (subtree compositing layer) |
-**The value-level hole is still open** (SD5.x, verified 2026-08-08). `W0107`
-reports an unimplemented *property*; a **rejected value on an implemented
-property is silent** — `text-align: justify`, `overflow: scroll` and
-`aspect-ratio: 0` all parse, fail their value check, and leave the property
-unset with no diagnostic. `get_styles` does not help: it reports the *declared*
+**The value-level hole is mostly closed** (SD5.x, 2026-08-08). `W0107` reports
+an unimplemented *property*; **`W0109` now reports an unusable value on an
+implemented one** — `text-align: justify`, `overflow: scroll`, `display: flext`
+were all silent before. Raised once per declaration at parse time, like W0107.
+
+The check is **deliberately narrow: bare keywords only.** A keyword either is in
+a property's accepted set or is not, so there is no false-positive risk; compound
+values are not judged, because partial-value nuance would make the check reject
+stylesheets that work (`transition: 120ms` applies nothing and the general form
+of the check flagged it). **Numeric rejections such as `aspect-ratio: 0` are
+therefore still silent** — the remaining sliver.
+
+Note `get_styles` does *not* answer this question: it reports the **declared**
 value and its source span, not what was applied, so a rejected value still
-appears there. `ui.explain {kind: "style"}` is the only surface that
-distinguishes them today.
+appears there. `ui.explain {kind: "style"}` distinguishes them per node.
 
 **`z-index` is parse-only for a structural reason, not an oversight** (investigated 2026-08-08). `Tree::hit_test` already maximizes `(z, preorder_pos)`, so wiring `z-index` to `Tree::set_z` would take about five minutes — and would be a **trap**: it would change which node receives a click *without changing what is painted on top*. Paint order is a two-pass scheme (normal, then overlay) keyed on the `overlay` flag, not on `z`, and `emit_pass` maintains its clip stack **by depth**, popping layers as depth decreases — so it requires a strict preorder traversal. Stable-sorting the paint order by `z` therefore breaks clip nesting (layers pop and push against the wrong nodes). Honouring `z-index` visually needs **stacking contexts**: paint each context as a self-contained subtree, then order contexts by `z`. That is real work, and until it exists the property must stay inert rather than half-wired.
 

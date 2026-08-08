@@ -587,7 +587,30 @@ impl Parser {
                     format!("`{property}` expects a {expected}, got `{value:?}`"),
                     span,
                 );
+                // Already reported; W0109 below would say the same thing worse.
+                return Some(Declaration {
+                    property,
+                    value,
+                    important,
+                    span,
+                });
             }
+        }
+        // SD5.x: the other half of W0107. E0103 above catches a value of the
+        // wrong TYPE; this catches one of the right type the runtime still
+        // cannot use — `text-align: justify`, `overflow: scroll`,
+        // `aspect-ratio: 0`. Those parsed clean and left the property unset,
+        // reported by nothing: not the diagnostics, and not `get_styles`, which
+        // returns the DECLARED value so a rejected one still appears there.
+        if !crate::style::value_applies(&property, &value) {
+            self.warn_at(
+                codes::W0109,
+                format!(
+                    "`{property}` does not accept `{value:?}` — this \
+                     declaration will have no effect"
+                ),
+                span,
+            );
         }
         Some(Declaration {
             property,

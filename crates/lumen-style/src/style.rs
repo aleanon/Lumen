@@ -619,6 +619,45 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     "selection-color",
 ];
 
+/// SD5.x: does `value` actually apply to `property`?
+///
+/// Used at parse time to raise `W0109` for a value the runtime cannot use. The
+/// test is the same one the parity suite uses on `APPLIED_PROPERTIES`: apply to
+/// a fresh [`Style`] and see whether anything changed. Every successful parse
+/// sets a field to `Some(..)`, which differs from the default `None`, so
+/// "unchanged" means "not understood" — including for values that happen to
+/// equal a default, since `Some(0.0) != None`.
+///
+/// Returns `true` (i.e. "assume fine") in two cases where the answer is not
+/// knowable here:
+///
+/// * the property is not in [`APPLIED_PROPERTIES`] — `W0107` already covers it,
+///   and double-reporting one declaration helps nobody;
+/// * the value mentions a `$token`, which is resolved later against a token map
+///   this function does not have. Reporting those would fire on every themed
+///   stylesheet.
+pub fn value_applies(property: &str, value: &Value) -> bool {
+    if !APPLIED_PROPERTIES.contains(&property) {
+        return true;
+    }
+    // Deliberately narrow: only a bare KEYWORD is judged. A keyword either is
+    // in a property's accepted set or is not, so there is no false-positive
+    // risk — which is not true of compound values. `transition: 120ms` is a
+    // duration with no property or easing and applies nothing, so the general
+    // form of this check would warn about it; but shorthands, lists and
+    // functions have enough partial-value nuance that reporting them here
+    // would mean rejecting stylesheets that work today. Numeric rejections
+    // (`aspect-ratio: 0`) are therefore still silent — the remaining sliver of
+    // the value-level hole, and the reason this const is named for what it
+    // checks rather than for the hole it closes.
+    if !matches!(value, Value::Keyword(_)) {
+        return true;
+    }
+    let mut probe = Style::new();
+    apply(&mut probe, property, value, &Tokens::new());
+    probe != Style::new()
+}
+
 /// The `.lss` properties `apply` actually consumes — the runtime's applied
 /// set, in `apply` arm order. The parity test asserts (a) each entry really
 /// changes a `Style`, (b) no other known property does, and (c) the typed
