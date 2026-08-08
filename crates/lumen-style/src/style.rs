@@ -363,6 +363,72 @@ impl Style {
     }
 }
 
+/// SD5.1: properties the parser ACCEPTS but `apply()` does nothing with.
+///
+/// These are the framework's worst defect class for its stated audience: an
+/// author (or an agent) writes a rule, gets no error, and the rule silently
+/// does nothing. A human eventually notices the pixels; an agent cannot see the
+/// screen, so it reports success and moves on.
+///
+/// Listing them explicitly does two things. It lets `apply()` emit `W0107`
+/// instead of falling through in silence, and — via `style_parity!`'s
+/// `KNOWN == APPLIED ∪ PARSE_ONLY` assertion — it makes the *next* property
+/// that lands in the parser without an implementation a **build failure**
+/// rather than another silent no-op.
+///
+/// Entries leave this list by being implemented, never by being deleted.
+///
+/// Most of these are mechanical: `LayoutStyle`/taffy already implement
+/// justify-content, align-*, flex-*, min/max-size, aspect-ratio,
+/// position/inset and CSS Grid — `apply()` simply never learned to read the
+/// parsed value into the existing field.
+pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
+    // Layout — the field exists in LayoutStyle; apply() doesn't populate it.
+    "flex-wrap",
+    "flex-grow",
+    "flex-shrink",
+    "flex-basis",
+    "justify-content",
+    "align-items",
+    "align-self",
+    "align-content",
+    "row-gap",
+    "column-gap",
+    "grid-template-columns",
+    "grid-template-rows",
+    "grid-column",
+    "grid-row",
+    "min-width",
+    "min-height",
+    "max-width",
+    "max-height",
+    "aspect-ratio",
+    "position",
+    "inset",
+    "inset-top",
+    "inset-right",
+    "inset-bottom",
+    "inset-left",
+    "overflow",
+    // Visual — needs render support, not just a field.
+    "filter",
+    "transform",
+    "transform-origin",
+    "z-index",
+    "cursor",
+    // Typography — needs text-stack plumbing.
+    "font-family",
+    "font-style",
+    "font-features",
+    "font-variation",
+    "letter-spacing",
+    "text-align",
+    "text-overflow",
+    "text-wrap",
+    "text-decoration",
+    "selection-color",
+];
+
 /// The `.lss` properties `apply` actually consumes — the runtime's applied
 /// set, in `apply` arm order. The parity test asserts (a) each entry really
 /// changes a `Style`, (b) no other known property does, and (c) the typed

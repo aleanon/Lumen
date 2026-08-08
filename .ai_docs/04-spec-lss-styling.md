@@ -118,7 +118,18 @@ atomically. `border-width`/`border-color` are in the known-property list
 (B.7a). Unknown units are `E0103` with a span since B.7 (known units:
 `px % ms s deg fr`; bare numbers stay legal where a length is expected).
 
-## 10. Implementation status by property (2026-07-09)
+## 10. Implementation status by property
+
+*(SD5.1/SD5.2, 2026-08-08: this section is no longer the source of truth and
+cannot drift from the code again. The three lists live in the crate —
+`KNOWN_PROPERTIES`, `APPLIED_PROPERTIES`, `PARSE_ONLY_PROPERTIES` — and
+`crates/lumen-style/tests/property_parity.rs` asserts `KNOWN == APPLIED ∪
+PARSE_ONLY`, so a property that parses without an implementation is a **build
+failure**. Current split: **78 known, 37 applied, 41 parse-only**. A parse-only
+declaration now reports `W0107` at parse time instead of silently doing
+nothing.)*
+
+## 10b. Historical status by property (2026-07-09)
 
 Three levels: **rendered** (visible effect), **applied** (parsed into the
 typed style but ignored downstream), **parse-only** (name known, dropped).

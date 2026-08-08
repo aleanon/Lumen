@@ -47,8 +47,47 @@ dialog .footer > button {
 #[test]
 fn valid_corpus_parses_cleanly() {
     let (sheet, ds) = parse("ok.lss", VALID);
-    assert!(ds.is_empty(), "expected no diagnostics, got: {ds:?}");
+    // SD5.2: "cleanly" means no ERRORS. The corpus legitimately uses
+    // `transform`, which parses and is not yet applied, so it now draws a
+    // W0107 warning — that is the diagnostic working, not the corpus being
+    // invalid. Asserting `ds.is_empty()` here would force the choice between
+    // a silent no-op and a failing test.
+    let errors: Vec<_> = ds
+        .iter()
+        .filter(|d| d.severity == lumen_core::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
     assert!(!sheet.items.is_empty());
+}
+
+/// SD5.2: a property that parses and does nothing must say so.
+#[test]
+fn parse_only_properties_warn() {
+    let (_, ds) = parse("t.lss", "button { transform: scale(2); }");
+    let w = ds
+        .iter()
+        .find(|d| d.code == lumen_core::codes::W0107)
+        .unwrap_or_else(|| panic!("expected W0107 for a parse-only property; got {ds:?}"));
+    assert!(
+        w.message.contains("transform") && w.message.contains("no effect"),
+        "the warning must name the property and say what happens: {}",
+        w.message
+    );
+    assert!(
+        !lumen_style::has_errors(&ds),
+        "a parse-only property is valid .lss — it must not make the sheet fail \
+         to load, only report that the rule does nothing"
+    );
+}
+
+/// And an implemented property must stay silent, or the warning is noise.
+#[test]
+fn applied_properties_do_not_warn() {
+    let (_, ds) = parse("t.lss", "button { width: 10px; }");
+    assert!(
+        !ds.iter().any(|d| d.code == lumen_core::codes::W0107),
+        "an implemented property must not warn: {ds:?}"
+    );
 }
 
 #[test]

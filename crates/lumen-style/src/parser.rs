@@ -145,6 +145,23 @@ impl Parser {
         let span = self.span();
         self.err_at(code, msg, span);
     }
+    /// SD5.2: a *warning* at a span. `err_at`'s sibling — the distinction
+    /// matters, because a parse-only property is valid `.lss` that happens to
+    /// do nothing, not a syntax error, and `has_errors()` must stay false so a
+    /// stylesheet using one still loads.
+    fn warn_at(&mut self, code: &'static str, msg: impl Into<String>, span: Span) {
+        // `Diagnostic::new` derives severity from the code prefix, so a
+        // `W` code is already a warning; this exists to make the *intent*
+        // explicit at the call site rather than relying on the reader knowing
+        // that rule.
+        self.diags
+            .push(Diagnostic::new(code, msg).with_span(SourceSpan {
+                file: self.file.clone(),
+                line: span.line,
+                col: span.col,
+            }));
+    }
+
     fn err_at(&mut self, code: &'static str, msg: impl Into<String>, span: Span) {
         self.diags
             .push(Diagnostic::new(code, msg).with_span(SourceSpan {
@@ -516,6 +533,23 @@ impl Parser {
                 None => format!("unknown property `{property}`"),
             };
             self.err_at(codes::E0102, msg, span);
+        } else if crate::style::PARSE_ONLY_PROPERTIES.contains(&property.as_str()) {
+            // SD5.2: the property is real and spelled correctly, and it will
+            // do nothing. Before this it parsed clean and silently had no
+            // effect — the defect class an agent cannot detect, because there
+            // is no error to read and no screen to look at.
+            //
+            // Reported once per declaration at parse time, not per node per
+            // frame: the author needs to hear it once, and the hot path should
+            // not pay for it.
+            self.warn_at(
+                codes::W0107,
+                format!(
+                    "`{property}` is parsed but not yet applied — this \
+                     declaration will have no effect"
+                ),
+                span,
+            );
         }
         self.expect(Tk::Colon, "`:`");
         let value = self.value();

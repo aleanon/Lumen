@@ -124,6 +124,13 @@ pub mod codes {
     /// An interactive node laid out with zero area — clickable but invisible /
     /// unhittable (usually a missing size or empty content).
     pub const W0105: &str = "W0105";
+    /// A `.lss` property parses and is spelled correctly, but `Style::apply`
+    /// does nothing with it, so the declaration has no effect (SD5.2).
+    ///
+    /// Reported once per declaration at parse time. Before this the rule was
+    /// simply silent — the defect class an agent cannot detect, since there is
+    /// no error to read and no screen to look at.
+    pub const W0107: &str = "W0107";
     /// A scroll container is laying out a large number of children directly
     /// (VL1). `Scrollable` materializes every child every frame, so cost grows
     /// with the item count rather than the viewport; `VirtualList` renders only
