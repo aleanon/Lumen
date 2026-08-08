@@ -48,6 +48,44 @@ jobs:
       - name: doc tests
         run: cargo test --workspace --doc
 
+  # LN0: the lean (`--no-default-features`) profile must actually compile.
+  #
+  # The `test` job cannot cover this. `cargo build --workspace` unifies features
+  # across all ~70 members, and 46 of 51 examples request full-default
+  # `lumen-widgets`, so the lean code paths are never compiled there — they were
+  # only ever exercised by a throwaway crate built OUTSIDE the workspace in
+  # scripts/size_gate.sh, which never ran tests against it.
+  #
+  # This is not hypothetical. Two consecutive commits (OB3, SD6a) each landed a
+  # break that the default profile compiled and tested cleanly: a dead-type
+  # warning under -D warnings, and six borrow errors. Both would have shipped.
+  #
+  # Each crate is checked ALONE (`-p <crate>`), because checking several at once
+  # re-introduces the unification this job exists to defeat.
+  #
+  # SCOPE: library targets only, deliberately — no `--all-targets`. Several test
+  # targets are legitimately snapshot-specific without being cfg-gated (e.g.
+  # lumen-core's semantics tests call the snapshot-only `to_json`; lumen-widgets
+  # has 27 such errors). Making the test suites lean-compatible is real work and
+  # partly undesirable — some of those tests exist precisely to test snapshot
+  # behavior. The lib target is what actually ships, so that is what is gated
+  # here; extending to test targets is tracked separately.
+  lean:
+    name: lean profile (--no-default-features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.9.1
+      - name: check each crate with default features off
+        run: |
+          set -euo pipefail
+          for crate in lumen-core lumen-style lumen-text lumen-render \
+                       lumen-layout lumen-widgets lumen-shell lumen; do
+            echo "==> $crate (lean)"
+            cargo check -p "$crate" --no-default-features
+          done
+
   # Perf gate (T2.6): criterion benches must stay within their frame budgets.
   # Runs on the reference Linux desktop runner only.
   perf:

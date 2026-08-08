@@ -108,3 +108,19 @@ check:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test --workspace
+    just check-lean
+
+# LN0: verify the lean (`--no-default-features`) profile still compiles.
+#
+# `cargo check --workspace` CANNOT catch this: Cargo unifies features across all
+# ~70 members, and most examples request full-default `lumen-widgets`, so the
+# lean paths are never compiled there. Each crate must be checked alone.
+check-lean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export RUSTFLAGS="-D warnings"
+    for crate in lumen-core lumen-style lumen-text lumen-render \
+                 lumen-layout lumen-widgets lumen-shell lumen; do
+        printf '%-16s ' "$crate"
+        cargo check -q -p "$crate" --no-default-features && echo OK
+    done
