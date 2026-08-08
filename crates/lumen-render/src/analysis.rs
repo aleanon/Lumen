@@ -399,6 +399,7 @@ mod tests {
             clip: None,
             opacity: 0.5,
             transform: Affine::IDENTITY,
+            filter_blur: 0.0,
             blend: BlendMode::SourceOver,
         });
         dl.push(DrawCmd::Rect {
@@ -426,6 +427,7 @@ mod tests {
             }),
             opacity: 1.0,
             transform: Affine::IDENTITY,
+            filter_blur: 0.0,
             blend: BlendMode::SourceOver,
         });
         dl.push(DrawCmd::Rect {

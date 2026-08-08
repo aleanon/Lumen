@@ -884,3 +884,47 @@ fn text_that_fits_is_not_ellipsized() {
         frame("#a { width: 200px; text-wrap: nowrap; }")
     );
 }
+
+// --- PROP1, filter -----------------------------------------------------------
+
+/// `filter: blur()` blurs the element's OWN content — distinct from
+/// `backdrop-filter`, which blurs what is behind it. Asserted on pixels, and on
+/// the layout box being unchanged: like `transform`, this is paint-time.
+#[test]
+fn filter_blur_changes_the_frame_but_not_the_box() {
+    fn probe(lss: &str) -> (Vec<u8>, kurbo::Rect) {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text("xx").id("a")]).id("root")
+        })
+        .run_headless(Size::new(200.0, 100.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        (
+            h.screenshot().pixels().to_vec(),
+            h.node_bounds_by_id("a").expect("label"),
+        )
+    }
+    let (sharp, sharp_box) = probe("#a { font-size: 24px; }");
+    let (blurred, blurred_box) = probe("#a { font-size: 24px; filter: blur(3px); }");
+    assert_ne!(sharp, blurred, "blur must change the frame");
+    assert_eq!(
+        sharp_box, blurred_box,
+        "filter is paint-time and must not move the layout box"
+    );
+    // `none` is a zero radius, so it must equal saying nothing.
+    assert_eq!(probe("#a { font-size: 24px; filter: none; }").0, sharp);
+}
+
+/// Only `blur()` is accepted. The CSS colour-map filters are cheap to add on
+/// this plumbing but are not applied yet, so accepting them would render
+/// nothing — the silent no-op this whole series removed.
+#[test]
+fn unimplemented_filter_functions_are_reported() {
+    for bad in ["brightness(2)", "contrast(200%)", "blur(-1px)"] {
+        let (_, ds) = lumen_style::parse("t.lss", &format!("x {{ filter: {bad}; }}"));
+        assert!(
+            ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+            "`filter: {bad}` must warn, got {ds:?}"
+        );
+    }
+}

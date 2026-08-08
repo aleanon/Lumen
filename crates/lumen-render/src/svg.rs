@@ -330,6 +330,7 @@ fn walk(
                 1.0
             },
             transform: Affine::IDENTITY,
+            filter_blur: 0.0,
             blend: crate::display_list::BlendMode::SourceOver,
         });
     }

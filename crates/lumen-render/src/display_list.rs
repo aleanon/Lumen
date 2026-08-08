@@ -326,6 +326,14 @@ pub enum DrawCmd {
         opacity: f32,
         /// Transform applied when the layer composites onto its parent.
         transform: Affine,
+        /// Blur radius in logical px applied to the layer's OWN content before
+        /// compositing (`0` = none) — CSS `filter: blur()`.
+        ///
+        /// Distinct from [`DrawCmd::BackdropFilter`], which blurs what is
+        /// painted *behind* a region. This blurs the subtree that painted into
+        /// the layer, which is why it belongs on the layer rather than being a
+        /// standalone command.
+        filter_blur: f32,
         /// Blend mode used when compositing.
         blend: BlendMode,
     },

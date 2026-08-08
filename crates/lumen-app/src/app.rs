@@ -4038,11 +4038,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 let py = bounds.y0 + bounds.height() * oy;
                 kurbo::Affine::translate((px, py)) * t * kurbo::Affine::translate((-px, -py))
             });
-            if opacity < 1.0 || blend != BlendMode::SourceOver || composed.is_some() {
+            // PROP1 `filter: blur()` — blurs the node's OWN content, so like
+            // opacity and blend it needs the subtree in a layer first.
+            let node_blur = css.and_then(|s| s.filter_blur).unwrap_or(0.0);
+            if opacity < 1.0
+                || blend != BlendMode::SourceOver
+                || composed.is_some()
+                || node_blur > 0.0
+            {
                 dl.push(DrawCmd::PushLayer {
                     clip: None,
                     opacity: opacity.clamp(0.0, 1.0),
                     transform: composed.unwrap_or(kurbo::Affine::IDENTITY),
+                    filter_blur: node_blur,
                     blend,
                 });
                 clip_stack.push(d);
@@ -4067,6 +4075,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     }),
                     opacity: 1.0,
                     transform: kurbo::Affine::IDENTITY,
+                    filter_blur: 0.0,
                     blend: BlendMode::SourceOver,
                 });
                 clip_stack.push(d);

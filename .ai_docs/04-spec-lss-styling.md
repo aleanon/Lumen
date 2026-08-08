@@ -141,7 +141,7 @@ cannot drift from the code again. The three lists live in the crate —
 `KNOWN_PROPERTIES`, `APPLIED_PROPERTIES`, `PARSE_ONLY_PROPERTIES` — and
 `crates/lumen-style/tests/property_parity.rs` asserts `KNOWN == APPLIED ∪
 PARSE_ONLY`, so a property that parses without an implementation is a **build
-failure**. Current split: **78 known, 75 applied, 3 parse-only** — no layout property is parse-only, and of typography only `font-variation` remains (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
+failure**. Current split: **78 known, 76 applied, 2 parse-only** — no layout property is parse-only, and of typography only `font-variation` remains (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
 declaration now reports `W0107` at parse time instead of silently doing
 nothing.)*
 
@@ -188,31 +188,19 @@ hardcoded literal, `text-wrap`→`wrap_width`, `transform`→`PushLayer`'s unuse
 `Affine`). Each of the four below was re-checked against what the render and
 text layers actually offer today.
 
-* **`filter`** — needs a *layer* filter. `BackdropFilter` blurs what is painted
-  BEHIND a region; `filter` must blur the element's own content: render the
-  subtree to an offscreen layer, filter that, composite.
+* **`filter: blur()`** — **done 2026-08-08.** `BackdropFilter` blurs what is
+  painted BEHIND a region; this blurs the element's own content, so the subtree
+  goes into a layer and the layer is filtered before compositing.
+  `DrawCmd::PushLayer` gained `filter_blur`, both backends apply it (CPU blurs
+  the layer pixmap, GPU reuses the extracted `blur_texture` ping-pong), and
+  `field_coverage.rs` gates both consuming it.
 
-  **Fully scoped as of 2026-08-08** (the `PushLayer::transform` work established
-  the pattern), in dependency order:
-
-  1. `DrawCmd::PushLayer` gains `filter: f32` (blur radius in logical px, `0` =
-     none). 18 construction sites, nearly all of which just gain `filter: 0.0`.
-  2. **CPU** — in `pop_layer`, blur the layer pixmap before compositing. The
-     blur already exists: the backdrop path calls `.blurred()` on a region.
-  3. **GPU** — the harder half. The 3-box ping-pong blur exists but is *inline*
-     in the backdrop-filter path (`gpu.rs`, the `blur_pass` closure over
-     `view_a`/`view_b`). It must be factored into a helper taking a source
-     texture and returning a blurred one, then called on the child texture
-     before the composite draw. This is a refactor of working, golden-tested
-     glass rendering — the reason it is called out separately rather than
-     bundled with the CPU half.
-  4. Add a `PushLayer::filter` case to `field_coverage.rs`, which then gates
-     both backends consuming it.
-
-  Deliberately blur-only to start. CSS's other filter functions (`brightness`,
-  `contrast`, `saturate`, …) are per-pixel colour maps and cheap to add once the
-  layer-filter plumbing exists; `blur` is the one that needs the texture passes,
-  so it is the one that decides the design.
+  The extraction of `blur_texture` out of the backdrop path was verified by
+  **byte-identity** of the `backdrop_glass` corpus hash, not by the existing
+  suites — they are tolerance-based and would have accepted a subtly wrong blur.
+  Only `blur()` and `none` are accepted; the colour-map filters (`brightness`,
+  `contrast`, …) are cheap on this plumbing but not applied yet, so they report
+  `W0109` rather than rendering nothing.
 * **`z-index`** — needs stacking contexts; see below.
 * **`font-variation`** — the bundled face is **static** (no `fvar` axes, checked
   with fontTools). parley exposes `StyleProperty::FontVariations` and wiring it
@@ -238,7 +226,7 @@ semantic label is still the full string; that assertion is the property's point.
 
 **`z-index` is parse-only for a structural reason, not an oversight** (investigated 2026-08-08). `Tree::hit_test` already maximizes `(z, preorder_pos)`, so wiring `z-index` to `Tree::set_z` would take about five minutes — and would be a **trap**: it would change which node receives a click *without changing what is painted on top*. Paint order is a two-pass scheme (normal, then overlay) keyed on the `overlay` flag, not on `z`, and `emit_pass` maintains its clip stack **by depth**, popping layers as depth decreases — so it requires a strict preorder traversal. Stable-sorting the paint order by `z` therefore breaks clip nesting (layers pop and push against the wrong nodes). Honouring `z-index` visually needs **stacking contexts**: paint each context as a self-contained subtree, then order contexts by `z`. That is real work, and until it exists the property must stay inert rather than half-wired.
 
-| **parse-only** | `filter`, `z-index`, `font-variation` |
+| **parse-only** | `z-index`, `font-variation` |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 + `!important` **work**; nested `&` rules **applied** (B.1 ✅ — flattened at

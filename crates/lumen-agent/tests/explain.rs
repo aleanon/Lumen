@@ -93,17 +93,17 @@ fn explains_that_a_property_parses_but_is_never_applied() {
         widgets::column(vec![widgets::text("x").id("lbl")]).id("root")
     })
     .run_headless(Size::new(200.0, 120.0));
-    app.set_stylesheet("#lbl { filter: blur(2px); }");
+    app.set_stylesheet("#lbl { z-index: 3; }");
     app.pump();
 
     let out = call(
         &mut app,
         "ui.explain",
-        json!({ "selector": "#lbl", "kind": "style", "property": "filter" }),
+        json!({ "selector": "#lbl", "kind": "style", "property": "z-index" }),
     );
     assert!(
         codes(&out).contains(&"parse_only".to_string()),
-        "`filter` is parse-only and must be reported as such, got {out}"
+        "`z-index` is parse-only and must be reported as such, got {out}"
     );
 }
 

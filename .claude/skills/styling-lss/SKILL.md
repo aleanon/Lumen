@@ -50,7 +50,9 @@ tnum, onum, zero, frac, liga and more. `normal` clears it.
 `transform` takes translate/scale/rotate/skew (px + deg only —
 percentages need the node's box and are rejected) and
 `transform-origin` takes keywords or `%`, defaulting to the
-centre. It is paint-time: the layout box does not move. Every layout
+centre. It is paint-time: the layout box does not move. `filter: blur(Npx)`
+blurs the element's OWN content (unlike `backdrop-filter`);
+only `blur()` and `none` are accepted so far. Every layout
 property now works in `.lss`. `overflow: hidden`
 (or `clip`) clips to the border-radius, `visible` disables it;
 `scroll`/`auto` are REJECTED — scrolling is the `Scrollable`

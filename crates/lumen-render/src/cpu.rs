@@ -80,6 +80,7 @@ struct LayerParams {
     clip: Option<RoundedRect>,
     opacity: f32,
     transform: Affine,
+    filter_blur: f32,
     blend: BlendMode,
 }
 
@@ -152,8 +153,9 @@ impl<'a> Renderer<'a> {
                 clip,
                 opacity,
                 transform,
+                filter_blur,
                 blend,
-            } => self.push_layer(*clip, *opacity, *transform, *blend),
+            } => self.push_layer(*clip, *opacity, *transform, *filter_blur, *blend),
             DrawCmd::PopLayer => self.pop_layer(),
             DrawCmd::Shader { rect, uniforms, .. } => self.draw_rect(
                 *rect,
@@ -471,6 +473,7 @@ impl<'a> Renderer<'a> {
         clip: Option<RoundedRect>,
         opacity: f32,
         transform: Affine,
+        filter_blur: f32,
         blend: BlendMode,
     ) {
         self.layers
@@ -479,6 +482,7 @@ impl<'a> Renderer<'a> {
             clip,
             opacity,
             transform,
+            filter_blur,
             blend,
         });
     }
@@ -506,6 +510,21 @@ impl<'a> Renderer<'a> {
             ..Default::default()
         };
         let transform = affine_to_ts(p.transform);
+        // `filter: blur()` — blur the layer's OWN content before compositing.
+        // Radius is in logical px and the layer is at physical resolution, so it
+        // scales with `base`'s uniform factor (the shell only ever sets a
+        // uniform DPI scale here).
+        // `self.base` is tiny_skia's Transform; its `sx` is the DPI scale the
+        // shell applies uniformly.
+        let blur_px = (p.filter_blur as f64 * self.base.sx as f64)
+            .round()
+            .max(0.0) as u32;
+        if blur_px > 0 {
+            let pm = RgbaImage::from_pixmap(&layer).blurred(blur_px).to_pixmap();
+            self.top()
+                .draw_pixmap(0, 0, pm.as_ref(), &paint, transform, clip_mask.as_ref());
+            return;
+        }
         self.top()
             .draw_pixmap(0, 0, layer.as_ref(), &paint, transform, clip_mask.as_ref());
     }

@@ -1298,6 +1298,7 @@ impl Wgpu {
                     clip,
                     opacity,
                     transform,
+                    filter_blur,
                     ..
                 } => {
                     flush_rects(device, &mut ops, &mut pend_rects);
@@ -1332,7 +1333,23 @@ impl Wgpu {
                         None,
                         scale,
                     );
-                    let child_view = child.create_view(&Default::default());
+                    // `filter: blur()` — blur the layer's OWN content before it
+                    // composites, reusing the same passes the backdrop uses.
+                    // Radius is logical px; the child is at physical resolution.
+                    let child_view = {
+                        let v = child.create_view(&Default::default());
+                        let r_px = (*filter_blur as f64 * scale).round().max(0.0) as f32;
+                        if r_px > 0.0 {
+                            let blurred =
+                                self.blur_texture(device, encoder, keep, &v, width, height, r_px);
+                            keep.views.push(v);
+                            let bv = blurred.create_view(&Default::default());
+                            keep.textures.push(blurred);
+                            bv
+                        } else {
+                            v
+                        }
+                    };
                     let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("composite-bg"),
                         layout: &self.image_bgl,

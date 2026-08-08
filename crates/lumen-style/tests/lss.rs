@@ -63,14 +63,15 @@ fn valid_corpus_parses_cleanly() {
 /// SD5.2: a property that parses and does nothing must say so.
 #[test]
 fn parse_only_properties_warn() {
-    // `filter` is still parse-only; `transform` was applied by PROP1.
-    let (_, ds) = parse("t.lss", "button { filter: blur(2px); }");
+    // `z-index` is still parse-only (it needs stacking contexts);
+    // `filter` and `transform` were applied by PROP1.
+    let (_, ds) = parse("t.lss", "button { z-index: 3; }");
     let w = ds
         .iter()
         .find(|d| d.code == lumen_core::codes::W0107)
         .unwrap_or_else(|| panic!("expected W0107 for a parse-only property; got {ds:?}"));
     assert!(
-        w.message.contains("filter") && w.message.contains("no effect"),
+        w.message.contains("z-index") && w.message.contains("no effect"),
         "the warning must name the property and say what happens: {}",
         w.message
     );

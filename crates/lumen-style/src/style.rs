@@ -193,6 +193,9 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
+    /// `filter: blur(Npx)` (PROP1) — blurs the element's own content. Distinct
+    /// from `backdrop-filter`, which blurs what is behind it.
+    pub filter_blur: Option<f32>,
     /// `transform` (PROP1) — a 2D affine, already composed from the CSS
     /// function list. Stored as the matrix rather than the source list because
     /// the paint layer wants one `Affine`, and composing at parse time means
@@ -405,6 +408,12 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `filter: blur()` (PROP1).
+    pub fn filter_blur(mut self, px: f32) -> Self {
+        self.filter_blur = Some(px);
         self
     }
 
@@ -680,7 +689,6 @@ impl Style {
 pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     // Layout — the field exists in LayoutStyle; apply() doesn't populate it.
     // Visual — needs render support, not just a field.
-    "filter",
     "z-index",
     // Typography — needs text-stack plumbing.
     "font-variation",
@@ -774,7 +782,7 @@ const SCALAR_PROPERTIES: &[&str] = &[
 /// looking: `translate(50%)` parses, is refused (a percentage is relative to
 /// the node's own box, which this layer cannot see), and without a diagnostic
 /// the author sees an untransformed node with nothing to read.
-const FUNCTION_VALUED_PROPERTIES: &[&str] = &["transform"];
+const FUNCTION_VALUED_PROPERTIES: &[&str] = &["transform", "filter"];
 
 /// The `.lss` properties `apply` actually consumes — the runtime's applied
 /// set, in `apply` arm order. The parity test asserts (a) each entry really
@@ -828,6 +836,7 @@ pub const APPLIED_PROPERTIES: &[&str] = &[
     "text-wrap",
     "text-overflow",
     "font-features",
+    "filter",
     "transform",
     "transform-origin",
     "grid-template-columns",
@@ -916,6 +925,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "text-wrap" => style.text_wrap = as_text_wrap(&v),
         "text-overflow" => style.text_ellipsis = as_text_overflow(&v),
         "font-features" => style.font_features = as_feature_settings(&v),
+        "filter" => style.filter_blur = as_filter_blur(&v),
         "transform" => style.transform = as_transform(&v),
         "transform-origin" => style.transform_origin = as_transform_origin(&v),
         "grid-template-columns" => style.grid_template_columns = as_grid_tracks(&v),
@@ -1459,6 +1469,24 @@ fn as_align(v: &Value) -> Option<Align> {
             "baseline" => Some(Align::Baseline),
             "space-between" => Some(Align::SpaceBetween),
             "space-around" => Some(Align::SpaceAround),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// `filter` (PROP1) — **`blur()` only**, plus `none`.
+///
+/// CSS's colour-map filters (`brightness`, `contrast`, `saturate`, …) are cheap
+/// to add on top of this plumbing but are per-pixel maps the layer path does not
+/// yet apply; accepting them now would render nothing and be the silent no-op
+/// this series removed 26 instances of. They report `W0109` until implemented.
+fn as_filter_blur(v: &Value) -> Option<f32> {
+    match v {
+        Value::Keyword(k) if k == "none" => Some(0.0),
+        Value::Function(name, args) if name == "blur" => match args.first() {
+            // px or unitless; a percentage is meaningless for a blur radius.
+            Some(Value::Number(n, Unit::Px | Unit::None)) if *n >= 0.0 => Some(*n as f32),
             _ => None,
         },
         _ => None,

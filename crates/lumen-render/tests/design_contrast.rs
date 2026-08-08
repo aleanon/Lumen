@@ -32,6 +32,7 @@ fn scene() -> (DisplayList, Color, Vec<TextTarget>) {
         }),
         opacity: 0.92,
         transform: Affine::IDENTITY,
+        filter_blur: 0.0,
         blend: BlendMode::SourceOver,
     });
     dl.push(DrawCmd::Rect {

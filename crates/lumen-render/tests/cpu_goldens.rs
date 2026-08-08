@@ -180,6 +180,7 @@ fn scene_layer() -> DisplayList {
         }),
         opacity: 0.6,
         transform: kurbo::Affine::IDENTITY,
+        filter_blur: 0.0,
         blend: BlendMode::SourceOver,
     });
     dl.push(DrawCmd::Rect {

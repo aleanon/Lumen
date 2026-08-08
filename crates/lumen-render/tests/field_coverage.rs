@@ -75,11 +75,22 @@ fn layered(
     transform: Affine,
     blend: BlendMode,
 ) -> DisplayList {
+    layered_blur(clip, opacity, transform, blend, 0.0)
+}
+
+fn layered_blur(
+    clip: Option<RoundedRect>,
+    opacity: f32,
+    transform: Affine,
+    blend: BlendMode,
+    filter_blur: f32,
+) -> DisplayList {
     let mut dl = DisplayList::new();
     dl.push(DrawCmd::PushLayer {
         clip,
         opacity,
         transform,
+        filter_blur,
         blend,
     });
     base_rect(&mut dl);
@@ -101,6 +112,11 @@ fn cases() -> Vec<FieldCase> {
                 Affine::translate((40.0, 20.0)),
                 BlendMode::SourceOver,
             ),
+        },
+        FieldCase {
+            field: "PushLayer::filter_blur",
+            a: plain(),
+            b: layered_blur(None, 1.0, Affine::IDENTITY, BlendMode::SourceOver, 6.0),
         },
         FieldCase {
             field: "PushLayer::opacity",

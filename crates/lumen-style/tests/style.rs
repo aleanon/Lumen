@@ -143,6 +143,8 @@ fn lss_matches_typed_mirror_over_the_whole_applied_set() {
         lumen_layout::GridLine::Line(2),
         lumen_layout::GridLine::Auto
     ));
+    style_parity!(covered, "filter", "blur(4px)", |s: Style| s
+        .filter_blur(4.0));
     style_parity!(covered, "transform", "scale(2)", |s: Style| s
         .transform(kurbo::Affine::scale_non_uniform(2.0, 2.0)));
     style_parity!(covered, "transform-origin", "left top", |s: Style| s
@@ -266,6 +268,7 @@ fn applied_properties_change_a_style_and_only_they_do() {
         "text-wrap" => "nowrap",
         "text-overflow" => "ellipsis",
         "font-features" => "\"smcp\"",
+        "filter" => "blur(4px)",
         "transform" => "scale(2)",
         "transform-origin" => "left top",
         "grid-template-columns" | "grid-template-rows" => "1fr 2fr",
