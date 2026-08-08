@@ -2008,7 +2008,6 @@ impl Wgpu {
         blur_pass(&view_b, &v_params, &bind_a);
         blur_pass(&view_a, &h_params, &bind_b);
         blur_pass(&view_b, &v_params, &bind_a);
-        drop(blur_pass);
         // Every intermediate the RECORDED passes reference must outlive
         // `queue.submit`, so it is parked rather than dropped here — the caller
         // only owns the returned texture.
@@ -2025,6 +2024,7 @@ impl Wgpu {
         tex_b
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn prepare_backdrop(
         &self,
         device: &wgpu::Device,
