@@ -135,6 +135,29 @@ jobs:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: cargo test -p lumen-render --features wgpu
 
+  # LN1: the two DERIVED font faces must be reproducible from their sources.
+  #
+  # Both shipped as untracked pyftsubset output — the recipe existed only in
+  # someone's shell history, so the committed bytes could not be audited or
+  # re-cut. The ranges were recovered from the artifacts' own cmap coverage and
+  # verified to regenerate both files with identical SHA-256s.
+  #
+  # This is a supply-chain check as much as a size one: it proves the shipped
+  # faces are exactly a documented subset of the sources they claim, and nothing
+  # else. Pinned to fontTools 4.63.0 because subsetter output is version-
+  # dependent — a floating version would make this fail for the wrong reason.
+  fonts:
+    name: font subsets reproduce
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: install fontTools + the DejaVu source
+        run: |
+          pip install --quiet fonttools==4.63.0
+          sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+      - name: verify
+        run: ./scripts/subset_fonts.sh verify
+
   # Perf gate (T2.6): criterion benches must stay within their frame budgets.
   # Runs on the reference Linux desktop runner only.
   perf:

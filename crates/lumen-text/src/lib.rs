@@ -33,8 +33,14 @@ const FONT: &[u8] = include_bytes!("../fonts/GoNotoKurrent-Regular.ttf");
 const FONT: &[u8] = include_bytes!("../fonts/GoNotoKurrent-Latin.ttf");
 // T.4: symbols fallback — Go Noto Kurrent has no geometric shapes / arrows /
 // stars (the accordion chevron was tofu!), so a ~170 KB DejaVu Sans subset
-// (U+2000–2BFF symbol blocks; license in fonts/LICENSE-DejaVu) rides along
-// in every build and registers as a fallback face.
+// (license in fonts/LICENSE-DejaVu) rides along in every build and registers
+// as a fallback face.
+//
+// LN1: both derived faces are byte-for-byte reproducible via
+// `scripts/subset_fonts.sh` (CI job `fonts`). The exact coverage lives there
+// as data, not prose — this comment used to say "U+2000–2BFF symbol blocks",
+// but the real coverage is 45 discrete ranges reaching U+FFFD, so that
+// description could never have re-cut the file.
 const SYMBOLS_FONT: &[u8] = include_bytes!("../fonts/DejaVuSans-Symbols.ttf");
 
 pub mod editor;
