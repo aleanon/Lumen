@@ -526,7 +526,9 @@ impl Parser {
                 return None;
             }
         };
-        if !KNOWN_PROPERTIES.contains(&property.as_str()) {
+        if !KNOWN_PROPERTIES.contains(&property.as_str())
+            && !crate::registry::is_registered(&property)
+        {
             let hint = did_you_mean(&property, KNOWN_PROPERTIES);
             let msg = match hint {
                 Some(h) => format!("unknown property `{property}`; did you mean `{h}`?"),

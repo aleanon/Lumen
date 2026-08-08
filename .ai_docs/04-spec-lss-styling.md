@@ -118,6 +118,22 @@ atomically. `border-width`/`border-color` are in the known-property list
 (B.7a). Unknown units are `E0103` with a span since B.7 (known units:
 `px % ms s deg fr`; bare numbers stay legal where a length is expected).
 
+## 9b. Third-party properties (MOD4, 2026-08-08)
+
+`lumen_style::register_property(name)` adds a property the framework does not
+implement. A registered name stops raising `E0102`, and its resolved value is
+carried on `Style::custom` (a `BTreeMap`, so serialization stays diffable) for
+whoever registered it to read.
+
+It cannot reach `Style`'s built-in fields, and registering over a built-in is
+**refused** rather than shadowing it — layout and render consume those fields as
+a contract, and an extension able to rewrite them could break invariants the
+framework asserts elsewhere. An unregistered name is still `E0102`, so a typo
+stays a typo.
+
+This closes the extension point the 2026-08 modularity review ranked in its
+top 5: before it, adding a style property meant forking the crate.
+
 ## 10. Implementation status by property
 
 *(SD5.1/SD5.2, 2026-08-08: this section is no longer the source of truth and

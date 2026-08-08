@@ -22,7 +22,9 @@ pub use ast::{
     ThemeKind, Unit, Value,
 };
 pub use parser::{has_errors, parse};
+pub mod registry;
 pub use properties::KNOWN_PROPERTIES;
+pub use registry::{any_registered, is_registered, register_property, registered_properties};
 pub use style::{
     apply, resolve_token, AnimationSpec, Style, StyleBlend, StyleClip, StyleGradient, StyleShadow,
     StyleSideBorder, Tokens, Transition, APPLIED_PROPERTIES, PARSE_ONLY_PROPERTIES,

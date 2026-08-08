@@ -127,6 +127,15 @@ pub struct Style {
     pub height: Option<Dim>,
     /// `gap` (both axes).
     pub gap: Option<Dim>,
+    /// MOD4: values of properties registered via
+    /// [`register_property`](crate::register_property).
+    ///
+    /// The framework carries these through the cascade without interpreting
+    /// them; whoever registered the name reads the resolved value. `BTreeMap`
+    /// so serialization order is stable — the agent's `ui.getStyles` shows
+    /// these, and diffable output matters more here than lookup speed on a map
+    /// that is almost always empty.
+    pub custom: std::collections::BTreeMap<String, Value>,
     /// SD5/PROP1: the mechanical batch — `LayoutStyle` and taffy already
     /// implement every one of these; `apply()` simply never read the parsed
     /// value into the existing field, so the declarations parsed clean and did
@@ -684,6 +693,12 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "border-left" => style.border_sides[3] = as_side_border(&v),
         "border-width" => style.border_width = as_px(&v),
         "border-color" => style.border_color = as_color(&v),
+        // MOD4: a registered third-party property. Carried verbatim — the
+        // framework does not interpret it, and deliberately cannot reach
+        // `Style`'s built-in fields through this path.
+        other if crate::registry::is_registered(other) => {
+            style.custom.insert(other.to_string(), v);
+        }
         _ => {}
     }
 }
