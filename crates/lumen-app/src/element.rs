@@ -383,6 +383,7 @@ impl Element {
                     letter_spacing: 0.0,
                     family: None,
                     features: None,
+                    variations: None,
                     italic: false,
                     align: lumen_text::TextAlign::Start,
                 },

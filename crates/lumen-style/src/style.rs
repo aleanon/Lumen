@@ -193,6 +193,8 @@ pub struct Style {
     pub inset_sides: [Option<f32>; 4],
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub letter_spacing: Option<f32>,
+    /// `font-variation` (PROP1) — CSS `font-variation-settings` syntax.
+    pub font_variations: Option<String>,
     /// `z-index` (PROP1) — paint order among SIBLINGS. CSS scopes z-index to a
     /// stacking context; the parent is the context here.
     pub z_index: Option<i32>,
@@ -411,6 +413,12 @@ impl Style {
     /// `letter-spacing` (PROP1), extra tracking in logical px.
     pub fn letter_spacing(mut self, px: f32) -> Self {
         self.letter_spacing = Some(px);
+        self
+    }
+
+    /// `font-variation` (PROP1).
+    pub fn font_variations(mut self, settings: impl Into<String>) -> Self {
+        self.font_variations = Some(settings.into());
         self
     }
 
@@ -699,7 +707,6 @@ pub const PARSE_ONLY_PROPERTIES: &[&str] = &[
     // Layout — the field exists in LayoutStyle; apply() doesn't populate it.
     // Visual — needs render support, not just a field.
     // Typography — needs text-stack plumbing.
-    "font-variation",
 ];
 
 /// SD5.x: does `value` actually apply to `property`?
@@ -799,6 +806,7 @@ const FUNCTION_VALUED_PROPERTIES: &[&str] = &["transform", "filter"];
 /// mirror covers exactly this set — so this const, `apply`, and the setters
 /// cannot drift apart silently (04 §8).
 pub const APPLIED_PROPERTIES: &[&str] = &[
+    "font-variation",
     "flex-wrap",
     "flex-grow",
     "flex-shrink",
@@ -935,6 +943,7 @@ pub fn apply(style: &mut Style, property: &str, value: &Value, tokens: &Tokens) 
         "text-wrap" => style.text_wrap = as_text_wrap(&v),
         "text-overflow" => style.text_ellipsis = as_text_overflow(&v),
         "font-features" => style.font_features = as_feature_settings(&v),
+        "font-variation" => style.font_variations = as_feature_settings(&v),
         "z-index" => style.z_index = as_z_index(&v),
         "filter" => style.filter_blur = as_filter_blur(&v),
         "transform" => style.transform = as_transform(&v),
@@ -1599,7 +1608,8 @@ fn as_transform_origin(v: &Value) -> Option<(f64, f64)> {
     }
 }
 
-/// `font-features` (PROP1). The value is handed to the shaper verbatim in CSS
+/// `font-features` **and `font-variation`** (PROP1) — both are quoted-tag lists
+/// in the same CSS shape (`"wght" 700`), handed to the shaper verbatim in CSS
 /// `font-feature-settings` syntax, so any tag the face carries works and any it
 /// does not is ignored — matching CSS, and avoiding a hardcoded tag allow-list
 /// that would go stale against whatever font an app registers.

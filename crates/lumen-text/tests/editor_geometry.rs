@@ -13,6 +13,7 @@ fn style() -> TextStyle {
         letter_spacing: 0.0,
         family: None,
         features: None,
+        variations: None,
         italic: false,
         align: TextAlign::Start,
     }

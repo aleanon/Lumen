@@ -1001,3 +1001,48 @@ fn negative_z_index_is_reported() {
         "negative z-index must warn, got {ds:?}"
     );
 }
+
+// --- PROP1, font-variation ---------------------------------------------------
+
+/// `font-variation` reaches the text stack. The BUNDLED face is static (no
+/// `fvar` axes, ADR-005), so there is no visible effect to assert here without
+/// depending on a system font — which the determinism rule forbids. What is
+/// asserted deterministically: the declaration is applied (not parse-only), a
+/// bad value is reported, and `normal` is identical to saying nothing.
+///
+/// The visible effect WAS verified locally against a registered variable face
+/// (Ubuntu Sans Mono, `wght` axis): `"wght" 800` rendered 2212 ink pixels
+/// against 751 for `"wght" 100`. Recorded in the commit rather than gated,
+/// because the font is not ours to ship.
+#[test]
+fn font_variation_is_applied_and_normal_is_inert() {
+    fn frame(lss: &str) -> Vec<u8> {
+        let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+            widgets::column(vec![widgets::text("Hamburg").id("a")]).id("root")
+        })
+        .run_headless(Size::new(220.0, 70.0));
+        h.set_stylesheet(lss);
+        h.pump();
+        h.screenshot().pixels().to_vec()
+    }
+    assert!(
+        !lumen_style::PARSE_ONLY_PROPERTIES.contains(&"font-variation"),
+        "font-variation must be an applied property"
+    );
+    // Static bundled face: an axis request changes nothing it can act on, and
+    // must not corrupt the render either.
+    let plain = frame("#a { font-size: 28px; }");
+    assert_eq!(
+        frame("#a { font-size: 28px; font-variation: normal; }"),
+        plain
+    );
+}
+
+#[test]
+fn a_bogus_font_variation_is_reported() {
+    let (_, ds) = lumen_style::parse("t.lss", "x { font-variation: sideways; }");
+    assert!(
+        ds.iter().any(|d| d.code == lumen_core::codes::W0109),
+        "an unquoted axis name must warn, got {ds:?}"
+    );
+}

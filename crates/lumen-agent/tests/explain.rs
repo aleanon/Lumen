@@ -87,33 +87,37 @@ fn explains_that_a_container_has_no_click_action() {
 /// The `.lss` blind spot: a property the parser accepts and the runtime never
 /// applies. Nothing in the stylesheet, the diagnostics or the rendered frame
 /// distinguishes it from a selector that simply did not match.
+///
+/// PROP1 emptied `PARSE_ONLY_PROPERTIES` — every known property is now applied —
+/// so this drives whatever is in that list and asserts the empty case
+/// explicitly. It re-arms the moment a parse-only property is added, which is
+/// the only time the `parse_only` diagnosis has a subject at all.
 #[test]
 fn explains_that_a_property_parses_but_is_never_applied() {
+    let Some(&example) = lumen_style::PARSE_ONLY_PROPERTIES.first() else {
+        assert!(
+            lumen_style::PARSE_ONLY_PROPERTIES.is_empty(),
+            "unreachable: first() was None on a non-empty slice"
+        );
+        // Nothing parses-and-does-nothing today. That is the goal state, not a
+        // gap in coverage — the assertion above is the claim.
+        return;
+    };
     let mut app = App::new(|_cx: &mut BuildCx| {
         widgets::column(vec![widgets::text("x").id("lbl")]).id("root")
     })
     .run_headless(Size::new(200.0, 120.0));
-    // PROP1 kept implementing whatever property this test named — four times.
-    // Assert the example is still parse-only, so a future implementation fails
-    // here with an instruction rather than a confusing mismatch.
-    const EXAMPLE: &str = "font-variation";
-    assert!(
-        lumen_style::PARSE_ONLY_PROPERTIES.contains(&EXAMPLE),
-        "`{EXAMPLE}` is no longer parse-only — pick another from \
-         PARSE_ONLY_PROPERTIES: {:?}",
-        lumen_style::PARSE_ONLY_PROPERTIES
-    );
-    app.set_stylesheet("#lbl { font-variation: \"wght\" 700; }");
+    app.set_stylesheet(&format!("#lbl {{ {example}: 1px; }}"));
     app.pump();
 
     let out = call(
         &mut app,
         "ui.explain",
-        json!({ "selector": "#lbl", "kind": "style", "property": EXAMPLE }),
+        json!({ "selector": "#lbl", "kind": "style", "property": example }),
     );
     assert!(
         codes(&out).contains(&"parse_only".to_string()),
-        "`{EXAMPLE}` is parse-only and must be reported as such, got {out}"
+        "`{example}` is parse-only and must be reported as such, got {out}"
     );
 }
 

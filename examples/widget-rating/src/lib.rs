@@ -41,6 +41,7 @@ pub fn rating(cx: &BuildCx, name: &str, max: usize) -> Element {
                         letter_spacing: 0.0,
                         family: None,
                         features: None,
+                        variations: None,
                         italic: false,
                         align: Default::default(),
                     },

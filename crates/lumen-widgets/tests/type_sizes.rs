@@ -62,9 +62,21 @@ fn element_size_is_pinned() {
     //     conversion friction on every call site, which is a poor trade for a
     //     figure this far below the noise floor of what dominates.
     //
+    // 1040 -> 1072 on 2026-08-08: `font-variation` added `variations:
+    // Option<String>` to the same inline `TextStyle`. Session total 1024 ->
+    // 1072 (+48) for align, italic, features and variations — four properties
+    // that previously parsed and did nothing.
+    //
+    // Still accepted on the same arithmetic: ~144 KB per frame's element tree
+    // at 3 000 nodes, against the ~270 MB RSS the same app carries. If this
+    // keeps climbing, the answer is EL (bundle the rarely-set text fields behind
+    // one pointer), not resisting individual properties — four `Option<String>`s
+    // on a type that is 90% layout is the shape worth fixing, and none of them
+    // is the culprit alone.
+    //
     // The assertion still earns its place: it made that a decision with a
     // number attached instead of an unnoticed drift.
-    assert_size!(Element, 1040);
+    assert_size!(Element, 1072);
 }
 
 #[test]

@@ -141,7 +141,7 @@ cannot drift from the code again. The three lists live in the crate —
 `KNOWN_PROPERTIES`, `APPLIED_PROPERTIES`, `PARSE_ONLY_PROPERTIES` — and
 `crates/lumen-style/tests/property_parity.rs` asserts `KNOWN == APPLIED ∪
 PARSE_ONLY`, so a property that parses without an implementation is a **build
-failure**. Current split: **78 known, 77 applied, 1 parse-only** — no layout property is parse-only, and of typography only `font-variation` remains (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
+failure**. Current split: **78 known, 78 applied, 0 parse-only** — every known `.lss` property now reaches the runtime — no layout property is parse-only, and of typography only `font-variation` remains (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
 declaration now reports `W0107` at parse time instead of silently doing
 nothing.)*
 
@@ -177,37 +177,38 @@ Note `get_styles` does *not* answer this question: it reports the **declared**
 value and its source span, not what was applied, so a rejected value still
 appears there. `ui.explain {kind: "style"}` distinguishes them per node.
 
-### The four remaining parse-only properties, and why (verified 2026-08-08)
+### PROP1 is complete: 29 parse-only → 0 (2026-08-08)
 
-PROP1 took this set from 29 to 4. The classification that survived is
-evidence-based rather than inherited: **six of the seven properties previously
-filed as "needs new capability" turned out to be bridges** — the capability
-already existed and only the wiring was missing (`overflow`→clip,
-`text-decoration`→rect drawing, `cursor`→hover+winit, `selection-color`→a
-hardcoded literal, `text-wrap`→`wrap_width`, `transform`→`PushLayer`'s unused
-`Affine`). Each of the four below was re-checked against what the render and
-text layers actually offer today.
+Every known `.lss` property now reaches the runtime. What the work actually
+found, since the estimate was wrong in both directions:
 
-* **`filter: blur()`** — **done 2026-08-08.** `BackdropFilter` blurs what is
-  painted BEHIND a region; this blurs the element's own content, so the subtree
-  goes into a layer and the layer is filtered before compositing.
-  `DrawCmd::PushLayer` gained `filter_blur`, both backends apply it (CPU blurs
-  the layer pixmap, GPU reuses the extracted `blur_texture` ping-pong), and
-  `field_coverage.rs` gates both consuming it.
+* **Nine were pure bridges** — the capability existed and only the wiring was
+  missing (`overflow`→clip, `text-decoration`→rect drawing, `cursor`→hover +
+  winit, `selection-color`→a hardcoded literal, `text-wrap`→`wrap_width`,
+  `transform`→`PushLayer`'s always-`IDENTITY` `Affine`, `letter-spacing` and
+  `font-family`→existing `TextStyle` fields, `text-align`→a hardcoded
+  `TextAlign::Start` at nine call sites).
+* **`filter: blur()` needed a real render pass** and got one: `PushLayer` gained
+  `filter_blur`, the CPU backend blurs the layer pixmap, the GPU backend reuses
+  a `blur_texture` helper extracted from the backdrop path. That extraction was
+  verified by **byte-identity** of the `backdrop_glass` hash, because the
+  parity suites are tolerance-based and would have accepted a subtly wrong blur.
+* **`z-index` needed the right sort, not stacking contexts.** A flat z sort
+  breaks the depth-keyed clip stack; sorting each node's CHILDREN during the
+  preorder walk does not, and matches CSS's stacking-context scoping.
+* **`text-overflow` needed a display/semantic split** — `NodeMeta.display_text`
+  is painted while `content` keeps the full string, so `ui.getTree` never
+  reports `"Some long lab…"`.
+* **`font-variation` is applied but inert with the bundled face**, which is
+  static. Verified against a registered variable face (Ubuntu Sans Mono `wght`):
+  `"wght" 800` rendered 2212 ink px against 751 for `"wght" 100`. Not gated in
+  CI, because ADR-005 forbids depending on a system font.
 
-  The extraction of `blur_texture` out of the backdrop path was verified by
-  **byte-identity** of the `backdrop_glass` corpus hash, not by the existing
-  suites — they are tolerance-based and would have accepted a subtly wrong blur.
-  Only `blur()` and `none` are accepted; the colour-map filters (`brightness`,
-  `contrast`, …) are cheap on this plumbing but not applied yet, so they report
-  `W0109` rather than rendering nothing.
-* **`z-index`** — needs stacking contexts; see below.
-* **`font-variation`** — the bundled face is **static** (no `fvar` axes, checked
-  with fontTools). parley exposes `StyleProperty::FontVariations` and wiring it
-  would take an hour, but the property would be **inert and untestable** with the
-  shipped font: exactly the silent no-op this series exists to remove. It
-  becomes real the day a variable face is bundled or an app registers one.
-* **`text-overflow`** — see below.
+The remaining limits are per-property and documented at each parse helper:
+`filter` is blur-only, `z-index` is non-negative, `transform` rejects percentage
+translate, `text-align` rejects `justify`, `overflow` rejects `scroll`/`auto`.
+Each rejects rather than silently approximating, and reports `W0109`.
+
 
 **`text-overflow: ellipsis` needed a display/semantic split, and got one** (2026-08-08). The obstacle was real, and is worth recording because
 `TextEngine::layout_ellipsized` exists and looks like it should just be wired up
@@ -244,7 +245,7 @@ than clamped, since clamping would make `z-index: -1` look like it worked.
 Overlay roots keep `OVERLAY_Z`: they route to the overlay pass regardless, and a
 stylesheet must not be able to demote a dropdown under the page.
 
-| **parse-only** | `font-variation` |
+| **parse-only** | *(none)* |
 
 Runtime constructs status: `@tokens`/`@theme`/`$token` **work**; specificity
 + `!important` **work**; nested `&` rules **applied** (B.1 ✅ — flattened at
