@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "lumen-semantics/1",
+  "$id": "lumen-semantics/2",
   "title": "Lumen semantics document",
   "type": "object",
   "required": ["schema", "window", "root"],
   "additionalProperties": false,
   "properties": {
-    "schema": { "const": "lumen-semantics/1" },
+    "schema": { "const": "lumen-semantics/2" },
     "window": {
       "type": "object",
       "required": ["width", "height", "scale"],
@@ -26,7 +26,8 @@
       "required": ["node", "role", "label", "classes", "states", "bounds", "actions", "type", "children"],
       "additionalProperties": false,
       "properties": {
-        "node": { "type": "string", "pattern": "^node-[0-9]+$" },
+        "node": { "type": "string", "pattern": "^nx-[0-9a-f]{32}$" },
+        "index": { "type": "integer", "minimum": 0 },
         "id": { "type": "string" },
         "role": {
           "enum": [

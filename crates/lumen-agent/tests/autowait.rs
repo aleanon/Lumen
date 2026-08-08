@@ -68,7 +68,11 @@ fn node_ids_from_get_tree_are_selectors() {
     // Wait for the async button, then find its runtime id in the tree.
     let waited = call(&mut h, "ui.waitFor", json!({ "selector": "#late" }));
     let node_id = waited["result"]["node"].as_str().unwrap().to_string();
-    assert!(node_id.starts_with("node-"), "{waited}");
+    // ID1: handles are `nx-<16 hex>`. The property that matters is the ROUND
+    // TRIP — a handle the server just emitted must be accepted back as a
+    // selector — so assert that, and check the shape only enough to catch a
+    // silently-empty id.
+    assert!(node_id.starts_with("nx-"), "{waited}");
     let resp = call(&mut h, "input.click", json!({ "selector": node_id }));
     assert_eq!(resp["result"]["ok"], json!(true), "{resp}");
 }
@@ -88,7 +92,7 @@ fn ambiguous_errors_list_candidates_readably() {
     let resp = call(&mut h, "input.click", json!({ "selector": "button" }));
     let msg = resp["error"]["message"].as_str().unwrap_or_default();
     assert!(
-        msg.contains("Ambiguous") && msg.contains("node-") && msg.contains("#id"),
+        msg.contains("Ambiguous") && msg.contains("nx-") && msg.contains("#id"),
         "readable ambiguity with candidates + advice: {resp}"
     );
 }
@@ -171,4 +175,49 @@ fn wait_settled_times_out_on_continuous_animation() {
         msg.contains("Timeout") && msg.contains("time-driven"),
         "readable timeout: {resp}"
     );
+}
+
+/// ID2 alias window: the legacy `node-<index>` selector must keep working
+/// while it is deprecated, or every in-flight agent session and every pinned
+/// skill snippet breaks at once.
+#[test]
+fn legacy_node_index_selectors_are_still_accepted() {
+    let mut h = App::new(|_cx| widgets::button("Go", |_| {}).id("go"))
+        .with_executor(ThreadPoolSpawner::new(1))
+        .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+
+    // The `index` field is published alongside the handle precisely so a
+    // caller holding an old-style id can still be served during the window.
+    let tree = call(&mut h, "ui.getTree", json!({}));
+    let index = find_index(&tree["result"]["root"], "go").expect("button in tree");
+
+    let resp = call(
+        &mut h,
+        "input.click",
+        json!({ "selector": format!("node-{index}") }),
+    );
+    assert_eq!(
+        resp["result"]["ok"],
+        json!(true),
+        "legacy selector must resolve during the alias window: {resp}"
+    );
+
+    // ...but the server must never EMIT the old form: after CP6 an index is
+    // stale by construction, and returning it would be wrong rather than
+    // merely deprecated.
+    assert!(
+        resp["result"]["node"].as_str().unwrap().starts_with("nx-"),
+        "responses must carry the new form only: {resp}"
+    );
+}
+
+fn find_index(n: &serde_json::Value, id: &str) -> Option<u64> {
+    if n.get("id").and_then(|v| v.as_str()) == Some(id) {
+        return n.get("index").and_then(|v| v.as_u64());
+    }
+    n.get("children")?
+        .as_array()?
+        .iter()
+        .find_map(|c| find_index(c, id))
 }

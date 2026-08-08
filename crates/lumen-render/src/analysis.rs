@@ -31,7 +31,7 @@ use serde::Serialize;
 /// (window coordinates, logical px).
 #[derive(Clone, Debug)]
 pub struct TextTarget {
-    /// Runtime node id (`"node-42"`), if known — lets a critique bind to the
+    /// Agent node handle (`"nx-<hex>"`), if known — lets a critique bind to the
     /// exact element so the agent can act on it.
     pub node: Option<String>,
     /// Human-readable label for reporting (e.g. the text content).

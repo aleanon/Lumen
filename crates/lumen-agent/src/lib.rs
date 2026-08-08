@@ -571,7 +571,7 @@ fn handle<R: Renderer, E: Spawner>(
                         if state_ok && text_ok {
                             return Ok(json!({
                                 "ok": true,
-                                "node": format!("node-{}", n.node),
+                                "node": n.node.to_wire(),
                                 "states": n.states.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
                                 "label": n.label,
                             }));
@@ -622,14 +622,14 @@ fn handle<R: Renderer, E: Spawner>(
                 app.inject(Event::PointerUp(up));
             }
             app.pump();
-            Ok(json!({ "ok": true, "node": format!("node-{}", node.node) }))
+            Ok(json!({ "ok": true, "node": node.node.to_wire() }))
         }
         "input.hover" => {
             // C.4a: move the pointer over the node (tooltips, :hovered).
             let node = resolve_action(app, params)?;
             app.inject(Event::PointerMove(PointerEvent::at(center(node.bounds))));
             app.pump();
-            Ok(json!({ "ok": true, "node": format!("node-{}", node.node) }))
+            Ok(json!({ "ok": true, "node": node.node.to_wire() }))
         }
         "input.invokeAction" => {
             // Geometry-free actuation: run the node's handler directly (F4.4).
@@ -643,7 +643,7 @@ fn handle<R: Renderer, E: Spawner>(
             let id = app
                 .invoke_action_with(selector, action, value)
                 .map_err(|e| (-32602, e))?;
-            Ok(json!({ "ok": true, "node": format!("node-{id}") }))
+            Ok(json!({ "ok": true, "node": id.to_wire() }))
         }
         "input.type" => {
             let node = resolve_action(app, params)?;
@@ -896,13 +896,28 @@ fn sel(params: &Value) -> Result<&str, (i64, String)> {
 fn resolve_selector(
     root: &SemanticsNode,
     selector: &str,
-) -> Result<u32, lumen_core::semantics::ResolveError> {
+) -> Result<lumen_core::identity::NodeHandle, lumen_core::semantics::ResolveError> {
+    // Current form: a handle echoed straight back from `ui.getTree`.
+    if let Some(h) = lumen_core::identity::NodeHandle::parse_wire(selector) {
+        if find_node(root, h).is_some() {
+            return Ok(h);
+        }
+        return Err(lumen_core::semantics::ResolveError::NotFound {
+            nearest: Vec::new(),
+        });
+    }
+    // ID2 alias window: the legacy `node-<index>` form is still ACCEPTED so
+    // in-flight sessions and pinned skill snippets keep working, but it is
+    // never EMITTED — after CP6 an emitted index would be wrong rather than
+    // merely deprecated, and returning a value that is stale by construction
+    // is worse than returning nothing. Callers observe the deprecation through
+    // W0302 in `ui.lint`; the resolver itself has nowhere to put a warning.
     if let Some(n) = selector
         .strip_prefix("node-")
         .and_then(|s| s.parse::<u32>().ok())
     {
-        if find_node(root, n).is_some() {
-            return Ok(n);
+        if let Some(found) = find_by_legacy_index(root, n) {
+            return Ok(found.node);
         }
         return Err(lumen_core::semantics::ResolveError::NotFound {
             nearest: Vec::new(),
@@ -927,7 +942,7 @@ fn resolve_err_msg(selector: &str, e: &lumen_core::semantics::ResolveError) -> S
             candidates.len(),
             candidates
                 .iter()
-                .map(|c| format!("node-{c}"))
+                .map(|c| c.to_wire())
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -1025,17 +1040,32 @@ fn downscale(img: &lumen_widgets::RgbaImage, max_width: u32) -> lumen_widgets::R
     lumen_widgets::RgbaImage::from_raw(nw, nh, out)
 }
 
-fn find_node(root: &SemanticsNode, id: u32) -> Option<&SemanticsNode> {
+fn find_node(root: &SemanticsNode, id: lumen_core::identity::NodeHandle) -> Option<&SemanticsNode> {
     if root.node == id {
         return Some(root);
     }
     root.children.iter().find_map(|c| find_node(c, id))
 }
 
+/// ID2 alias window: find a node by its legacy arena index.
+///
+/// Only reachable from a deprecated `node-<index>` selector. It walks the tree
+/// rather than indexing, because the index is no longer an identity — it is
+/// just another field, and once the arena recycles slots two rebuilds can
+/// disagree about which node wore it.
+fn find_by_legacy_index(root: &SemanticsNode, index: u32) -> Option<&SemanticsNode> {
+    if root.index == index {
+        return Some(root);
+    }
+    root.children
+        .iter()
+        .find_map(|c| find_by_legacy_index(c, index))
+}
+
 fn collect_annotations(n: &SemanticsNode, out: &mut Vec<Value>) {
     if !n.actions.is_empty() {
         out.push(json!({
-            "node": format!("node-{}", n.node),
+            "node": n.node.to_wire(),
             "id": n.id.as_ref().map(|i| i.as_str()),
             "bounds": { "x": n.bounds.x0, "y": n.bounds.y0, "w": n.bounds.width(), "h": n.bounds.height() },
         }));

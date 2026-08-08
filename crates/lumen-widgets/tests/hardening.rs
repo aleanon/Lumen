@@ -126,7 +126,11 @@ fn parser_and_selector_never_panic_on_fuzz() {
         state ^= state << 17;
         state
     };
-    let tree = SemanticsNode::new(1, Role::Window);
+    let tree = SemanticsNode::new(
+        lumen_core::identity::NodeHandle::root(Role::Window.as_str()),
+        1,
+        Role::Window,
+    );
     for _ in 0..3000 {
         let len = (next() % 40) as usize;
         let s: String = (0..len)

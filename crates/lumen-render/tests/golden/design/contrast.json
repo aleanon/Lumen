@@ -2,7 +2,7 @@
   "schema": "lumen-design/contrast/1",
   "targets": [
     {
-      "node": "node-11",
+      "node": "nx-000000000000000000000000000000b1",
       "label": "Heading (near-white)",
       "region": {
         "x": 64.0,
@@ -17,7 +17,7 @@
       "passes_body_text": true
     },
     {
-      "node": "node-12",
+      "node": "nx-000000000000000000000000000000b2",
       "label": "Body (mid-gray)",
       "region": {
         "x": 64.0,
@@ -32,7 +32,7 @@
       "passes_body_text": false
     },
     {
-      "node": "node-13",
+      "node": "nx-000000000000000000000000000000b3",
       "label": "Muted caption (too dim)",
       "region": {
         "x": 64.0,

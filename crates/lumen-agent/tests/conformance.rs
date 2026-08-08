@@ -53,7 +53,24 @@ fn agent_drives_counter_over_socket() {
     // Act: click #increment.
     let clicked = call(&mut ws, "input.click", json!({ "selector": "#increment" }));
     assert_eq!(clicked["result"]["ok"], json!(true));
-    assert_eq!(clicked["result"]["node"], json!("node-2"));
+
+    // ID1: assert the ROUND-TRIP property, not a literal handle. This used to
+    // pin `"node-2"`, which was really asserting an arena slot number — it
+    // would have broken on any tree reshuffle, and pinning `"nx-<hex>"`
+    // instead would just re-create that brittleness in a new spelling. What
+    // actually matters is that a handle the server returns identifies the same
+    // node when handed straight back.
+    let handle = clicked["result"]["node"].as_str().unwrap().to_string();
+    assert!(handle.starts_with("nx-"), "{clicked}");
+    let again = call(
+        &mut ws,
+        "ui.getLayout",
+        json!({ "selector": handle.clone() }),
+    );
+    assert!(
+        again.get("error").is_none(),
+        "a returned handle must resolve back as a selector: {again}"
+    );
 
     // Observe: the label updated to "Count: 1".
     let tree = call(&mut ws, "ui.getTree", json!({}));

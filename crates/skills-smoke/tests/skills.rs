@@ -119,8 +119,8 @@ fn agent_client_script_is_sound() {
 import sys
 sys.path.insert(0, sys.argv[1])
 from agent_client import AgentClient
-tree = {"node": "node-0", "role": "group", "children": [
-    {"node": "node-1", "role": "button", "id": "save", "label": "Save",
+tree = {"node": "nx-cbee35e47fb1c7e69470de9bda6edc2a", "role": "group", "children": [
+    {"node": "nx-418addb932da6e1a98fc688e3546eb27", "role": "button", "id": "save", "label": "Save",
      "children": [], "states": [], "bounds": {}}], "states": [], "bounds": {}}
 assert len(AgentClient.flatten(tree)) == 2
 assert AgentClient.find(tree, id="save")["role"] == "button"

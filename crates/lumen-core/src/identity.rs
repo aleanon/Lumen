@@ -360,6 +360,110 @@ impl std::fmt::Debug for StableId {
     }
 }
 
+// --- ID1: agent-visible node identity ---------------------------------------
+
+/// Seed for the semantic tree's root handle. Distinct from [`ROOT_ID`] so a
+/// node handle can never collide with a signal identity.
+const NODE_ROOT_SEED: IdHash = 0x6c75_6d65_6e2d_6e6f_6465_0000_0000_0001;
+
+/// A node's identity in the agent-visible semantic tree (ID1, ADR ID-0a).
+///
+/// Derived from the node's **structural path**, not from its arena slot:
+///
+/// ```text
+/// handle(root)  = fold_id(NODE_ROOT_SEED, role)
+/// handle(child) = fold_id(handle(parent), local)
+///   local = author id, if `.id(...)` is set     (survives sibling insertion)
+///         = (role, sibling ordinal), otherwise
+/// ```
+///
+/// This replaces `node-<index>`, which named the arena slot. Slots are re-minted
+/// in document preorder every rebuild, so they were stable only *by accident*
+/// for a tree whose shape never changed; persisting the arena (CP6) starts
+/// recycling them and makes the old ids ambiguous. `a11y.rs` records a live
+/// `accesskit_consumer` panic from exactly that reuse.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
+pub struct NodeHandle(IdHash);
+
+impl NodeHandle {
+    /// The root handle for a tree whose root has `role`.
+    pub fn root<R: Hash + ?Sized>(role: &R) -> NodeHandle {
+        NodeHandle(fold_id(NODE_ROOT_SEED, hash_id(role)))
+    }
+
+    /// A child handle folded under `self`.
+    pub fn child<K: Hash + ?Sized>(self, local: &K) -> NodeHandle {
+        NodeHandle(fold_id(self.0, hash_id(local)))
+    }
+
+    /// The wire form: `nx-` followed by 32 lowercase hex digits — the **full**
+    /// 128-bit value.
+    ///
+    /// Full width, not [`fold64`](Self::fold64), so the round trip is lossless:
+    /// a handle the server emits must compare equal to the same handle parsed
+    /// back from a selector. Emitting the 64-bit projection instead made
+    /// `parse_wire` produce a *different* handle, so `ui.waitFor` → `input.click`
+    /// on the returned id reported NotFound — caught by the round-trip test,
+    /// which is the property that actually matters here.
+    ///
+    /// Truncation therefore exists in exactly one place, the AccessKit
+    /// projection, where a `u64` id space forces it (ADR ID-0a).
+    ///
+    /// `nx-` rather than `node-` deliberately: hex is inside the selector
+    /// grammar's `[a-z0-9-]` ident charset (03 §2), so `node-1f3a…` would be
+    /// grammatically ambiguous with the old decimal-index form. A distinct
+    /// prefix makes old and new mutually unparseable, which is what an alias
+    /// window needs.
+    pub fn to_wire(self) -> String {
+        format!("nx-{:032x}", self.0)
+    }
+
+    /// Parse the wire form. Returns `None` for anything else, including the
+    /// legacy `node-<index>` form.
+    pub fn parse_wire(s: &str) -> Option<NodeHandle> {
+        let hex = s.strip_prefix("nx-")?;
+        if hex.len() != 32 {
+            return None;
+        }
+        u128::from_str_radix(hex, 16).ok().map(NodeHandle)
+    }
+
+    /// The 64-bit projection: XOR of the two independent lanes.
+    ///
+    /// Needed because `accesskit::NodeId` is a `u64` while [`IdHash`] is 128
+    /// bits (ADR ID-0a). Both lanes are full-entropy by construction, so XOR
+    /// preserves that for one instruction.
+    ///
+    /// This trades the old scheme's *guaranteed* within-frame uniqueness — its
+    /// low half was the arena index, unique by construction — for a
+    /// probabilistic one (~n²/2⁶⁵; ~2.7e-12 at 10 000 nodes). Accepted because
+    /// the requirement that has actually failed in production is cross-update
+    /// *stability*, not uniqueness, and a structural fold is what fixes that.
+    pub fn fold64(self) -> u64 {
+        (self.0 as u64) ^ ((self.0 >> 64) as u64)
+    }
+
+    /// Rebuild a handle from its 64-bit projection.
+    ///
+    /// Lossy by nature: the high lane is gone, so this is only for comparing
+    /// against handles that came from the same fold (AccessKit round-trips,
+    /// wire parsing). Never use it to reconstruct a tree identity.
+    pub fn from_fold64(v: u64) -> NodeHandle {
+        NodeHandle(u128::from(v))
+    }
+
+    /// The full 128-bit value, for callers needing the untruncated identity.
+    pub fn raw(self) -> IdHash {
+        self.0
+    }
+}
+
+impl std::fmt::Display for NodeHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_wire())
+    }
+}
+
 #[cfg(test)]
 mod id_hash_tests {
     use super::*;

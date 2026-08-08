@@ -39,12 +39,12 @@ pub enum LocatorError {
     /// No node matched within the timeout. `nearest` are near-miss node ids.
     NotFound {
         /// Near-miss candidate node ids.
-        nearest: Vec<u32>,
+        nearest: Vec<lumen_core::identity::NodeHandle>,
     },
     /// More than one node matched. `candidates` are their node ids.
     Ambiguous {
         /// Matching node ids.
-        candidates: Vec<u32>,
+        candidates: Vec<lumen_core::identity::NodeHandle>,
     },
     /// The selector did not parse.
     Parse(String),
@@ -373,7 +373,7 @@ impl Locator {
 
     /// Auto-wait (05 §3): poll every 10 ms of virtual time until the selector
     /// resolves to exactly one node, or fail. `>1` fails `Ambiguous` immediately.
-    async fn wait_one(&self) -> Result<u32, LocatorError> {
+    async fn wait_one(&self) -> Result<lumen_core::identity::NodeHandle, LocatorError> {
         let mut waited = 0.0;
         loop {
             let result = {
@@ -404,7 +404,7 @@ impl Locator {
         }
     }
 
-    fn node_bounds(&self, id: u32) -> Option<Rect> {
+    fn node_bounds(&self, id: lumen_core::identity::NodeHandle) -> Option<Rect> {
         let root = self.inner.borrow().semantics_doc().root.elided();
         find_node(&root, id).map(|n| n.bounds)
     }
@@ -629,7 +629,7 @@ impl Expect {
     }
 }
 
-fn find_node(root: &SemanticsNode, id: u32) -> Option<&SemanticsNode> {
+fn find_node(root: &SemanticsNode, id: lumen_core::identity::NodeHandle) -> Option<&SemanticsNode> {
     if root.node == id {
         return Some(root);
     }

@@ -151,11 +151,11 @@ The ones you'll actually use:
   `now_ms()` read doesn't count — that schedules nothing to wait for). A
   forever-spinner therefore times out, readably; verify final state via
   `ui.waitFor` after `ui.waitSettled`.
-- **`node-N` ids ARE selectors since C.3** — act on exactly the node
+- **`nx-<hex>` handles ARE selectors (C.3; ID1 changed the form)** — act on exactly the node
   `ui.getTree`/`ui.waitFor` returned. They're per-rebuild runtime ids
   though: re-query after structural changes; prefer a stable `#id` in
   committed tests. Ambiguous/NotFound errors are now readable and list
-  `node-N` candidates.
+  `nx-<hex>` candidates.
 - **Dotted ids are unselectable.** `#faq.returns` parses as id `faq` +
   class `returns`. Ids must be `[a-z0-9-]`. If `tree` shows a dotted id,
   that's an app bug — fix the id, don't work around it.

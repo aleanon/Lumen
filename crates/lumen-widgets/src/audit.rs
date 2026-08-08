@@ -141,7 +141,7 @@ fn check_unnamed_focusable(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
         out.push(Diagnostic::new(
             codes::W0301,
             format!(
-                "focusable {} leaf (node-{}) has no label or value — name it \
+                "focusable {} leaf ({}) has no label or value — name it \
                  so a11y and selectors can reach it",
                 n.role.as_str(),
                 n.node

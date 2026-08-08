@@ -1651,6 +1651,30 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         self.rtl
     }
 
+    /// ID1: map an agent-visible [`NodeHandle`] back to a live arena node.
+    ///
+    /// Selectors now resolve to handles (structural identity), while the
+    /// tree/style/layout maps are keyed by `NodeIndex` (arena slot). The
+    /// semantic tree carries both, so it is the translation table — and it
+    /// stays correct when the arena starts recycling slots, which a direct
+    /// index comparison would not.
+    fn node_for_handle(&self, handle: lumen_core::identity::NodeHandle) -> Option<NodeIndex> {
+        fn walk(
+            n: &lumen_core::semantics::SemanticsNode,
+            want: lumen_core::identity::NodeHandle,
+        ) -> Option<u32> {
+            if n.node == want {
+                return Some(n.index);
+            }
+            n.children.iter().find_map(|c| walk(c, want))
+        }
+        let idx = walk(self.sem_root.as_ref()?, handle)?;
+        self.tree
+            .document_order()
+            .into_iter()
+            .find(|n| n.index() == idx)
+    }
+
     /// The elided semantics root, computed once per rebuild and shared (OB4).
     ///
     /// Prefer this over `semantics_doc().root.elided()`, which deep-clones the
@@ -1662,7 +1686,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         }
         let built = Rc::new(match self.sem_root.as_ref() {
             Some(r) => r.elided(),
-            None => lumen_core::semantics::SemanticsNode::new(0, Role::Window),
+            None => lumen_core::semantics::SemanticsNode::new(
+                lumen_core::identity::NodeHandle::root(Role::Window.as_str()),
+                0,
+                Role::Window,
+            ),
         });
         *self.elided_cache.borrow_mut() = Some(Rc::clone(&built));
         built
@@ -1675,11 +1703,28 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
 
     /// The semantics document (typed).
     pub fn semantics_doc(&self) -> SemanticsDoc {
-        let focused = self.focused_node().map(|n| n.index());
-        let root = self
-            .sem_root
-            .clone()
-            .unwrap_or_else(|| SemanticsNode::new(0, Role::Window));
+        // ID1: report the focused node by handle. The arena index is looked up
+        // through the semantic tree rather than emitted directly, so this field
+        // survives slot recycling like every other id does now.
+        let focused = self.focused_node().and_then(|n| {
+            fn find(
+                s: &lumen_core::semantics::SemanticsNode,
+                idx: u32,
+            ) -> Option<lumen_core::identity::NodeHandle> {
+                if s.index == idx {
+                    return Some(s.node);
+                }
+                s.children.iter().find_map(|c| find(c, idx))
+            }
+            self.sem_root.as_ref().and_then(|r| find(r, n.index()))
+        });
+        let root = self.sem_root.clone().unwrap_or_else(|| {
+            SemanticsNode::new(
+                lumen_core::identity::NodeHandle::root(Role::Window.as_str()),
+                0,
+                Role::Window,
+            )
+        });
         SemanticsDoc {
             window: WindowInfo {
                 width: self.size.width,
@@ -3005,12 +3050,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let Ok(id) = lumen_core::semantics::resolve_one(&root, selector) else {
             return serde_json::Value::Null;
         };
-        // Map the semantics node id back to a live NodeIndex.
-        let node = self
-            .tree
-            .document_order()
-            .into_iter()
-            .find(|n| n.index() == id);
+        let node = self.node_for_handle(id);
         let Some(node) = node else {
             return serde_json::Value::Null;
         };
@@ -3036,16 +3076,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         let Ok(id) = lumen_core::semantics::resolve_one(&root, selector) else {
             return serde_json::Value::Null;
         };
-        let node = self
-            .tree
-            .document_order()
-            .into_iter()
-            .find(|n| n.index() == id);
+        let node = self.node_for_handle(id);
         let Some(deps) = node.and_then(|n| self.meta.get(&n)).map(|m| &m.deps) else {
             return serde_json::Value::Null;
         };
         serde_json::json!({
-            "node": format!("node-{id}"),
+            "node": id.to_wire(),
             "deps": deps.union(),
             "byProp": {
                 "scope": deps.scope,
@@ -3066,7 +3102,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
             .iter()
             .map(|e| {
                 serde_json::json!({
-                    "node": format!("node-{}", e.node),
+                    // e.node is an arena index (dependents_of scans meta);
+                    // translate so the agent gets a usable selector.
+                    "node": self.handle_for_index(e.node).map(|h| h.to_wire()),
                     "via": e.via,
                     "update": e.update,
                 })
@@ -3082,7 +3120,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     pub fn last_change(&self) -> serde_json::Value {
         serde_json::json!({
             "kind": self.last_change.kind,
-            "nodes": self.last_change.nodes.iter().map(|n| format!("node-{n}")).collect::<Vec<_>>(),
+            "nodes": self
+                .last_change
+                .nodes
+                .iter()
+                .filter_map(|n| self.handle_for_index(*n).map(|h| h.to_wire()))
+                .collect::<Vec<_>>(),
         })
     }
 
@@ -3090,7 +3133,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// instead of synthesizing a pointer at its centre and re-hit-testing — more
     /// robust under overlap/transforms. `action` is `click`/`focus`/`dismiss`.
     /// Pumps afterward; returns the node index or an error string.
-    pub fn invoke_action(&mut self, selector: &str, action: &str) -> Result<u32, String> {
+    pub fn invoke_action(
+        &mut self,
+        selector: &str,
+        action: &str,
+    ) -> Result<lumen_core::identity::NodeHandle, String> {
         self.invoke_action_with(selector, action, None)
     }
 
@@ -3101,15 +3148,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
         selector: &str,
         action: &str,
         value: Option<&str>,
-    ) -> Result<u32, String> {
+    ) -> Result<lumen_core::identity::NodeHandle, String> {
         let root = self.semantics_elided();
         let id = lumen_core::semantics::resolve_one(&root, selector)
             .map_err(|_| format!("selector `{selector}` did not resolve to one node"))?;
         let node = self
-            .tree
-            .document_order()
-            .into_iter()
-            .find(|n| n.index() == id)
+            .node_for_handle(id)
             .ok_or_else(|| "resolved node is not live".to_string())?;
         // W1: the agent gets the same answer as the pointer. Without this the
         // geometry-free path would drive a control the user cannot touch.
@@ -4150,7 +4194,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                 // Mirror the painted text as a design-analysis target: the
                 // foreground is the text's resolved color, the region its bounds.
                 text_targets.push(lumen_render::TextTarget {
-                    node: Some(format!("node-{}", node.index())),
+                    // Raw arena index here: display-list building runs during
+                    // paint, before this frame's semantic tree exists, so the
+                    // handle isn't derivable yet. `contrast_report` translates
+                    // it before the value reaches an agent.
+                    node: Some(node.index().to_string()),
                     label: Some(txt.clone()),
                     foreground: text_color,
                     region: bounds,
@@ -4321,15 +4369,62 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
     /// finding is bound to the `node-<index>` id of the text node it assesses,
     /// and contrast is measured against the *composited* backdrop.
     pub fn contrast_report(&mut self) -> lumen_render::ContrastReport {
-        let (dl, targets) = self.build_display_list();
+        let (dl, mut targets) = self.build_display_list();
+        // ID1: translate arena indices into agent handles, so a finding binds
+        // to an id the agent can actually use as a selector. Done here rather
+        // than at paint time because the semantic tree only exists afterwards.
+        for t in &mut targets {
+            if let Some(idx) = t.node.as_deref().and_then(|s| s.parse::<u32>().ok()) {
+                t.node = self.handle_for_index(idx).map(|h| h.to_wire());
+            }
+        }
         lumen_render::analyze_contrast(&dl, Color::srgb8(255, 255, 255, 255), &targets)
+    }
+
+    /// ID1: arena index -> agent handle, via the semantic tree that holds both.
+    fn handle_for_index(&self, index: u32) -> Option<lumen_core::identity::NodeHandle> {
+        fn walk(
+            n: &lumen_core::semantics::SemanticsNode,
+            index: u32,
+        ) -> Option<lumen_core::identity::NodeHandle> {
+            if n.index == index {
+                return Some(n.node);
+            }
+            n.children.iter().find_map(|c| walk(c, index))
+        }
+        walk(self.sem_root.as_ref()?, index)
     }
 
     // --- semantics ----------------------------------------------------------
 
     fn build_semantics(&self, node: NodeIndex) -> SemanticsNode {
+        let role = self
+            .meta
+            .get(&node)
+            .map(|m| m.role)
+            .unwrap_or(Role::Generic);
+        self.build_semantics_at(node, lumen_core::identity::NodeHandle::root(role.as_str()))
+    }
+
+    /// ID1: build a node's semantics under an already-derived handle.
+    ///
+    /// The handle is threaded down rather than recomputed per node because it
+    /// folds the *path*: a child's identity is `fold(parent, local)`, so the
+    /// parent's value has to be in hand. `local` is the author id when one is
+    /// set — which is what lets a node keep its identity when a sibling is
+    /// inserted above it, something `node-<index>` never survived — and the
+    /// `(role, ordinal)` pair otherwise.
+    fn build_semantics_at(
+        &self,
+        node: NodeIndex,
+        handle: lumen_core::identity::NodeHandle,
+    ) -> SemanticsNode {
         let m = self.meta.get(&node);
-        let mut s = SemanticsNode::new(node.index(), m.map(|m| m.role).unwrap_or(Role::Generic));
+        let mut s = SemanticsNode::new(
+            handle,
+            node.index(),
+            m.map(|m| m.role).unwrap_or(Role::Generic),
+        );
         if let Some(m) = m {
             s.id = m.id.clone();
             s.label = m.label.clone();
@@ -4367,11 +4462,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner> Headless<R, E> {
                     content_height: m.content_height,
                 });
         let mut child = self.tree.first_child(node);
+        // Ordinal counts only the children that survive into the semantic tree,
+        // so a hidden sibling appearing or disappearing does not renumber — and
+        // therefore does not re-identify — the ones around it.
+        let mut ordinal = 0u32;
         while child.is_some() {
             // B.3 visibility:hidden — hidden subtrees leave the semantic tree
             // too (what the agent sees matches what the user sees).
             if self.tree.flags(child).contains(NodeFlags::VISIBLE) {
-                s.children.push(self.build_semantics(child));
+                let cm = self.meta.get(&child);
+                let crole = cm.map(|m| m.role).unwrap_or(Role::Generic);
+                let ch = match cm.and_then(|m| m.id.as_ref()) {
+                    Some(id) => handle.child(id.as_str()),
+                    None => handle.child(&(crole.as_str(), ordinal)),
+                };
+                s.children.push(self.build_semantics_at(child, ch));
+                ordinal += 1;
             }
             child = self.tree.next_sibling(child);
         }

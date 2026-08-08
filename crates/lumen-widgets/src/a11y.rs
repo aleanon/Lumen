@@ -71,18 +71,22 @@ fn apply_states(node: &mut Node, states: &[State]) {
 /// Build an AccessKit [`TreeUpdate`] from a Lumen semantic tree (the elided
 /// tree).
 ///
-/// Node ids are `(path_salt << 32) | runtime_node_index`. The low half keeps
-/// AT action routing trivial (mask and compare against `SemanticsNode.node`);
-/// the high half is a hash of the node's structural path (sibling indexes +
-/// role) so that a runtime index reused by an unrelated node after a rebuild
-/// gets a *different* published id. Raw-index ids let a reused index carry a
-/// stale parent pointer into a pruned subtree, which panics
-/// `accesskit_consumer`'s diff (`updated` node missing from the new state) —
-/// hit live on the wallet's login→unlocked transition with AT-SPI active.
+/// Node ids are `SemanticsNode.node.fold64()` — the 64-bit projection of the
+/// node's structural [`NodeHandle`](lumen_core::identity::NodeHandle).
+///
+/// ID1 removed the previous `(path_salt << 32) | runtime_index` scheme. That
+/// existed because raw-index ids let a reused index carry a stale parent
+/// pointer into a pruned subtree, panicking `accesskit_consumer`'s diff
+/// (`updated` node missing from the new state) — hit live on the wallet's
+/// login→unlocked transition with AT-SPI active. The salt was a local fix for
+/// the general problem `NodeHandle` now solves, so the whole
+/// half-structural/half-positional construction is gone: the handle is already
+/// the structural path, and unlike the old low half it does not change when the
+/// arena recycles a slot.
 pub fn build_tree(root: &SemanticsNode) -> TreeUpdate {
     let mut nodes = Vec::new();
     let mut focus_id = None;
-    let root_id = build_node(root, root_salt(), &mut nodes, &mut focus_id);
+    let root_id = build_node(root, &mut nodes, &mut focus_id);
     let focus = focus_id.unwrap_or(root_id);
     let mut tree = Tree::new(root_id);
     // P.4: identify the app on the a11y bus (it showed as an empty-name
@@ -94,6 +98,20 @@ pub fn build_tree(root: &SemanticsNode) -> TreeUpdate {
         .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()));
     tree.toolkit_name = Some("Lumen".into());
     tree.toolkit_version = Some(env!("CARGO_PKG_VERSION").into());
+    // ID-0a's guard. Its value is NOT catching birthday collisions in the
+    // 64-bit fold (~2.7e-12 at 10 000 nodes — it will never see one); it is
+    // catching a derivation BUG that maps two distinct nodes to one id, which
+    // would make AT clicks land on the wrong widget and would otherwise fail
+    // only for screen-reader users, silently.
+    debug_assert!(
+        {
+            let mut seen = std::collections::HashSet::with_capacity(nodes.len());
+            nodes.iter().all(|(id, _)| seen.insert(*id))
+        },
+        "duplicate AccessKit node id in one TreeUpdate — two nodes are \
+         indistinguishable to assistive tech"
+    );
+
     TreeUpdate {
         nodes,
         tree: Some(tree),
@@ -101,31 +119,12 @@ pub fn build_tree(root: &SemanticsNode) -> TreeUpdate {
     }
 }
 
-/// The structural-path salt of the root.
-fn root_salt() -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::hash::DefaultHasher::new();
-    "lumen-a11y-root".hash(&mut h);
-    h.finish() & 0xFFFF_FFFF
-}
-
-/// Derive a child's path salt from its parent's: hash(parent salt, sibling
-/// index, role). Same position + role ⇒ same salt (stable announcements);
-/// different position ⇒ different id (no cross-rebuild aliasing).
-fn child_salt(parent: u64, index: usize, role: Role) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::hash::DefaultHasher::new();
-    (parent, index, role as u8).hash(&mut h);
-    h.finish() & 0xFFFF_FFFF
-}
-
 fn build_node(
     n: &SemanticsNode,
-    salt: u64,
     out: &mut Vec<(NodeId, Node)>,
     focus_out: &mut Option<NodeId>,
 ) -> NodeId {
-    let id = NodeId((salt << 32) | (n.node as u64 & 0xFFFF_FFFF));
+    let id = NodeId(n.node.fold64());
     if n.states.contains(&State::Focused) {
         *focus_out = Some(id);
     }
@@ -172,8 +171,7 @@ fn build_node(
     let kids: Vec<NodeId> = n
         .children
         .iter()
-        .enumerate()
-        .map(|(i, c)| build_node(c, child_salt(salt, i, c.role), out, focus_out))
+        .map(|c| build_node(c, out, focus_out))
         .collect();
     node.set_children(kids);
     out.push((id, node));

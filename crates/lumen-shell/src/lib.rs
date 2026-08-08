@@ -1204,15 +1204,17 @@ fn route_at_action<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner>(
     req: &accesskit::ActionRequest,
 ) {
     fn find_bounds(n: &lumen_core::semantics::SemanticsNode, id: u64) -> Option<kurbo::Rect> {
-        if u64::from(n.node) == id {
+        if n.node.fold64() == id {
             return Some(n.bounds);
         }
         n.children.iter().find_map(|c| find_bounds(c, id))
     }
     let root = h.semantics_elided();
-    // Published ids carry a structural-path salt in the high 32 bits (see
-    // `lumen_widgets::a11y::build_tree`); the runtime index is the low half.
-    let Some(bounds) = find_bounds(&root, req.target.0 & 0xFFFF_FFFF) else {
+    // ID1: published ids are `NodeHandle::fold64()` (see
+    // `lumen_widgets::a11y::build_tree`), so compare the same projection. The
+    // old `& 0xFFFF_FFFF` masked out an arena index, which stops identifying
+    // anything once the arena recycles slots.
+    let Some(bounds) = find_bounds(&root, req.target.0) else {
         return;
     };
     if req.action == accesskit::Action::Click {

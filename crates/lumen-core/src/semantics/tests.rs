@@ -1,10 +1,12 @@
 //! T0.8 acceptance: schema validation + a selector test table (≥30 cases).
 
 use super::*;
-use crate::identity::StableId;
+use crate::identity::{NodeHandle, StableId};
 
 fn node(n: u32, role: Role, label: &str) -> SemanticsNode {
-    let mut s = SemanticsNode::new(n, role);
+    // A per-number handle keeps fixture nodes distinct; the assertions below
+    // key on `index` because they test elision structure, not identity.
+    let mut s = SemanticsNode::new(NodeHandle::root(&n), n, role);
     s.label = label.to_string();
     s.type_name = role.type_name();
     s
@@ -68,7 +70,7 @@ fn doc() -> SemanticsDoc {
             width: 800.0,
             height: 600.0,
             scale: 2.0,
-            focused: Some(2),
+            focused: Some(NodeHandle::root(&2u32)),
         },
         root: fixture(),
     }
@@ -78,13 +80,13 @@ fn doc() -> SemanticsDoc {
 fn elision_splices_pure_layout_children() {
     let raw = fixture();
     assert_eq!(
-        raw.children.iter().map(|c| c.node).collect::<Vec<_>>(),
+        raw.children.iter().map(|c| c.index).collect::<Vec<_>>(),
         vec![1, 5, 9]
     );
     let elided = raw.elided();
     // group(1) elided -> its buttons splice into window
     assert_eq!(
-        elided.children.iter().map(|c| c.node).collect::<Vec<_>>(),
+        elided.children.iter().map(|c| c.index).collect::<Vec<_>>(),
         vec![2, 3, 4, 5, 9]
     );
 }
@@ -92,7 +94,7 @@ fn elision_splices_pure_layout_children() {
 #[test]
 fn document_validates_against_schema() {
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../../schema/semantics-1.json")).unwrap();
+        serde_json::from_str(include_str!("../../schema/semantics-2.json")).unwrap();
     let validator = jsonschema::validator_for(&schema).unwrap();
 
     for raw in [false, true] {
@@ -107,9 +109,26 @@ fn document_validates_against_schema() {
     }
 }
 
+/// Selectors resolve to handles (ID1); map back to the fixture's numbering so
+/// the assertion tables below stay readable as indices.
+fn index_of(n: &SemanticsNode, h: NodeHandle) -> Option<u32> {
+    if n.node == h {
+        return Some(n.index);
+    }
+    n.children.iter().find_map(|c| index_of(c, h))
+}
+
+fn idx(root: &SemanticsNode, h: NodeHandle) -> u32 {
+    index_of(root, h).expect("resolved handle is in the tree")
+}
+
 fn sel(selector: &str) -> Vec<u32> {
     let elided = fixture().elided();
-    select(&elided, selector).unwrap_or_else(|e| panic!("parse failed for {selector:?}: {e}"))
+    select(&elided, selector)
+        .unwrap_or_else(|e| panic!("parse failed for {selector:?}: {e}"))
+        .into_iter()
+        .map(|h| idx(&elided, h))
+        .collect()
 }
 
 #[test]
@@ -170,9 +189,10 @@ fn selector_table() {
 #[test]
 fn resolve_one_single_match() {
     let elided = fixture().elided();
-    assert_eq!(resolve_one(&elided, "#save"), Ok(2));
-    assert_eq!(resolve_one(&elided, "button:text(\"Save\")"), Ok(2));
-    assert_eq!(resolve_one(&elided, ".primary"), Ok(2));
+    let one = |s: &str| idx(&elided, resolve_one(&elided, s).expect("resolves"));
+    assert_eq!(one("#save"), 2);
+    assert_eq!(one("button:text(\"Save\")"), 2);
+    assert_eq!(one(".primary"), 2);
 }
 
 #[test]
@@ -180,7 +200,8 @@ fn resolve_one_ambiguous_lists_candidates() {
     let elided = fixture().elided();
     match resolve_one(&elided, "button") {
         Err(ResolveError::Ambiguous { candidates }) => {
-            assert_eq!(candidates, vec![2, 3, 4, 11, 12]);
+            let got: Vec<u32> = candidates.iter().map(|&h| idx(&elided, h)).collect();
+            assert_eq!(got, vec![2, 3, 4, 11, 12]);
         }
         other => panic!("expected Ambiguous, got {other:?}"),
     }
@@ -192,7 +213,8 @@ fn resolve_one_not_found_suggests_nearest() {
     match resolve_one(&elided, "button#missing") {
         Err(ResolveError::NotFound { nearest }) => {
             // nearest-miss ignores the failing #missing structural constraint
-            assert!(nearest.is_empty() || nearest.iter().all(|n| [2, 3, 4, 11, 12].contains(n)));
+            let got: Vec<u32> = nearest.iter().map(|&h| idx(&elided, h)).collect();
+            assert!(got.is_empty() || got.iter().all(|n| [2, 3, 4, 11, 12].contains(n)));
         }
         other => panic!("expected NotFound, got {other:?}"),
     }

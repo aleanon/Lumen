@@ -9,7 +9,7 @@
 //! selector resolver; the headless `App` (T0.9) builds these nodes during
 //! rebuild. `allow(dead_code)` until then.
 
-use crate::identity::StableId;
+use crate::identity::{NodeHandle, StableId};
 use kurbo::Rect;
 #[cfg(feature = "snapshot")]
 use serde_json::{json, Value};
@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 /// while the shape stays identical is a lie to any client doing version
 /// negotiation. ID1 changes node handles from `node-<index>` to `nx-<hex>` and
 /// bumps this in the same commit.
-pub const SCHEMA: &str = "lumen-semantics/1";
+pub const SCHEMA: &str = "lumen-semantics/2";
 
 /// Accessible role (closed set, 03 §1). Extend only via the decision log.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -369,8 +369,19 @@ pub struct TextMetrics {
 /// nodes whose children splice into the parent.
 #[derive(Clone, Debug)]
 pub struct SemanticsNode {
-    /// Runtime node index (serializes as `"node-<index>"`).
-    pub node: u32,
+    /// Agent-visible identity (ID1) — serializes as `"node": "nx-<hex>"`.
+    ///
+    /// Structural, not positional: derived from the node's path through the
+    /// tree rather than its arena slot, so it survives the slot recycling that
+    /// persistent arenas (CP6) introduce.
+    pub node: NodeHandle,
+    /// The raw arena slot, serialized alongside as `"index"`.
+    ///
+    /// Kept for one release as a debugging/screenshot-annotation
+    /// cross-reference while callers migrate off positional ids. It is NOT an
+    /// identity: it is re-minted every rebuild and will be recycled once the
+    /// arena persists.
+    pub index: u32,
     /// Author id, if set.
     pub id: Option<StableId>,
     /// Role.
@@ -419,9 +430,10 @@ pub struct SemanticsNode {
 
 impl SemanticsNode {
     /// A minimal node with the given role.
-    pub fn new(node: u32, role: Role) -> SemanticsNode {
+    pub fn new(node: NodeHandle, index: u32, role: Role) -> SemanticsNode {
         SemanticsNode {
             node,
+            index,
             id: None,
             role,
             label: String::new(),
@@ -470,7 +482,8 @@ impl SemanticsNode {
     #[cfg(feature = "snapshot")]
     pub fn to_json(&self) -> Value {
         let mut obj = serde_json::Map::new();
-        obj.insert("node".into(), json!(format!("node-{}", self.node)));
+        obj.insert("node".into(), json!(self.node.to_wire()));
+        obj.insert("index".into(), json!(self.index));
         if let Some(id) = &self.id {
             obj.insert("id".into(), json!(id.as_str()));
         }
@@ -526,7 +539,8 @@ pub struct WindowInfo {
     /// DPI scale factor.
     pub scale: f64,
     /// Focused node index, if any.
-    pub focused: Option<u32>,
+    /// Handle of the focused node, if any (ID1: `nx-<hex>`, not an index).
+    pub focused: Option<NodeHandle>,
 }
 
 /// A complete semantics document (the value of `Headless::semantics_json` /
@@ -555,7 +569,7 @@ impl SemanticsDoc {
         window.insert("height".into(), json!(self.window.height));
         window.insert("scale".into(), json!(self.window.scale));
         if let Some(f) = self.window.focused {
-            window.insert("focused".into(), json!(format!("node-{f}")));
+            window.insert("focused".into(), json!(f.to_wire()));
         }
         json!({
             "schema": SCHEMA,
@@ -618,12 +632,12 @@ pub enum ResolveError {
     /// No node matched. `nearest` lists near-miss node indices.
     NotFound {
         /// Near-miss candidate node indices.
-        nearest: Vec<u32>,
+        nearest: Vec<NodeHandle>,
     },
-    /// More than one node matched. `candidates` lists their node indices.
+    /// More than one node matched. `candidates` lists their handles.
     Ambiguous {
         /// Matching node indices, in document order.
-        candidates: Vec<u32>,
+        candidates: Vec<NodeHandle>,
     },
 }
 
@@ -640,7 +654,7 @@ struct Flat {
 }
 
 struct FlatNode {
-    node: u32,
+    node: NodeHandle,
     id: Option<String>,
     role: &'static str,
     label: String,
@@ -680,7 +694,7 @@ fn build_flat(n: &SemanticsNode, parent: Option<usize>, out: &mut Vec<FlatNode>)
 
 /// Resolve a selector over `root` (which is treated as already elided) to all
 /// matching node indices, in document order.
-pub fn select(root: &SemanticsNode, selector: &str) -> Result<Vec<u32>, SelectorParseError> {
+pub fn select(root: &SemanticsNode, selector: &str) -> Result<Vec<NodeHandle>, SelectorParseError> {
     let sel = Selector::parse(selector)?;
     let flat = Flat::build(root);
     let matched = match_selector(&flat, &sel);
@@ -689,7 +703,7 @@ pub fn select(root: &SemanticsNode, selector: &str) -> Result<Vec<u32>, Selector
 
 /// Resolve a selector to exactly one node (the locator/agent contract, 03 §2),
 /// returning structured `NotFound`/`Ambiguous` errors otherwise.
-pub fn resolve_one(root: &SemanticsNode, selector: &str) -> Result<u32, ResolveError> {
+pub fn resolve_one(root: &SemanticsNode, selector: &str) -> Result<NodeHandle, ResolveError> {
     let sel = Selector::parse(selector).map_err(|e| ResolveError::Parse(e.0))?;
     let flat = Flat::build(root);
     let matched = match_selector(&flat, &sel);
@@ -773,7 +787,7 @@ fn node_matches(flat: &Flat, i: usize, parts: &[Part]) -> bool {
     })
 }
 
-fn nearest_miss(flat: &Flat, sel: &Selector) -> Vec<u32> {
+fn nearest_miss(flat: &Flat, sel: &Selector) -> Vec<NodeHandle> {
     // Heuristic: nodes matching the final compound's parts, ignoring structure.
     let last = sel.rest.last().map(|(_, c)| c).unwrap_or(&sel.first);
     (0..flat.nodes.len())

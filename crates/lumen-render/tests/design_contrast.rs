@@ -46,19 +46,19 @@ fn scene() -> (DisplayList, Color, Vec<TextTarget>) {
     // directly (foreground + region). Their colors stand in for the brush.
     let targets = vec![
         TextTarget {
-            node: Some("node-11".into()),
+            node: Some("nx-000000000000000000000000000000b1".into()),
             label: Some("Heading (near-white)".into()),
             foreground: Color::srgb8(0xf2, 0xf4, 0xf8, 0xff),
             region: Rect::new(64.0, 64.0, 320.0, 96.0),
         },
         TextTarget {
-            node: Some("node-12".into()),
+            node: Some("nx-000000000000000000000000000000b2".into()),
             label: Some("Body (mid-gray)".into()),
             foreground: Color::srgb8(0x9a, 0xa0, 0xaa, 0xff),
             region: Rect::new(64.0, 120.0, 320.0, 150.0),
         },
         TextTarget {
-            node: Some("node-13".into()),
+            node: Some("nx-000000000000000000000000000000b3".into()),
             label: Some("Muted caption (too dim)".into()),
             foreground: Color::srgb8(0x44, 0x4a, 0x55, 0xff),
             region: Rect::new(64.0, 220.0, 320.0, 250.0),

@@ -17,7 +17,7 @@ The semantic tree is the single source of truth for accessibility, test locators
 ```json
 {
   "schema": "lumen-semantics/1",
-  "window": { "width": 800, "height": 600, "scale": 2.0, "focused": "node-42" },
+  "window": { "width": 800, "height": 600, "scale": 2.0, "focused": "nx-418addb932da6e1a98fc688e3546eb27" },
   "root": { "$ref": "SemNode" }
 }
 ```
@@ -25,7 +25,8 @@ The semantic tree is the single source of truth for accessibility, test locators
 `SemNode`:
 ```json
 {
-  "node": "node-42",                  // runtime id: "node-" + NodeIndex.index
+  "node": "nx-418addb932da6e1a98fc688e3546eb27",  // structural handle: "nx-" + 32 hex (ID1)
+  "index": 42,                        // arena slot, debugging only — NOT an identity
   "id": "save-button",                // StableId if set, else absent
   "role": "button",
   "label": "Save",                    // accessible name (explicit or derived from text)
@@ -78,7 +79,7 @@ part       := '#' ident                  // StableId equals
 ```
 Matching runs over the **elided** semantic tree, document order. Examples: `#save-button`, `button:text("Continue")`, `dialog .footer > button:nth(2)`, `list_item:has(:text-contains("invoice"))`.
 
-Resolution semantics shared by tests and agent: a selector resolves to all matches; actions require exactly one match and return `Ambiguous` (with the `node-N` candidate list and advice) or `NotFound` otherwise. Agent methods additionally accept the runtime ids `ui.getTree` returns (`node-42`) as direct lookups (C.3) — act on exactly the node you observed. **Gotcha:** `ident` treats `.` as a class delimiter, so ids must be `[a-z0-9-]` (a dotted id `#faq.returns` parses as id `faq` + class `returns`). Actions auto-wait (existence/actionability/async — C.1a) both headless and live; clock-driven animation settling is not waited on yet (C.1b).
+Resolution semantics shared by tests and agent: a selector resolves to all matches; actions require exactly one match and return `Ambiguous` (with the `nx-<hex>` candidate list and advice) or `NotFound` otherwise. Agent methods additionally accept the handles `ui.getTree` returns (`nx-<32 hex>`) as direct lookups (C.3) — act on exactly the node you observed. **ID1:** handles are now *structural* (folded from the node's path), not arena indices; the legacy `node-<index>` form is still accepted during the alias window but is never emitted, and using it reports `W0302`. **Gotcha:** `ident` treats `.` as a class delimiter, so ids must be `[a-z0-9-]` (a dotted id `#faq.returns` parses as id `faq` + class `returns`). Actions auto-wait (existence/actionability/async — C.1a) both headless and live; clock-driven animation settling is not waited on yet (C.1b).
 
 ## 3. `lumen-agent` protocol — as implemented
 
@@ -142,7 +143,7 @@ action polls at 10 ms — pumping so deferred task results apply — until the
 selector resolves to exactly one *actionable* node (non-empty bounds, not
 `disabled`) or `timeout_ms` elapses (param on any action; default 5000).
 `Ambiguous` fails immediately with candidates. Animation settling is the
-explicit `ui.waitSettled` call (C.1b ✅), not part of per-action auto-wait. Results: `{ ok: true, node: "node-42" }` or a JSON-RPC
+explicit `ui.waitSettled` call (C.1b ✅), not part of per-action auto-wait. Results: `{ ok: true, node: "nx-418addb932da6e1a98fc688e3546eb27" }` or a JSON-RPC
 error (`-32601` unknown method; `-32000` with `Timeout(…)` /
 `NotFound { nearest }` / `Ambiguous { candidates }`; structured error codes
 planned, C.4). `events.subscribe` (push notifications) remains open —
@@ -213,7 +214,7 @@ endpoint (`lumen agent serve` proxying a managed app, C.8b).
 `session.start`/`session.stop`, and `reload.apply` all SHIPPED — they are
 in the §3.1–§3.3 tables; this list previously contradicted them.)* *(Shipped since the re-ground:
 C.1a auto-wait + `ui.waitFor`; C.2 `app.logs` + real `app.perf`; C.3 live
-`session.*`, `node-N` selectors, readable resolver errors; C.4a state.get/
+`session.*`, handle selectors, readable resolver errors; C.4a state.get/
 subtree-getTree/max_width/hover/click-opts/scroll-dx/type-clear; C.5
 `lumen agent call` + MCP stdio server + bearer auth; C.8a port-0 +
 discovery + `app.quit` + `just stop-agent`.)*
