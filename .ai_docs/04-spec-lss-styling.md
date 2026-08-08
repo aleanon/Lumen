@@ -141,7 +141,7 @@ cannot drift from the code again. The three lists live in the crate —
 `KNOWN_PROPERTIES`, `APPLIED_PROPERTIES`, `PARSE_ONLY_PROPERTIES` — and
 `crates/lumen-style/tests/property_parity.rs` asserts `KNOWN == APPLIED ∪
 PARSE_ONLY`, so a property that parses without an implementation is a **build
-failure**. Current split: **78 known, 78 applied, 0 parse-only** — every known `.lss` property now reaches the runtime — no layout property is parse-only, and of typography only `font-variation` remains (PROP1's two mechanical layout batches landed 2026-08-08; the parity test's tripwire ratchets down with each one). A parse-only
+failure**. Current split: **78 known, 78 applied, 0 parse-only** — every known `.lss` property now reaches the runtime (PROP1, completed 2026-08-08; the parity test's tripwire ratcheted down with each one and now pins the empty set). A parse-only
 declaration now reports `W0107` at parse time instead of silently doing
 nothing.)*
 
