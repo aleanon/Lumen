@@ -157,6 +157,13 @@ jobs:
           sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
       - name: verify
         run: ./scripts/subset_fonts.sh verify
+      # LN2: the pan-Unicode face is opt-in, so the CJK/RTL goldens are gated on
+      # the feature. They still have to RUN somewhere, or making the face
+      # optional would quietly delete the i18n coverage instead of relocating
+      # it. This is that somewhere.
+      - uses: dtolnay/rust-toolchain@stable
+      - name: i18n goldens (CJK/RTL, needs the pan-Unicode face)
+        run: cargo test -p lumen-text --features pan-unicode
 
   # Perf gate (T2.6): criterion benches must stay within their frame budgets.
   # Runs on the reference Linux desktop runner only.

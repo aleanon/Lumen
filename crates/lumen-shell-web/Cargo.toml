@@ -14,7 +14,7 @@ name = "lumen_shell_web"
 # Forwarded tiers. Default matches the previous behaviour exactly (the facade's
 # own defaults minus the desktop-only ones), so existing consumers are
 # unchanged; `--no-default-features` is what makes a lean wasm build reachable.
-default = ["pan-unicode", "snapshot"]
+default = ["snapshot"]
 pan-unicode = ["lumen/pan-unicode", "lumen-shell-core/pan-unicode", "lumen-agent/pan-unicode"]
 snapshot = ["lumen/snapshot", "lumen-shell-core/snapshot"]
 

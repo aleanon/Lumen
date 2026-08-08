@@ -14,9 +14,9 @@ publish = false
 # AppSnapshot restore, `semantics_json`, `get_styles`, and the `design` import.
 # Forwards to lumen-core / lumen-style; a lean GPU app builds with
 # `--no-default-features --features wgpu` and drops `serde_json` app-wide.
-# `pan-unicode` (default-on): the full 15 MB embedded face (CJK/RTL/Indic);
+# `pan-unicode` (LN2: default-OFF): the full 15 MB embedded face (CJK/RTL/Indic);
 # lean builds embed the ~350 KB Latin+symbols subset (T.4).
-default = ["wgpu", "snapshot", "pan-unicode", "codecs"]
+default = ["wgpu", "snapshot", "codecs"]
 # ADR-M1: jpeg/gif/webp decode (`asset::decode`/`asset::animation`). Off in
 # the lean profile — PNG always works via tiny-skia.
 codecs = ["dep:image"]

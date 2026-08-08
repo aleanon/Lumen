@@ -29,7 +29,7 @@ swash = { workspace = true }
 # lean build (--no-default-features, the shipped profile) embeds the
 # ~350 KB Latin+symbols subset instead; register a full face at runtime
 # with `App::font(bytes)` when a lean app needs wider coverage.
-default = ["pan-unicode"]
+default = []
 pan-unicode = []
 
 [dev-dependencies]

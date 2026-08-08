@@ -67,6 +67,11 @@ bytes, so the cost is a re-decode and the UI is unchanged. `lumen::asset` is now
 re-exported through the facade, which it wasn't: an app previously had no way to
 respond to a low-memory warning even if it wanted to.
 
+*LN2 closed 2026-08-08* — the pan-Unicode face is opt-in. Default `hello`
+22.1 MB -> 7.6 MB. The CJK/RTL goldens are gated on the feature and run in the
+`fonts` CI job, so the i18n coverage moved rather than disappeared. Safe without
+a deprecation window: every crate is `publish = false` at 0.0.0.
+
 *MOB3 closed 2026-08-08* — the "no APK has ever been built" reason was
 inherited and false: `scripts/android_build_apk.sh` already existed and the
 toolchain was installed. A signed arm64 APK builds, and the x86_64 one installs,

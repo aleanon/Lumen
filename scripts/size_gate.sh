@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # R.4/R.6/T.4: binary-size gates (01 §9). Three legs:
-#  - default hello (pan-Unicode face embedded): regression guard at 24 MB.
+#  - default hello (LN2: Latin subset): regression guard at 9 MB, plus an
+#    explicit pan-unicode leg at 24 MB so the opt-in face still has a ceiling.
 #  - LEAN HEADLESS hello (facade `default-features = false, features =
 #    ["wgpu"]` — 355 KB Latin+symbols subset, no snapshot/serde): gated at
 #    8 MB.
@@ -21,11 +22,27 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "==> default profile"
+# LN2 re-baseline. The default no longer embeds the pan-Unicode face, so the
+# old 24 MB threshold would have passed whatever happened — including the face
+# coming back by accident, which is the one regression this leg exists to catch.
+echo "==> default profile (LN2: Latin+symbols subset, no pan-Unicode face)"
 cargo build -q -p hello --release
 SIZE=$(stat -c%s target/release/hello)
 echo "hello (default): $(echo "scale=1; $SIZE/1048576" | bc -l) MB"
-[ "$SIZE" -lt $((24 * 1048576)) ] || { echo "FAIL: default > 24 MB"; exit 1; }
+[ "$SIZE" -lt $((9 * 1048576)) ] || {
+    echo "FAIL: default > 9 MB — has the 15 MB pan-Unicode face come back?"; exit 1; }
+
+# The opt-in face still needs a ceiling, or it could grow unnoticed now that
+# nothing else measures it.
+echo "==> pan-unicode profile (opt-in CJK/RTL/Indic face)"
+cargo build -q -p hello --release --features lumen/pan-unicode
+PSIZE=$(stat -c%s target/release/hello)
+echo "hello (pan-unicode): $(echo "scale=1; $PSIZE/1048576" | bc -l) MB"
+[ "$PSIZE" -lt $((24 * 1048576)) ] || { echo "FAIL: pan-unicode > 24 MB"; exit 1; }
+[ "$PSIZE" -gt "$SIZE" ] || {
+    echo "FAIL: the pan-unicode build is not larger than the default — the"
+    echo "      feature is not reaching the font. A lean gate that measures the"
+    echo "      wrong build reports a number and proves nothing."; exit 1; }
 
 echo "==> lean profile (scaffolded app, facade lean features)"
 TMP=$(mktemp -d)

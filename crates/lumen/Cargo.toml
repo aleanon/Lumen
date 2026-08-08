@@ -12,15 +12,21 @@ publish = false
 # facade's ShaderWidget re-export. (Web/mobile drop wgpu via target-gating in
 # lumen-render regardless; the CPU-only renderer build is `lumen-render
 # --no-default-features`.)
-default = ["wgpu", "snapshot", "pan-unicode", "desktop-integration"]
+default = ["wgpu", "snapshot", "desktop-integration"]
 wgpu = ["lumen-widgets/wgpu", "lumen-render/wgpu", "lumen-shell/wgpu"]
 # The serializable/introspectable surfaces (AppSnapshot, get_styles, agent
 # JSON) — default-on; the lean shipped profile drops it (02 §4 doctrine).
 snapshot = ["lumen-widgets/snapshot", "lumen-shell/snapshot"]
-# T.4: the full 15 MB pan-Unicode embedded face — default-on. A lean app
-# depends on the facade with `default-features = false, features = ["wgpu"]`
-# and embeds the ~350 KB Latin+symbols subset instead (hello: 22 MB → ~7 MB),
-# registering a wider face at runtime (`App::font`) if it needs one.
+# T.4/LN2: the full 15 MB pan-Unicode embedded face — **default-OFF** since
+# LN2. The default build embeds the ~350 KB Latin+symbols subset, which is
+# everything the built-in widgets draw; an app that renders CJK/RTL/Indic either
+# turns this on or registers a wider face at runtime with `App::font`.
+#
+# Flipped because the face is ~14.5 MB of the binary and the ~95% of apps that
+# never render those scripts were paying for it. Measured on hello_android:
+# 22.8 MB -> 7.0 MB. Safe to flip without a deprecation window because every
+# crate here is `publish = false` at 0.0.0 — there is no downstream consumer to
+# break, and after 1.0 there would have been.
 pan-unicode = ["lumen-widgets/pan-unicode", "lumen-shell/pan-unicode"]
 # The live-window agent endpoint (JSON-RPC on LUMEN_AGENT_ADDR) — default-off,
 # forwarded to the desktop shell. Scaffolded apps use it via `just run-agent`.

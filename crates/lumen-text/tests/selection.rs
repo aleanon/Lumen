@@ -64,6 +64,12 @@ fn selection_highlight_golden() {
     check_golden("selection_hello", &img);
 }
 
+/// Requires the pan-Unicode face: the lean build embeds a Latin+symbols subset,
+/// so these glyphs would render as tofu and the golden would be a picture of
+/// missing coverage rather than of shaping. LN2 made that face opt-in; the
+/// `fonts` CI leg runs this file with `--features pan-unicode`, so the coverage
+/// is retained — it just no longer rides in every consumer's binary.
+#[cfg(feature = "pan-unicode")]
 #[test]
 fn cjk_selection_golden() {
     // selection across CJK glyphs (byte offsets are multi-byte)

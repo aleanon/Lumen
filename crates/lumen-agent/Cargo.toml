@@ -28,7 +28,7 @@ serde_json = { workspace = true }
 tungstenite = { workspace = true, optional = true }
 
 [features]
-default = ["ws", "pan-unicode"]
+default = ["ws"]
 # Forwarded tier (GX3), so a lean platform shell can actually reach lean.
 # NOTE `snapshot` is NOT forwardable: the agent bridge IS the JSON surface
 # (`semantics_json`, `get_styles`), so lumen-widgets/snapshot is a hard

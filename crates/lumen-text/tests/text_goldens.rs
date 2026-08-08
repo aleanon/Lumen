@@ -57,6 +57,12 @@ fn golden_latin() {
     check_golden("latin", &b.render(0, 0, white()));
 }
 
+/// Requires the pan-Unicode face: the lean build embeds a Latin+symbols subset,
+/// so these glyphs would render as tofu and the golden would be a picture of
+/// missing coverage rather than of shaping. LN2 made that face opt-in; the
+/// `fonts` CI leg runs this file with `--features pan-unicode`, so the coverage
+/// is retained — it just no longer rides in every consumer's binary.
+#[cfg(feature = "pan-unicode")]
 #[test]
 fn golden_cjk() {
     let mut e = TextEngine::new();
@@ -65,6 +71,12 @@ fn golden_cjk() {
     check_golden("cjk", &b.render(0, 0, white()));
 }
 
+/// Requires the pan-Unicode face: the lean build embeds a Latin+symbols subset,
+/// so these glyphs would render as tofu and the golden would be a picture of
+/// missing coverage rather than of shaping. LN2 made that face opt-in; the
+/// `fonts` CI leg runs this file with `--features pan-unicode`, so the coverage
+/// is retained — it just no longer rides in every consumer's binary.
+#[cfg(feature = "pan-unicode")]
 #[test]
 fn golden_bidi() {
     let mut e = TextEngine::new();

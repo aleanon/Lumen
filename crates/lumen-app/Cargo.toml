@@ -18,7 +18,7 @@ repository.workspace = true
 publish = false
 
 [features]
-default = ["wgpu", "snapshot", "pan-unicode"]
+default = ["wgpu", "snapshot"]
 wgpu = ["lumen-render/wgpu"]
 snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot"]
 pan-unicode = ["lumen-text/pan-unicode"]
