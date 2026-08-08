@@ -13,6 +13,29 @@ use taffy::{AvailableSpace, NodeId, Size as TSize, TaffyTree};
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct LayoutNode(NodeId);
 
+impl LayoutNode {
+    /// Mint a handle from a raw index.
+    ///
+    /// MOD2: a third-party [`LayoutEngine`](crate::LayoutEngine) has to be able
+    /// to hand back node handles, and could not — the inner type was private
+    /// and unconstructible, so the trait was an interface only Lumen could
+    /// implement. Found by writing an outside-the-crate engine and discovering
+    /// it did not compile.
+    ///
+    /// `u64` deliberately, not taffy's `NodeId`: ADR-004 keeps taffy types out
+    /// of the public API, and an integer handle carries no engine semantics.
+    /// The value means whatever the engine that minted it decides — Lumen never
+    /// interprets it, only passes it back.
+    pub fn from_raw(raw: u64) -> LayoutNode {
+        LayoutNode(NodeId::from(raw))
+    }
+
+    /// The raw index behind this handle, for an engine to index its own store.
+    pub fn raw(self) -> u64 {
+        self.0.into()
+    }
+}
+
 /// A layout tree. Build it with [`LayoutTree::leaf`]/[`LayoutTree::container`],
 /// then [`LayoutTree::compute`]; read results via [`LayoutTree::bounds`].
 pub struct LayoutTree {
