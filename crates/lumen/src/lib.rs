@@ -40,6 +40,14 @@ pub use lumen_widgets::renderer_override;
 /// change. Everything now lives in `widgets`.
 pub use lumen_widgets::{a11y, forms, i18n, nav, system, undo, widgets};
 
+/// Cached decoded assets, and the hook to release them.
+///
+/// Exposed for MOB1/MOB2: a platform shell (or an app) must be able to drop
+/// derived caches when the OS signals memory pressure. It was previously
+/// unreachable through the facade, so an app had no way to respond to a
+/// low-memory warning even if it wanted to.
+pub use lumen_widgets::asset;
+
 /// The ShaderWidget (GPU; `wgpu` feature, not available on wasm).
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
 pub use lumen_widgets::shader;

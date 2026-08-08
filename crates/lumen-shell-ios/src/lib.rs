@@ -125,6 +125,22 @@ pub fn session_touch(phase: u32, x: f64, y: f64) {
     });
 }
 
+/// MOB2: the host must call this from
+/// `applicationDidReceiveMemoryWarning:` (or `UIViewController`'s
+/// `didReceiveMemoryWarning`).
+///
+/// iOS had no memory-pressure path at all — not even a stub — so an app got
+/// the warning, Lumen never heard it, and the process was jetsammed holding
+/// caches it could have released. Android's equivalent (`MainEvent::LowMemory`)
+/// was received and dropped; this one was simply absent.
+///
+/// Releases derived caches only: decoded images are recomputable from the
+/// source bytes, so the cost is a re-decode on the next frame that draws one.
+/// Signals, focus and scroll are untouched — the UI is unchanged afterwards.
+pub fn session_memory_warning() {
+    lumen::asset::clear_cache();
+}
+
 /// Committed text (UITextInput bridge) into the focused editor.
 pub fn session_text(text: &str) {
     SESSION.with(|s| {

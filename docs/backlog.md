@@ -32,6 +32,26 @@ change that needs review / an ADR). Each blocked/deferred item lists *why* and a
 - Prior: live-window agent endpoint; design-analysis APCA contrast; resize fix;
   paint caches (text/shadow) + shadow-ring blit + hover.
 
+## 📱 Mobile memory pressure (MOB1/MOB2, 2026-08-08)
+
+Both platforms now respond to OS memory pressure, which neither did before:
+
+- **Android** — `MainEvent::LowMemory` was *received and dropped* (swallowed by
+  the catch-all arm), so Lumen was the app that ignored the warning and then got
+  killed. It now releases the decoded-image cache.
+- **iOS** — there was no memory-pressure path at all, not even a stub. Added
+  `session_memory_warning()`; the host must call it from
+  `applicationDidReceiveMemoryWarning:`.
+
+Both release derived caches only — decoded images are recomputable from source
+bytes, so the cost is a re-decode and the UI is unchanged. `lumen::asset` is now
+re-exported through the facade, which it wasn't: an app previously had no way to
+respond to a low-memory warning even if it wanted to.
+
+*Still open:* no APK or IPA has ever been built in this repo (MOB3), so the
+mobile size and behaviour numbers remain unmeasured. See
+`docs/cp4-arm-measurement-blocked.md` for the related hardware gap.
+
 ## ⏸ Sandbox-blocked (need hardware / OS / external infra to *verify*)
 
 - **A4 — Desktop OS integration** (native menus, clipboard, file/color dialogs,

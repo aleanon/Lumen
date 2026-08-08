@@ -75,6 +75,18 @@ pub fn run_styled(
                 // the signals survive; only presentation stops.
                 content = Viewport::default();
             }
+            PollEvent::Main(MainEvent::LowMemory) => {
+                // MOB1: the OS is telling us it is about to start killing
+                // processes. This event was received and dropped — the `_ =>
+                // {}` arm below swallowed it — so Lumen was the app that
+                // ignored the warning and then got killed.
+                //
+                // Decoded images are pure derived data: releasing them costs a
+                // re-decode on the next frame that draws one, and nothing else.
+                // That makes this the cheapest meaningful thing to hand back.
+                lumen::asset::clear_cache();
+                log::info!("LowMemory: released the decoded-image cache");
+            }
             PollEvent::Main(MainEvent::Destroy) => quit = true,
             _ => {}
         });
