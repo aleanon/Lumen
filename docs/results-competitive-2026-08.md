@@ -22,36 +22,52 @@ Both viewports 400×800. Both compiled with `lto = "thin"`, `codegen-units = 1`
 — matched to the root workspace's release profile, because without that the
 harness would benchmark a differently-compiled Lumen than users get.
 
-## Re-measured 2026-08-09, after the `link_last_child` quadratic was fixed
+## Re-measured 2026-08-09 — two corrections, and the gap is 3.3×
 
-| rows | Lumen | egui | ratio | was |
-|-----:|------:|-----:|------:|----:|
-| 100 | 382.2 µs | 37.4 µs | 10.22× | 10.3× |
-| 500 | 718.3 µs | 139.9 µs | **5.13×** | 5.8× |
-| 1000 | 1115.3 µs | 268.5 µs | **4.15×** | 6.5× |
-| 1400 | 1451.8 µs | 372.3 µs | **3.90×** | 6.5× |
-| 2000 | 2489.5 µs | 541.2 µs | **4.60×** | 5.9× |
-| 3000 | 3160.5 µs | 809.3 µs | **3.91×** | 8.8× |
+Two things changed since the 2026-08-08 numbers below. Both were defects in what
+was being compared, not improvements in what egui does.
 
-`Tree::link_last_child` walked the sibling chain on every insert, making a
-k-child container O(k²). It was 23% of cycles in a profile and invisible to
-eight rounds of hand-bisection. Fixing it took 3000 rows from 7052 µs to
-3161 µs.
+**1. `Tree::link_last_child` was quadratic.** Appending a child walked the whole
+sibling chain, so building a k-child container cost O(k²). It was 23% of cycles
+in a profile and invisible to eight rounds of hand-bisection. A tail pointer
+fixed it; 3000 rows went 7052 µs → 3161 µs.
 
-**Two regimes are now visible.** Below ~750 rows a roughly constant ~380 µs
-dominates; above it, ~900 ns/node. The floor is the next target and the 100-row
-ratio (unchanged at 10×) is entirely it.
+**2. The harness was not comparing the same stopping point.** Its own header
+claimed both sides stop at "ready to hand to a renderer", but `pump()` →
+`paint()` → `render_frame` **rasterized into an `RgbaImage`** while egui's
+`tessellate()` stops at meshes. Lumen was charged for a CPU rasterizer egui
+never ran. The Lumen app now builds with a `NullRenderer`, so it stops at the
+display list — the artifact that is egui's meshes' actual counterpart.
 
-**Fairness caveat, newly identified.** This harness's header claims both sides
-stop at "ready to hand to a renderer". That is not accurate for Lumen:
-`pump()` → `paint()` → `render_frame`/`render_damage` (`app.rs:4672`)
-**rasterizes to an `RgbaImage`**, while egui's side stops at `tessellate()` and
-produces meshes. Damage-limiting shrinks it, but part of the fixed floor is
-rasterization egui is not doing. The ratios above are therefore an upper bound
-on the true gap, and the harness should either stop Lumen at the display list or
-run egui's tessellated meshes through a rasterizer.
+| rows | Lumen | egui | ratio | ratio as first published |
+|-----:|------:|-----:|------:|------:|
+| 100 | 123.8 µs | 38.1 µs | **3.25×** | 10.3× |
+| 250 | 258.3 µs | 77.9 µs | **3.32×** | 7.0× |
+| 500 | 472.1 µs | 143.3 µs | **3.29×** | 5.8× |
+| 750 | 668.6 µs | 208.3 µs | **3.21×** | 5.5× |
+| 1000 | 900.2 µs | 273.7 µs | **3.29×** | 6.5× |
+| 1400 | 1215.4 µs | 381.9 µs | **3.18×** | 6.5× |
+| 2000 | 1969.7 µs | 551.7 µs | **3.57×** | 5.9× |
+| 3000 | 3058.7 µs | 830.5 µs | **3.68×** | 8.8× |
 
-## Result (original measurement, 2026-08-08)
+**The ratio is now flat at ~3.2–3.7× across a 30× range of sizes.** That is the
+more informative result: a constant ratio means the two frameworks now scale
+the same way, and what separates them is a constant factor, not an algorithmic
+difference. Per row, Lumen is ~1.0 µs against egui's ~0.28 µs.
+
+The 100-row point is the clearest evidence for correction 2: it was 10.3×, the
+worst ratio in the table, and it is now 3.25×, the best. That entire anomaly was
+rasterization of a 400×800 frame, which is nearly fixed-cost and therefore
+dominated the smallest case.
+
+What still separates the two is documented in the caveats below and is mostly
+capability: Lumen rebuilds a **semantics tree** every frame (egui has no
+equivalent), shapes text with parley/swash (full Unicode + bidi against egui's
+simpler layout), and maintains a **retained tree + taffy** where egui appends to
+a mesh. Those are choices, not defects, and they are what the remaining ~3×
+buys.
+
+## Result (original measurement, 2026-08-08)## Result (original measurement, 2026-08-08)
 
 Measured at eight sizes after the cache fix below (criterion, 2 s warm-up /
 4 s measurement; egui at 1 s / 2 s).

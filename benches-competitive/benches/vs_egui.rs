@@ -12,12 +12,29 @@
 //!
 //! * **Lumen** — `Headless::pump()` after a signal write: re-run the view
 //!   closure, reconcile, lay out (taffy), paint to a display list, and rebuild
-//!   the semantics tree.
+//!   the semantics tree. The app is built with [`NullRenderer`], so the frame
+//!   stops at the display list.
 //! * **egui** — `Context::run()` + `tessellate()`: re-run the UI closure, lay
 //!   out, and tessellate shapes into meshes.
 //!
 //! Both therefore cover build → layout → "ready to hand to a renderer", and
-//! neither includes GPU submission.
+//! neither includes GPU submission or rasterization.
+//!
+//! # The stopping point, and why it needed fixing (2026-08-09)
+//!
+//! This header made the claim above while the Lumen side did **not** honour it.
+//! `pump()` → `paint()` → `render_frame`/`render_damage` (`app.rs:4672`)
+//! rasterizes into an `RgbaImage`; egui's `tessellate()` stops at meshes. So
+//! Lumen was being charged for a CPU rasterizer that egui never ran, and every
+//! ratio this harness produced was an upper bound on the real gap — most
+//! visibly at 100 rows, where the cost is nearly all fixed overhead.
+//!
+//! `NullRenderer` is the fix: it satisfies the `Renderer` trait and returns an
+//! empty image without touching a pixel. Lumen still builds the display list —
+//! the artifact that *is* "ready to hand to a renderer", and egui's meshes'
+//! counterpart — it simply no longer draws it. Nothing else about the app
+//! changes, because the renderer is a seam (`App::with_renderer`) rather than a
+//! mode.
 //!
 //! # What makes this comparison unfair, in both directions
 //!
@@ -56,6 +73,31 @@ use lumen_widgets::{widgets, App};
 /// diagnostic instead of merely comparative.
 const SIZES: [usize; 8] = [100, 250, 500, 750, 1000, 1400, 2000, 3000];
 
+/// A `Renderer` that draws nothing, so `pump()` stops at the display list.
+///
+/// Returning a 0-sized image is deliberate. The runtime's damage path needs the
+/// retained frame to match the target size, so a mismatched frame makes every
+/// pump take the full-repaint branch — which is exactly what we want measured
+/// here: no damage bookkeeping either, since egui has none to match it.
+struct NullRenderer;
+
+impl lumen_render::Renderer for NullRenderer {
+    fn render_frame(
+        &mut self,
+        _list: &lumen_render::DisplayList,
+        _width: u32,
+        _height: u32,
+        _scale: f64,
+        _background: lumen_core::Color,
+    ) -> lumen_render::RgbaImage {
+        lumen_render::RgbaImage::from_raw(0, 0, Vec::new())
+    }
+
+    fn name(&self) -> &'static str {
+        "null"
+    }
+}
+
 /// Lumen: N rows, one of which reads a signal, so a write dirties the view.
 fn lumen_frame(c: &mut Criterion) {
     let mut g = c.benchmark_group("build_frame/lumen");
@@ -73,6 +115,7 @@ fn lumen_frame(c: &mut Criterion) {
                 .collect();
             widgets::column(rows)
         })
+        .with_renderer(NullRenderer)
         .run_headless(Size::new(400.0, 800.0));
         h.pump();
         let sig: Signal<i64> = h.runtime().signal("n", || 0);

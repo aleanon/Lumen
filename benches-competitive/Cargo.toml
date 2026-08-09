@@ -15,6 +15,9 @@ publish = false
 [dependencies]
 lumen-widgets = { path = "../crates/lumen-widgets" }
 lumen-core = { path = "../crates/lumen-core" }
+# For `NullRenderer`: the harness supplies its own `Renderer` so the Lumen side
+# stops at the display list, matching where egui's `tessellate()` stops.
+lumen-render = { path = "../crates/lumen-render", default-features = false }
 kurbo = "0.11"
 
 # `egui` core only — deliberately NOT `eframe`, which would drag in winit/wgpu
