@@ -65,3 +65,44 @@ A per-field derive is still worth having for *ergonomics* — it removes the
 laborious to opt into, and the fast path being laborious is itself part of why
 nothing uses it. But it should be understood as an API convenience that makes an
 existing 3.6× reachable, not as a performance change.
+
+## Addendum: would a derive remove the dependency graph?
+
+Asked directly, so answered with the same discipline.
+
+**There is no per-frame dependency graph left to remove.** OB3 deleted the eager
+reverse index (`rebuild_dep_index`), which used to clone a `String` per
+dependency per node every rebuild; `what_depends_on` is now computed on demand
+for the agent RPC that is its only reader. What remains in the hot path is a
+read *set*: `collect_reads` pushes one `Vec` frame, each `Signal::get` pushes its
+id, and the frame ends with one snapshot.
+
+**Cost: ~1%.** The perf gate measures re-addressing 1000 per-row signals —
+including recording their reads — at **18.2 µs with zero allocations**, against
+a 1493–2322 µs frame. A derive that eliminated dependency tracking *entirely*
+would buy about one percent.
+
+Three things a compile-time derive cannot do, which matter more than the 1%:
+
+* **It cannot supply the instance mapping.** Static analysis can prove "this
+  widget depends on `Item::name`"; it cannot say *which of 1000 rows*. A runtime
+  map from (field, index) → node is still required — which is exactly what
+  ADR-021's typed keys are, at the 18.2 µs above.
+* **It over-approximates dynamic reads.** Runtime tracking records that
+  `if flag { a.get() } else { b.get() }` depended on `a` *or* `b`, not both. A
+  static derive must assume both, so more writes are treated as invalidating,
+  and more frames take the 2322 µs path instead of the 654 µs one. That is the
+  opposite of the direction the 3.6× points.
+* **It does not remove the work the dependency implies.** Knowing precisely that
+  a text binding changed still leaves a re-measure and a relayout to perform,
+  and there is no incremental layout to perform them with. Discovery was never
+  the blocker.
+
+**Where static knowledge would genuinely pay:** classifying a binding's *target
+property* at compile time. Patch eligibility is currently decided by which
+builder the author called (`bind_background` = paint-only, therefore patchable).
+A derive that knew a binding writes only a paint-only property could make that
+routing total and checkable, rather than one hand-wired case — turning the
+patch path from a special case into the default for every prop that qualifies.
+That is an argument for the derive, but it is an argument about *dispatch*, not
+about dependency tracking.
