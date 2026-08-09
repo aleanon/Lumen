@@ -288,7 +288,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             node_caret: HashMap::default(),
             node_text_metrics: HashMap::default(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
-            sem_root: None,
+            sem_root: RefCell::new(None),
             build_panic: None,
             focused_id: focused,
             hovered_id: None,
@@ -660,7 +660,14 @@ pub struct Headless<
     /// surfaced on `SemanticsNode.text_metrics` and via `ui.getLayout`).
     node_text_metrics: HashMap<NodeIndex, lumen_text::TextMetrics>,
     frame: RgbaImage,
-    sem_root: Option<SemanticsNode>,
+    /// OB2: the semantics tree, built **on demand**.
+    ///
+    /// It used to be rebuilt eagerly in every `rebuild_inner`, which measured at
+    /// **8.9% of a 1000-row frame** — paid whether or not anything ever read it.
+    /// An app with no screen reader attached and no agent connected never does.
+    /// A rebuild now invalidates this; the first reader builds it and the rest
+    /// share the `Rc`.
+    sem_root: RefCell<Option<Rc<SemanticsNode>>>,
     /// If the last build panicked, the contained diagnostic (the previous good
     /// frame is kept). Cleared on the next successful build (C2 / T7.3).
     build_panic: Option<lumen_core::Diagnostic>,
@@ -1852,7 +1859,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
             n.children.iter().find_map(|c| walk(c, want))
         }
-        let idx = walk(self.sem_root.as_ref()?, handle)?;
+        let idx = walk(&self.sem_root(), handle)?;
         self.tree
             .document_order()
             .into_iter()
@@ -1864,18 +1871,24 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// Prefer this over `semantics_doc().root.elided()`, which deep-clones the
     /// tree twice on every call. Returns an `Rc` rather than a borrow so the
     /// interior-mutable cache doesn't leak a `RefCell` guard into callers.
+    /// The semantics tree, building it if this frame has not needed one yet
+    /// (OB2). Returns an `Rc` rather than a borrow so the interior-mutable cache
+    /// does not leak a `RefCell` guard into callers — same reasoning as
+    /// [`semantics_elided`](Self::semantics_elided).
+    fn sem_root(&self) -> Rc<SemanticsNode> {
+        if let Some(r) = self.sem_root.borrow().as_ref() {
+            return Rc::clone(r);
+        }
+        let built = Rc::new(self.build_semantics(self.tree.root()));
+        *self.sem_root.borrow_mut() = Some(Rc::clone(&built));
+        built
+    }
+
     pub fn semantics_elided(&self) -> Rc<lumen_core::semantics::SemanticsNode> {
         if let Some(cached) = self.elided_cache.borrow().as_ref() {
             return Rc::clone(cached);
         }
-        let built = Rc::new(match self.sem_root.as_ref() {
-            Some(r) => r.elided(),
-            None => lumen_core::semantics::SemanticsNode::new(
-                lumen_core::identity::NodeHandle::root(Role::Window.as_str()),
-                0,
-                Role::Window,
-            ),
-        });
+        let built = Rc::new(self.sem_root().elided());
         *self.elided_cache.borrow_mut() = Some(Rc::clone(&built));
         built
     }
@@ -1921,15 +1934,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
                 s.children.iter().find_map(|c| find(c, idx))
             }
-            self.sem_root.as_ref().and_then(|r| find(r, n.index()))
+            find(&self.sem_root(), n.index())
         });
-        let root = self.sem_root.clone().unwrap_or_else(|| {
-            SemanticsNode::new(
-                lumen_core::identity::NodeHandle::root(Role::Window.as_str()),
-                0,
-                Role::Window,
-            )
-        });
+        let root = (*self.sem_root()).clone();
         SemanticsDoc {
             window: WindowInfo {
                 width: self.size.width,
@@ -2429,10 +2436,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// over the gallery and examples.
     pub fn assert_view_coherent(&mut self) {
         let dl_before = self.last_dl.as_ref().map(|d| d.cmds.clone());
-        let sem_before = self.sem_root.as_ref().map(|s| format!("{s:?}"));
+        let sem_before = format!("{:?}", self.sem_root());
         self.rebuild_fresh();
         let dl_after = self.last_dl.as_ref().map(|d| d.cmds.clone());
-        let sem_after = self.sem_root.as_ref().map(|s| format!("{s:?}"));
+        let sem_after = format!("{:?}", self.sem_root());
         assert!(
             dl_before == dl_after,
             "view incoherent: display list differs from a fresh rebuild"
@@ -2513,7 +2520,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
         }
 
-        self.sem_root = Some(self.build_semantics(self.tree.root()));
+        *self.sem_root.borrow_mut() = None;
 
         self.invalidate_semantics_cache();
         self.last_damage = self.paint();
@@ -2945,7 +2952,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             self.key_anims.retain(|id, _| live.contains(id));
         }
         self.last_damage = self.paint();
-        self.sem_root = Some(self.build_semantics(self.tree.root()));
+        *self.sem_root.borrow_mut() = None;
         self.invalidate_semantics_cache();
     }
 
@@ -4733,7 +4740,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
             n.children.iter().find_map(|c| walk(c, index))
         }
-        walk(self.sem_root.as_ref()?, index)
+        walk(&self.sem_root(), index)
     }
 
     // --- semantics ----------------------------------------------------------
