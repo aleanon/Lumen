@@ -314,3 +314,47 @@ that the semantics output actually changed (496 → 278 bytes), measured anythin
 3. **Retain and update incrementally.** Most complex, and it only pays when a
    client is attached — exactly the case where (2) already helps. Worth measuring
    only after (1) and (2).
+
+## Addendum 7: OB2 landed; option 2 (stop cloning) measured and **declined**
+
+**OB2 (lazy semantics) is in.** `sem_root` is now built on demand, and a rebuild
+only invalidates it: 1000 rows **855.1 → 785.2 µs**, against an ablated upper
+bound of 779.4 — laziness captures ~92% of what deleting the build would. The
+egui ratio at 1000 rows moves **3.29× → 2.87×**.
+
+**Option 2 was to stop cloning `id`/`label`/`value`/`classes`/`actions` out of
+`NodeMeta` per node (`Rc<str>`/`Rc<[T]>`). Measured first, and it is not worth
+doing.** Decomposing the cost when something actually consumes the tree, at
+1000 rows:
+
+| | µs |
+|---|---:|
+| pump only | 1087.2 |
+| + `semantics_elided()` (forces build + elide) | 1148.7 |
+| + `semantics_json()` | 2255.1 |
+| **→ build + elide** | **61.6** |
+| **→ JSON serialization** | **1106.3** |
+
+The clones option 2 targets live inside that **61.6 µs**, and eliminating them
+entirely could not save more than ~half of it. Against that: 115+ read/write
+sites across the workspace, on a **public, serde-serialized type**
+(`SemanticsNode`), plus enabling serde's `rc` feature. That is a large,
+irreversible-feeling change to a public surface for ≤30 µs in a path that —
+since OB2 — most apps no longer take at all.
+
+**What the same measurement found instead is 18× bigger.** Serializing the
+semantics tree costs **1106 µs at 1000 nodes**, and it is *uncached*:
+`semantics_json()` is `semantics_doc().to_json(false)`, so every `ui.getTree`
+deep-clones the tree and re-serializes it from scratch. An agent polling the
+tree pays a millisecond per call — on the observability pillar, which is a
+stated A+ bar.
+
+So the ranked successor is not the clone refactor:
+
+1. **Cache the serialized doc**, invalidated where `sem_root` is — the same
+   shape OB4 used for the elided projection, against a cost 18× larger.
+2. **Then** re-measure whether the per-node clones still register at all.
+
+Recorded rather than done, because "115 sites for ≤30 µs" is the exact trade
+this campaign has repeatedly measured at noise, and because the alternative was
+sitting in the same table.
