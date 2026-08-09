@@ -145,3 +145,39 @@ measures.
 attributed, it lands in one of two paths: patch at 654 µs or rebuild at 2322 µs.
 Only paint-only props can take the first. Finer granularity buys more precise
 invalidation *of a path that is still expensive*.
+
+## Addendum 3: the `#[derive(Reactive)]` route specifically
+
+**What it would generate already exists.** SD6b shipped `SignalKey<T>`:
+
+```rust
+const COUNT: SignalKey<i64> = SignalKey::new("count");
+let c = rt.signal_keyed(COUNT, || 0);
+```
+
+`const`-callable, type-bound at declaration. A derive over a state struct would
+emit one of these per field and a `signal_keyed` accessor for each. That is a
+code generator over an existing API — real ergonomic value, no new capability,
+and no effect on any number in this document.
+
+**Per-field granularity is coarser exactly where Lumen is slowest.** A field is
+one reactive unit, so `items: Vec<Item>` invalidates wholesale when any element
+changes — the long-list case, which is the shape every measurement here is
+about. Recursing the derive into `Item` does not fix it: per-element identity
+needs an id *per element*, and an id-carrying wrapper is `Signal<T>`. So the
+hard case falls back to the model that already exists, and the derive's reach is
+scalar named state — where dependency tracking is ~1% and addressing is 18.2 µs
+per 1000. It makes the cheap case pleasant.
+
+**The one place the derive earns real performance is dispatch, not state.**
+Patch eligibility is decided today by which builder was called: `bind_background`
+is paint-only, therefore patchable — one hand-wired property against a measured
+**3.6×** (654 µs vs 2322 µs). A derive that classified each field by *what it
+can affect* — paint-only versus size-affecting — could make that routing total
+and compiler-checked instead of case-by-case, so every qualifying write takes
+the cheap path automatically.
+
+That is worth doing. It is also capped: only paint-only props can qualify until
+`set_style` + `mark_dirty` are wired to a persistent `TaffyTree`. The derive
+would let the framework *know* a write is patchable; incremental layout is what
+lets it *act* on that for anything that changes a box.
