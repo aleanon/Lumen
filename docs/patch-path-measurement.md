@@ -271,3 +271,46 @@ toward the expensive path, never toward the stale one.
 
 Steps 1 and 2 are bounded and reversible. Step 3 is the one with real design risk
 and it is also the ceiling on everything above it.
+
+## Addendum 6: the semantics tree is ~9% of a frame, not 3%
+
+Measured 2026-08-09 by ablating the build in `rebuild_inner`, against the
+corrected harness:
+
+| rows | with semantics | ablated | share |
+|---:|---:|---:|---:|
+| 1000 | 855.1 µs | 779.4 µs | **8.9%** |
+| 3000 | ~3.05–3.55 ms | 2.82 ms | ~8–20% (noisy) |
+
+The 1000-row figure is the reliable one; the 3000-row control varied 3.05–3.55 ms
+across runs, so its share is quoted as a range rather than a point.
+
+**This corrects a recorded 3%.** That earlier figure was measured when the frame
+still contained the `link_last_child` quadratic — the denominator was inflated,
+so every other cost looked smaller than it was. Removing a dominant cost promotes
+everything behind it, and conclusions drawn from shares (rather than absolutes)
+have to be re-run afterwards. The campaign record's *"OB2 is not the performance
+lever at scale"* was true of the frame as it stood and is not true of this one.
+
+The measurement also came within one command of being wrong in the other
+direction: the first attempt used `LUMEN_NO_SEM=` for the control, which **sets**
+the variable to empty, so `var_os(...).is_none()` was false in both arms and both
+runs were ablated. It reported a 0.15% difference — a confident null result from
+a probe that never varied. The second attempt ablated the wrong one of two
+assignment sites and reported the same null. Only the third, verified by checking
+that the semantics output actually changed (496 → 278 bytes), measured anything.
+
+### Options, cheapest first
+
+1. **Build lazily (OB2).** Nothing in this benchmark reads the tree, and neither
+   does an app with no screen reader attached and no agent connected. That is the
+   whole 8.9% for free in the common case. It is also the only option that helps
+   the case where the tree is genuinely unobserved.
+2. **Stop cloning per node.** `build_semantics_at` clones `id`, `label`, `value`,
+   `classes` and `actions` out of `NodeMeta` for every node, every frame —
+   `String` and `Vec` clones for data that already exists one struct away.
+   `Rc<str>`/`Rc<[T]>` in both places would make it a refcount bump. Orthogonal
+   to (1) and helps when the tree *is* observed.
+3. **Retain and update incrementally.** Most complex, and it only pays when a
+   client is attached — exactly the case where (2) already helps. Worth measuring
+   only after (1) and (2).
