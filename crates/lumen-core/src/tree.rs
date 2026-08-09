@@ -65,6 +65,11 @@ pub struct Tree {
     // intrusive tree links (02 §5)
     parent: Vec<NodeIndex>,
     first_child: Vec<NodeIndex>,
+    /// Tail of each node's child list. Without it, appending a child walks the
+    /// whole sibling chain, making the build of a k-child container O(k²) — a
+    /// 1000-row column cost ~500 000 pointer hops per frame and was the single
+    /// largest symbol in a profile of `pump()` at 23%.
+    last_child: Vec<NodeIndex>,
     next_sibling: Vec<NodeIndex>,
 
     root: NodeIndex,
@@ -92,6 +97,7 @@ impl Tree {
             z: Vec::new(),
             parent: Vec::new(),
             first_child: Vec::new(),
+            last_child: Vec::new(),
             next_sibling: Vec::new(),
             root: NodeIndex::NONE,
         }
@@ -339,6 +345,7 @@ impl Tree {
             self.z[iu] = 0;
             self.parent[iu] = parent;
             self.first_child[iu] = NodeIndex::NONE;
+            self.last_child[iu] = NodeIndex::NONE;
             self.next_sibling[iu] = NodeIndex::NONE;
             NodeIndex::new(i, self.generation[iu])
         } else {
@@ -353,6 +360,7 @@ impl Tree {
             self.z.push(0);
             self.parent.push(parent);
             self.first_child.push(NodeIndex::NONE);
+            self.last_child.push(NodeIndex::NONE);
             self.next_sibling.push(NodeIndex::NONE);
             NodeIndex::new(i, 0)
         }
@@ -375,20 +383,11 @@ impl Tree {
         let pi = parent.index() as usize;
         self.parent[child.index() as usize] = parent;
         self.next_sibling[child.index() as usize] = NodeIndex::NONE;
-        let head = self.first_child[pi];
-        if head.is_none() {
-            self.first_child[pi] = child;
-            return;
+        match self.last_child[pi] {
+            tail if tail.is_some() => self.next_sibling[tail.index() as usize] = child,
+            _ => self.first_child[pi] = child,
         }
-        let mut cur = head;
-        loop {
-            let next = self.next_sibling[cur.index() as usize];
-            if next.is_none() {
-                self.next_sibling[cur.index() as usize] = child;
-                return;
-            }
-            cur = next;
-        }
+        self.last_child[pi] = child;
     }
 
     /// Detach `node` from its parent's child list (node itself stays alive).
@@ -399,15 +398,25 @@ impl Tree {
         }
         let pi = parent.index() as usize;
         let head = self.first_child[pi];
+        let after = self.next_sibling[node.index() as usize];
         if head == node {
-            self.first_child[pi] = self.next_sibling[node.index() as usize];
+            self.first_child[pi] = after;
+            // Removing the only child empties the list; otherwise the tail is
+            // unchanged unless `node` WAS the tail, handled below.
+            if after.is_none() {
+                self.last_child[pi] = NodeIndex::NONE;
+            }
         } else {
             let mut cur = head;
             while cur.is_some() {
                 let next = self.next_sibling[cur.index() as usize];
                 if next == node {
-                    self.next_sibling[cur.index() as usize] =
-                        self.next_sibling[node.index() as usize];
+                    self.next_sibling[cur.index() as usize] = after;
+                    // `cur` is `node`'s predecessor: if `node` was the tail,
+                    // `cur` becomes it. The walk already found it, so free.
+                    if after.is_none() {
+                        self.last_child[pi] = cur;
+                    }
                     break;
                 }
                 cur = next;
