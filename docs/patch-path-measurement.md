@@ -181,3 +181,45 @@ That is worth doing. It is also capped: only paint-only props can qualify until
 `set_style` + `mark_dirty` are wired to a persistent `TaffyTree`. The derive
 would let the framework *know* a write is patchable; incremental layout is what
 lets it *act* on that for anything that changes a box.
+
+## Addendum 4: could it all be compile-time, with no runtime tracking?
+
+No — and the barrier is structural, not a missing feature.
+
+**What is statically decidable:** which *fields* a view fragment reads. A derive
+plus a macro over the view can know "this row's text depends on `Item::name`".
+
+**What is not:** which *instance*. `for item in items { row(item.name) }` gives
+the compiler a shape, not a population. It cannot know there are 1000 rows, nor
+which node is `items[3]`, because that is runtime data. A write to
+`items[3].name` therefore needs a map from (field, index) → node, and that map is
+runtime tracking. A macro can *emit* the registration instead of the runtime
+*observing* the read, but the bookkeeping does not disappear — it changes author.
+Cost class is unchanged: **18.2 µs per 1000 rows, zero allocations.**
+
+Four further things a macro cannot see through, all present in this codebase:
+
+* **The view is an opaque closure** — `App::new(impl Fn(&mut BuildCx) -> Element)`.
+  It is arbitrary Rust that returns a tree; there is no static tree to analyse.
+* **`NodeContent::Custom(w)`** — third-party widgets behind a trait object, with
+  a user-supplied `measure(&self, available) -> Size`.
+* **`set_stylesheet(&str)`** — `.lss` is loaded and swapped at runtime, and
+  hover/focus/container-query state decides what applies.
+* **Conditional reads** — `if flag { a.get() } else { b.get() }` is statically
+  both and dynamically one.
+
+That last one is the expensive one. Static analysis must over-approximate, so
+more writes count as invalidating, and each mis-classified write moves a frame
+from **654 µs to 2322 µs**. Runtime tracking is precise by construction, and
+precision is worth 3.6× here.
+
+**So the premise is worth inverting.** Eliminating runtime tracking is a ~1%
+saving bought with a loss of precision that costs multiples of that. The
+split that respects what is actually decidable is a hybrid:
+
+| decided at | what | worth |
+|---|---|---|
+| **compile time** | which *property kind* a binding writes — paint-only vs size-affecting | total, checkable patch dispatch: the **3.6×** |
+| **runtime** | which *instance* a write lands on | already 18.2 µs/1000, 0 allocs |
+
+Static where the answer is a type; dynamic where the answer is data.
