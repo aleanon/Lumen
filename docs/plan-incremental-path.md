@@ -262,7 +262,7 @@ phase before the cheap measurements were taken.
 | retired | evidence |
 |---|---|
 | **N1 SoA refactor** (as scoped) | "allocation-bound" false — allocation is ~10 % of frame. CP2.1 keeps the useful sliver. |
-| **N3 retained node graph (XL)** | Marginal 1.6 pp of a 60 Hz frame at 500 nodes, 0.19 pp at 60. Also blocked on decoupling semantics ids from arena slots — `SemanticsNode::new(node.index())` (`app.rs:4279`) is serialized as the agent's public `node-<index>` handle and asserted in `conformance.rs:56`. |
+| **N3 retained node graph (XL)** | ~~Marginal 1.6 pp of a 60 Hz frame at 500 nodes, 0.19 pp at 60. Also blocked on decoupling semantics ids from arena slots.~~ **Both grounds void (CP5, 2026-08-09):** the 1.6 pp figure is on the campaign's quarantine list with no derivation, and Phase 1 removed the semantics-id blocker — `SemanticsNode` now takes a `NodeHandle` (`nx-<hex>`) and `conformance.rs` asserts a round-trip property, not a literal. Still not built: measured ceiling is ~1.6× on the memoized path and **zero** on the flat path. Re-scoped as CP5.1 (prototype + measure, ship nothing). `docs/cp5-gate-decision.md`. |
 | **N3.4 / A.4 incremental layout** | Formally superseded 2026-07-10 (`plan-retained-pipeline.md:123`) and re-opened by mistake. `relayout_subtree` also pins the subtree to its existing box and never propagates a size delta — wiring it in as-is is a layout-corruption bug. |
 | **N4 subtree texture caching** | Conditional on N3; `lumen-render` has no concept of a scope, `KeepAlive` destroys layer textures by design, and it makes the display list backend-dependent. |
 | **R4 multi-`TaffyTree` split** | 79 µs of a 776 µs frame. Stays parked (revisit only if CP4.2 says otherwise). |
