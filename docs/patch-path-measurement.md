@@ -223,3 +223,51 @@ split that respects what is actually decidable is a hybrid:
 | **runtime** | which *instance* a write lands on | already 18.2 µs/1000, 0 allocs |
 
 Static where the answer is a type; dynamic where the answer is data.
+
+## Addendum 5: the hybrid — compile-time fields, runtime values
+
+**Yes, and it needs no runtime bifurcation, because both halves already resolve
+into one store.** `signal_keyed(key, init)` is literally `self.signal(key, init)`:
+a `SignalKey<T>` is a compile-time *name*, not a separate storage path. So:
+
+| path | naming | storage | already exists |
+|---|---|---|---|
+| fields | `const F: SignalKey<T>`, derive-generated | runtime store | **yes** (SD6b) |
+| values | typed per-row keys (`Row::Hits(i)`) | runtime store | **yes** (ADR-021) |
+
+Both fold to the same `SignalId`, bump the same write-gen, and record deps the
+same way — so `ui.getDeps`, `AppSnapshot` and the pump's dirty check keep working
+unchanged. That is the property that makes the hybrid cheap: the two "paths" are
+two ways of *naming* state, not two ways of *storing* it.
+
+### The invariant that keeps it safe
+
+**The static path may narrow which node to patch. It must never be the sole
+source of truth for whether something changed.**
+
+A field can be read both statically (through a derived binding) and dynamically
+(inside a closure handed to a `NodeContent::Custom` widget, or behind a
+conditional). If the static classification is treated as exclusive, the dynamic
+read is invisible and the update is *missed* — stale UI, silently. A redundant
+invalidation costs 2322 µs instead of 654; a missed one costs correctness, and
+this codebase's recurring failure mode is exactly the silent no-op.
+
+So: the runtime read set stays authoritative for invalidation; the static
+classification is an optimisation that says "this write is patchable, and here is
+the node" — and when it does not apply, the frame **falls back to rebuild**. Fail
+toward the expensive path, never toward the stale one.
+
+### Build order
+
+1. **Extend the patch path to the remaining paint-only props** — opacity, border
+   colour, shadow, text colour. Same shape as `bind_background`, no macro
+   required, and it converts the measured **3.6×** from one property into a
+   family. This is the increment that pays before any derive exists.
+2. **Then the derive**, for two things: generating the per-field keys, and
+   classifying each field by what it can affect so patch routing becomes total
+   and compiler-checked rather than one hand-wired case.
+3. **Then `set_style` + `mark_dirty` against a persistent `TaffyTree`**, which is
+   the only thing that lets size-affecting props join the patch path at all.
+
+Steps 1 and 2 are bounded and reversible. Step 3 is the one with real design risk
+and it is also the ceiling on everything above it.
