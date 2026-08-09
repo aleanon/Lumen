@@ -334,7 +334,9 @@ fn handle<R: Renderer, E: Spawner>(
                 let node = resolve(app, selector)?;
                 return Ok(json!({ "root": node.to_json() }));
             }
-            Ok(app.semantics_doc().to_json(raw))
+            // Memoized per rebuild: serializing the tree is ~18x the cost of
+            // building it, and a vision loop re-queries this every frame.
+            Ok((*app.semantics_json_cached(raw)).clone())
         }
         "state.get" => {
             // C.4a: the state store as JSON — whole snapshot, or one signal.
