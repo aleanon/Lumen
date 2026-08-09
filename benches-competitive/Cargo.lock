@@ -1098,6 +1098,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "lumen-app"
+version = "0.0.0"
+dependencies = [
+ "accesskit",
+ "kurbo",
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-style",
+ "lumen-text",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lumen-competitive-benches"
 version = "0.0.0"
 dependencies = [
@@ -1156,6 +1171,7 @@ dependencies = [
  "kurbo",
  "lumen-core",
  "lumen-layout",
+ "lumen-text",
  "serde_json",
 ]
 
@@ -1178,6 +1194,7 @@ dependencies = [
  "accesskit",
  "image",
  "kurbo",
+ "lumen-app",
  "lumen-core",
  "lumen-layout",
  "lumen-macros",

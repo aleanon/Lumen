@@ -1,5 +1,15 @@
 # The build_node drift is not bytes, not strings, and not the paint sort
 
+> **RESOLVED 2026-08-09 — it was `Tree::link_last_child`, a quadratic.**
+> Appending a child walked the whole sibling chain, so a k-child container cost
+> O(k²). 23% of cycles in a profile; invisible to every hypothesis below. Fixed
+> with a `last_child` tail pointer: 6000 rows 22539 µs → 6469 µs, and per-node
+> cost went from climbing 1328→3757 ns to flat ~860–1080 ns. The falsifications
+> below all stand — they were just all wrong about where it was, which is why
+> this file ends by saying the term "behaves like an algorithmic term in the
+> number of siblings". It was exactly that.
+
+
 *2026-08-08. Four falsifications and no culprit — recorded because each one was
 directing planned work.*
 

@@ -22,7 +22,36 @@ Both viewports 400×800. Both compiled with `lto = "thin"`, `codegen-units = 1`
 — matched to the root workspace's release profile, because without that the
 harness would benchmark a differently-compiled Lumen than users get.
 
-## Result
+## Re-measured 2026-08-09, after the `link_last_child` quadratic was fixed
+
+| rows | Lumen | egui | ratio | was |
+|-----:|------:|-----:|------:|----:|
+| 100 | 382.2 µs | 37.4 µs | 10.22× | 10.3× |
+| 500 | 718.3 µs | 139.9 µs | **5.13×** | 5.8× |
+| 1000 | 1115.3 µs | 268.5 µs | **4.15×** | 6.5× |
+| 1400 | 1451.8 µs | 372.3 µs | **3.90×** | 6.5× |
+| 2000 | 2489.5 µs | 541.2 µs | **4.60×** | 5.9× |
+| 3000 | 3160.5 µs | 809.3 µs | **3.91×** | 8.8× |
+
+`Tree::link_last_child` walked the sibling chain on every insert, making a
+k-child container O(k²). It was 23% of cycles in a profile and invisible to
+eight rounds of hand-bisection. Fixing it took 3000 rows from 7052 µs to
+3161 µs.
+
+**Two regimes are now visible.** Below ~750 rows a roughly constant ~380 µs
+dominates; above it, ~900 ns/node. The floor is the next target and the 100-row
+ratio (unchanged at 10×) is entirely it.
+
+**Fairness caveat, newly identified.** This harness's header claims both sides
+stop at "ready to hand to a renderer". That is not accurate for Lumen:
+`pump()` → `paint()` → `render_frame`/`render_damage` (`app.rs:4672`)
+**rasterizes to an `RgbaImage`**, while egui's side stops at `tessellate()` and
+produces meshes. Damage-limiting shrinks it, but part of the fixed floor is
+rasterization egui is not doing. The ratios above are therefore an upper bound
+on the true gap, and the harness should either stop Lumen at the display list or
+run egui's tessellated meshes through a rasterizer.
+
+## Result (original measurement, 2026-08-08)
 
 Measured at eight sizes after the cache fix below (criterion, 2 s warm-up /
 4 s measurement; egui at 1 s / 2 s).
