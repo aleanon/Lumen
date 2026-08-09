@@ -106,3 +106,42 @@ routing total and checkable, rather than one hand-wired case — turning the
 patch path from a special case into the default for every prop that qualifies.
 That is an argument for the derive, but it is an argument about *dispatch*, not
 about dependency tracking.
+
+## Addendum 2: `Vec<Reactive<u32>>` — per-element reactivity without fields
+
+**This already works.** `Signal<T>` *is* that wrapper: it is
+`{ id: SignalId(u32) }`, `Copy`, four bytes. `Vec<Signal<u32>>` compiles today
+and gives per-element granularity with no field names involved. The question is
+therefore not whether it can be expressed, but whether the value should live
+**inline in the Vec** rather than in the runtime store.
+
+**What inline ownership buys: the addressing.** A store-backed handle must be
+re-addressed each frame — measured at **18.2 µs per 1000 per-row signals, zero
+allocations** (ADR-021's typed keys, down from 51.4 µs string-keyed). Owning the
+value inline removes that entirely. It is ~1% of the frame: the same order as
+every other reactivity-side saving measured here, and not a lever.
+
+**What it costs: the checkpoint.** `AppSnapshot` is
+`{ state: StateSnapshot, focused }` — it serializes the **store**. Values living
+in user-owned structs cannot be captured, so ADR-011's tier-2/3 hot-reload
+contract (`quiesce` → `serialize_state` → `restore_state` → `resume`) loses
+exactly the state preservation it exists to provide. This is the MOD6 trade in a
+new spelling, and MOD6 was declined on measurement: the store's enumerability is
+the observability pillar, not an implementation detail.
+
+Attribution, notably, would **survive** — `what_depends_on` scans `NodeDeps` in
+`meta`, not the store. But each inline `Reactive` would need a stable identity to
+name in the `via` field, which is the addressing problem returning through the
+back door.
+
+**The structural limit is the same one Solid has.** `Vec<Reactive<u32>>` makes
+each *element* reactive but not the *Vec*: push, remove and reorder still
+invalidate wholesale, so the shape becomes `Reactive<Vec<Reactive<u32>>>` and
+structural edits take the expensive path anyway. Lumen's existing answer to that
+is a per-row memo scope — which is exactly what `scoped_vs_flat = 0.787`
+measures.
+
+**And it does not reach the bottleneck.** However precisely a write is
+attributed, it lands in one of two paths: patch at 654 µs or rebuild at 2322 µs.
+Only paint-only props can take the first. Finer granularity buys more precise
+invalidation *of a path that is still expensive*.
