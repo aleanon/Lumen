@@ -1866,11 +1866,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             .find(|n| n.index() == idx)
     }
 
-    /// The elided semantics root, computed once per rebuild and shared (OB4).
-    ///
-    /// Prefer this over `semantics_doc().root.elided()`, which deep-clones the
-    /// tree twice on every call. Returns an `Rc` rather than a borrow so the
-    /// interior-mutable cache doesn't leak a `RefCell` guard into callers.
     /// The semantics tree, building it if this frame has not needed one yet
     /// (OB2). Returns an `Rc` rather than a borrow so the interior-mutable cache
     /// does not leak a `RefCell` guard into callers — same reasoning as
@@ -1884,6 +1879,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         built
     }
 
+    /// The elided semantics root, computed once per rebuild and shared (OB4).
+    ///
+    /// Prefer this over `semantics_doc().root.elided()`, which deep-clones the
+    /// tree twice on every call. Returns an `Rc` rather than a borrow so the
+    /// interior-mutable cache doesn't leak a `RefCell` guard into callers.
     pub fn semantics_elided(&self) -> Rc<lumen_core::semantics::SemanticsNode> {
         if let Some(cached) = self.elided_cache.borrow().as_ref() {
             return Rc::clone(cached);
