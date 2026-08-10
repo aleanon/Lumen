@@ -140,7 +140,12 @@ impl VirtualList {
         let el = {
             const OVERSCAN: usize = 2;
             let offset = cx.signal(name, || 0.0f64);
-            let y = offset.get(cx.runtime());
+            let max_y = (item_count as f64 * item_height - viewport_h).max(0.0);
+            // Clamp on READ, like `Scrollable` does. Without it a stale offset
+            // survives when the list shrinks, and — since the wheel router now
+            // consults `ScrollInfo` to decide whether to chain — a `y > max_y`
+            // would make this list look scrollable when it is stuck.
+            let y = offset.get(cx.runtime()).clamp(0.0, max_y);
 
             let first = ((y / item_height).floor() as usize).saturating_sub(OVERSCAN);
             let per_view = (viewport_h / item_height).ceil() as usize;
@@ -151,8 +156,14 @@ impl VirtualList {
                     let top = (i as f64 * item_height) - y;
                     let mut el = render(i);
                     el.style.position = Position::Absolute;
+                    // `left` AND `right` pinned with `width: auto` stretches the
+                    // item to the viewport, which is what an author expects of a
+                    // row. Setting `width: 100%` instead (the workaround
+                    // consumers were writing) would clobber an item that sets its
+                    // own width; pinning both insets composes with it.
                     el.style.inset = Edges {
                         left: Dim::px(0.0),
+                        right: Dim::px(0.0),
                         top: Dim::px(top as f32),
                         ..Edges::AUTO
                     };
@@ -160,10 +171,13 @@ impl VirtualList {
                     el
                 })
                 .collect();
-
-            let max_y = (item_count as f64 * item_height - viewport_h).max(0.0);
             Element {
                 role: Role::List,
+                // Overscan rows (up to two above and below) sit outside the
+                // viewport box. Without clipping they PAINT and stay
+                // HIT-TESTABLE there — the same defect `scroll_hit_clip.rs`
+                // exists for on `Scrollable`, which has always set this.
+                clip: true,
                 scroll: Some(ScrollInfo {
                     x: 0.0,
                     y,
@@ -264,7 +278,9 @@ impl DataGrid {
     ) -> DataGrid {
         let el = {
             let offset = cx.signal(name, || 0.0f64);
-            let y = offset.get(cx.runtime());
+            // Clamped on read, like `Scrollable` — see the note in `VirtualList`.
+            let max_y = (row_count as f64 * row_height - viewport_h).max(0.0);
+            let y = offset.get(cx.runtime()).clamp(0.0, max_y);
             let ncols = columns.len();
 
             let header = Element {
@@ -309,9 +325,11 @@ impl DataGrid {
                 })
                 .collect();
 
-            let max_y = (row_count as f64 * row_height - viewport_h).max(0.0);
             let body = Element {
                 role: Role::Group,
+                // Same as `VirtualList`: overscan rows outside the viewport must
+                // not paint or take hits.
+                clip: true,
                 scroll: Some(ScrollInfo {
                     x: 0.0,
                     y,

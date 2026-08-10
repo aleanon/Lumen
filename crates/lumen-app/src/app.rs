@@ -2164,12 +2164,24 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
             }
             Event::Wheel(we) => {
-                // Find the nearest ancestor (incl. target) with a wheel handler.
+                // Find the nearest ancestor (incl. target) with a wheel handler
+                // that can actually use it, chaining past ones that cannot.
+                //
+                // `WheelHandler` returns `()`, so a handler cannot report "not
+                // consumed" — but `NodeMeta` already carries `ScrollInfo`, so
+                // the router can decide without changing the signature. Before
+                // this, a `VirtualList` whose items fit its viewport swallowed
+                // the wheel and its parent never scrolled: the page stayed put
+                // and a later click landed on whatever had not moved.
                 let mut n = self.tree.hit_test(we.pos);
                 while let Some(node) = n {
-                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_wheel.clone()) {
-                        h(&self.rt, we.delta.x, we.delta.y, we.modifiers);
-                        break;
+                    let m = self.meta.get(&node);
+                    if let Some(h) = m.and_then(|m| m.on_wheel.clone()) {
+                        if wheel_can_take(m.and_then(|m| m.scroll)) {
+                            h(&self.rt, we.delta.x, we.delta.y, we.modifiers);
+                            break;
+                        }
+                        // Otherwise fall through and keep climbing.
                     }
                     let parent = self.tree.parent(node);
                     n = parent.is_some().then_some(parent);
@@ -5458,6 +5470,27 @@ fn hover_tint_brush(brush: &mut Brush) {
             }
         }
         _ => {}
+    }
+}
+
+/// Whether a node with a wheel handler should consume this event.
+///
+/// Deliberately NOT directional ("can it move *this* way"). That is the right
+/// long-term rule, but `PullToRefresh` declares a fictional `max_y: 1e6` and
+/// relies on receiving `dy < 0` while already at the top in order to fire —
+/// a directional test would see no room upward, chain the event away, and break
+/// it silently. Widening this is gated on making that `ScrollInfo` honest.
+///
+/// A node with no `ScrollInfo` is not a scroll container at all (a stepper, a
+/// zoomable grid); it consumes, exactly as before.
+///
+/// One consequence worth stating: a single `WheelHandler` call carries both
+/// `dx` and `dy`, so consumption cannot be split per axis. The decision is
+/// all-or-nothing per event.
+fn wheel_can_take(scroll: Option<lumen_core::semantics::ScrollInfo>) -> bool {
+    match scroll {
+        None => true,
+        Some(s) => s.max_x > 0.5 || s.max_y > 0.5,
     }
 }
 
