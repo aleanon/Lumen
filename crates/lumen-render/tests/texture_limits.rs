@@ -78,3 +78,95 @@ fn a_4k_frame_renders_without_panicking() {
         "the 4K frame came back empty"
     );
 }
+
+/// An image past the ceiling is downscaled rather than handed to wgpu.
+///
+/// This is the invariant the whole guard exists for: producers upstream size
+/// their own sprites sensibly, but `upload_image` is what makes "no oversize
+/// texture" provable instead of audited. 9000 px exceeds even the raised
+/// ceiling, so nothing but the backstop can save it.
+#[test]
+fn an_image_past_the_ceiling_does_not_panic() {
+    let Some(gpu) = require_gpu() else { return };
+    let cap = gpu.max_texture_dimension();
+    let wide = cap + 808;
+    // A red strip; 8 px tall so the allocation stays small.
+    let mut px = Vec::with_capacity(wide as usize * 8 * 4);
+    for _ in 0..(wide * 8) {
+        px.extend_from_slice(&Color::srgb8(0xd0, 0x20, 0x20, 0xff).to_srgb8());
+    }
+    let mut dl = DisplayList::new();
+    dl.images
+        .push(lumen_render::RgbaImage::from_raw(wide, 8, px));
+    dl.push(DrawCmd::Image {
+        id: ImageId(0),
+        src_rect: Rect::new(0.0, 0.0, wide as f64, 8.0),
+        dst_rect: Rect::new(20.0, 60.0, 180.0, 90.0),
+        quality: Filter::Bilinear,
+    });
+    let img = gpu.render(&dl, W, H, bg());
+    assert_eq!((img.width(), img.height()), (W, H));
+    // It drew: the destination band is red, not background.
+    let i = ((75 * W + 100) * 4) as usize;
+    let p = img.pixels();
+    assert!(
+        p[i] > 120 && p[i + 1] < 110,
+        "expected the downscaled strip to paint red at (100,75), got \
+         [{}, {}, {}]",
+        p[i],
+        p[i + 1],
+        p[i + 2]
+    );
+}
+
+/// A large asset drawn into a small box must still look right after being
+/// resampled to its destination footprint. Averaging, not point-sampling: a
+/// checkerboard point-sampled to a small box collapses to one colour, while an
+/// averaged one goes grey.
+#[test]
+fn a_large_asset_downscales_to_its_destination() {
+    let Some(gpu) = require_gpu() else { return };
+    const SRC: u32 = 2000;
+    let mut px = Vec::with_capacity(SRC as usize * SRC as usize * 4);
+    for y in 0..SRC {
+        for x in 0..SRC {
+            let on = (x / 2 + y / 2) % 2 == 0;
+            let c = if on {
+                Color::srgb8(0xff, 0xff, 0xff, 0xff)
+            } else {
+                Color::srgb8(0x00, 0x00, 0x00, 0xff)
+            };
+            px.extend_from_slice(&c.to_srgb8());
+        }
+    }
+    let mut dl = DisplayList::new();
+    dl.images
+        .push(lumen_render::RgbaImage::from_raw(SRC, SRC, px));
+    dl.push(DrawCmd::Image {
+        id: ImageId(0),
+        src_rect: Rect::new(0.0, 0.0, SRC as f64, SRC as f64),
+        dst_rect: Rect::new(40.0, 30.0, 140.0, 130.0),
+        quality: Filter::Bilinear,
+    });
+    gpu.take_uploaded_texels();
+    let img = gpu.render(&dl, W, H, bg());
+    let uploaded = gpu.take_uploaded_texels();
+
+    // The observable. Pixel checks cannot see this: bilinear minification of a
+    // full-size upload lands on roughly the same grey, so the frame looks the
+    // same whether four million texels crossed the bus or forty thousand.
+    assert!(
+        uploaded < 200_000,
+        "a {SRC}x{SRC} asset drawn into a 100x100 box uploaded {uploaded} texels; \
+         expected it to be resampled to its destination footprint first \
+         (full size would be {})",
+        SRC as u64 * SRC as u64
+    );
+    let i = ((80 * W + 90) * 4) as usize;
+    let p = img.pixels();
+    assert!(
+        (60..=200).contains(&p[i]),
+        "the downscale must still look right: expected mid-grey, got {}",
+        p[i]
+    );
+}

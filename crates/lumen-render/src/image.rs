@@ -141,6 +141,55 @@ impl RgbaImage {
         }
     }
 
+    /// Resample to `w`x`h` by box-averaging each destination pixel's source
+    /// footprint.
+    ///
+    /// Used where an image is larger than it can usefully be: past the device's
+    /// texture limit (where the alternative is a panic), or far larger than the
+    /// box it is drawn into (where the alternative is uploading megabytes to
+    /// minify them on the GPU anyway). Averaging rather than point-sampling
+    /// matters for the second case — dropping pixels aliases badly on
+    /// photographic content.
+    ///
+    /// Alpha is averaged straight, not premultiplied: every producer here
+    /// (shadow sprites, decoded assets, text coverage) is either fully opaque or
+    /// has colour defined where alpha is zero, so there is nothing to bleed.
+    pub fn downscaled(&self, w: u32, h: u32) -> RgbaImage {
+        let (w, h) = (w.max(1).min(self.width), h.max(1).min(self.height));
+        if w == self.width && h == self.height {
+            return self.clone();
+        }
+        let mut pixels = Vec::with_capacity((w as usize) * (h as usize) * 4);
+        for dy in 0..h {
+            let sy0 = (dy as u64 * self.height as u64 / h as u64) as usize;
+            let sy1 = (((dy + 1) as u64 * self.height as u64 / h as u64) as usize).max(sy0 + 1);
+            for dx in 0..w {
+                let sx0 = (dx as u64 * self.width as u64 / w as u64) as usize;
+                let sx1 = (((dx + 1) as u64 * self.width as u64 / w as u64) as usize).max(sx0 + 1);
+                let mut acc = [0u32; 4];
+                let mut n = 0u32;
+                for sy in sy0..sy1 {
+                    let row = sy * self.width as usize;
+                    for sx in sx0..sx1 {
+                        let i = (row + sx) * 4;
+                        for (a, &b) in acc.iter_mut().zip(&self.pixels[i..i + 4]) {
+                            *a += b as u32;
+                        }
+                        n += 1;
+                    }
+                }
+                for a in acc {
+                    pixels.push((a / n.max(1)) as u8);
+                }
+            }
+        }
+        RgbaImage {
+            width: w,
+            height: h,
+            pixels,
+        }
+    }
+
     /// Overwrite a `src`-sized rectangle at `(x, y)` with `src`'s pixels
     /// (opaque copy, no blending), clipped to this image's bounds. Used to
     /// composite a damage tile into the retained frame (R2).

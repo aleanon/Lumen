@@ -52,6 +52,13 @@ pub struct Wgpu {
     >,
     /// R6.4: reusable layer render targets.
     targets: std::cell::RefCell<TargetPool>,
+    /// Set when a texture had to be downscaled to fit `max_dim`. Drained into a
+    /// `W0110` diagnostic; see `take_diagnostics`.
+    oversize: std::cell::Cell<Option<(u32, u32, u32)>>,
+    /// Total texels handed to `create_texture` by `upload_image`. The only way
+    /// to observe that an asset was downscaled before upload rather than after,
+    /// which is otherwise invisible in the rendered frame.
+    uploaded_texels: std::cell::Cell<u64>,
     /// R6.3: the root target from the previous frame, and whether its contents
     /// can be trusted. Held separately from the pool because "first free target
     /// of this size" is not necessarily the one holding last frame's pixels once
@@ -681,8 +688,18 @@ impl Wgpu {
                 // the downlevel profile exists to constrain is untouched. The
                 // GPU path is `cfg(not(target_arch = "wasm32"))`, so no web
                 // target is affected.
-                required_limits:
-                    wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+                required_limits: {
+                    let mut l =
+                        wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+                    // Request exactly the ceiling we intend to honour. Asking for
+                    // the adapter's full resolution while guarding at
+                    // MAX_DIM_CEILING leaves wgpu validating against a limit we
+                    // never use: the guard becomes untestable, and any unguarded
+                    // path fails only on hardware weaker than the developer's.
+                    l.max_texture_dimension_1d = l.max_texture_dimension_1d.min(MAX_DIM_CEILING);
+                    l.max_texture_dimension_2d = l.max_texture_dimension_2d.min(MAX_DIM_CEILING);
+                    l
+                },
                 // Favor low memory over large pre-reserved pools: the default
                 // `Performance` hint makes gpu-alloc keep big blocks, which on the
                 // NVIDIA driver mapped ~128 MB per device. A UI allocates little
@@ -1143,6 +1160,8 @@ impl Wgpu {
             glyph_pipeline,
             path_pipeline,
             targets: std::cell::RefCell::new(TargetPool::default()),
+            oversize: std::cell::Cell::new(None),
+            uploaded_texels: std::cell::Cell::new(0),
             retained_root: std::cell::RefCell::new(None),
             max_dim,
             adapter_name,
@@ -1529,6 +1548,12 @@ impl Wgpu {
     /// from outside (wgpu exposes no allocation counter).
     pub fn pooled_target_count(&self) -> usize {
         self.targets.borrow().by_key.values().map(Vec::len).sum()
+    }
+
+    /// Texels uploaded since the last call, and reset. Lets a test see that a
+    /// large asset was resampled *before* crossing the bus.
+    pub fn take_uploaded_texels(&self) -> u64 {
+        self.uploaded_texels.replace(0)
     }
 
     /// The largest 2-D texture this device accepts (capped at 8192). Content
@@ -1936,6 +1961,34 @@ impl Wgpu {
                     if let Some(img) = list.images.get(id.0 as usize) {
                         flush_rects(device, &mut ops, &mut pend_rects);
                         flush_paths(device, &mut ops, &mut pend_paths);
+                        // An asset uploads at its INTRINSIC size, so a 4000 px
+                        // photo in a 100 px box shipped 4000 px of texture to
+                        // minify it on the GPU. Cap the upload at twice the
+                        // drawn footprint (headroom for scale changes and
+                        // bilinear taps) — a large win in bandwidth and VRAM,
+                        // and it removes a whole class of oversize upload.
+                        //
+                        // Only applied when the source is a `src_rect`-complete
+                        // blit: a partial region (the shadow bands) is already
+                        // small and its uv math is normalized against the full
+                        // texture, which a resample would invalidate.
+                        let full_src = src_rect.x0 <= 0.0
+                            && src_rect.y0 <= 0.0
+                            && src_rect.width() >= img.width() as f64
+                            && src_rect.height() >= img.height() as f64;
+                        let want_w = (dst_rect.width().abs() * scale * 2.0).ceil();
+                        let want_h = (dst_rect.height().abs() * scale * 2.0).ceil();
+                        let shrunk;
+                        let img = if full_src
+                            && want_w >= 1.0
+                            && want_h >= 1.0
+                            && (img.width() as f64 > want_w || img.height() as f64 > want_h)
+                        {
+                            shrunk = img.downscaled(want_w as u32, want_h as u32);
+                            &shrunk
+                        } else {
+                            img
+                        };
                         let bind = self.upload_image(img, *quality);
                         // Normalize with the CPU backend's clamping semantics
                         // (`cpu.rs` `draw_image`): src is in IMAGE PIXELS and is
@@ -2634,6 +2687,28 @@ impl Wgpu {
         if let Some(hit) = self.img_cache.borrow().get(&key) {
             return hit.clone();
         }
+        // The invariant: nothing past this point can hand wgpu a texture it will
+        // reject. Producers upstream size their own sprites sensibly (a shadow
+        // is 9-sliced, an asset is downscaled to its destination), but this is
+        // what makes "no oversize texture" provable rather than audited — a
+        // future producer cannot reintroduce the panic by forgetting.
+        //
+        // Downscaling rather than skipping: returning early would leave the draw
+        // without a bind group and desync the pass. A too-large image drawn small
+        // is a degraded frame; a desynced pass is a wrong one.
+        let owned;
+        let img = if img.width() > self.max_dim || img.height() > self.max_dim {
+            let (w, h) = (img.width(), img.height());
+            let scale = (self.max_dim as f64 / w.max(h) as f64).min(1.0);
+            self.oversize.set(Some((w, h, self.max_dim)));
+            owned = img.downscaled(
+                ((w as f64 * scale).round() as u32).max(1),
+                ((h as f64 * scale).round() as u32).max(1),
+            );
+            &owned
+        } else {
+            img
+        };
         // Nearest for crisp/pixel-art (and cached text/shadow sprites, which are
         // drawn 1:1); bilinear for smoothly-scaled images. Both filter in gamma
         // space (the texture holds sRGB bytes), matching the CPU reference.
@@ -2641,6 +2716,8 @@ impl Wgpu {
             Filter::Nearest => &self.sampler,
             Filter::Bilinear => &self.ramp_sampler,
         };
+        self.uploaded_texels
+            .set(self.uploaded_texels.get() + img.width() as u64 * img.height() as u64);
         let size = wgpu::Extent3d {
             width: img.width(),
             height: img.height(),
@@ -2714,6 +2791,13 @@ impl Wgpu {
         width: u32,
         height: u32,
     ) -> Result<RgbaImage, lumen_core::Diagnostic> {
+        // Caller-supplied, so clamp: a shader widget sized past the device limit
+        // would otherwise panic in `create_texture`. Clamping is the only
+        // meaning-preserving option — a shader has no smaller equivalent.
+        let (width, height) = (width.min(self.max_dim), height.min(self.max_dim));
+        if width == 0 || height == 0 {
+            return Ok(RgbaImage::from_raw(0, 0, Vec::new()));
+        }
         let src = format!("{SHADER_HEADER}\n{fragment}");
 
         // Capture WGSL validation errors instead of panicking, so a broken edit
