@@ -103,22 +103,23 @@ jobs:
   # Vulkan), so the backend users actually see gets tested without buying a
   # GPU runner.
   #
-  # NON-BLOCKING ON PURPOSE (continue-on-error). Evaluating this on 2026-08-08
-  # falsified the assumption it was scheduled on: the CPU/GPU parity suite
-  # passes on a real NVIDIA adapter but FAILS under lavapipe, which renders
-  # `gradient_linear` as a completely blank frame (identical to the blank
-  # reference, while differing from the CPU render by 23 400 px). Whether that
-  # is a lavapipe limitation or a portability bug in Lumen's gradient encoding
-  # is unresolved — a conformant software implementation rendering nothing is
-  # worth knowing either way, so the job collects the signal instead of
-  # pretending the platform is covered.
+  # BLOCKING as of 2026-08-10. It was non-blocking because the parity suite
+  # "failed under lavapipe, which renders gradient_linear as a blank frame".
+  # That diagnosis was wrong: `VK_ICD_FILENAMES` constrains VULKAN ONLY, so
+  # pointing it at lavapipe removed the NVIDIA *Vulkan* adapter and let NVIDIA
+  # *GL* win the selection — and it is the GL backend that returns zeros from
+  # `textureSample` of the gradient ramp. On real lavapipe the scene matches the
+  # CPU better than any other in the corpus (docs/gl-gradient-defect.md).
+  # `Wgpu::new` now prefers PRIMARY backends, and every render suite passes on
+  # lavapipe, so red here means broken rather than mis-attributed.
   #
-  # Make this a required check once the gradient issue is resolved; until then
-  # a real (self-hosted) GPU runner is the only way to gate the GPU path.
+  # Runs lumen-widgets too. Those GPU tests existed but were in NO job, which is
+  # structurally why an oversize-texture panic could ship: headless tests use the
+  # CPU renderer, which has no texture-dimension concept at all, so the crash was
+  # invisible to everything except a live window.
   gpu:
-    name: gpu renderer (lavapipe, non-blocking)
+    name: gpu renderer (lavapipe)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -127,13 +128,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
-      - name: renderer tests on a software adapter
+      - name: renderer + widget GPU tests on a software adapter
         env:
           # Fail rather than self-skip: a GPU job that silently no-ops when the
           # driver is missing reports green while proving nothing.
           LUMEN_REQUIRE_GPU: "1"
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-        run: cargo test -p lumen-render --features wgpu
+        run: cargo test -p lumen-render -p lumen-widgets --features wgpu
 
   # LN1: the two DERIVED font faces must be reproducible from their sources.
   #
