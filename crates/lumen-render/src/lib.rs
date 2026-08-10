@@ -138,6 +138,17 @@ pub trait Renderer {
         false
     }
 
+    /// Diagnostics the backend produced since the last call, and clear them.
+    ///
+    /// The renderer knows the device's limits; the audit that produces
+    /// `Diagnostic`s walks the semantics tree and does not. This is how that
+    /// information crosses, without the audit growing a backend dependency.
+    /// Defaulted to empty so the CPU renderer — which has no texture-dimension
+    /// concept at all — and every existing implementor are unaffected.
+    fn take_diagnostics(&mut self) -> Vec<lumen_core::Diagnostic> {
+        Vec::new()
+    }
+
     /// A short, stable backend name (for diagnostics / the agent).
     fn name(&self) -> &'static str;
 }
@@ -247,6 +258,10 @@ impl<R: Renderer + ?Sized> Renderer for Box<R> {
         dirty: Option<kurbo::Rect>,
     ) -> bool {
         (**self).present_to_surface(list, width, height, scale, background, dirty)
+    }
+
+    fn take_diagnostics(&mut self) -> Vec<lumen_core::Diagnostic> {
+        (**self).take_diagnostics()
     }
 
     fn name(&self) -> &'static str {

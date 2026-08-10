@@ -59,6 +59,10 @@ pub struct Wgpu {
     /// to observe that an asset was downscaled before upload rather than after,
     /// which is otherwise invisible in the rendered frame.
     uploaded_texels: std::cell::Cell<u64>,
+    /// A glyph too large for a whole atlas page, which is dropped rather than
+    /// drawn. Distinct from `atlas_overflow` (pages exhausted), which recovers
+    /// by repacking and must stay silent or it would fire every busy frame.
+    atlas_too_big: std::cell::Cell<Option<(u32, u32)>>,
     /// R6.3: the root target from the previous frame, and whether its contents
     /// can be trusted. Held separately from the pool because "first free target
     /// of this size" is not necessarily the one holding last frame's pixels once
@@ -528,6 +532,32 @@ impl crate::Renderer for Wgpu {
         let w = (dirty.x1.ceil().min(width as f64) - x as f64).max(0.0) as u32;
         let h = (dirty.y1.ceil().min(height as f64) - y as f64).max(0.0) as u32;
         full.crop(x, y, w, h)
+    }
+
+    fn take_diagnostics(&mut self) -> Vec<lumen_core::Diagnostic> {
+        let mut out = Vec::new();
+        if let Some((w, h, cap)) = self.oversize.take() {
+            out.push(lumen_core::Diagnostic::new(
+                lumen_core::codes::W0110,
+                format!(
+                    "the renderer needed a {w}x{h} px texture but this device \
+                     caps them at {cap} px; it was downscaled, so that paint is \
+                     blurred or clipped. Split the content, or drop the shadow \
+                     on the oversized element."
+                ),
+            ));
+        }
+        if let Some((gw, gh)) = self.atlas_too_big.take() {
+            out.push(lumen_core::Diagnostic::new(
+                lumen_core::codes::W0110,
+                format!(
+                    "a {gw}x{gh} px glyph does not fit the {ATLAS_SIZE} px glyph \
+                     atlas and was DROPPED — that character is missing from the \
+                     frame. Reduce the font size, or raise ATLAS_SIZE."
+                ),
+            ));
+        }
+        out
     }
 
     fn name(&self) -> &'static str {
@@ -1162,6 +1192,7 @@ impl Wgpu {
             targets: std::cell::RefCell::new(TargetPool::default()),
             oversize: std::cell::Cell::new(None),
             uploaded_texels: std::cell::Cell::new(0),
+            atlas_too_big: std::cell::Cell::new(None),
             retained_root: std::cell::RefCell::new(None),
             max_dim,
             adapter_name,
@@ -2105,10 +2136,22 @@ impl Wgpu {
                             let Some(gi) = list.glyph_images.get(pg.image as usize) else {
                                 continue;
                             };
-                            let Some((slot, fresh)) = atlas.alloc(gi.key, gi.width, gi.height)
-                            else {
-                                self.atlas_overflow.set(true);
-                                continue;
+                            let (slot, fresh) = match atlas.alloc(gi.key, gi.width, gi.height) {
+                                Ok(v) => v,
+                                Err(crate::atlas::AtlasFull::PagesExhausted) => {
+                                    // Recoverable: the frame clears and repacks
+                                    // afterwards. Silent on purpose — reporting
+                                    // it would fire on any busy frame.
+                                    self.atlas_overflow.set(true);
+                                    continue;
+                                }
+                                Err(crate::atlas::AtlasFull::TooBig) => {
+                                    // Unrecoverable: this glyph is missing from
+                                    // the frame entirely, which used to happen
+                                    // silently. Worth a W0110.
+                                    self.atlas_too_big.set(Some((gi.width, gi.height)));
+                                    continue;
+                                }
                             };
                             if fresh {
                                 self.queue.write_texture(

@@ -312,6 +312,16 @@ All warnings/errors are `Diagnostic { code: &'static str, severity, message, spa
 the audit lint, E0201, W0401 (i18n missing key), E0701 (contained panic).
 The defined-but-dead bucket from the 2026-07 audit is empty.
 
+*Added (2026-08-10):* **W0110** — an element needs a rasterized sprite past the
+portable texture limit. Two emitters under one code because the author's fix is
+the same: a fixed-2048 px portability advisory from `lint()` on **any** backend
+(the class a CPU-only suite cannot see — an oversize shadow was a hard
+`create_texture` panic in the live window and nothing at all headless), and the
+GPU backend reporting what it actually clamped, via the defaulted
+`Renderer::take_diagnostics`. A glyph too large for a whole atlas page reports
+here too, since it is dropped from the frame; pages-exhausted stays silent
+because it self-heals by repacking.
+
 *Resolved (2026-08-08, SD4):* **W0106** (a node declares a semantic `Action` it
 does not implement) is now emitted by `App::lint()`, so it reaches `ui.lint`
 over the agent protocol. It previously fired only from

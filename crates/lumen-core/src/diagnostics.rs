@@ -160,6 +160,24 @@ pub mod codes {
     /// Reported once per declaration at parse time, like `W0107`: the author
     /// needs to hear it once and the hot path must not pay for it.
     pub const W0109: &str = "W0109";
+    /// An element needs a rasterized sprite larger than the renderer can
+    /// portably upload; the paint is degraded rather than exact.
+    ///
+    /// Two situations, deliberately reported under one code because the author's
+    /// fix is the same — make the element smaller, or drop the effect on it:
+    ///
+    /// * **Portability advisory**, from `lint()` on any backend: the sprite an
+    ///   element's box-shadow needs exceeds 2048 px, the WebGL2/downlevel floor.
+    ///   It may render perfectly on the author's GPU and be wrong on a user's,
+    ///   which is exactly the class a CPU-only test suite cannot see.
+    /// * **The renderer actually clamped**, from the GPU backend: a texture,
+    ///   frame or surface was downscaled or refused to fit the device limit.
+    ///
+    /// Before this existed, all of it was silent — an oversize shadow sprite was
+    /// a hard `create_texture` panic in the live window and nothing at all in
+    /// headless tests, because the CPU renderer has no texture-dimension
+    /// concept.
+    pub const W0110: &str = "W0110";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).

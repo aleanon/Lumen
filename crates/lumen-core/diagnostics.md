@@ -22,6 +22,7 @@ same commit. Codes are assigned by `02-spec-core.md §9` and `04-spec-lss-stylin
 | W0107 | warning  | `.lss` property parses but is not applied — the declaration has no effect (SD5.2) | 04 §9 |
 | W0108 | warning  | Scroll container laying out many children directly; consider `VirtualList` (VL1) | 02 §9, 02 §10 |
 | W0109 | warning  | `.lss` property is implemented but does not accept this **value** — the declaration has no effect (SD5.x; the other half of W0107) | 04 §9 |
+| W0110 | warning  | Element needs a sprite past the portable texture limit; the renderer downscales or clamps it (oversize shadow/asset/frame) | 02 §9 |
 | E0201 | error    | Shader compile error                                  | 02 §9       |
 | W0301 | warning  | Missing semantics on a focusable leaf (no label/value)| 02 §9, 03 §1|
 | W0302 | warning  | Deprecated `node-<index>` agent handle accepted; use `nx-<hex>` (ID2 alias window) | 03 §1, §2 |
@@ -37,7 +38,7 @@ drifted to 9 documented rows against 16 defined consts once already, and a
 proposed `W0105` for parse-only `.lss` properties collided with the live
 zero-area-node code):
 
-- `W01xx` layout/render: next free is **W0109**
+- `W01xx` layout/render: next free is **W0111**
 - `W03xx` semantics: next free is **W0303**
 - `W04xx` i18n/text: next free is **W0403**
 - `E01xx` styling: next free is **E0105**

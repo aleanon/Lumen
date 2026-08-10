@@ -1678,6 +1678,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// and via the agent (`ui.lint`).
     pub fn lint(&mut self) -> Vec<lumen_core::Diagnostic> {
         let mut out = crate::audit::lint(&self.semantics_doc().root);
+        // What the renderer actually clamped this frame (W0110). The CPU
+        // backend returns nothing; only a GPU one has limits to hit.
+        out.extend(self.renderer.take_diagnostics());
         // SD4: W0106 (a node advertises a semantic Action it does not
         // implement) was emitted only by `audit_actions()`, which tests call
         // and `ui.lint` never did — so an agent could not observe this class of
@@ -1686,6 +1689,45 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // SD5.0's registry repair: the code existed, was documented, and had
         // no reachable path.
         out.extend(self.audit_actions());
+        // W0110 portability advisory. Checked against a FIXED 2048 px — the
+        // WebGL2/downlevel floor — regardless of which backend is running,
+        // because an element needing a bigger sprite is non-portable whatever
+        // GPU the author happens to own. That is precisely the class a CPU-only
+        // test suite cannot see: the shadow that crashed a live GPU window
+        // rendered perfectly in every headless test.
+        //
+        // Emitted here rather than in `audit.rs` because `SemanticsNode` carries
+        // `bounds` but not `shadow`, so a semantics walk cannot see the cause.
+        const PORTABLE_TEXTURE_LIMIT: f64 = 2048.0;
+        for (node, m) in self.meta.iter() {
+            let Some(sh) = m.shadow else { continue };
+            let b = self.tree.bounds(*node);
+            // Mirrors the sprite sizing in `paint`: the 9-slice bounds each axis
+            // by style, so only a shadow that is *itself* enormous can trip this
+            // — a blur of 700 px, not a tall card.
+            let radius = m.corner_radius;
+            let inv = (radius + sh.spread).max(0.0) + 3.0 * sh.blur.max(0.0) + 1.0;
+            let margin = (sh.spread.max(0.0) + sh.blur).ceil() + 2.0;
+            let side = |len: f64| len.min(2.0 * inv + 1.0) + 2.0 * margin;
+            let (sw, sh_px) = (side(b.width()), side(b.height()));
+            if sw > PORTABLE_TEXTURE_LIMIT || sh_px > PORTABLE_TEXTURE_LIMIT {
+                let who =
+                    m.id.as_ref()
+                        .map(|i| format!("`#{}`", i.as_str()))
+                        .unwrap_or_else(|| "an element".to_string());
+                out.push(lumen_core::Diagnostic::new(
+                    lumen_core::codes::W0110,
+                    format!(
+                        "{who} is {:.0}x{:.0} px with a shadow whose sprite is \
+                         {sw:.0}x{sh_px:.0} px, past the {PORTABLE_TEXTURE_LIMIT:.0} px \
+                         portable texture limit. It may render on your GPU and \
+                         be downscaled on a user's. Reduce the blur or spread.",
+                        b.width(),
+                        b.height()
+                    ),
+                ));
+            }
+        }
         // T.4 tofu: any text node whose shaped block contains `.notdef`
         // glyphs (chars no registered face covers). Shaping hits the cache,
         // so this is a cheap walk on an already-rendered tree.

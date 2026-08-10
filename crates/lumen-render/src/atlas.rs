@@ -10,6 +10,15 @@
 
 use std::collections::HashMap;
 
+/// Why [`GlyphAtlas::alloc`] could not place a glyph.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AtlasFull {
+    /// Larger than a whole page — it can never fit, and the glyph is dropped.
+    TooBig,
+    /// Every page is full. Recoverable: clear and repack.
+    PagesExhausted,
+}
+
 /// A packed glyph's location: which `page` (texture layer) and its pixel rect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AtlasSlot {
@@ -118,31 +127,35 @@ impl GlyphAtlas {
 
     /// Get (or pack) a slot for a `w`×`h` glyph under `key`. Returns `(slot,
     /// fresh)`: when `fresh` is true the slot was newly allocated and the caller
-    /// must upload the glyph's pixels into it. Returns `None` if the glyph can't
-    /// fit even a fresh page (too large, or `max_pages` exhausted) — the caller
-    /// should [`clear`](Self::clear) and retry, or fall back to a sprite.
-    pub fn alloc(&mut self, key: u64, w: u32, h: u32) -> Option<(AtlasSlot, bool)> {
+    /// must upload the glyph's pixels into it.
+    ///
+    /// Failure has two very different meanings and the caller must tell them
+    /// apart, so it returns [`AtlasFull`] rather than `None`: `TooBig` means the
+    /// glyph can never fit and will be **dropped from the frame** (worth a
+    /// diagnostic), while `PagesExhausted` is recoverable by clearing and
+    /// repacking (and must stay silent, or it fires on any busy frame).
+    pub fn alloc(&mut self, key: u64, w: u32, h: u32) -> Result<(AtlasSlot, bool), AtlasFull> {
         if let Some(&slot) = self.map.get(&key) {
-            return Some((slot, false));
+            return Ok((slot, false));
         }
         let (cw, ch) = (w + PAD, h + PAD);
         if cw > self.size || ch > self.size {
-            return None; // larger than a whole page
+            return Err(AtlasFull::TooBig);
         }
         // Existing pages first, then grow.
         for page in 0..self.pages.len() {
             if let Some((x, y)) = self.pages[page].place(cw, ch, self.size) {
-                return Some((self.record(key, page as u32, x, y, w, h), true));
+                return Ok((self.record(key, page as u32, x, y, w, h), true));
             }
         }
         if (self.pages.len() as u32) < self.max_pages {
             let page = self.pages.len();
             self.pages.push(Page::new());
             if let Some((x, y)) = self.pages[page].place(cw, ch, self.size) {
-                return Some((self.record(key, page as u32, x, y, w, h), true));
+                return Ok((self.record(key, page as u32, x, y, w, h), true));
             }
         }
-        None
+        Err(AtlasFull::PagesExhausted)
     }
 
     fn record(&mut self, key: u64, page: u32, x: u32, y: u32, w: u32, h: u32) -> AtlasSlot {
@@ -195,8 +208,9 @@ mod tests {
         assert_eq!(p0.page, 0);
         assert_eq!(p1.page, 1, "second glyph spilled to a new page");
         assert_eq!(a.page_count(), 2);
-        // Third can't fit: pages exhausted.
-        assert!(a.alloc(2, 14, 14).is_none());
+        // Third can't fit: pages exhausted — recoverable, so it must NOT report
+        // as `TooBig`, which is what makes a glyph vanish and earns a W0110.
+        assert_eq!(a.alloc(2, 14, 14), Err(AtlasFull::PagesExhausted));
         // After eviction it packs again from scratch.
         a.clear();
         assert_eq!(a.page_count(), 0);
@@ -207,7 +221,9 @@ mod tests {
     #[test]
     fn rejects_glyphs_larger_than_a_page() {
         let mut a = GlyphAtlas::new(32, 4);
-        assert!(a.alloc(0, 40, 10).is_none());
-        assert!(a.alloc(1, 10, 40).is_none());
+        // Unrecoverable: no amount of repacking fits these, so the glyph is
+        // dropped from the frame and the caller reports W0110.
+        assert_eq!(a.alloc(0, 40, 10), Err(AtlasFull::TooBig));
+        assert_eq!(a.alloc(1, 10, 40), Err(AtlasFull::TooBig));
     }
 }
