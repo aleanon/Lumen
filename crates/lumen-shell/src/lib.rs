@@ -843,7 +843,22 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         #[cfg(feature = "wgpu")]
                         if self.direct {
                             // GPU → swapchain directly, no readback (1c).
-                            h.present_to_surface();
+                            //
+                            // `false` means the backend gave the surface up —
+                            // today only because the window grew past the
+                            // device's texture limit, where configuring it would
+                            // be a FATAL wgpu error rather than a recoverable
+                            // one. Degrade to CPU presentation for the rest of
+                            // the session instead of freezing: the window keeps
+                            // updating, just through a readback.
+                            if !h.present_to_surface() {
+                                self.direct = false;
+                                self.presenter = self.window.clone().map(Presenter::new);
+                                eprintln!(
+                                    "lumen: present = cpu-readback (surface too large \
+                                     for this device; falling back)"
+                                );
+                            }
                         }
                         // `presenter` is None in direct mode, so this covers
                         // both paths without a second `direct` test.

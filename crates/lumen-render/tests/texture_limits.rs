@@ -170,3 +170,29 @@ fn a_large_asset_downscales_to_its_destination() {
         p[i]
     );
 }
+
+/// A frame requested past the ceiling is clamped, not allocated.
+///
+/// Every offscreen target is viewport-sized, so before the clamp this failed in
+/// `create_texture` before drawing anything. A wrong-sized frame is recoverable;
+/// an aborted process is not.
+#[test]
+fn an_oversize_frame_is_clamped_rather_than_allocated() {
+    let Some(gpu) = require_gpu() else { return };
+    let cap = gpu.max_texture_dimension();
+    let mut dl = DisplayList::new();
+    dl.push(DrawCmd::Rect {
+        rect: Rect::new(0.0, 0.0, 100.0, 100.0),
+        brush: Brush::Solid(Color::srgb8(0x20, 0x60, 0xc0, 0xff)),
+        radii: CornerRadii::all(0.0),
+        border: None,
+    });
+    let img = gpu.render_at_scale(&dl, cap + 1000, 200, 1.0, bg());
+    assert_eq!(
+        img.width(),
+        cap,
+        "a frame requested {} px wide should clamp to the {cap} px ceiling",
+        cap + 1000
+    );
+    assert_eq!(img.height(), 200);
+}

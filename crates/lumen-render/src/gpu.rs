@@ -1193,6 +1193,17 @@ impl Wgpu {
         width: u32,
         height: u32,
     ) -> bool {
+        // `Surface::configure` past the device limit is FATAL, not an error:
+        // wgpu-core routes it through `handle_error_fatal`, so an oversize
+        // window used to abort at open rather than fail gracefully. At the old
+        // 2048 cap that meant 1440p and 4K windows died before the first frame.
+        //
+        // Returning `false` is already the shell's "use the CPU presenter"
+        // signal, so refusing here degrades instead of aborting.
+        if width > self.max_dim || height > self.max_dim {
+            self.oversize.set(Some((width, height, self.max_dim)));
+            return false;
+        }
         let Ok(surface) = self.instance.create_surface(target) else {
             return false;
         };
@@ -1292,6 +1303,16 @@ impl Wgpu {
 
     /// Reconfigure the attached surface to a new physical size. No-op headless.
     pub fn resize_surface(&mut self, width: u32, height: u32) {
+        // Same fatal-configure hazard as `attach_surface`, reached by dragging a
+        // window onto a larger display. Dropping the surface makes
+        // `present_to_surface` return `false`, which the shell already handles by
+        // falling back to CPU presentation — a resize that degrades beats a
+        // resize that aborts.
+        if width > self.max_dim || height > self.max_dim {
+            self.oversize.set(Some((width, height, self.max_dim)));
+            self.surface = None;
+            return;
+        }
         if let Some(surf) = self.surface.as_mut() {
             surf.config.width = width.max(1);
             surf.config.height = height.max(1);
@@ -1652,6 +1673,14 @@ impl Wgpu {
         background: Color,
         dirty: Option<kurbo::Rect>,
     ) -> RgbaImage {
+        // Every offscreen target here is viewport-sized, so an outsized request
+        // would fail at `create_texture`. Clamp: a wrong-sized frame is
+        // recoverable, an aborted process is not.
+        let (req_w, req_h) = (width, height);
+        let (width, height) = (width.min(self.max_dim), height.min(self.max_dim));
+        if req_w != width || req_h != height {
+            self.oversize.set(Some((req_w, req_h, self.max_dim)));
+        }
         let dirty = self.reusable_scissor(list, width, height, dirty);
         // R6.2: cull to the damaged region as well as scissoring to it — the
         // same composition the present path uses, so the equivalence corpus
