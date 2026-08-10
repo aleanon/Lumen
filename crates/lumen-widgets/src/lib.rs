@@ -92,9 +92,9 @@ mod text_editing;
 pub use app::{center, App, FrameStats, Headless, ReloadResult};
 #[cfg(feature = "snapshot")]
 pub use app::{AppSnapshot, Checkpoint};
-pub use element::{BuildCx, Element, Handler, LeafWidget, NodeContent};
+pub use element::{AbortHandle, BuildCx, Element, Handler, LeafWidget, NodeContent};
 /// The data layer: executors + the `Sink` background work pushes results through.
-pub use lumen_core::tasks::{InlineSpawner, ManualSpawner, Sink, Spawner};
+pub use lumen_core::tasks::{CancelToken, InlineSpawner, ManualSpawner, Sink, Spawner, TaskHandle};
 /// Compile-time handler-currency check (F2): a handler may only capture stable
 /// `Copy` state (signal/memo handles, scalars), never owned snapshots that go
 /// stale when the handler is retained. See [`lumen_macros::stable_handler`].

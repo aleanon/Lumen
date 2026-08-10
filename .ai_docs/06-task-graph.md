@@ -286,6 +286,9 @@ One PR per task, message prefixed `[T0.x]`, checkbox flipped in the merge commit
 ### M0-exit
 - `examples/hello` counter app; a CI lumen-test queries the tree, clicks `#increment` by selector, asserts label `1`, matches an exact golden — headless on Linux/Windows/macOS. This is just T0.9's harness + T0.10's Button/Text + T0.12's scaffold wired into one example; no new mechanism.
 
+## TC1 ☑ Task cancellation (2026-08-10)
+`cx.task`/`cx.resource` are owned by the declaring scope and cancelled when it leaves the view or a deps change supersedes them; `cx.abortable_task`/`abortable_task_blocking` return an `AbortHandle` for stopping one on demand. `Spawner::spawn`/`spawn_blocking` return `Box<dyn TaskHandle>`. *Accept met:* scope death, deps supersede, memo-skip survival, handler-driven abort, and restart-after-cancel all covered in `lumen-widgets/tests/data_layer.rs` + `examples/download_progress/tests/smoke.rs`; the evicted-slot panic has a regression test. *(Two pre-existing bugs fixed as prerequisites — the `scope_cache`-only dead-set in `sweep_dead_scopes`, and F5 × F1 memo-skipped parents orphaning child scopes (`scope_gc_nested.rs`). See 07 § TC1.)*
+
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
 - Any public-API signature in `02 §4`/`§8` that won't compile as written beyond a *minimal semantics-preserving* fix.

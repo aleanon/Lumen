@@ -7,6 +7,7 @@
 use lumen_core::identity::{fold_id, hash_id, key_name, IdHash, ROOT_ID};
 use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
 use lumen_core::state::{Runtime, State};
+use lumen_core::tasks::{CancelToken, TaskHandle};
 use lumen_core::{Color, Dynamic, Signal, StableId};
 use lumen_layout::{Dim, Display, FlexDirection, LayoutStyle};
 use lumen_render::RgbaImage;
@@ -580,15 +581,138 @@ pub type FutureFactory =
 #[cfg(target_arch = "wasm32")]
 pub type FutureFactory = Box<dyn FnOnce(lumen_core::tasks::Sink) -> lumen_core::tasks::BoxFuture>;
 
-/// A request to run background work, recorded during build and dispatched by the
-/// runtime *after* the build (it owns the executor + the deferred-op channel, so
-/// the executor never leaks into `BuildCx`). Each variant is "given a [`Sink`](lumen_core::tasks::Sink),
-/// do the work" — the runtime mints the sink at dispatch and runs it.
-pub enum TaskRequest {
+/// The work half of a [`TaskRequest`]. Each variant is "given a
+/// [`Sink`](lumen_core::tasks::Sink), do the work".
+pub enum TaskKind {
     /// CPU-bound work for `spawn_blocking`.
     Blocking(BlockingFactory),
     /// Async work for `spawn` — a factory that, given the sink, yields the future.
     Future(FutureFactory),
+}
+
+/// A request to run background work, recorded during build and dispatched by the
+/// runtime *after* the build (it owns the executor + the deferred-op channel, so
+/// the executor never leaks into `BuildCx`). The runtime mints the sink — bound
+/// to `token` — at dispatch, runs the work, and files the backend handle under
+/// `id` in the task table.
+pub struct TaskRequest {
+    pub(crate) id: IdHash,
+    pub(crate) token: CancelToken,
+    pub(crate) kind: TaskKind,
+}
+
+/// A live task's shared record (TC1): the cancel token minted when it was
+/// *declared*, and the backend handle attached when it was *dispatched* — which
+/// happens after the build that declared it, hence the interior mutability.
+pub(crate) struct TaskSlot {
+    /// The scope that declared it. The task dies when that scope does; this is
+    /// what makes `cx.task` a subscription with a lifetime rather than a
+    /// fire-and-forget.
+    pub(crate) owner: IdHash,
+    token: CancelToken,
+    handle: RefCell<Option<Box<dyn TaskHandle>>>,
+}
+
+impl TaskSlot {
+    fn new(owner: IdHash) -> TaskSlot {
+        TaskSlot {
+            owner,
+            token: CancelToken::new(),
+            handle: RefCell::new(None),
+        }
+    }
+
+    /// The token to bind this task's [`Sink`](lumen_core::tasks::Sink) to.
+    pub(crate) fn token(&self) -> CancelToken {
+        self.token.clone()
+    }
+
+    /// File the backend handle once the executor has been given the work.
+    pub(crate) fn attach(&self, handle: Box<dyn TaskHandle>) {
+        *self.handle.borrow_mut() = Some(handle);
+    }
+
+    /// Stop the task: raise the token — which is what makes it *correct*, since
+    /// no write of this task's can land afterwards — then ask the backend to
+    /// drop the work if it still owns it.
+    pub(crate) fn cancel(&self) {
+        self.token.cancel();
+        if let Some(h) = self.handle.borrow().as_ref() {
+            h.abort();
+        }
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.token.is_cancelled()
+    }
+}
+
+impl Drop for TaskSlot {
+    /// Teardown backstop: dropping the table (app shutdown) stops its tasks.
+    /// Every *deliberate* cancellation calls [`TaskSlot::cancel`] explicitly,
+    /// because an escaped [`AbortHandle`] keeps the `Rc` alive past removal.
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
+/// Live tasks by identity, owned by `Headless` and threaded into `BuildCx` —
+/// the same shape as [`ScopeCache`].
+pub(crate) type TaskTable = crate::fxhash::HashMap<IdHash, Rc<TaskSlot>>;
+
+/// A handle to a task started with [`BuildCx::abortable_task`], letting app code
+/// stop it early — the "cancel by choice" half of the data layer.
+///
+/// Cheap to clone and **not** `Send`: it is meant to be captured straight into a
+/// [`Handler`], which is `Rc`-based too. That is also the only way to keep one,
+/// since a handle can never live in a signal (`.ai_docs/02-spec-core.md` §4
+/// forbids OS handles in stored state).
+///
+/// Aborting is *additional* to the task's scope lifetime, never a replacement:
+/// the task still dies with its scope whether or not you hold this.
+#[derive(Clone)]
+pub struct AbortHandle {
+    slot: Rc<TaskSlot>,
+    /// Scope-local mirror of "this was aborted", so the UI can *react* to it.
+    ///
+    /// The cancel token itself is a plain `AtomicBool` that no reactive scope
+    /// subscribes to. Cancelling flips no signal, so — since `abort` typically
+    /// stops work rather than producing a value — nothing would mark the frame
+    /// dirty and the view would keep rendering as if the task were still
+    /// running. This signal is what makes the abort observable.
+    flag: Signal<bool>,
+}
+
+impl AbortHandle {
+    pub(crate) fn new(slot: Rc<TaskSlot>, flag: Signal<bool>) -> AbortHandle {
+        AbortHandle { slot, flag }
+    }
+
+    /// Stop the task. Idempotent; safe to call after it has already finished.
+    ///
+    /// Writes through its `Sink` stop landing immediately. Whether the *work*
+    /// stops depends on the backend — see
+    /// [`TaskHandle`]. A blocking job already
+    /// running on a pool thread only stops if it polls `sink.is_cancelled()`.
+    ///
+    /// Takes the runtime like any other state write, because that is what this
+    /// is: it schedules the rebuild that lets the view notice.
+    pub fn abort(&self, cx: &impl lumen_core::state::WriteCx) {
+        self.slot.cancel();
+        self.flag.set(cx, true);
+    }
+
+    /// Whether this task has been cancelled — by [`abort`](Self::abort), by its
+    /// scope dying, or by a newer generation superseding it.
+    ///
+    /// Reading this during a build subscribes to the abort, so a view that shows
+    /// "cancelled" updates on its own.
+    pub fn is_aborted(&self, cx: &impl lumen_core::state::ReadCx) -> bool {
+        // The signal covers explicit aborts reactively; the token also catches
+        // the paths that never run app code (scope death, a superseded
+        // generation) — those always coincide with a rebuild happening anyway.
+        self.flag.get(cx) || self.slot.is_cancelled()
+    }
 }
 
 /// A memoized view scope's cached output plus the signals it read (F1). While
@@ -628,6 +752,15 @@ pub struct BuildCx<'a> {
     /// scope-local signals whose key is absent are swept, bounding a churning
     /// keyed list's memory.
     scope_live: &'a RefCell<std::collections::HashSet<IdHash>>,
+    /// Scopes that took the memo-hit path this build. Their closures did not
+    /// run, so nested `cx.scope` calls inside them never announced themselves in
+    /// `scope_live` — yet those children are still on screen, embedded in the
+    /// reused subtree. The sweep consults this to tell "skipped" from "gone".
+    scope_skipped: &'a RefCell<std::collections::HashSet<IdHash>>,
+    /// Live background tasks (TC1), persisted on `Headless` across builds like
+    /// `scope_cache`. Declaring a task registers its slot here; the sweep that
+    /// drops dead scopes cancels the tasks they own.
+    tasks_table: &'a RefCell<TaskTable>,
     /// Identity of the enclosing `scope` ([`ROOT_ID`] at the root). Keys created
     /// inside a scope fold into this, so a reused component gets its own state.
     /// `Copy`, so re-addressing a signal costs no allocation (ADR-021).
@@ -648,6 +781,8 @@ impl<'a> BuildCx<'a> {
         now_ms: f64,
         scope_cache: &'a RefCell<ScopeCache>,
         scope_live: &'a RefCell<std::collections::HashSet<IdHash>>,
+        scope_skipped: &'a RefCell<std::collections::HashSet<IdHash>>,
+        tasks_table: &'a RefCell<TaskTable>,
         size: lumen_core::geometry::Size,
     ) -> BuildCx<'a> {
         BuildCx {
@@ -661,6 +796,8 @@ impl<'a> BuildCx<'a> {
             menu: RefCell::new(None),
             scope_cache,
             scope_live,
+            scope_skipped,
+            tasks_table,
             prefix_hash: Cell::new(ROOT_ID),
             prefix: RefCell::new(String::new()),
             size,
@@ -718,6 +855,32 @@ impl<'a> BuildCx<'a> {
         self.signal(key, init)
     }
 
+    /// Register a freshly-declared task under `key` (TC1), returning the id to
+    /// stamp on its [`TaskRequest`] and the slot the dispatcher fills in.
+    ///
+    /// The identity is `fold_id(scope, key)` — exactly what [`signal`](Self::signal)
+    /// uses, so a task and its tracker signal share one identity and die together.
+    /// Any previous generation at that identity is cancelled here: this is what
+    /// stops a deps change from leaving two tasks writing the same signal.
+    pub(crate) fn register_task<K: Hash>(&self, key: &K) -> (IdHash, Rc<TaskSlot>) {
+        let owner = self.prefix_hash.get();
+        let id = fold_id(owner, hash_id(key));
+        let slot = Rc::new(TaskSlot::new(owner));
+        // Cancel the superseded generation *explicitly*: an escaped
+        // `AbortHandle` keeps its `Rc` alive past removal, so relying on the
+        // `Drop` impl here would silently leave the old task running.
+        if let Some(prev) = self.tasks_table.borrow_mut().insert(id, Rc::clone(&slot)) {
+            prev.cancel();
+        }
+        (id, slot)
+    }
+
+    /// The slot of an already-running task at `key` in the current scope.
+    pub(crate) fn lookup_task<K: Hash>(&self, key: &K) -> Option<Rc<TaskSlot>> {
+        let id = fold_id(self.prefix_hash.get(), hash_id(key));
+        self.tasks_table.borrow().get(&id).cloned()
+    }
+
     /// A memoized view region (F1). Runs `f` inside a read-tracking window and
     /// caches the subtree it returns; on a later build the closure is **skipped**
     /// (the cached subtree reused) while none of the signals it read has changed.
@@ -726,8 +889,15 @@ impl<'a> BuildCx<'a> {
     /// fine-grained *view* updates: a write re-runs only the scopes that read it
     /// (and their ancestors, whose subtrees embed them).
     ///
-    /// Scopes that emit a frame-request (read the clock, `animate`, `wake_*`, or
-    /// spawn a task) are never cached — they re-run every build, as they must.
+    /// Scopes that emit a frame-request (read the clock, `animate`, `wake_*`) are
+    /// never cached — they re-run every build, as they must.
+    ///
+    /// A scope that *spawns* a task is uncacheable only on the build that
+    /// actually spawns: `cx.task` pushes a request just once per `(key, deps)`,
+    /// so once the task is running the scope becomes cacheable again and is
+    /// memo-skipped like any other. That is deliberate and costs nothing —
+    /// a task's lifetime is tied to its scope being *live* (recorded below
+    /// before the cache check), not to its declaration re-running.
     pub fn scope<K: Hash + Debug>(
         &mut self,
         id: K,
@@ -739,6 +909,13 @@ impl<'a> BuildCx<'a> {
         // The memo-hit path needs identity only — no name, no allocation. This
         // is the steady state for an unchanged list row.
         if let Some(el) = self.cached_if_current(key) {
+            // The closure did not run, so any `cx.scope` nested inside it never
+            // reached the `scope_live` insert above — even though those children
+            // are still on screen inside the reused subtree. Note the skip so the
+            // F5 sweep does not shed their state (or cancel their tasks); walking
+            // the subtree here instead would put an O(scopes) cost on the very
+            // path memoization exists to make cheap.
+            self.scope_skipped.borrow_mut().insert(key);
             return el;
         }
         // Re-run: establish this scope's identity + name prefix, collect its

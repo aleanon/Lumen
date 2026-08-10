@@ -345,6 +345,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             last_build_clock: 0.0,
             scope_cache: RefCell::new(HashMap::default()),
             scope_live: RefCell::new(std::collections::HashSet::new()),
+            scope_skipped: RefCell::new(std::collections::HashSet::new()),
+            tasks_table: RefCell::new(HashMap::default()),
             bg_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
             elided_cache: RefCell::new(None),
@@ -813,6 +815,14 @@ pub struct Headless<
     /// Scope keys accessed during the current build (F5 GC). After the build,
     /// cached scopes + scope-local signals whose key is absent are swept.
     scope_live: RefCell<std::collections::HashSet<IdHash>>,
+    /// Scopes that memo-hit during the current build. Their children never got
+    /// to announce themselves in `scope_live`, so the sweep treats a scope with
+    /// a skipped ancestor as live (F5 × F1).
+    scope_skipped: RefCell<std::collections::HashSet<IdHash>>,
+    /// Live background tasks by identity (TC1). Declaring a task registers its
+    /// slot; `sweep_dead_scopes` cancels the ones whose owning scope vanished,
+    /// and dropping the table on teardown cancels the rest.
+    tasks_table: RefCell<crate::element::TaskTable>,
     /// Retained paint-only prop bindings from the last build (F3.4). A change to
     /// one binding's deps patches its node + repaints, skipping the rebuild.
     bg_bindings: Vec<BoundBg>,
@@ -2434,22 +2444,75 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         self.style_memo.clear();
     }
 
+    /// Whether `scope` is still in the view.
+    ///
+    /// Direct evidence is `scope_live` — the scope announced itself this build.
+    /// Failing that, a scope is *still* live if any ancestor took the memo-hit
+    /// path: that ancestor's cached subtree embeds this one, so it is on screen
+    /// even though its own `cx.scope` call never ran. An ancestor that re-ran
+    /// without visiting it, by contrast, really did drop it.
+    fn scope_is_live(&self, scope: IdHash) -> bool {
+        // The root is not a `cx.scope` and so never announces itself, but it is
+        // alive for as long as the app is. It only reaches this test now that
+        // task owners are sweep candidates — a task declared at the root has
+        // `owner == ROOT_ID` — and treating it as dead would evict every
+        // root-owned signal in the app.
+        if scope == lumen_core::identity::ROOT_ID {
+            return true;
+        }
+        if self.scope_live.borrow().contains(&scope) {
+            return true;
+        }
+        let skipped = self.scope_skipped.borrow();
+        let mut cur = scope;
+        // O(depth), and only for scopes that did not announce themselves.
+        while let Some(parent) = self.rt.parent_scope(cur) {
+            if skipped.contains(&parent) {
+                return true;
+            }
+            cur = parent;
+        }
+        false
+    }
+
     /// F5 GC: drop cached scope subtrees + scope-local signals whose key was not
-    /// accessed this build (a keyed-list item that vanished). Keeps a churning
-    /// list bounded; correct because an absent scope isn't in the view, so a
-    /// fresh rebuild wouldn't produce it either (coherence preserved).
+    /// accessed this build (a keyed-list item that vanished), and cancel the
+    /// background tasks those scopes owned (TC1). Keeps a churning list bounded;
+    /// correct because an absent scope isn't in the view, so a fresh rebuild
+    /// wouldn't produce it either (coherence preserved).
     fn sweep_dead_scopes(&mut self) {
-        let dead: Vec<IdHash> = {
-            let live = self.scope_live.borrow();
+        // Candidates come from both side tables: a scope that is never cacheable
+        // (it reads the clock, or animates) has no `scope_cache` entry at all, so
+        // scanning the cache alone would never notice its death — and its tasks
+        // would outlive it forever.
+        let candidates: std::collections::HashSet<IdHash> = {
             let cache = self.scope_cache.borrow();
+            let tasks = self.tasks_table.borrow();
             cache
                 .keys()
-                .filter(|k| !live.contains(*k))
                 .copied()
+                .chain(tasks.values().map(|slot| slot.owner))
                 .collect()
         };
+        let dead: Vec<IdHash> = candidates
+            .into_iter()
+            .filter(|k| !self.scope_is_live(*k))
+            .collect();
         for k in dead {
             self.scope_cache.borrow_mut().remove(&k);
+            // Cancel before evicting the signals: the token is what stops an
+            // in-flight write from reaching a slot that is about to disappear.
+            // Explicit rather than leaving it to `TaskSlot::drop`, because an
+            // `AbortHandle` captured in a handler keeps the `Rc` alive past
+            // removal. Computed once — `subtree_scopes` walks the whole scope map.
+            let doomed = self.rt.subtree_scopes(k);
+            self.tasks_table.borrow_mut().retain(|_, slot| {
+                let keep = !doomed.contains(&slot.owner);
+                if !keep {
+                    slot.cancel();
+                }
+                keep
+            });
             // Sheds the scope's own signals *and* any nested scope's (ADR-021:
             // identity is a hash, so this walks recorded ownership rather than
             // matching a key prefix).
@@ -2757,12 +2820,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // into `structural_reads` there.
         let rt = self.rt.clone();
         self.scope_live.borrow_mut().clear();
+        self.scope_skipped.borrow_mut().clear();
         let (root_el, mut requests, root_reads) = {
             let mut cx = BuildCx::new(
                 &self.rt,
                 self.clock_ms,
                 &self.scope_cache,
                 &self.scope_live,
+                &self.scope_skipped,
+                &self.tasks_table,
                 self.size,
             );
             let (el, reads) = rt.collect_reads(|| (self.root)(&mut cx));
@@ -2789,16 +2855,37 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // The runtime owns the executor + the deferred-op channel, so it mints
         // the sink here (the executor never leaked into `BuildCx`). Results flow
         // back through the channel and are applied at the top of the next pump.
+        //
+        // TC1: the sink is bound to the task's cancel token, and the backend
+        // handle is filed in the slot the declaration registered — this is the
+        // only place the two halves of cancellation meet, because the token
+        // exists from *declare* time while the handle only exists from here on.
         let tasks = std::mem::take(&mut self.requests.tasks);
         for req in tasks {
-            let sink = self.rt.make_sink_with(self.task_waker.clone());
-            match req {
-                crate::element::TaskRequest::Blocking(job) => {
-                    self.executor.spawn_blocking(Box::new(move || job(sink)));
+            // The sweep above may already have cancelled it (a task declared
+            // inside a scope that this same build retired). Don't start work
+            // that is dead on arrival.
+            let slot = self.tasks_table.borrow().get(&req.id).cloned();
+            let Some(slot) = slot else { continue };
+            if slot.is_cancelled() {
+                continue;
+            }
+            let sink = self
+                .rt
+                .make_sink_for(self.task_waker.clone(), req.token.clone());
+            let handle = match req.kind {
+                crate::element::TaskKind::Blocking(job) => {
+                    self.executor.spawn_blocking(Box::new(move || job(sink)))
                 }
-                crate::element::TaskRequest::Future(make) => {
-                    self.executor.spawn(make(sink));
-                }
+                crate::element::TaskKind::Future(make) => self.executor.spawn(make(sink)),
+            };
+            slot.attach(handle);
+            // An `InlineSpawner` runs the work *inside* `spawn` above, so a task
+            // that cancelled itself mid-run would have its handle attached after
+            // the fact. Re-check and abort so the slot never holds a live handle
+            // for finished-and-cancelled work.
+            if slot.is_cancelled() {
+                slot.cancel();
             }
         }
 

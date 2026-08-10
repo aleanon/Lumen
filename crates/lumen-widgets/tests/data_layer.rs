@@ -203,3 +203,204 @@ fn stale_generation_result_is_discarded() {
         "late gen-1 result discarded: {t}"
     );
 }
+
+// --- TC1: cancellation ------------------------------------------------------
+
+/// A task is owned by the scope that declared it. When a keyed row leaves the
+/// view, the row's scope is swept — and the task must go with it, or it keeps
+/// writing signals that no longer exist.
+///
+/// **Regression:** before TC1 the surviving task's `sink.update` reached an
+/// evicted slot and panicked the UI thread inside `drain_deferred`
+/// (`state.rs`'s `expect("signal slot missing")`).
+#[test]
+fn a_task_dies_with_the_scope_that_declared_it() {
+    let spawner = ManualSpawner::new();
+    let mut a = App::new(|cx: &mut BuildCx| {
+        let rows = cx.signal("rows", || 1usize);
+        let hits = cx.signal("hits", || 0i32);
+        let n = rows.get(cx.runtime());
+        let kids: Vec<Element> = (0..n)
+            .map(|i| {
+                cx.scope(i, move |cx| {
+                    // Scope-*local*: evicted along with the row.
+                    let local = cx.signal("local", || 0i32);
+                    cx.task_blocking("t", (), move |(), sink| {
+                        sink.update(local, |v| *v += 1);
+                        sink.update(hits, |v| *v += 1);
+                    });
+                    lumen_widgets::widgets::text(format!("row{i}={}", local.get(cx.runtime())))
+                        .id("r")
+                })
+            })
+            .collect();
+        lumen_widgets::widgets::column(kids)
+    })
+    .with_executor(spawner.clone())
+    .run_headless(Size::new(200.0, 100.0));
+
+    a.pump(); // the row's task is recorded, not yet run
+    assert_eq!(spawner.pending(), 1, "one job queued");
+
+    // Drop the row. The sweep cancels its task and evicts `local`.
+    let rows = a.runtime().signal("rows", || 0usize);
+    rows.set(a.runtime(), 0);
+    a.pump();
+    assert_eq!(
+        spawner.pending(),
+        0,
+        "cancelling removed the job the backend had not started"
+    );
+
+    // Nothing left to run, and the drain must stay panic-free.
+    spawner.run_pending();
+    a.pump();
+    let hits = a.runtime().signal("hits", || 0i32);
+    assert_eq!(hits.get(a.runtime()), 0, "a dead scope's task never wrote");
+}
+
+/// The other half of the lifetime rule: a scope that is merely *memo-skipped* is
+/// still in the view, so its task must survive. Without transitive liveness this
+/// is the failure that would bite hardest — a subscription silently dying the
+/// first time its parent didn't need rebuilding.
+#[test]
+fn a_memo_skipped_scope_keeps_its_task() {
+    let spawner = ManualSpawner::new();
+    let mut a = App::new(|cx: &mut BuildCx| {
+        let sib = cx.signal("sib", || 0i32);
+        let hits = cx.signal("hits", || 0i32);
+        lumen_widgets::widgets::column(vec![
+            cx.scope("outer", move |cx| {
+                cx.scope("inner", move |cx| {
+                    cx.task_blocking("t", (), move |(), sink| {
+                        sink.update(hits, |v| *v += 1);
+                    });
+                    lumen_widgets::widgets::text("inner").id("i")
+                })
+            }),
+            cx.scope("s", move |cx| {
+                lumen_widgets::widgets::text(format!("sib={}", sib.get(cx.runtime()))).id("s")
+            }),
+        ])
+    })
+    .with_executor(spawner.clone())
+    .run_headless(Size::new(200.0, 100.0));
+
+    a.pump();
+    assert_eq!(spawner.pending(), 1);
+
+    // Touch only the sibling: "outer" memo-hits, so "inner" never re-announces
+    // itself — but it is still on screen inside the reused subtree.
+    let sib = a.runtime().signal("sib", || 0i32);
+    sib.set(a.runtime(), 1);
+    a.pump();
+    assert_eq!(spawner.pending(), 1, "the task was not cancelled");
+
+    settle(&mut a);
+    let hits = a.runtime().signal("hits", || 0i32);
+    assert_eq!(hits.get(a.runtime()), 1, "it ran and its write landed");
+}
+
+/// A `deps` change starts a new generation — and must stop the old one, or two
+/// tasks end up writing the same signal.
+#[test]
+fn a_deps_change_cancels_the_superseded_generation() {
+    let spawner = ManualSpawner::new();
+    let mut a = App::new(|cx: &mut BuildCx| {
+        let dep = cx.signal("dep", || 1i32);
+        let seen = cx.signal("seen", String::new);
+        let d = dep.get(cx.runtime());
+        cx.task_blocking("job", d, move |d, sink| {
+            sink.update(seen, move |s| s.push_str(&format!("{d};")));
+        });
+        Element::text(seen.get(cx.runtime()))
+    })
+    .with_executor(spawner.clone())
+    .run_headless(Size::new(200.0, 60.0));
+
+    a.pump(); // gen 1 queued, not run
+    let dep = a.runtime().signal("dep", || 0i32);
+    dep.set(a.runtime(), 2);
+    a.pump(); // gen 2 queued; gen 1 cancelled and dropped from the queue
+    assert_eq!(
+        spawner.pending(),
+        1,
+        "only the current generation is queued"
+    );
+
+    settle(&mut a);
+    let seen = a.runtime().signal("seen", String::new);
+    assert_eq!(
+        seen.get(a.runtime()),
+        "2;",
+        "the superseded generation never wrote"
+    );
+}
+
+/// `abortable_task` hands app code a handle it can fire from a normal handler —
+/// the "cancel by choice" half. The handle is `Rc`-based precisely so it can be
+/// captured into a button like this (no handle can live in a signal).
+#[test]
+fn an_abort_handle_from_a_handler_stops_the_task() {
+    let spawner = ManualSpawner::new();
+    let mut a = App::new(|cx: &mut BuildCx| {
+        let p = cx.signal("p", || 0i32);
+        let dl = cx.abortable_task_blocking("job", (), move |(), sink| {
+            for step in 1..=5 {
+                if sink.is_cancelled() {
+                    break;
+                }
+                sink.set(p, step);
+            }
+        });
+        lumen_widgets::widgets::column(vec![
+            lumen_widgets::widgets::text(format!("p={}", p.get(cx.runtime()))).id("p"),
+            lumen_widgets::widgets::button("Cancel", move |rt| dl.abort(rt)).id("cancel"),
+        ])
+    })
+    .with_executor(spawner.clone())
+    .run_headless(Size::new(200.0, 100.0));
+
+    a.pump();
+    assert_eq!(spawner.pending(), 1, "task queued");
+
+    click(&mut a, "cancel");
+    assert_eq!(spawner.pending(), 0, "the handler aborted it before it ran");
+
+    settle(&mut a);
+    assert!(
+        a.semantics_json().to_string().contains("p=0"),
+        "no progress was streamed"
+    );
+}
+
+/// Re-declaring an unchanged `abortable_task` must hand back a handle to the
+/// *running* task rather than starting a second one.
+#[test]
+fn re_declaring_an_abortable_task_does_not_restart_it() {
+    let spawner = ManualSpawner::new();
+    let mut a = App::new(|cx: &mut BuildCx| {
+        let tick = cx.signal("tick", || 0i32);
+        let runs = cx.signal("runs", || 0i32);
+        let h = cx.abortable_task_blocking("job", (), move |(), sink| {
+            sink.update(runs, |v| *v += 1);
+        });
+        assert!(
+            !h.is_aborted(cx.runtime()),
+            "a live task reports itself live"
+        );
+        Element::text(format!("tick={}", tick.get(cx.runtime())))
+    })
+    .with_executor(spawner.clone())
+    .run_headless(Size::new(120.0, 40.0));
+
+    a.pump();
+    assert_eq!(spawner.pending(), 1);
+    // Force more builds; the task must not be queued again.
+    let tick = a.runtime().signal("tick", || 0i32);
+    tick.set(a.runtime(), 1);
+    a.pump();
+    tick.set(a.runtime(), 2);
+    a.pump();
+    assert_eq!(spawner.pending(), 1, "still exactly one job");
+}

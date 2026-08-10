@@ -3,14 +3,30 @@
 //! dispatches it after the build on its executor, and results flow back through
 //! the deferred-op channel into a backing signal cell — so all state writes
 //! happen on the UI thread inside `pump` (determinism preserved).
+//!
+//! # Lifetime (TC1)
+//!
+//! Every task is owned by the scope that declared it and is cancelled when that
+//! scope leaves the view — a `cx.task` is a subscription with a lifetime, not a
+//! fire-and-forget. A change of `deps` likewise cancels the generation it
+//! supersedes, so a task never races its own replacement.
+//!
+//! Cancellation is *always* correct — no write of a cancelled task ever lands —
+//! but only sometimes prompt: see [`lumen_core::tasks::TaskHandle`] for what each
+//! backend can actually stop. Long-running work should poll
+//! [`Sink::is_cancelled`].
+//!
+//! [`abortable_task`](BuildCx::abortable_task) adds early, on-demand
+//! cancellation on top of that lifetime; it never extends it.
 
-use crate::element::{BuildCx, TaskRequest};
+use crate::element::{AbortHandle, BuildCx, TaskKind, TaskRequest, TaskSlot};
 use lumen_core::state::{Signal, State};
 use lumen_core::tasks::{MaybeSend, Sink};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 
 /// Default resource error: a message string.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,7 +147,7 @@ impl BuildCx<'_> {
         Fut: Future<Output = Result<T, E>> + MaybeSend + 'static,
     {
         self.resource_impl(key, deps, |deps, sig, gen| {
-            TaskRequest::Future(Box::new(move |sink| {
+            TaskKind::Future(Box::new(move |sink| {
                 Box::pin(async move {
                     let r = fetch(deps).await;
                     finish(&sink, sig, gen, r);
@@ -154,7 +170,7 @@ impl BuildCx<'_> {
         D: Hash + MaybeSend + 'static,
     {
         self.resource_impl(key, deps, |deps, sig, gen| {
-            TaskRequest::Blocking(Box::new(move |sink| {
+            TaskKind::Blocking(Box::new(move |sink| {
                 let r = fetch(deps);
                 finish(&sink, sig, gen, r);
             }))
@@ -165,7 +181,7 @@ impl BuildCx<'_> {
         &self,
         key: &str,
         deps: D,
-        make_req: impl FnOnce(D, Signal<ResourceCell<T, E>>, u64) -> TaskRequest,
+        make_kind: impl FnOnce(D, Signal<ResourceCell<T, E>>, u64) -> TaskKind,
     ) -> Resource<T, E>
     where
         T: State + Clone,
@@ -183,7 +199,16 @@ impl BuildCx<'_> {
                 c.gen = new_gen;
                 c.started = true;
             });
-            self.tasks.borrow_mut().push(make_req(deps, sig, new_gen));
+            // TC1: registering cancels the superseded fetch. The generation guard
+            // in `finish` already discarded its *result*; the token additionally
+            // stops it burning a thread (where the backend can) — worth having
+            // for a row that scrolled off mid-request.
+            let (id, slot) = self.register_task(&key);
+            self.tasks.borrow_mut().push(TaskRequest {
+                id,
+                token: slot.token(),
+                kind: make_kind(deps, sig, new_gen),
+            });
         }
         sig.with(self.runtime(), |c| Resource {
             value: c.value.clone(),
@@ -192,9 +217,24 @@ impl BuildCx<'_> {
         })
     }
 
-    /// Spawn a long-lived async task (e.g. a stream) once per (key, deps). The
-    /// closure gets a [`crate::Sink`] to push results back over time (`sink.set` /
-    /// `sink.update` a signal). Use for streaming/subscriptions.
+    /// Spawn a long-lived async task (e.g. a stream) once per (key, deps) — the
+    /// framework's subscription primitive. The closure gets a [`Sink`] to
+    /// push results back over time (`sink.set` / `sink.update` a signal).
+    ///
+    /// **Lifetime:** the task lives as long as the scope that declared it. It is
+    /// cancelled when that scope leaves the view, and when a change of `deps`
+    /// supersedes it. Declaring it inside `cx.scope(item.id, …)` is therefore how
+    /// you scope a subscription to a list row or a screen.
+    ///
+    /// Declaring it at the root ties it to the app's lifetime — an `if` around
+    /// the call does **not** stop it, because a task that is simply not
+    /// re-declared is not the same thing as one whose scope died. Use
+    /// [`abortable_task`](Self::abortable_task) when you want to stop it on
+    /// demand.
+    ///
+    /// Long-running loops should poll [`Sink::is_cancelled`] to stop promptly;
+    /// correctness does not depend on it (writes stop landing regardless), but
+    /// a pool thread otherwise keeps working for nothing.
     pub fn task<D, Fut>(
         &self,
         key: &str,
@@ -205,12 +245,14 @@ impl BuildCx<'_> {
         Fut: Future<Output = ()> + MaybeSend + 'static,
     {
         self.task_impl(key, deps, |deps| {
-            TaskRequest::Future(Box::new(move |sink| Box::pin(f(deps, sink))))
+            TaskKind::Future(Box::new(move |sink| Box::pin(f(deps, sink))))
         });
     }
 
     /// Spawn a blocking task (e.g. a heavy compute job streaming progress) once
-    /// per (key, deps). The closure gets a [`crate::Sink`] to push results/progress.
+    /// per (key, deps). The closure gets a [`Sink`] to push results/progress.
+    ///
+    /// Same lifetime rules as [`task`](Self::task).
     pub fn task_blocking<D>(
         &self,
         key: &str,
@@ -220,23 +262,110 @@ impl BuildCx<'_> {
         D: Hash + MaybeSend + 'static,
     {
         self.task_impl(key, deps, |deps| {
-            TaskRequest::Blocking(Box::new(move |sink| f(deps, sink)))
+            TaskKind::Blocking(Box::new(move |sink| f(deps, sink)))
         });
     }
 
-    fn task_impl<D>(&self, key: &str, deps: D, make_req: impl FnOnce(D) -> TaskRequest)
+    /// [`task`](Self::task), plus an [`AbortHandle`] for stopping it on demand.
+    ///
+    /// The handle is `Rc`-based and cheap to clone, so it captures straight into
+    /// a button handler. It cannot be stored in a signal — no handle can — and
+    /// does not need to be: re-declaring the task on a later build returns a
+    /// handle to the *same* running task, not a new one.
+    ///
+    /// ```ignore
+    /// let dl = cx.abortable_task_blocking("download", (), |_, sink| {
+    ///     for chunk in reader {
+    ///         if sink.is_cancelled() { break; }
+    ///         sink.update(progress, move |p| *p += chunk.len() as u64);
+    ///     }
+    /// });
+    /// widgets::button("Cancel", move |_| dl.abort())
+    /// ```
+    pub fn abortable_task<D, Fut>(
+        &self,
+        key: &str,
+        deps: D,
+        f: impl FnOnce(D, Sink) -> Fut + MaybeSend + 'static,
+    ) -> AbortHandle
+    where
+        D: Hash + MaybeSend + 'static,
+        Fut: Future<Output = ()> + MaybeSend + 'static,
+    {
+        let (slot, fresh) = self.task_impl(key, deps, |deps| {
+            TaskKind::Future(Box::new(move |sink| Box::pin(f(deps, sink))))
+        });
+        self.abortable(key, slot, fresh)
+    }
+
+    /// [`task_blocking`](Self::task_blocking), plus an [`AbortHandle`].
+    /// See [`abortable_task`](Self::abortable_task).
+    pub fn abortable_task_blocking<D>(
+        &self,
+        key: &str,
+        deps: D,
+        f: impl FnOnce(D, Sink) + MaybeSend + 'static,
+    ) -> AbortHandle
+    where
+        D: Hash + MaybeSend + 'static,
+    {
+        let (slot, fresh) = self.task_impl(key, deps, |deps| {
+            TaskKind::Blocking(Box::new(move |sink| f(deps, sink)))
+        });
+        self.abortable(key, slot, fresh)
+    }
+
+    /// Pair a task's slot with the scope-local signal that makes its abort
+    /// observable. Keyed off the task's own key so it dies with the task.
+    ///
+    /// `fresh` marks a new generation, which clears the flag: the signal is
+    /// keyed by task identity, not by generation, so without this a task
+    /// restarted after a cancel would still report itself aborted forever.
+    fn abortable(&self, key: &str, slot: Rc<TaskSlot>, fresh: bool) -> AbortHandle {
+        let flag = self.signal((key, "lumen.aborted"), || false);
+        if fresh && flag.get(self.runtime()) {
+            flag.set(self.runtime(), false);
+        }
+        AbortHandle::new(slot, flag)
+    }
+
+    /// Declare a task, returning its slot and whether this call *started* it.
+    /// A new `(key, deps)` gets a fresh slot; otherwise the already-running
+    /// task's slot comes back, so a re-declaration hands out a handle to the
+    /// same task rather than restarting it.
+    fn task_impl<D>(
+        &self,
+        key: &str,
+        deps: D,
+        make_kind: impl FnOnce(D) -> TaskKind,
+    ) -> (Rc<TaskSlot>, bool)
     where
         D: Hash,
     {
         let dh = hash_deps(&deps);
         let sig: Signal<TaskTracker> = self.signal(key, TaskTracker::default);
         let changed = sig.with(self.runtime(), |t| !t.started || t.deps_hash != dh);
-        if changed {
-            sig.update(self.runtime(), move |t| {
-                t.deps_hash = dh;
-                t.started = true;
-            });
-            self.tasks.borrow_mut().push(make_req(deps));
+        if !changed {
+            // Steady state. The slot outlives the request, so it is still here
+            // unless the scope died — in which case this build would not be
+            // running. Fall back to an inert slot rather than panicking.
+            let slot = self
+                .lookup_task(&key)
+                .unwrap_or_else(|| self.register_task(&key).1);
+            return (slot, false);
         }
+        sig.update(self.runtime(), move |t| {
+            t.deps_hash = dh;
+            t.started = true;
+        });
+        // Registering cancels the previous generation — without this a deps
+        // change leaves two tasks writing the same signal.
+        let (id, slot) = self.register_task(&key);
+        self.tasks.borrow_mut().push(TaskRequest {
+            id,
+            token: slot.token(),
+            kind: make_kind(deps),
+        });
+        (slot, true)
     }
 }

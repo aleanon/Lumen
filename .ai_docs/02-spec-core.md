@@ -141,6 +141,11 @@ impl BuildCx {
     pub fn scope<K: Hash + Debug>(&mut self, key: K, f: impl FnOnce(&mut BuildCx) -> Element) -> Element;
     /// Async data keyed by (name, deps): re-fetches when deps change.
     pub fn resource<T, E>(&self, name: &str, deps: …, fetch: …) -> Resource<T, E>; // value + error + loading
+    /// Long-lived background work keyed by (name, deps) — the subscription
+    /// primitive. Lifetime = the declaring scope (TC1).
+    pub fn task<D, Fut>(&self, name: &str, deps: D, f: impl FnOnce(D, Sink) -> Fut);
+    /// `task`, plus a handle app code can abort early.
+    pub fn abortable_task<D, Fut>(&self, name: &str, deps: D, f: …) -> AbortHandle;
 }
 // `cx.memo` / `cx.effect` (W.3): scope-key-prefixed forwards to the
 // spec-shaped `Runtime::memo`/`Runtime::effect`.
@@ -150,6 +155,18 @@ impl BuildCx {
 // foreign wakers. Bounds are `MaybeSend` (Send native, nothing on wasm) so
 // one API fits tokio handles, the thread pool, and the RAF-driven
 // `WasmSpawner`. Recipes: the `lumen-data-async` skill.
+//
+// TC1: `Spawner::spawn`/`spawn_blocking` return `Box<dyn TaskHandle>` (still
+// object-safe, so `Box<dyn Spawner>` survives). Every task is owned by the
+// scope that declared it and cancelled when that scope leaves the view or a
+// deps change supersedes it. Cancellation is always *correct* — a `CancelToken`
+// on the `Sink` drops queued ops at APPLY time, so a task can no longer reach
+// signals evicted with its scope — but only sometimes *prompt*: `abort` stops
+// work the backend still owns (a queued pool job, a wasm future, a tokio
+// handle) and cannot stop a blocking job already running, which must poll
+// `sink.is_cancelled()`. `AbortHandle::abort(rt)` takes the runtime because it
+// writes a scope-local flag: without it the abort changes no signal, no frame
+// is scheduled, and the view never notices.
 ```
 
 Rules (enforced by the type system where possible, by review otherwise):

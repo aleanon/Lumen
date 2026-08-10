@@ -551,26 +551,9 @@ impl Runtime {
     /// key↔id mapping is kept (cheap), so re-adding the same key re-creates the
     /// slot from its initializer. Returns how many slots were removed.
     pub fn evict_scope(&self, scope: IdHash) -> usize {
+        // Everything nested under `scope` goes too.
+        let dead = self.subtree_scopes(scope);
         let mut b = self.inner.borrow_mut();
-
-        // Everything nested under `scope` goes too. Identity is a hash, so
-        // descendants can't be found by prefix the way string keys allowed —
-        // they're walked from the recorded scope tree instead. Iterating to a
-        // fixed point over `scope_parent` (scopes, not signals — a small map)
-        // keeps eviction transitive regardless of nesting depth or order.
-        let mut dead: HashSet<IdHash> = HashSet::new();
-        dead.insert(scope);
-        loop {
-            let mut grew = false;
-            for (child, parent) in b.scope_parent.iter() {
-                if dead.contains(parent) && dead.insert(*child) {
-                    grew = true;
-                }
-            }
-            if !grew {
-                break;
-            }
-        }
 
         let ids: Vec<SignalId> = b
             .slots
@@ -586,6 +569,39 @@ impl Runtime {
         }
         b.scope_parent.retain(|child, _| !dead.contains(child));
         n
+    }
+
+    /// `scope` plus every scope nested inside it, transitively.
+    ///
+    /// Identity is a hash, so descendants can't be found by prefix the way
+    /// string keys allowed — they're walked from the recorded scope tree
+    /// instead. Iterating to a fixed point over `scope_parent` (scopes, not
+    /// signals — a small map) keeps this transitive regardless of nesting depth
+    /// or insertion order.
+    pub fn subtree_scopes(&self, scope: IdHash) -> HashSet<IdHash> {
+        let b = self.inner.borrow();
+        let mut set: HashSet<IdHash> = HashSet::new();
+        set.insert(scope);
+        loop {
+            let mut grew = false;
+            for (child, parent) in b.scope_parent.iter() {
+                if set.contains(parent) && set.insert(*child) {
+                    grew = true;
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+        set
+    }
+
+    /// The scope `child` was recorded as nested directly inside, if any.
+    ///
+    /// Walking *up* is O(depth) where [`subtree_scopes`](Self::subtree_scopes)
+    /// is O(scopes²) — the F5 sweep uses this to test one candidate cheaply.
+    pub fn parent_scope(&self, child: IdHash) -> Option<IdHash> {
+        self.inner.borrow().scope_parent.get(&child).copied()
     }
 
     /// Record that reactive scope `child` is nested directly inside `parent`.
