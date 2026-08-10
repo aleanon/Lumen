@@ -99,6 +99,10 @@ pub struct Wgpu {
     /// supports for `TARGET_FORMAT`). Gives anti-aliasing to tessellated paths
     /// (R1.3); the SDF rect fill is alpha-coverage based and unaffected.
     sample_count: u32,
+    /// The largest 2-D texture this device will accept, resolved once at
+    /// construction (see `Wgpu::new`). Guards read it instead of round-tripping
+    /// to `device.limits()`.
+    max_dim: u32,
 }
 
 /// A live window surface plus the fullscreen-blit pipeline that copies a rendered
@@ -665,7 +669,20 @@ impl Wgpu {
             &wgpu::DeviceDescriptor {
                 label: Some("lumen-gpu"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                // `downlevel_defaults()` alone pins `max_texture_dimension_2d`
+                // to 2048 — and REQUESTED limits are what wgpu validates
+                // against, so that is a hard ceiling even on a 32k-capable GPU.
+                // It made a tall shadow sprite, a large image asset, and any
+                // window over 2048 physical px a hard panic.
+                //
+                // `using_resolution` copies exactly the three
+                // `max_texture_dimension_*` fields from the adapter and nothing
+                // else, so every storage-buffer / workgroup / inter-stage limit
+                // the downlevel profile exists to constrain is untouched. The
+                // GPU path is `cfg(not(target_arch = "wasm32"))`, so no web
+                // target is affected.
+                required_limits:
+                    wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
                 // Favor low memory over large pre-reserved pools: the default
                 // `Performance` hint makes gpu-alloc keep big blocks, which on the
                 // NVIDIA driver mapped ~128 MB per device. A UI allocates little
@@ -678,6 +695,16 @@ impl Wgpu {
 
         let info = adapter.get_info();
         let (adapter_name, adapter_backend) = (info.name, info.backend);
+
+        // Cap what we will actually allocate. A 16384x16384 RGBA texture is
+        // 1 GiB and the readback buffer would follow it, so take the adapter's
+        // resolution but stop at 8192 — enough for an 8K window, and the point
+        // at which "the GPU says yes" stops being a good reason to.
+        const MAX_DIM_CEILING: u32 = 8192;
+        let max_dim = device
+            .limits()
+            .max_texture_dimension_2d
+            .min(MAX_DIM_CEILING);
 
         // Pick the best MSAA level the adapter supports for our target format
         // (paths get geometry AA from it). downlevel hardware may only do 1×.
@@ -1117,6 +1144,7 @@ impl Wgpu {
             path_pipeline,
             targets: std::cell::RefCell::new(TargetPool::default()),
             retained_root: std::cell::RefCell::new(None),
+            max_dim,
             adapter_name,
             adapter_backend,
             gradient_pipeline,
@@ -1501,6 +1529,12 @@ impl Wgpu {
     /// from outside (wgpu exposes no allocation counter).
     pub fn pooled_target_count(&self) -> usize {
         self.targets.borrow().by_key.values().map(Vec::len).sum()
+    }
+
+    /// The largest 2-D texture this device accepts (capped at 8192). Content
+    /// needing more is downscaled or clamped rather than panicking.
+    pub fn max_texture_dimension(&self) -> u32 {
+        self.max_dim
     }
 
     /// True when the OpenGL backend answered. GL is only selected when no
