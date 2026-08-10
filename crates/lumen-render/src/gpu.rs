@@ -331,6 +331,19 @@ struct RectInstance {
 }
 
 impl RectInstance {
+    /// An image blit sampling `uv` (normalized `[u0, v0, du, dv]`) of its
+    /// texture. `radii` is repurposed as the uv slot; see the image pipeline's
+    /// vertex layout.
+    fn image(rect: [f32; 4], uv: [f32; 4]) -> RectInstance {
+        RectInstance {
+            rect,
+            color: [1.0, 1.0, 1.0, 1.0],
+            radii: uv,
+            bcolor: [0.0; 4],
+            misc: [0.0; 4],
+        }
+    }
+
     /// A plain instance (square corners, no border) — used for image blits.
     fn plain(rect: [f32; 4], color: [f32; 4]) -> RectInstance {
         RectInstance {
@@ -798,7 +811,11 @@ impl Wgpu {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<RectInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4],
+                    // `2` lands at offset 32 == `RectInstance::radii`, which an
+                    // image instance does not otherwise use — it carries the
+                    // normalized source rect. Same trick the glyph pipeline uses
+                    // with `GlyphInstance.uv`, so no new struct.
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
                 }],
                 compilation_options: Default::default(),
             },
@@ -1878,24 +1895,45 @@ impl Wgpu {
                 }
                 DrawCmd::Image {
                     id,
+                    src_rect,
                     dst_rect,
                     quality,
-                    ..
                 } => {
                     if let Some(img) = list.images.get(id.0 as usize) {
                         flush_rects(device, &mut ops, &mut pend_rects);
                         flush_paths(device, &mut ops, &mut pend_paths);
                         let bind = self.upload_image(img, *quality);
+                        // Normalize with the CPU backend's clamping semantics
+                        // (`cpu.rs` `draw_image`): src is in IMAGE PIXELS and is
+                        // clipped to the image, so the two backends agree on a
+                        // partially out-of-bounds rect. Normalizing here also
+                        // keeps the uv correct if the texture is later
+                        // downscaled to fit the device limit.
+                        let (iw, ih) = (img.width() as f64, img.height() as f64);
+                        let sx = src_rect.x0.max(0.0);
+                        let sy = src_rect.y0.max(0.0);
+                        let sw = src_rect.width().max(0.0).min(iw - sx);
+                        let sh = src_rect.height().max(0.0).min(ih - sy);
+                        let uv = if iw > 0.0 && ih > 0.0 && sw > 0.0 && sh > 0.0 {
+                            [
+                                (sx / iw) as f32,
+                                (sy / ih) as f32,
+                                (sw / iw) as f32,
+                                (sh / ih) as f32,
+                            ]
+                        } else {
+                            [0.0, 0.0, 1.0, 1.0]
+                        };
                         let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("img-instance"),
-                            contents: bytemuck_lite::bytes_of(&RectInstance::plain(
+                            contents: bytemuck_lite::bytes_of(&RectInstance::image(
                                 [
                                     dst_rect.x0 as f32,
                                     dst_rect.y0 as f32,
                                     dst_rect.width() as f32,
                                     dst_rect.height() as f32,
                                 ],
-                                [1.0, 1.0, 1.0, 1.0],
+                                uv,
                             )),
                             usage: wgpu::BufferUsages::VERTEX,
                         });
@@ -3230,12 +3268,17 @@ fn rect_fs(in: RectVsOut) -> @location(0) vec4<f32> {
 @vertex
 fn image_vs(@builtin(vertex_index) vi: u32,
             @location(0) rect: vec4<f32>,
-            @location(1) color: vec4<f32>) -> VsOut {
+            @location(1) color: vec4<f32>,
+            @location(2) uvr: vec4<f32>) -> VsOut {
     let c = corner(vi);
     var o: VsOut;
     o.pos = to_ndc(rect.xy + c * rect.zw);
     o.color = color;
-    o.uv = c;
+    // `uvr` is the NORMALIZED source rect [u0, v0, du, dv]. This used to be
+    // `o.uv = c`, i.e. the whole texture regardless of `DrawCmd::Image.src_rect`
+    // — so the shadow band carve-out, the only producer that draws a partial
+    // region, painted the entire sprite squashed into each band.
+    o.uv = uvr.xy + c * uvr.zw;
     return o;
 }
 

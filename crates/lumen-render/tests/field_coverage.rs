@@ -25,6 +25,17 @@
 //!
 //! # Known gaps are asserted, not skipped
 //!
+//! # The case list is hand-written, and that is this file's weakness
+//!
+//! This test claims each backend consumes *every* display-list field, but it
+//! only checks the fields someone enumerated in `cases()`. `Image::src_rect`
+//! was absent from that list for as long as the file existed, and the GPU
+//! backend was silently dropping it the whole time (`DrawCmd::Image { .., .. }`
+//! destructured it away) — so every partial-region blit, i.e. every box-shadow
+//! band, painted the whole sprite squashed into the band. A hand-written list
+//! proves what was remembered, not what exists. **When you add a field to
+//! `DrawCmd`, add a case here in the same commit.**
+//!
 //! `GPU_IGNORES` lists fields the GPU backend does not consume today. They are
 //! asserted to STILL be ignored, so the list is a tripwire in both directions:
 //! implementing one fails this test until the entry is removed, and a new gap
@@ -137,6 +148,15 @@ fn cases() -> Vec<FieldCase> {
             ),
         },
         FieldCase {
+            field: "Image::src_rect",
+            // A 2x1 image, left half red and right half blue, blitted into the
+            // same destination from each half. A backend that ignores
+            // `src_rect` samples the whole texture both times and renders them
+            // identically — which is exactly what the GPU did.
+            a: image_src(Rect::new(0.0, 0.0, 1.0, 1.0)),
+            b: image_src(Rect::new(1.0, 0.0, 2.0, 1.0)),
+        },
+        FieldCase {
             field: "Rect::radii",
             a: {
                 let mut dl = DisplayList::new();
@@ -155,6 +175,22 @@ fn cases() -> Vec<FieldCase> {
             },
         },
     ]
+}
+
+/// A 2x1 red|blue image drawn into the frame, sampling `src`.
+fn image_src(src: Rect) -> DisplayList {
+    let mut dl = DisplayList::new();
+    let mut px = Vec::new();
+    px.extend_from_slice(&Color::srgb8(0xd0, 0x20, 0x20, 0xff).to_srgb8());
+    px.extend_from_slice(&Color::srgb8(0x20, 0x20, 0xd0, 0xff).to_srgb8());
+    dl.images.push(RgbaImage::from_raw(2, 1, px));
+    dl.push(DrawCmd::Image {
+        id: ImageId(0),
+        src_rect: src,
+        dst_rect: Rect::new(40.0, 30.0, 160.0, 110.0),
+        quality: Filter::Nearest,
+    });
+    dl
 }
 
 fn cpu_render(dl: &DisplayList) -> RgbaImage {
