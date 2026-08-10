@@ -4262,9 +4262,48 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 let h = bounds.height();
                 let margin = (sh.spread.max(0.0) + sh.blur).ceil() + 2.0;
                 let [r, g, b, a] = sh.color.to_srgb8();
+                // 9-slice: the sprite is sized by STYLE, not by the element.
+                //
+                // `blurred` runs three box passes of radius `blur` per axis, so
+                // a pixel is influenced by anything within `3 * blur` of it —
+                // note 3x, not 1x. Beyond `radius + spread + 3 * blur` from a
+                // corner arc, the blurred edge stops changing along that edge,
+                // so one strip of it repeats. Rasterizing a shorter synthetic
+                // box and stretching that strip is therefore EXACT, not an
+                // approximation, and nearest sampling keeps it exact because
+                // every row of a constant strip is identical.
+                //
+                // Without this a 12 016 px card produced a 12 016 px sprite and
+                // panicked in `create_texture`; it also blurred the whole area
+                // every time the card resized, and thrashed the 64-entry cache
+                // with one sprite per distinct size.
+                // `+ 1` is defensive margin, not a fix for an observed failure:
+                // the strip lands at exactly `margin + inv`, which is the last
+                // index the corner arc can reach, and `shadow_slice.rs` is
+                // byte-identical with or without it. It costs 2 px of sprite and
+                // covers fractional radius/blur, where the reach does not land
+                // on an integer.
+                let inv = (radius + sh.spread).max(0.0) + 3.0 * sh.blur.max(0.0) + 1.0;
+                let min_sliceable = 2.0 * inv + 1.0;
+                // `LUMEN_NO_SHADOW_SLICE` forces the pre-slice path. It exists
+                // for `shadow_slice.rs`, which byte-compares the two: no golden
+                // in the suite has a shadowed element over the threshold, so
+                // without an explicit equivalence test the sliced path would
+                // ship completely unexercised.
+                let no_slice = std::env::var_os("LUMEN_NO_SHADOW_SLICE").is_some();
+                let w_syn = if w > min_sliceable && !no_slice {
+                    min_sliceable
+                } else {
+                    w
+                };
+                let h_syn = if h > min_sliceable && !no_slice {
+                    min_sliceable
+                } else {
+                    h
+                };
                 let key = (
-                    (w * 4.0).round() as i32,
-                    (h * 4.0).round() as i32,
+                    (w_syn * 4.0).round() as i32,
+                    (h_syn * 4.0).round() as i32,
                     (radius * 4.0).round() as i32,
                     (sh.blur * 4.0).round() as i32,
                     (sh.spread * 4.0).round() as i32,
@@ -4273,10 +4312,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 let sprite = if let Some(c) = self.shadow_cache.get(&key) {
                     c.clone()
                 } else {
-                    let sw = (w + 2.0 * margin).ceil() as u32;
-                    let sh_px = (h + 2.0 * margin).ceil() as u32;
+                    let sw = (w_syn + 2.0 * margin).ceil() as u32;
+                    let sh_px = (h_syn + 2.0 * margin).ceil() as u32;
                     let mut sdl = DisplayList::new();
-                    let base = Rect::new(margin, margin, margin + w, margin + h)
+                    let base = Rect::new(margin, margin, margin + w_syn, margin + h_syn)
                         .inflate(sh.spread, sh.spread);
                     // Rasterize the solid shadow shape, then blur it into a soft
                     // penumbra. The margin reserves room for the blur to spread.
@@ -4301,8 +4340,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     self.shadow_cache.insert(key, img.clone());
                     img
                 };
-                let iw = sprite.width() as f64;
-                let ih = sprite.height() as f64;
+                let sw_f = sprite.width() as f64;
+                let sh_f = sprite.height() as f64;
+                // Bands are expressed in DESTINATION space (element-sized) and
+                // mapped back to the sprite by `split`.
+                let iw = w + 2.0 * margin;
+                let ih = h + 2.0 * margin;
                 let id = lumen_render::ImageId(dl.images.len() as u32);
                 dl.images.push(sprite);
                 // Integer placement + nearest sampling makes each blit a straight
@@ -4318,16 +4361,65 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 let sy0 = (bounds.y0 - py + radius).ceil().clamp(0.0, ih);
                 let sx1 = (bounds.x0 - px + w - radius).floor().clamp(0.0, iw);
                 let sy1 = (bounds.y0 - py + h - radius).floor().clamp(0.0, ih);
+                // Destination extent of the shadow, which stays element-sized
+                // even when the sprite was shrunk above.
+                let dw = w + 2.0 * margin;
+                let dh = h + 2.0 * margin;
+                // Fixed border kept 1:1 on each side; whatever is between them
+                // is one repeating strip. `+ 1.0` for the strip itself.
+                let fixed_x = ((sw_f - 1.0) * 0.5).floor().max(0.0);
+                let fixed_y = ((sh_f - 1.0) * 0.5).floor().max(0.0);
+                // Split a destination span into pieces that each map to one
+                // region of the sprite: the leading 1:1 border, the stretched
+                // middle strip, and the trailing 1:1 border. When the sprite was
+                // not shrunk on this axis (`dst_len == src_len`) this returns the
+                // span unchanged, so unsliced shadows keep their exact old path.
+                let split = |a: f64, b: f64, fixed: f64, dst_len: f64, src_len: f64| {
+                    let mut out: Vec<(f64, f64, f64, f64)> = Vec::new();
+                    if (dst_len - src_len).abs() < 0.5 {
+                        out.push((a, b, a, b));
+                        return out;
+                    }
+                    let tail = dst_len - fixed; // first dest coord of the trailing border
+                    let lead = a.min(fixed).max(0.0);
+                    if a < fixed {
+                        out.push((a, b.min(fixed), a, b.min(fixed)));
+                    }
+                    let m0 = a.max(fixed);
+                    let m1 = b.min(tail);
+                    if m1 > m0 {
+                        // One source pixel stretched across the middle. Exact:
+                        // every row/column of that strip is identical.
+                        out.push((m0, m1, fixed, fixed + 1.0));
+                    }
+                    if b > tail {
+                        // Both ends map through the same 1:1 offset. Using
+                        // `src_len` for the end instead assumes the band reaches
+                        // the very bottom — the carve-out bands do not, and that
+                        // silently COMPRESSED the trailing border into them.
+                        let t0 = a.max(tail);
+                        out.push((t0, b, src_len - (dst_len - t0), src_len - (dst_len - b)));
+                    }
+                    let _ = lead;
+                    out
+                };
                 let mut band = |x0: f64, y0: f64, x1: f64, y1: f64| {
                     if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
                         return;
                     }
-                    dl.push(DrawCmd::Image {
-                        id,
-                        src_rect: Rect::new(x0, y0, x1, y1),
-                        dst_rect: Rect::new(px + x0, py + y0, px + x1, py + y1),
-                        quality: lumen_render::Filter::Nearest,
-                    });
+                    for (dx0, dx1, sx0, sx1) in split(x0, x1, fixed_x, dw, sw_f) {
+                        for (dy0, dy1, sy0, sy1) in split(y0, y1, fixed_y, dh, sh_f) {
+                            if dx1 - dx0 < 0.5 || dy1 - dy0 < 0.5 {
+                                continue;
+                            }
+                            dl.push(DrawCmd::Image {
+                                id,
+                                src_rect: Rect::new(sx0, sy0, sx1, sy1),
+                                dst_rect: Rect::new(px + dx0, py + dy0, px + dx1, py + dy1),
+                                quality: lumen_render::Filter::Nearest,
+                            });
+                        }
+                    }
                 };
                 if sx1 > sx0 && sy1 > sy0 {
                     band(0.0, 0.0, iw, sy0); // top
