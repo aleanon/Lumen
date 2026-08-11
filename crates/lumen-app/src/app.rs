@@ -293,6 +293,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             focused_id: focused,
             hovered_id: None,
             pressed: None,
+            pan: None,
             input: InputQueue::new(),
             pointer: PointerState::new(),
             requests: crate::element::FrameRequests::default(),
@@ -681,6 +682,13 @@ pub struct Headless<
     /// drag survive rebuilds that renumber nodes (e.g. a scrollbar whose index
     /// shifts as list rows load) by re-resolving the current node each move.
     pressed: Option<(NodeIndex, Option<StableId>)>,
+    /// Touch panning: the node whose wheel handler a finger drag drives, plus
+    /// the last pointer position. Armed on a touch press that did not land on a
+    /// drag handler; cleared on release.
+    ///
+    /// TOUCH ONLY, deliberately: a mouse drag inside a list is a text selection
+    /// or a marquee, not a scroll.
+    pan: Option<(NodeIndex, Point)>,
     app_sheet: Option<lumen_style::Stylesheet>,
     theme: lumen_style::ThemeKind,
     node_style: HashMap<NodeIndex, lumen_style::Style>,
@@ -2053,6 +2061,30 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
         match ev {
             Event::PointerDown(pe) => {
+                // Arm touch panning: a finger drag over a scroll container
+                // scrolls it, which is the only way to scroll on a phone — the
+                // Android shell emits pointer events and never a wheel, so
+                // before this a list could only be moved by its scrollbar.
+                //
+                // Skipped when the press lands on a drag handler (slider,
+                // scrollbar thumb): that widget owns the gesture.
+                self.pan = None;
+                if pe.pointer == lumen_core::events::PointerKind::Touch {
+                    let mut n = self.tree.hit_test(pe.pos);
+                    while let Some(node) = n {
+                        if let Some(m) = self.meta.get(&node) {
+                            if m.on_drag.is_some() {
+                                break;
+                            }
+                            if m.on_wheel.is_some() && wheel_can_take(m.scroll) {
+                                self.pan = Some((node, pe.pos));
+                                break;
+                            }
+                        }
+                        let parent = self.tree.parent(node);
+                        n = parent.is_some().then_some(parent);
+                    }
+                }
                 // Bubble from the hit target up its ancestors, firing the
                 // nearest focus/click/drag handlers (decorative children let
                 // their interactive ancestor handle the press).
@@ -2101,6 +2133,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
             Event::PointerUp(_) => {
                 self.pressed = None;
+                self.pan = None;
             }
             Event::TextInput(te) => {
                 if let Some(node) = self.focused_node() {
@@ -2110,6 +2143,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
             }
             Event::PointerMove(pe) => {
+                // Touch pan: content follows the finger, so dragging UP scrolls
+                // toward the end — the same sign the shell gives the wheel.
+                // Deltas are per-move rather than from the press origin, which
+                // is what lets them accumulate through the wheel path unchanged.
+                if let Some((_, last)) = self.pan {
+                    let (dx, dy) = (last.x - pe.pos.x, last.y - pe.pos.y);
+                    if dx.abs() >= 0.5 || dy.abs() >= 0.5 {
+                        self.pan = self.pan.map(|(n, _)| (n, pe.pos));
+                        self.dispatch_wheel(pe.pos, dx, dy, pe.modifiers);
+                    }
+                }
                 let (_l, _e) = self.pointer.update(&self.tree, pe.pos);
                 // Hover bubbles to the nearest ancestor with an id (like clicks
                 // bubble to an on_click ancestor), so hovering a button's child
@@ -2164,28 +2208,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
             }
             Event::Wheel(we) => {
-                // Find the nearest ancestor (incl. target) with a wheel handler
-                // that can actually use it, chaining past ones that cannot.
-                //
-                // `WheelHandler` returns `()`, so a handler cannot report "not
-                // consumed" — but `NodeMeta` already carries `ScrollInfo`, so
-                // the router can decide without changing the signature. Before
-                // this, a `VirtualList` whose items fit its viewport swallowed
-                // the wheel and its parent never scrolled: the page stayed put
-                // and a later click landed on whatever had not moved.
-                let mut n = self.tree.hit_test(we.pos);
-                while let Some(node) = n {
-                    let m = self.meta.get(&node);
-                    if let Some(h) = m.and_then(|m| m.on_wheel.clone()) {
-                        if wheel_can_take(m.and_then(|m| m.scroll)) {
-                            h(&self.rt, we.delta.x, we.delta.y, we.modifiers);
-                            break;
-                        }
-                        // Otherwise fall through and keep climbing.
-                    }
-                    let parent = self.tree.parent(node);
-                    n = parent.is_some().then_some(parent);
-                }
+                self.dispatch_wheel(we.pos, we.delta.x, we.delta.y, we.modifiers);
             }
             Event::Drop(de) => {
                 // Bubble to the nearest ancestor (incl. target) with a drop handler.
@@ -2397,6 +2420,37 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             if let Some(h) = self.meta.get(&n).and_then(|m| m.on_click.clone()) {
                 h(&self.rt);
             }
+        }
+    }
+
+    /// Deliver a scroll delta at `pos`, to the nearest ancestor (including the
+    /// hit target) whose wheel handler can actually use it.
+    ///
+    /// `WheelHandler` returns `()`, so a handler cannot report "not consumed" —
+    /// but `NodeMeta` carries `ScrollInfo`, so the router decides without a
+    /// signature change. Before that, a `VirtualList` whose items fit its
+    /// viewport swallowed the wheel and its parent never scrolled.
+    ///
+    /// Shared with touch panning, which synthesizes deltas from finger motion —
+    /// so a finger drag chains exactly like a wheel does, for free.
+    fn dispatch_wheel(
+        &mut self,
+        pos: Point,
+        dx: f64,
+        dy: f64,
+        modifiers: lumen_core::events::Modifiers,
+    ) {
+        let mut n = self.tree.hit_test(pos);
+        while let Some(node) = n {
+            let m = self.meta.get(&node);
+            if let Some(h) = m.and_then(|m| m.on_wheel.clone()) {
+                if wheel_can_take(m.and_then(|m| m.scroll)) {
+                    h(&self.rt, dx, dy, modifiers);
+                    break;
+                }
+            }
+            let parent = self.tree.parent(node);
+            n = parent.is_some().then_some(parent);
         }
     }
 
