@@ -60,6 +60,32 @@ pub use analysis::{
 
 use lumen_core::Color;
 
+/// What a direct-to-surface present did, and what the caller owes it.
+///
+/// This used to be a `bool`, and the two ways of failing were indistinguishable:
+/// "the swapchain went stale for one frame, ask again" and "there is no usable
+/// surface and there never will be". The shell read every `false` as the second,
+/// so a single frame dropped during a resize drag tore down the direct path and
+/// built a CPU presenter — which configured a *second* surface on a window that
+/// was still being dragged, and wgpu 22 turns a configure-time out-of-date into
+/// a **fatal** `Invalid surface` panic. One skipped frame killed the process.
+/// Making the outcome a type is what stops that being expressible.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Present {
+    /// The frame reached the swapchain.
+    Done,
+    /// Nothing was presented **this frame**, and the next one is expected to
+    /// work: the swapchain went out of date mid-resize, or acquiring the texture
+    /// timed out, or there is no frame to show yet. Ask for another redraw and
+    /// try again — do NOT tear the surface down.
+    Skipped,
+    /// There is no usable surface and retrying will not produce one: none is
+    /// attached, the window outgrew the device's texture limit (where
+    /// configuring is fatal, not recoverable), or the device is out of memory.
+    /// The caller must fall back to CPU presentation.
+    Unavailable,
+}
+
 /// A frame renderer: rasterizes a (logical-px) display list to a physical-px
 /// frame. The runtime is generic over this so backends are *pluggable* — the
 /// tiny-skia CPU reference renderer ([`TinySkia`]) is the default and the
@@ -119,7 +145,8 @@ pub trait Renderer {
     fn resize_surface(&mut self, _width: u32, _height: u32) {}
 
     /// Render `list` straight to the attached swapchain — no CPU readback (1c).
-    /// Returns `false` if no surface is attached (caller uses `render_frame`).
+    /// See [`Present`] for what the outcome obliges the caller to do; the
+    /// default is [`Present::Unavailable`] (no surface).
     ///
     /// R6.2/R6.3: `dirty` is the physical-pixel region that changed since the
     /// last presented frame, or `None` for "redraw everything". A backend may
@@ -134,8 +161,8 @@ pub trait Renderer {
         _scale: f64,
         _background: Color,
         _dirty: Option<kurbo::Rect>,
-    ) -> bool {
-        false
+    ) -> Present {
+        Present::Unavailable
     }
 
     /// Diagnostics the backend produced since the last call, and clear them.
@@ -256,7 +283,7 @@ impl<R: Renderer + ?Sized> Renderer for Box<R> {
         scale: f64,
         background: Color,
         dirty: Option<kurbo::Rect>,
-    ) -> bool {
+    ) -> Present {
         (**self).present_to_surface(list, width, height, scale, background, dirty)
     }
 

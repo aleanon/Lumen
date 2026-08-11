@@ -656,10 +656,12 @@ impl crate::Renderer for WgpuFallbackTinySkia {
         scale: f64,
         background: Color,
         dirty: Option<kurbo::Rect>,
-    ) -> bool {
+    ) -> crate::Present {
         match &mut self.main {
             Some(g) => g.present_to_surface(list, width, height, scale, background, dirty),
-            None => false,
+            // No GPU at all: the CPU renderer of record has no swapchain, and
+            // never will. Permanent, not transient.
+            None => crate::Present::Unavailable,
         }
     }
 
@@ -1364,9 +1366,12 @@ impl Wgpu {
         scale: f64,
         background: Color,
         dirty: Option<kurbo::Rect>,
-    ) -> bool {
+    ) -> crate::Present {
         let Some(surf) = self.surface.as_ref() else {
-            return false;
+            // Either nothing was ever attached, or `resize_surface` dropped it
+            // because the window outgrew `max_dim`. Both are permanent for this
+            // surface; the caller must present some other way.
+            return crate::Present::Unavailable;
         };
         // A resize makes the swapchain Outdated/Lost until reconfigured; rather
         // than drop the frame (visible stutter during a drag), reconfigure and
@@ -1397,10 +1402,18 @@ impl Wgpu {
                 surf.surface.configure(&self.device, &surf.config);
                 match surf.surface.get_current_texture() {
                     Ok(f) => f,
-                    Err(_) => return false,
+                    // Still stale: the window changed size AGAIN between the
+                    // reconfigure and the acquire, which is routine during a
+                    // resize drag and routine to recover from. Skipping one
+                    // frame is the whole cost — reporting this as a dead
+                    // surface is what used to crash the process.
+                    Err(_) => return crate::Present::Skipped,
                 }
             }
-            Err(_) => return false, // Timeout / OutOfMemory: skip this frame
+            // A timeout is the compositor being slow; try again next frame.
+            Err(wgpu::SurfaceError::Timeout) => return crate::Present::Skipped,
+            // Out of memory will not fix itself by retrying.
+            Err(wgpu::SurfaceError::OutOfMemory) => return crate::Present::Unavailable,
         };
         let mut keep = KeepAlive::default();
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -1456,7 +1469,7 @@ impl Wgpu {
         if self.atlas_overflow.take() {
             self.atlas.borrow_mut().clear();
         }
-        true
+        crate::Present::Done
     }
 
     /// Render `list` (logical-px) to a `width`×`height` *physical* image over

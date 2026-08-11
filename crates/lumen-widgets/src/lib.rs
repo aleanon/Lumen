@@ -126,7 +126,7 @@ pub use lumen_macros::stable_handler;
 pub use lumen_macros::text;
 /// Re-exported so downstream crates can bound on the renderer backend (e.g.
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
-pub use lumen_render::{DefaultRenderer, Renderer, RgbaImage, TinySkia};
+pub use lumen_render::{DefaultRenderer, Present, Renderer, RgbaImage, TinySkia};
 pub use tasks::{Resource, TaskError};
 
 /// Render a widget doc-example `app` at `w`×`h` and verify it against the PNG

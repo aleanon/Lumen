@@ -14,6 +14,8 @@ use lumen_core::events::{
     PointerEvent, PointerKind, TextInputEvent, WheelEvent,
 };
 use lumen_render::RgbaImage;
+#[cfg(feature = "wgpu")]
+use lumen_widgets::Present;
 use lumen_widgets::{App, Headless};
 #[cfg(feature = "agent")]
 use std::io::{BufRead, Write};
@@ -532,7 +534,7 @@ impl ApplicationHandler<ShellEvent> for Shell {
         self.presenter = if self.direct {
             None
         } else {
-            Some(Presenter::new(window.clone()))
+            Presenter::new(window.clone())
         };
         eprintln!(
             "lumen: present = {}",
@@ -844,21 +846,40 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         #[cfg(feature = "wgpu")]
                         if self.direct {
                             // GPU → swapchain directly, no readback (1c).
-                            //
-                            // `false` means the backend gave the surface up —
-                            // today only because the window grew past the
-                            // device's texture limit, where configuring it would
-                            // be a FATAL wgpu error rather than a recoverable
-                            // one. Degrade to CPU presentation for the rest of
-                            // the session instead of freezing: the window keeps
-                            // updating, just through a readback.
-                            if !h.present_to_surface() {
-                                self.direct = false;
-                                self.presenter = self.window.clone().map(Presenter::new);
-                                eprintln!(
-                                    "lumen: present = cpu-readback (surface too large \
-                                     for this device; falling back)"
-                                );
+                            match h.present_to_surface() {
+                                Present::Done => {}
+                                // The swapchain went stale mid-resize (or the
+                                // acquire timed out). Routine during a drag and
+                                // routine to recover from: ask for one more
+                                // redraw and present the same list again.
+                                //
+                                // This arm is the bug fix. It used to share the
+                                // fallback path below, so ONE dropped frame
+                                // during a resize built a second wgpu surface on
+                                // a window that was still being dragged — and a
+                                // configure that races a resize is a FATAL
+                                // `Invalid surface` panic in wgpu 22, not an
+                                // error we could catch.
+                                Present::Skipped => {
+                                    self.force_present = true;
+                                    if let Some(w) = &self.window {
+                                        w.request_redraw();
+                                    }
+                                }
+                                // The surface is gone for good — the window
+                                // outgrew the device's texture limit, where
+                                // configuring is fatal rather than recoverable.
+                                // Degrade to CPU presentation for the rest of
+                                // the session instead of freezing: the window
+                                // keeps updating, just through a readback.
+                                Present::Unavailable => {
+                                    self.direct = false;
+                                    self.presenter = self.window.clone().and_then(Presenter::new);
+                                    eprintln!(
+                                        "lumen: present = cpu-readback (no usable \
+                                         surface for this device; falling back)"
+                                    );
+                                }
                             }
                         }
                         // `presenter` is None in direct mode, so this covers
@@ -1002,7 +1023,7 @@ impl Shell {
         let presenter = if direct {
             None
         } else {
-            Some(Presenter::new(window.clone()))
+            Presenter::new(window.clone())
         };
         let proxy = self.proxy.clone();
         h.set_waker(std::sync::Arc::new(move || {
@@ -1152,7 +1173,17 @@ impl Shell {
                 if stats.painted {
                     #[cfg(feature = "wgpu")]
                     if sw.direct {
-                        sw.headless.present_to_surface();
+                        match sw.headless.present_to_surface() {
+                            Present::Done => {}
+                            // Same recovery as the primary window: a stale
+                            // swapchain during a resize costs one frame, not the
+                            // surface.
+                            Present::Skipped => sw.window.request_redraw(),
+                            Present::Unavailable => {
+                                sw.direct = false;
+                                sw.presenter = Presenter::new(sw.window.clone());
+                            }
+                        }
                     }
                     if let Some(p) = &mut sw.presenter {
                         let frame = sw.headless.screenshot();
@@ -1612,10 +1643,11 @@ struct Presenter {
 
 #[cfg(not(feature = "wgpu"))]
 impl Presenter {
-    fn new(window: Arc<Window>) -> Presenter {
-        let context = softbuffer::Context::new(window.clone()).expect("softbuffer context");
-        let surface =
-            softbuffer::Surface::new(&context, window.clone()).expect("softbuffer surface");
+    /// Fallible for the same reason as the wgpu presenter: this also runs
+    /// mid-session on the fallback path, where a panic kills a running app.
+    fn new(window: Arc<Window>) -> Option<Presenter> {
+        let context = softbuffer::Context::new(window.clone()).ok()?;
+        let surface = softbuffer::Surface::new(&context, window.clone()).ok()?;
         let phys = window.inner_size();
         let mut p = Presenter {
             _context: context,
@@ -1623,7 +1655,7 @@ impl Presenter {
             size: (0, 0),
         };
         p.resize(phys.width.max(1), phys.height.max(1));
-        p
+        Some(p)
     }
 
     fn resize(&mut self, w: u32, h: u32) {
@@ -1676,16 +1708,21 @@ struct Presenter {
 
 #[cfg(feature = "wgpu")]
 impl Presenter {
-    fn new(window: Arc<Window>) -> Presenter {
-        let size = window.inner_size();
+    /// Build a CPU-frame presenter for `window`, or `None` if this machine
+    /// cannot give us one.
+    ///
+    /// Fallible on purpose. This runs at startup on the no-GPU path, where a
+    /// panic is at least honest — but it ALSO runs mid-session when the direct
+    /// path gives up, and killing a running app because an adapter request
+    /// failed at the worst moment is not a trade anyone chose.
+    fn new(window: Arc<Window>) -> Option<Presenter> {
         let instance = wgpu::Instance::default();
-        let surface = instance.create_surface(window).expect("surface");
+        let surface = instance.create_surface(window.clone()).ok()?;
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
-        }))
-        .expect("adapter");
+        }))?;
         // MemoryUsage over the default Performance hint — the blit presenter holds
         // one small texture; no need for large pre-reserved GPU pools.
         let (device, queue) = block_on(adapter.request_device(
@@ -1695,7 +1732,7 @@ impl Presenter {
             },
             None,
         ))
-        .expect("device");
+        .ok()?;
         let caps = surface.get_capabilities(&adapter);
         let format = caps
             .formats
@@ -1703,11 +1740,23 @@ impl Presenter {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(caps.formats[0]);
+        // Sampled HERE, not before the adapter/device requests: those block for
+        // milliseconds, and this constructor now runs mid-resize on the fallback
+        // path. Configuring with a size the window has already left behind is
+        // exactly the race that panics — `Surface::configure` reports a stale
+        // window as `InvalidSurface` and wgpu 22 routes that through
+        // `handle_error_fatal`, so it aborts the process instead of returning an
+        // error. Re-querying does not close the race (nothing can, from out
+        // here), but it removes the part of it we were creating ourselves.
+        let size = window.inner_size();
+        // The same ceiling `Wgpu` applies: configuring past the device's
+        // `max_texture_dimension_2d` is fatal too, so clamp rather than trip it.
+        let max = adapter.limits().max_texture_dimension_2d.max(1);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
-            width: size.width.max(1),
-            height: size.height.max(1),
+            width: size.width.clamp(1, max),
+            height: size.height.clamp(1, max),
             present_mode: wgpu::PresentMode::Fifo, // vsync
             desired_maximum_frame_latency: 2,
             alpha_mode: caps.alpha_modes[0],
@@ -1767,7 +1816,7 @@ impl Presenter {
             cache: None,
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-        Presenter {
+        Some(Presenter {
             surface,
             device,
             queue,
@@ -1776,7 +1825,7 @@ impl Presenter {
             bgl,
             sampler,
             staging: None,
-        }
+        })
     }
 
     fn resize(&mut self, w: u32, h: u32) {

@@ -18,7 +18,7 @@ use lumen_core::tree::{NodeFlags, Tree};
 use lumen_core::{Color, NodeIndex, StableId};
 use lumen_layout::{Dim, LayoutEngine, LayoutNode, LayoutStyle, LayoutTree};
 use lumen_render::{
-    cpu, BlendMode, Border, Brush, CornerRadii, Damage, DisplayList, DrawCmd, RgbaImage,
+    cpu, BlendMode, Border, Brush, CornerRadii, Damage, DisplayList, DrawCmd, Present, RgbaImage,
     RoundedRect,
 };
 use lumen_text::{TextBlockApi, TextEngine, TextEngineApi};
@@ -1534,15 +1534,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     }
 
     /// Present the most recent frame straight to the attached swapchain (1c) —
-    /// no CPU readback. Returns `false` if nothing is attached or there's no
-    /// frame yet. The shell calls this after `pump()` when the frame changed.
+    /// no CPU readback. The shell calls this after `pump()` when the frame
+    /// changed; see [`Present`] for what each outcome obliges it to do.
     #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
-    pub fn present_to_surface(&mut self) -> bool {
+    pub fn present_to_surface(&mut self) -> Present {
         if !self.surface_attached {
-            return false;
+            return Present::Unavailable;
         }
+        // No display list yet is a *timing* miss, not a dead surface — the very
+        // distinction this return type exists to keep. Reporting it as
+        // unavailable would degrade the whole session to CPU readback the first
+        // time the shell asked for a present before the first paint.
         let Some(dl) = self.last_dl.take() else {
-            return false;
+            return Present::Skipped;
         };
         let pw = (self.size.width * self.scale).round().max(1.0) as u32;
         let ph = (self.size.height * self.scale).round().max(1.0) as u32;
@@ -1563,11 +1567,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             )),
             Damage::Full | Damage::None => None,
         };
-        let ok = self
+        let outcome = self
             .renderer
             .present_to_surface(&dl, pw, ph, self.scale, bg, dirty);
+        // Kept even on a skip, so the retry next frame has something to show
+        // without forcing a full rebuild.
         self.last_dl = Some(dl);
-        ok
+        outcome
     }
 
     /// Force the next paint to repaint the whole frame instead of only the
