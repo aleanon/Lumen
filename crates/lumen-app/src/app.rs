@@ -4206,7 +4206,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             if style.width == Dim::Auto {
                 style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
             }
-            style.height = Dim::px(block.height().ceil() + (pt + pb) as f32);
+            // Same guard, same reason as the width above: an explicit height was
+            // being overwritten by the measured glyph height. A `VirtualList`
+            // sets each item's height to `item_height`, so a 24 px-pitch list of
+            // text rows laid out 21 px rows — a 3 px strip between every pair
+            // that painted no background and took no taps. CSS gives a
+            // fixed-height element that height with the text at the top, which
+            // is what the paint already does (the run is drawn at the padded
+            // origin), so honouring it needs nothing else.
+            //
+            // The "text ignores an explicit height" gotcha this retires cost one
+            // golden across the whole corpus: `Grid`'s doc-shot, where the cells
+            // now fill their 32 px rows instead of leaving a pale band between
+            // them. That band was the same defect, sitting in a committed image.
+            if style.height == Dim::Auto {
+                style.height = Dim::px(block.height().ceil() + (pt + pb) as f32);
+            }
             text_wrap = wrap;
         } else if let NodeContent::Custom(w) = &el.content {
             // Size a custom leaf from its intrinsic measure (E2), but let an

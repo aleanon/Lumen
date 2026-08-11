@@ -242,10 +242,13 @@ are still strings (they're selectors, not reactive keys).
 
 ## Gotchas (hard-won — check every one)
 
-- **A text-bearing element ignores an explicit `height`** (it sizes to the
-  glyphs; `width` *is* honoured — `Dim::px` **and** `Dim::pct`). To size a text
-  cell, put the label in a **child** of a sized box, never set text content on
-  the box you're sizing. (This caused the "resize just adds empty space" bug.)
+- **A text element sizes to its glyphs only when you say nothing.** An explicit
+  `width` *or* `height` is honoured now — `Dim::px` and `Dim::pct` alike — and
+  the run paints at the top-left of the box, like CSS. (Until 2026-08-12 the
+  height was silently overwritten by the glyph height, which is what left a 3 px
+  dead strip between the rows of a `VirtualList` of labels.) Putting the label in
+  a **child** of a sized box is still the better habit when you want the text
+  centred or the box to own the padding.
 - **Only a `Dim::px` width wraps.** A percentage width stretches the *box* but
   the run stays on one line: the containing block isn't resolved until layout,
   and the measure happens during the build. Want wrapping at a relative width?

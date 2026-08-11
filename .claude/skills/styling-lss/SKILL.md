@@ -21,13 +21,15 @@ Styles resolve *before* layout now, so these work from `.lss`:
 `padding` and `margin` — whole-side *and* per-side longhands
 (`padding-top` … `margin-left`, overriding the shorthand component-wise,
 B.3). `.lss` wins over the element's
-`LayoutStyle` per-property. Two caveats: **text-bearing nodes still derive
-`height` from their glyphs** (the text-height rule — size a box, put the
-text in a child), and a state-part layout rule (`#x:hovered { width: … }`)
-relayouts through the normal rebuild path on pointer motion. `width` on a
-label works in both units, but only a **px** width wraps — a `%` width
-stretches the box and leaves the run on one line, because the containing
-block isn't resolved until after the build-time measure.
+`LayoutStyle` per-property. Two caveats: **a text node derives its size
+from its glyphs only where you set nothing** — an explicit `width` or
+`height` on a label is honoured since 2026-08-12 (it used to be
+overwritten), and the run paints at the box's top-left; and a state-part
+layout rule (`#x:hovered { width: … }`) relayouts through the normal
+rebuild path on pointer motion. `width` works in both units, but only a
+**px** width wraps — a `%` width stretches the box and leaves the run on
+one line, because the containing block isn't resolved until after the
+build-time measure.
 
 `text-align` works (`start`/`left`, `center`, `end`/`right`;
 `justify` is rejected — no justification pass), and

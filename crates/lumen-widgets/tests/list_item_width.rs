@@ -95,3 +95,63 @@ fn an_item_that_sets_its_own_width_keeps_it() {
     let b = h.node_bounds_by_id("row-3").expect("row 3 is mounted");
     assert_eq!(b.x1 - b.x0, 120.0, "the caller's width wins ({b:?})");
 }
+
+/// Rows tile the list with no gap between them. `VirtualList` sets each item's
+/// height to `item_height`, and text lowering used to overwrite it with the
+/// glyph height — so a 24 px-pitch list of text rows laid out 21 px rows with a
+/// 3 px dead strip between each pair, taking no taps and painting no background.
+#[test]
+fn text_rows_tile_the_list_with_no_dead_strip() {
+    const PITCH: f64 = 24.0;
+    let build = |cx: &mut BuildCx| -> Element {
+        let vl = VirtualList::new(cx, "vl", 100, PITCH, VIEWPORT, |i| {
+            widgets::text(format!("row {i}")).id(format!("row-{i}"))
+        });
+        let mut root = widgets::column(vec![vl.into()]);
+        root.style.width = Dim::px(W as f32);
+        root.id("root")
+    };
+    let mut h = App::new(build).run_headless(Size::new(W, VIEWPORT));
+    h.pump();
+
+    for i in 0..4 {
+        let b = h
+            .node_bounds_by_id(&format!("row-{i}"))
+            .unwrap_or_else(|| panic!("row {i} is mounted"));
+        assert_eq!(b.height(), PITCH, "row {i} must fill its pitch ({b:?})");
+        // The next row starts exactly where this one ends.
+        let n = h
+            .node_bounds_by_id(&format!("row-{}", i + 1))
+            .expect("next row");
+        assert_eq!(n.y0, b.y1, "no gap between rows {i} and {}", i + 1);
+    }
+}
+
+/// The consequence: a tap in the strip that used to belong to nobody now lands
+/// on the row it looks like it belongs to.
+#[test]
+fn a_tap_near_the_bottom_edge_of_a_row_hits_that_row() {
+    const PITCH: f64 = 24.0;
+    let build = |cx: &mut BuildCx| -> Element {
+        let hits: Signal<u32> = cx.signal("hits", || 0);
+        let vl = VirtualList::new(cx, "vl", 100, PITCH, VIEWPORT, move |i| {
+            let mut row = widgets::text(format!("row {i}"));
+            row.on_click = Some(Rc::new(move |rt| hits.update(rt, |v| *v += 1)));
+            row.id(format!("row-{i}"))
+        });
+        let mut root = widgets::column(vec![vl.into()]);
+        root.style.width = Dim::px(W as f32);
+        root.id("root")
+    };
+    let mut h = App::new(build).run_headless(Size::new(W, VIEWPORT));
+    h.pump();
+
+    // Row 2 spans 48..72; 70.5 sits in the band the glyphs never covered.
+    let p = Point::new(150.0, 70.5);
+    h.inject(Event::PointerDown(PointerEvent::at(p)));
+    h.inject(Event::PointerUp(PointerEvent::at(p)));
+    h.pump();
+
+    let hits: Signal<u32> = h.runtime().signal("hits", || 0);
+    assert_eq!(hits.get(h.runtime()), 1, "the bottom of a row is the row");
+}
