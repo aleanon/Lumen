@@ -6,7 +6,7 @@ use crate::widget::impl_common;
 use crate::{BuildCx, Element};
 use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role, ScrollInfo};
-use lumen_layout::{Dim, LayoutStyle};
+use lumen_layout::{Dim, Edges, LayoutStyle, Position};
 use std::rc::Rc;
 
 /// A clipping viewport that scrolls its content vertically with the wheel.
@@ -68,6 +68,8 @@ impl Scrollable {
             }),
             actions: vec![Action::ScrollIntoView],
             style: LayoutStyle {
+                // Anchors the absolutely-positioned overlay scrollbar.
+                position: Position::Relative,
                 height: Dim::px(viewport_h as f32),
                 ..LayoutStyle::default()
             },
@@ -100,7 +102,10 @@ impl Scrollable {
                 };
                 offset.update(rt, |o| *o = (*o + step).clamp(0.0, max_y));
             })),
-            children: vec![inner],
+            children: match overlay_scrollbar(viewport_h, y, max_y, offset) {
+                Some(bar) => vec![inner, bar],
+                None => vec![inner],
+            },
             ..Element::default()
         };
         Scrollable { el }
@@ -108,3 +113,89 @@ impl Scrollable {
 }
 
 impl_common!(Scrollable);
+
+/// An overlay scrollbar for any container that reports [`ScrollInfo`].
+///
+/// **Overlay**, so it is absolutely positioned over the content's trailing edge
+/// and costs no layout width — turning it on reflows nothing.
+///
+/// The thumb is sized from the container's *reported* extent, not from its laid
+/// out children, which is what makes it correct for a virtualized list.
+/// `VirtualList` computes `max_y` from `item_count * item_height`, so the true
+/// content height is known even though only a window of rows exists — dragging
+/// to the middle lands in the middle on the first try. A scrollbar derived from
+/// materialized content instead (the usual approach, and what makes virtual
+/// lists feel broken elsewhere) grows as rows appear, so the thumb keeps
+/// shrinking out from under the pointer.
+///
+/// Returns `None` when there is nothing to scroll: an affordance that cannot
+/// move is noise, and it would also cover content.
+///
+/// The drag lives on the **track**, not the thumb, because `apply_drag` reports
+/// the pointer as a fraction of the *handler's own* node — so `frac_y` is
+/// already "how far down the track", with no window-coordinate arithmetic and
+/// no drag-origin state. It also makes clicking the track jump there, which is
+/// the behaviour being asked for.
+pub(crate) fn overlay_scrollbar(
+    viewport_h: f64,
+    y: f64,
+    max_y: f64,
+    offset: lumen_core::state::Signal<f64>,
+) -> Option<Element> {
+    if max_y <= 0.5 || viewport_h <= 0.0 {
+        return None;
+    }
+    const TRACK_W: f64 = 8.0;
+    const MIN_THUMB: f64 = 24.0;
+    let content_h = viewport_h + max_y;
+    // Proportional, with a floor so a very long list still leaves something
+    // grabbable.
+    let thumb_h = ((viewport_h / content_h) * viewport_h)
+        .max(MIN_THUMB)
+        .min(viewport_h);
+    let travel = (viewport_h - thumb_h).max(0.0);
+    let pos_frac = (y / max_y).clamp(0.0, 1.0);
+
+    let thumb = Element {
+        background: Some(lumen_core::Color::srgb8(0x5f, 0x63, 0x68, 0xb0)),
+        corner_radius: (TRACK_W - 2.0) / 2.0,
+        style: LayoutStyle {
+            position: Position::Absolute,
+            inset: Edges {
+                left: Dim::px(1.0),
+                top: Dim::px((pos_frac * travel) as f32),
+                ..Edges::AUTO
+            },
+            width: Dim::px((TRACK_W - 2.0) as f32),
+            height: Dim::px(thumb_h as f32),
+            ..LayoutStyle::default()
+        },
+        ..Element::default()
+    };
+
+    Some(Element {
+        // No `ScrollBar` role exists; `Slider` is the closest — ARIA models a
+        // scrollbar as a range widget — and it keeps the bar drivable by the
+        // agent rather than invisible to it. A dedicated role would be more
+        // precise if this proves confusing to a screen reader.
+        role: Role::Slider,
+        label: "Scrollbar".to_string(),
+        background: Some(lumen_core::Color::srgb8(0x00, 0x00, 0x00, 0x14)),
+        style: LayoutStyle {
+            position: Position::Absolute,
+            inset: Edges {
+                right: Dim::px(0.0),
+                top: Dim::px(0.0),
+                ..Edges::AUTO
+            },
+            width: Dim::px(TRACK_W as f32),
+            height: Dim::px(viewport_h as f32),
+            ..LayoutStyle::default()
+        },
+        on_drag: Some(Rc::new(move |rt, _fx, fy, _pos| {
+            offset.set(rt, (fy * max_y).clamp(0.0, max_y));
+        })),
+        children: vec![thumb],
+        ..Element::default()
+    })
+}

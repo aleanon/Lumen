@@ -194,7 +194,14 @@ impl VirtualList {
                 on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
                     offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
                 })),
-                children,
+                children: match crate::scrollable::overlay_scrollbar(viewport_h, y, max_y, offset) {
+                    Some(bar) => {
+                        let mut c = children;
+                        c.push(bar);
+                        c
+                    }
+                    None => children,
+                },
                 ..Element::default()
             }
         };
@@ -345,7 +352,14 @@ impl DataGrid {
                 on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
                     offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
                 })),
-                children: rows,
+                children: match crate::scrollable::overlay_scrollbar(viewport_h, y, max_y, offset) {
+                    Some(bar) => {
+                        let mut r = rows;
+                        r.push(bar);
+                        r
+                    }
+                    None => rows,
+                },
                 ..Element::default()
             };
 
