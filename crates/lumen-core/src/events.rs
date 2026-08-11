@@ -79,6 +79,15 @@ impl PointerEvent {
     }
 }
 
+/// Pixels a scroll container moves per wheel *line*.
+///
+/// Platforms report a wheel notch either as lines (`MouseScrollDelta::LineDelta`)
+/// or as pixels; lines are multiplied by this. Keyboard arrow-scrolling uses the
+/// same step so the two feel alike. It lived as a bare `40.0` in three places —
+/// two shell translations and `Scrollable`'s key handler — which is how the two
+/// shell sites drifted apart on sign.
+pub const WHEEL_LINE_PX: f64 = 40.0;
+
 /// A scroll-wheel event.
 #[derive(Clone, Copy, Debug)]
 pub struct WheelEvent {

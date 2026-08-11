@@ -83,7 +83,7 @@ impl Scrollable {
             // (WAI-ARIA: a scrollable region must be keyboard operable).
             focusable: true,
             on_key: Some(Rc::new(move |rt, ke| {
-                let line = 40.0;
+                let line = lumen_core::events::WHEEL_LINE_PX;
                 let page = (viewport_h - line).max(line);
                 let step = match ke.key {
                     Key::Named(NamedKey::ArrowDown) => line,

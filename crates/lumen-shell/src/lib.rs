@@ -628,9 +628,10 @@ impl ApplicationHandler<ShellEvent> for Shell {
                 // down). Handlers and the agent's `input.scroll` all use that
                 // natural sign.
                 let d = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => {
-                        Vec2::new(x as f64 * 40.0, -(y as f64) * 40.0)
-                    }
+                    MouseScrollDelta::LineDelta(x, y) => Vec2::new(
+                        x as f64 * lumen_core::events::WHEEL_LINE_PX,
+                        -(y as f64) * lumen_core::events::WHEEL_LINE_PX,
+                    ),
                     MouseScrollDelta::PixelDelta(p) => Vec2::new(p.x, -p.y),
                 };
                 self.inject(Event::Wheel(WheelEvent {
@@ -1079,8 +1080,16 @@ impl Shell {
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let (dx, dy) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (f64::from(x) * 40.0, f64::from(y) * 40.0),
-                    MouseScrollDelta::PixelDelta(p) => (p.x, p.y),
+                    // Same sign convention as the primary window: positive dy
+                    // scrolls toward the end. This negation was MISSING here, so
+                    // every secondary window scrolled inverted — and no test
+                    // caught it, because the multi-window tests inject events
+                    // directly and never exercise this translation.
+                    MouseScrollDelta::LineDelta(x, y) => (
+                        f64::from(x) * lumen_core::events::WHEEL_LINE_PX,
+                        -f64::from(y) * lumen_core::events::WHEEL_LINE_PX,
+                    ),
+                    MouseScrollDelta::PixelDelta(p) => (p.x, -p.y),
                 };
                 sw.headless.inject(Event::Wheel(WheelEvent {
                     pos: sw.cursor,
