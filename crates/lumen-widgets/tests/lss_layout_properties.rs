@@ -692,7 +692,7 @@ fn selection_color_overrides_the_builtin_highlight() {
 /// wrapped paragraph is taller than a single line.
 #[test]
 fn text_wrap_nowrap_keeps_the_run_on_one_line() {
-    fn height(lss: &str) -> f64 {
+    fn bounds(lss: &str) -> kurbo::Rect {
         let mut h = App::new(|_cx: &mut BuildCx| -> Element {
             widgets::column(vec![widgets::text(
                 "a fairly long sentence that will certainly wrap when narrow",
@@ -703,13 +703,27 @@ fn text_wrap_nowrap_keeps_the_run_on_one_line() {
         .run_headless(Size::new(400.0, 300.0));
         h.set_stylesheet(lss);
         h.pump();
-        h.node_bounds_by_id("a").expect("label").height()
+        h.node_bounds_by_id("a").expect("label")
+    }
+    fn height(lss: &str) -> f64 {
+        bounds(lss).height()
     }
     let wrapped = height("#a { width: 80px; }");
     let nowrap = height("#a { width: 80px; text-wrap: nowrap; }");
     assert!(
         wrapped > nowrap * 1.5,
         "a narrow box must wrap to several lines ({wrapped}) unless nowrap ({nowrap})"
+    );
+    // The other half of the rule, and the half that was silently false: the BOX
+    // keeps the width the author asked for. Only the height was ever asserted
+    // here, so nothing noticed that lowering overwrote the width with the
+    // one-line glyph width: this label laid out at 438 px, not the 80 px it was
+    // given, and grew its container instead of overflowing it.
+    let b = bounds("#a { width: 80px; text-wrap: nowrap; }");
+    assert_eq!(
+        b.width(),
+        80.0,
+        "nowrap keeps the explicit box width ({b:?})"
     );
     // `wrap` is the default, so saying it explicitly changes nothing.
     assert_eq!(height("#a { width: 80px; text-wrap: wrap; }"), wrapped);

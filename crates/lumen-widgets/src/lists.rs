@@ -158,7 +158,7 @@ impl VirtualList {
                     el.style.position = Position::Absolute;
                     // `left` AND `right` pinned with `width: auto` stretches the
                     // item to the viewport, which is what an author expects of a
-                    // row. Setting `width: 100%` instead (the workaround
+                    // row. Setting `width: 100%` unconditionally (the workaround
                     // consumers were writing) would clobber an item that sets its
                     // own width; pinning both insets composes with it.
                     el.style.inset = Edges {
@@ -167,6 +167,18 @@ impl VirtualList {
                         top: Dim::px(top as f32),
                         ..Edges::AUTO
                     };
+                    // …except the insets do NOT stretch a text-bearing row: a
+                    // text element's measure fixes its own width, so
+                    // `|i| widgets::text(…)` — the most obvious way to write a
+                    // list — shrink-wrapped to its glyphs (42 px in a 300 px
+                    // list), and everything right of the label missed the row on
+                    // a tap. A *definite* width is resolved before measure runs,
+                    // so it lands where the insets cannot. Applied only when the
+                    // caller left the width `Auto`, which keeps the composition
+                    // the insets were chosen for.
+                    if el.style.width == Dim::Auto {
+                        el.style.width = Dim::pct(1.0);
+                    }
                     el.style.height = Dim::px(item_height as f32);
                     el
                 })

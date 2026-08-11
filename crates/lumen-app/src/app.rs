@@ -4176,7 +4176,28 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
             }
             let block = self.text.shaped(txt, ts, wrap, ts.align);
-            if wrap.is_none() {
+            // Size the box to the glyphs ONLY when the author asked for nothing.
+            // `== Dim::Auto` rather than `wrap.is_none()`, which clobbered two
+            // widths the author *had* expressed:
+            //
+            //  * `Dim::Percent` — `width: 100%` on a label silently became the
+            //    glyph width, in normal flow as well as absolute. That is what
+            //    made a `VirtualList` of bare `text` rows shrink-wrap: nothing
+            //    could stretch the row, so everything right of the label fell
+            //    through it on a tap. The custom-leaf branch below already gets
+            //    this right ("let an explicit width win so a leaf can flex/fill,
+            //    e.g. a chart at `width: 100%`"); text was the odd one out.
+            //  * `Dim::Px` under `text-wrap: nowrap` — which sets `wrap = None`
+            //    precisely in order to *keep the explicit width for the box*, and
+            //    then had it overwritten two lines later.
+            //
+            // A percentage cannot feed the wrap width: the containing block is
+            // not resolved until layout runs, and this measurement happens
+            // during the build. So a percentage-width label lays out as one
+            // unwrapped line inside a stretched box — the same shape as
+            // `nowrap`. Wrapping still needs a definite `Dim::px` (or a sized
+            // container around the label).
+            if style.width == Dim::Auto {
                 style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
             }
             style.height = Dim::px(block.height().ceil() + (pt + pb) as f32);

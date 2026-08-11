@@ -243,9 +243,13 @@ are still strings (they're selectors, not reactive keys).
 ## Gotchas (hard-won — check every one)
 
 - **A text-bearing element ignores an explicit `height`** (it sizes to the
-  glyphs; `width` *is* honoured). To size a text cell, put the label in a **child**
-  of a sized box, never set text content on the box you're sizing. (This caused
-  the "resize just adds empty space" bug.)
+  glyphs; `width` *is* honoured — `Dim::px` **and** `Dim::pct`). To size a text
+  cell, put the label in a **child** of a sized box, never set text content on
+  the box you're sizing. (This caused the "resize just adds empty space" bug.)
+- **Only a `Dim::px` width wraps.** A percentage width stretches the *box* but
+  the run stays on one line: the containing block isn't resolved until layout,
+  and the measure happens during the build. Want wrapping at a relative width?
+  Put the label inside a percentage-sized container.
 - **Hit-test / paint priority = document order.** Later siblings paint on top and
   win hit-testing. Push interactive overlays (resize handles, thumbs) **after** the
   things they must sit above.
