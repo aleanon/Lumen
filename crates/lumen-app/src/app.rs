@@ -293,6 +293,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             focused_id: focused,
             hovered_id: None,
             pressed: None,
+            pending_click: None,
             pan: None,
             pan_vel: (0.0, 0.0, 0.0),
             fling: None,
@@ -685,6 +686,15 @@ pub struct Headless<
     /// drag survive rebuilds that renumber nodes (e.g. a scrollbar whose index
     /// shifts as list rows load) by re-resolving the current node each move.
     pressed: Option<(NodeIndex, Option<StableId>)>,
+    /// A press that may still become a click: the `on_click` node it landed on
+    /// (index *and* stable id, re-resolved on release like [`Self::pressed`]),
+    /// and the press position the movement slop is measured from.
+    ///
+    /// `on_click` fires on **release**, not press, so a finger that presses a
+    /// row and then drags to scroll does not activate it. Cleared by a touch
+    /// that travels past [`TOUCH_SLOP_PX`], by a release that lands somewhere
+    /// else, and by the next press.
+    pending_click: Option<(NodeIndex, Option<StableId>, Point)>,
     /// Touch panning: the node whose wheel handler a finger drag drives, plus
     /// the last pointer position. Armed on a touch press that did not land on a
     /// drag handler; cleared on release.
@@ -2092,6 +2102,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // Skipped when the press lands on a drag handler (slider,
                 // scrollbar thumb): that widget owns the gesture.
                 self.pan = None;
+                // A new press supersedes any press still waiting for its
+                // release (a lost pointer-up, a second finger).
+                self.pending_click = None;
                 if pe.pointer == lumen_core::events::PointerKind::Touch {
                     let mut n = self.tree.hit_test(pe.pos);
                     while let Some(node) = n {
@@ -2120,11 +2133,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                             self.focused_id = m.id.clone();
                             did_focus = true;
                         }
-                        if !did_click {
-                            if let Some(h) = m.on_click.clone() {
-                                h(&self.rt);
-                                did_click = true;
-                            }
+                        // Recorded, not fired: the click belongs to the release
+                        // (see `pending_click`). Still resolved here, because
+                        // the *press* is what picks the target — a release that
+                        // lands on a different node must not activate it.
+                        if !did_click && m.on_click.is_some() {
+                            self.pending_click = Some((node, m.id.clone(), pe.pos));
+                            did_click = true;
                         }
                         if !did_drag && m.on_drag.is_some() {
                             self.pressed = Some((node, m.id.clone()));
@@ -2156,13 +2171,36 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
             Event::PointerUp(pe) => {
                 self.pressed = None;
+                // A cancelled release (the platform took the gesture — see
+                // `PointerEvent::click_count`) ends the press and nothing else:
+                // no click, and no fling either, since the user never chose to
+                // let go.
+                let cancelled = pe.click_count == 0;
+                // The click fires here, and only if the release lands back on
+                // the node the press picked. A finger that pressed a row and
+                // then scrolled has already dropped `pending_click` on slop;
+                // this second check catches the release that simply drifted
+                // onto a neighbour.
+                if let Some((node, id, _)) = self.pending_click.take().filter(|_| !cancelled) {
+                    if let Some(t) = self.click_target_at(pe.pos) {
+                        let same = match &id {
+                            Some(i) => self.meta.get(&t).and_then(|m| m.id.as_ref()) == Some(i),
+                            None => t == node,
+                        };
+                        if same {
+                            if let Some(h) = self.meta.get(&t).and_then(|m| m.on_click.clone()) {
+                                h(&self.rt);
+                            }
+                        }
+                    }
+                }
                 self.fling_ms = self.clock_ms;
                 if let Some((_, last)) = self.pan.take() {
                     // Coast only from a real flick. Below this the finger was
                     // placed, not thrown, and momentum would feel like drift.
                     const MIN_FLING_PX_S: f64 = 60.0;
                     let (vx, vy, _) = self.pan_vel;
-                    if vx.hypot(vy) >= MIN_FLING_PX_S {
+                    if !cancelled && vx.hypot(vy) >= MIN_FLING_PX_S {
                         self.fling = Some((last, vx, vy));
                     }
                 }
@@ -2177,6 +2215,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
             }
             Event::PointerMove(pe) => {
+                // A finger that travels past the slop is scrolling, not tapping,
+                // so the press stops being a candidate click. Latched: the
+                // cancel is permanent for this gesture even if the finger comes
+                // back to where it started.
+                //
+                // TOUCH ONLY. A mouse cannot pan (see `pan`), so there is no
+                // competing gesture to disambiguate, and cancelling on movement
+                // would break the ordinary "press a big button, wiggle, release"
+                // that every desktop toolkit activates.
+                if pe.pointer == lumen_core::events::PointerKind::Touch {
+                    if let Some((_, _, origin)) = self.pending_click {
+                        if (pe.pos - origin).hypot() > TOUCH_SLOP_PX {
+                            self.pending_click = None;
+                        }
+                    }
+                }
                 // Touch pan: content follows the finger, so dragging UP scrolls
                 // toward the end — the same sign the shell gives the wheel.
                 // Deltas are per-move rather than from the press origin, which
@@ -2449,6 +2503,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// Whether `node` is disabled (itself or by an ancestor).
     fn is_disabled(&self, node: NodeIndex) -> bool {
         self.tree.flags(node).contains(NodeFlags::DISABLED)
+    }
+
+    /// The node a press at `pos` would activate: the nearest ancestor of the hit
+    /// target carrying an `on_click`. Mirrors the bubble in the `PointerDown`
+    /// arm, and is what the release re-resolves to in order to confirm the
+    /// pointer never left the node it pressed.
+    fn click_target_at(&self, pos: Point) -> Option<NodeIndex> {
+        let mut n = self.tree.hit_test(pos);
+        while let Some(node) = n {
+            if self.meta.get(&node).is_some_and(|m| m.on_click.is_some()) {
+                return Some(node);
+            }
+            let p = self.tree.parent(node);
+            n = p.is_some().then_some(p);
+        }
+        None
     }
 
     fn move_focus(&mut self, forward: bool) {
@@ -5603,6 +5673,18 @@ fn hover_tint_brush(brush: &mut Brush) {
         _ => {}
     }
 }
+
+/// How far a finger may travel before a press stops counting as a tap.
+///
+/// A touch that moves further is scrolling: the row under it will still be the
+/// same row when the finger lifts (the content moved with it), so "released on
+/// the node it pressed" cannot tell a tap from a drag on its own — this can.
+///
+/// 10 px sits between Android's ~8 dp `ViewConfiguration` slop and Flutter's
+/// 18 px `kTouchSlop`. Lower is more sensitive to a jittery finger cancelling a
+/// deliberate tap; higher lets the first few pixels of a scroll still activate
+/// what it started on.
+const TOUCH_SLOP_PX: f64 = 10.0;
 
 /// Whether a node with a wheel handler should consume this event.
 ///

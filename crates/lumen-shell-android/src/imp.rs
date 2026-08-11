@@ -165,8 +165,22 @@ fn drain_input(android: &AndroidApp, hl: &mut Headless, vp: &Viewport) -> bool {
                             hl.inject(Event::PointerMove(pe));
                             changed = true;
                         }
-                        MotionAction::Up | MotionAction::PointerUp | MotionAction::Cancel => {
+                        MotionAction::Up | MotionAction::PointerUp => {
                             hl.inject(Event::PointerUp(pe));
+                            changed = true;
+                        }
+                        // `Cancel` means the system took the gesture (the
+                        // notification shade, a back-swipe, a parent view
+                        // claiming it). It must end the press *without*
+                        // activating anything — `click_count: 0` is the
+                        // release-is-a-cancellation marker (02 §6). Folding it
+                        // into `Up` was harmless while clicks fired on the
+                        // press; now it would fire one on the way out.
+                        MotionAction::Cancel => {
+                            hl.inject(Event::PointerUp(PointerEvent {
+                                click_count: 0,
+                                ..pe
+                            }));
                             changed = true;
                         }
                         _ => {}

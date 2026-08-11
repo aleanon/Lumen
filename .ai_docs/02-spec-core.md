@@ -226,6 +226,17 @@ pub struct PointerEvent { pub pos: Point, pub button: PointerButton, pub pointer
 
 Dispatch: capture phase root→target, bubble phase target→root; `EventStatus::Handled` stops bubbling. Focus: `Tab`/`Shift+Tab` traversal over FOCUSABLE nodes in document order; arrow-key traversal inside composite controls is the widget's job. Synthesized input (test/agent) enters the same queue as OS input — there is exactly one input path.
 
+**Pointer activation is a press/release *pair*** (amended 2026-08-11). `PointerDown` picks the target — the nearest ancestor of the hit node carrying an `on_click` — and moves focus, starts drags and places carets, all as before. `on_click` itself fires on `PointerUp`, and only when both hold:
+
+- the release resolves to that same node (compared by `StableId` when it has one, so the click survives a rebuild between press and release), and
+- for `PointerKind::Touch`, the pointer never travelled more than 10 px from the press. The cancel is latched: returning to the press point does not revive it.
+
+The slop is touch-only. A mouse has no competing gesture (panning is touch-only), so press-drag-release inside one element activates it, matching every desktop toolkit. Both rules are required: when a list scrolls under a finger the row travels *with* it, so the release lands on the very same node and position alone cannot tell a tap from a drag.
+
+A release carrying `click_count == 0` is a **cancellation** — the gesture was taken over by the system (Android `MotionAction::Cancel`). It ends the press without clicking and without launching momentum.
+
+Agent/keyboard activation (`Action::Click`, Space/Enter on a focused node) invokes the handler directly and is unaffected by either rule.
+
 ## 7. Display list
 
 ```rust

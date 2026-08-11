@@ -63,6 +63,12 @@ pub struct PointerEvent {
     /// Modifier state.
     pub modifiers: Modifiers,
     /// Click count (1 = single, 2 = double, …).
+    ///
+    /// **0 on a `PointerUp` means the release is a *cancellation*** — the
+    /// platform took the gesture over rather than the user completing it
+    /// (Android's `MotionAction::Cancel`). Such a release ends the press
+    /// without activating an `on_click` and without launching momentum. Every
+    /// other producer sets 1 or more; [`PointerEvent::at`] sets 1.
     pub click_count: u8,
 }
 

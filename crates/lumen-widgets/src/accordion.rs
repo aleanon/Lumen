@@ -173,9 +173,12 @@ mod tests {
     use lumen_core::geometry::{Point, Size};
     use lumen_core::state::Signal;
 
-    /// A pointer-down event at a window point.
-    fn down(x: f64, y: f64) -> Event {
-        Event::PointerDown(PointerEvent::at(Point::new(x, y)))
+    /// Press *and release* at a window point. Both halves are required: the
+    /// click fires on the release, so a lone `PointerDown` activates nothing.
+    fn click(h: &mut crate::Headless, x: f64, y: f64) {
+        let p = Point::new(x, y);
+        h.inject(Event::PointerDown(PointerEvent::at(p)));
+        h.inject(Event::PointerUp(PointerEvent::at(p)));
     }
 
     /// Build an accordion whose body is a single id-tagged node, so we can assert
@@ -207,7 +210,7 @@ mod tests {
         assert!(!open.get(h.runtime()), "starts collapsed");
 
         // Click the header (top-left of the section).
-        h.inject(down(10.0, 10.0));
+        click(&mut h, 10.0, 10.0);
         let opened = h.pump();
 
         assert!(open.get(h.runtime()), "header click opened the section");
@@ -229,7 +232,7 @@ mod tests {
     fn is_open_reader_tracks_state() {
         let mut h = app();
         h.pump();
-        h.inject(down(10.0, 10.0));
+        click(&mut h, 10.0, 10.0);
         h.pump();
         let open: Signal<bool> = h.runtime().signal("acc", || false);
         assert!(open.get(h.runtime()));

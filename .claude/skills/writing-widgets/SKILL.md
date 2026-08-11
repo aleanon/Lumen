@@ -249,9 +249,14 @@ are still strings (they're selectors, not reactive keys).
 - **Hit-test / paint priority = document order.** Later siblings paint on top and
   win hit-testing. Push interactive overlays (resize handles, thumbs) **after** the
   things they must sit above.
-- **`focusable` + `on_click` both fire** on the same press. Keyboard input routes
-  to the *focused* node's id, so to make a click start editing, give the click
-  target and the editor the **same stable id** — focus lands where keystrokes go.
+- **`focusable` moves focus on the press; `on_click` fires on the *release*.**
+  A press picks the click target; the release activates it, and only if it lands
+  back on that same node — plus, for touch, only if the finger stayed within
+  10 px (a longer drag is a scroll, not a tap). So **a test that injects a bare
+  `PointerDown` activates nothing**; inject the `PointerUp` too. Keyboard input
+  routes to the *focused* node's id, so to make a click start editing, give the
+  click target and the editor the **same stable id** — focus lands where
+  keystrokes go.
 - **Colours:** `Color::srgb8(r,g,b,a)` is a runtime fn (not `const`); `WHITE` and
   `Color::new_linear(...)` are `const`. Build palettes in a fn, or thread a small
   `Copy` struct — don't reach for `const` `srgb8`.
@@ -352,7 +357,10 @@ pixels:
 ```rust
 let mut h = App::new(|cx| Toggle::new(cx, "t", "Label").into()).run_headless(Size::new(200.0, 80.0));
 h.pump();
-h.inject(Event::PointerDown(pe(x, y)));   // click, wheel, drag, text…
+// A click is a PAIR. `on_click` fires on the RELEASE — a lone `PointerDown`
+// activates nothing (02 §6).
+h.inject(Event::PointerDown(pe(x, y)));
+h.inject(Event::PointerUp(pe(x, y)));
 h.pump();
 let on: Signal<bool> = h.runtime().signal("t", || false);
 assert!(on.get(h.runtime()));             // state changed
