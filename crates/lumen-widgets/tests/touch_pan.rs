@@ -131,3 +131,98 @@ fn a_finger_drag_chains_past_a_list_that_cannot_scroll() {
         "the inner list has nowhere to go, so the finger must move the outer one"
     );
 }
+
+/// A flick keeps scrolling after the finger lifts, then settles.
+#[test]
+fn a_flick_coasts_and_then_stops() {
+    let mut h = App::new(list()).run_headless(Size::new(W, VIEWPORT));
+    h.pump();
+    let x = 100.0;
+    h.inject(Event::PointerDown(ev(
+        Point::new(x, 180.0),
+        PointerKind::Touch,
+    )));
+    h.pump();
+    // Move fast: 40px per 16ms frame is ~2500 px/s. Pumped between moves
+    // because velocity is sampled against the clock, and `inject` QUEUES —
+    // a whole batch drained in one pump shares a single clock value, so
+    // several moves per frame contribute only one velocity sample. That is
+    // also the device's shape: the shell injects as events arrive and pumps
+    // per frame.
+    for y in [140.0, 100.0, 60.0] {
+        h.advance_clock(16.0);
+        h.inject(Event::PointerMove(ev(Point::new(x, y), PointerKind::Touch)));
+        h.pump();
+    }
+    h.inject(Event::PointerUp(ev(
+        Point::new(x, 60.0),
+        PointerKind::Touch,
+    )));
+    h.pump();
+
+    let y: Signal<f64> = h.runtime().signal("vl", || 0.0);
+    let at_release = y.get(h.runtime());
+    assert_eq!(at_release, 120.0, "the drag itself moves 120px");
+
+    // Coast well past the decay horizon, then confirm it is actually still.
+    for _ in 0..120 {
+        h.advance_clock(16.0);
+        h.pump();
+    }
+    let settled = y.get(h.runtime());
+    assert!(
+        settled > at_release + 20.0,
+        "the flick should carry past {at_release} after release, got {settled}"
+    );
+    for _ in 0..60 {
+        h.advance_clock(16.0);
+        h.pump();
+    }
+    assert_eq!(
+        y.get(h.runtime()),
+        settled,
+        "momentum must decay to a stop rather than coast forever"
+    );
+}
+
+/// Touching the list during a coast stops it, the way it does everywhere else.
+#[test]
+fn a_new_touch_stops_the_coast() {
+    let mut h = App::new(list()).run_headless(Size::new(W, VIEWPORT));
+    h.pump();
+    let x = 100.0;
+    h.inject(Event::PointerDown(ev(
+        Point::new(x, 180.0),
+        PointerKind::Touch,
+    )));
+    h.pump();
+    for y in [140.0, 100.0, 60.0] {
+        h.advance_clock(16.0);
+        h.inject(Event::PointerMove(ev(Point::new(x, y), PointerKind::Touch)));
+        h.pump();
+    }
+    h.inject(Event::PointerUp(ev(
+        Point::new(x, 60.0),
+        PointerKind::Touch,
+    )));
+    h.advance_clock(16.0);
+    h.pump();
+
+    let y: Signal<f64> = h.runtime().signal("vl", || 0.0);
+    h.inject(Event::PointerDown(ev(
+        Point::new(x, 100.0),
+        PointerKind::Touch,
+    )));
+    h.advance_clock(16.0);
+    h.pump();
+    let at_stop = y.get(h.runtime());
+    for _ in 0..20 {
+        h.advance_clock(16.0);
+        h.pump();
+    }
+    assert_eq!(
+        y.get(h.runtime()),
+        at_stop,
+        "pressing during a coast must stop it dead"
+    );
+}
