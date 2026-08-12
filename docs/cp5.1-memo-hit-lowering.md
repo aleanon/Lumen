@@ -59,6 +59,12 @@ real case for apps that memoize… If it lands near 0.787, the retained graph is
 dead on measurement."* 0.43 is on the live side of that line — a memo-hit frame
 would go from 1.5× faster than a full rebuild to **2.3×**.
 
+> **Re-gated 2026-08-13 on the larger version — `docs/cp6-retained-tree-gate.md`.**
+> The split below refined further: the *tree* is free (~0 ns/node), the 13.8% is
+> index churn it forces, and taffy is 6.3%. Ruling was **STOP** — not on the
+> number, which clears every bar, but because 0 of 51 examples and 0 shipped
+> widgets use `cx.scope` at all.
+
 ## The finding that changes what CP6 should be
 
 CP6 is written as *"persisting the arenas"*. The decomposition says that is the

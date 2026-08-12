@@ -49,7 +49,14 @@ running the gate rather than by reading it.
 
 ## What is NOT decided here
 
-**CP6.2 (persist `Tree`) is a separate question and remains open.** CP2.3
+**CP6.2 (persist `Tree`) is a separate question and remains open.**
+> **Answered 2026-08-13 — `docs/cp6-retained-tree-gate.md`: STOP, and not on the
+> number.** Building the tree measures at **~0 ns/node**; it matters only as the
+> enabler for keeping side-table indices stable, which is 13.8% of a memo-hit
+> frame (taffy a further 6.3%). Full retention would take `scoped_vs_flat` to
+> 0.43–0.52, clearing every bar the campaign set — but **0 of 51 example crates
+> and 0 shipped widgets use `cx.scope`**, so it speeds up a path with no users.
+> Successor is ADOPT (make the list widgets memoize), not retention. CP2.3
 measured the *taffy* mint cost only. The other half of the retained-arena
 proposal is the per-copied-node bookkeeping in `copy_node`: 8 hashmap
 remove+insert pairs, a `root_map.insert`, and a `LayoutStyle::clone()` per memo
