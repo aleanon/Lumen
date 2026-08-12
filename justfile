@@ -68,6 +68,11 @@ stop-agent name="":
     fi
     rm -f target/lumen-agent.addr
 
+# LW: the live-window smoke gate — opens REAL windows on a REAL adapter and abuses them.
+# Needs an X display and wmctrl. `--legs a,b` runs a subset; `--storm N` sets the resize count.
+live-gate *args:
+    scripts/live_window_gate.sh {{args}}
+
 # Run an example headlessly (no window): binaries run their smoke main, gallery names render a frame to PNG, library examples run their tests. `just render list` shows the gallery. Pass `--wgpu` for a gallery name to rasterize the linear/GPU picture.
 render name *args:
     #!/usr/bin/env bash

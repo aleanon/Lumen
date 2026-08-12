@@ -79,6 +79,17 @@ message isn't enough.
 
 ## Rung 4 — the live window
 
+**There is an automated gate for this rung now: `just live-gate`.** It opens
+real windows on a real adapter and asserts through the agent RPC — boot,
+click-vs-drag, shadow ink, diagnostics, a >2048 px window, and a 400-resize
+storm. Run it before claiming a rendering/surface/input change is verified;
+CI runs it under xvfb+openbox. The three crashes that reached a user in
+2026-08 were all invisible to 394 headless suites and all live-only. See
+`docs/live-window-gate.md`, including what it deliberately does not cover.
+
+Driving a window by hand, for anything the gate does not assert:
+
+
 ```bash
 just run-agent <name> &          # window + JSON-RPC on 127.0.0.1:9230
 python3 scripts/agent_client.py wait-port

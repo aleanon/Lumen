@@ -136,6 +136,42 @@ jobs:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: cargo test -p lumen-render -p lumen-widgets --features wgpu
 
+  # LW: the ONLY job that opens a real window. Everything else in this file runs
+  # headless on the CPU renderer, which has no swapchain, no texture-dimension
+  # concept and no OS event loop — and of the five defects found in the week to
+  # 2026-08-12, the three that reached a user were all in the live surface path
+  # and none of the 394 headless suites saw any of them.
+  #
+  # Under xvfb + a window manager, because the gate drives resizes through
+  # wmctrl and an EWMH request needs someone to honour it. Not
+  # `continue-on-error`: this job exists precisely because the failures it
+  # catches were shipping.
+  live-window:
+    name: live window (xvfb + lavapipe)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.9.1
+      - name: install lavapipe, xvfb, a WM and wmctrl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools \
+                                  xvfb openbox wmctrl just
+      - name: live window gate
+        env:
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          # Software rasterization of a resize storm is slow; the storm's job is
+          # to race a reconfigure against a resize, and 120 does that.
+          LUMEN_LIVE_STORM: "120"
+        run: |
+          Xvfb :99 -screen 0 2560x1600x24 &
+          export DISPLAY=:99
+          sleep 2
+          openbox &
+          sleep 1
+          scripts/live_window_gate.sh --storm "$LUMEN_LIVE_STORM"
+
   # LN1: the two DERIVED font faces must be reproducible from their sources.
   #
   # Both shipped as untracked pyftsubset output — the recipe existed only in
