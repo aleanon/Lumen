@@ -1,5 +1,17 @@
 # CP5 — the written gate, re-run with `scoped_vs_flat = 0.787`
 
+> **CP5.1 ran, 2026-08-13 — the gate's bar is met.** `docs/cp5.1-memo-hit-lowering.md`.
+> Re-lowering unchanged spans is **33.8%** of a memo-hit frame, so removing it
+> all would take `scoped_vs_flat` from **0.648** (today, re-measured — not the
+> 0.787 recorded below, which predates OB2 and the quadratic fix) to **~0.43**.
+> That is the live side of the "near 0.49" line this document drew. **But the
+> decomposition changes what CP6 has to be:** taffy node construction is only
+> ~18% of the re-lowering; the rest is the tree rebuild and the side-table
+> moves. "Persisting the arenas" as specified below buys ~6% of a frame, not the
+> ceiling. Re-gate the bigger version — retained tree *and* side tables — or
+> expect a sixth of the win. Still says nothing about the egui gap, and CP4
+> remains missing.
+
 *2026-08-09. The gate asks four questions and permits "stop". Answers below,
 with numbers.*
 
