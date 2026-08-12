@@ -120,7 +120,14 @@ emulator that would measure QEMU. See `docs/cp4-arm-measurement-blocked.md`.
   + new deps; browser/iOS CI and devices; the Android emulator exists locally but
   is heavy. *First step:* the deterministic software-decode CI path (D2) and the
   WASM/CPU golden path (D4) are the testable slices to start with.
-- **Async runtime + HTTP/WS client + `WasmSpawner`** (the data layer's Part D).
+- **~~Async runtime~~ + HTTP/WS client + `WasmSpawner`** (the data layer's Part D).
+  **The executor half shipped 2026-08-13 (EX):** `lumen-exec` provides tokio/smol
+  `Spawner` adapters behind default-off features (`lumen::exec` via
+  `lumen/exec-tokio` / `exec-smol`), so reactor-dependent futures actually run —
+  `ThreadPoolSpawner` `block_on`s them on a pool thread, where a tokio timer
+  panics. **The HTTP half is declined, not deferred** (owner decision,
+  2026-08-13): transport is the app's choice; bring your own client and run it on
+  one of these adapters.
   *Done already (no deps):* the executor/data layer — `Spawner` + `Sink` +
   `cx.resource`/`cx.task` + `InlineSpawner`/`ManualSpawner`/`ThreadPoolSpawner`,
   shell waker (`lumen_core::tasks`, `examples/data`). *Why blocked:* a bundled

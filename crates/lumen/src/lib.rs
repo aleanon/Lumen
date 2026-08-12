@@ -68,6 +68,13 @@ pub use lumen_widgets::shader;
 /// Layout styling (the typed mirror of the `.lss` layout properties, 04 §3).
 pub use lumen_layout as layout;
 
+/// Executor adapters (`exec-tokio` / `exec-smol`): run an app's background work
+/// on a real async runtime rather than by blocking a thread-pool thread. Absent
+/// unless one of those features is on, so a default build has no runtime crate
+/// in its graph. See [`lumen_exec`] for why the built-in `ThreadPoolSpawner` is
+/// not enough for reactor-dependent futures.
+#[cfg(any(feature = "exec-tokio", feature = "exec-smol"))]
+pub use lumen_exec as exec;
 /// The display list and CPU renderer (02 §7).
 pub use lumen_render as render;
 

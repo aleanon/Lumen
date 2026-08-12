@@ -1,0 +1,36 @@
+[package]
+name = "lumen-exec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Adapters that let a Lumen app run its futures on a real async runtime.
+#
+# A LEAF crate on purpose. `Spawner` lives in `lumen-core`, and putting
+# `tokio`/`smol` behind features THERE would put them one careless
+# `{ workspace = true }` away from being on everywhere — the exact trap GX3 and
+# CFG1 document (an inherited link silently re-enabling defaults across a
+# five-crate chain, and a "lean" wasm module that was 21.9 MB against a 22.0 MB
+# default). Nothing in the workspace depends on this crate, so it cannot leak by
+# feature unification.
+[features]
+default = []
+tokio = ["dep:tokio"]
+smol = ["dep:smol", "dep:blocking"]
+
+[dependencies]
+lumen-core = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time"], optional = true }
+smol = { version = "2", optional = true }
+blocking = { version = "1", optional = true }
+
+[dev-dependencies]
+# The in-app test needs the real widget stack to prove the round trip from a
+# spawned future back into a signal, which is what an app actually depends on.
+lumen-widgets = { workspace = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros"] }

@@ -35,9 +35,19 @@ agent = ["lumen-shell/agent"]
 # the entire Linux GTK cluster (rfd + muda + tray-icon + gtk); the constrained
 # profile CFG1 targets is built this way.
 desktop-integration = ["lumen-shell/desktop-integration"]
+# EX: run background work on a real async runtime. Default-OFF, and the runtime
+# crates are optional dependencies OF AN OPTIONAL CRATE — so a default build has
+# neither tokio nor smol anywhere in its graph. `lumen::exec` appears only when
+# one of these is on.
+exec-tokio = ["dep:lumen-exec", "lumen-exec/tokio"]
+exec-smol = ["dep:lumen-exec", "lumen-exec/smol"]
 
 [dependencies]
 lumen-core = { workspace = true }
+# Direct path dep with `default-features = false`, per the GX3 rule — Cargo
+# ignores that key on a workspace-inherited dependency, and this one gates
+# whether tokio/smol exist in the graph at all.
+lumen-exec = { path = "../lumen-exec", default-features = false, optional = true }
 lumen-render = { workspace = true }
 lumen-layout = { workspace = true }
 lumen-text = { workspace = true }

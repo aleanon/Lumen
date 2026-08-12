@@ -4,6 +4,7 @@
 resolver = "2"
 members = [
     "crates/lumen-core",
+    "crates/lumen-exec",
     "crates/lumen-macros",
     "crates/lumen-layout",
     "crates/lumen-render",
@@ -99,6 +100,7 @@ publish = false
 # feature-forwarding is what lets a `--no-default-features` app binary actually
 # drop `serde_json` app-wide despite Cargo's feature unification.
 lumen-core = { path = "crates/lumen-core", default-features = false }
+lumen-exec = { path = "crates/lumen-exec", default-features = false }
 lumen-macros = { path = "crates/lumen-macros" }
 lumen-layout = { path = "crates/lumen-layout" }
 lumen-render = { path = "crates/lumen-render" }

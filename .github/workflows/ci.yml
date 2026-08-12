@@ -136,6 +136,28 @@ jobs:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: cargo test -p lumen-render -p lumen-widgets --features wgpu
 
+  # EX: the executor adapters are behind default-off features, so nothing else
+  # in this file compiles them. Without this job they would rot untested — and
+  # the whole point of the crate is a claim about runtime behaviour (a
+  # reactor-dependent future runs) that only a test can hold.
+  executors:
+    name: executor adapters (tokio + smol)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2.9.1
+      - name: test both adapters
+        run: cargo test -p lumen-exec --features tokio,smol
+      - name: the default graph must contain neither runtime
+        run: |
+          if cargo tree -p lumen -e normal | grep -qiE "^[^a-z]*(tokio|smol) "; then
+            echo "a default lumen build pulled an async runtime — the containment"
+            echo "that justifies the ADR-003 amendment has regressed (see 07, EX)."
+            cargo tree -p lumen -e normal | grep -iE "tokio|smol"
+            exit 1
+          fi
+
   # LW: the ONLY job that opens a real window. Everything else in this file runs
   # headless on the CPU renderer, which has no swapchain, no texture-dimension
   # concept and no OS event loop — and of the five defects found in the week to
