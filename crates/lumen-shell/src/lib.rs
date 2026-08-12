@@ -1722,16 +1722,15 @@ impl Presenter {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
-        }))?;
+            apply_limit_buckets: false,
+        }))
+        .ok()?;
         // MemoryUsage over the default Performance hint — the blit presenter holds
         // one small texture; no need for large pre-reserved GPU pools.
-        let (device, queue) = block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
-                ..Default::default()
-            },
-            None,
-        ))
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            ..Default::default()
+        }))
         .ok()?;
         let caps = surface.get_capabilities(&adapter);
         let format = caps
@@ -1753,6 +1752,7 @@ impl Presenter {
         // `max_texture_dimension_2d` is fatal too, so clamp rather than trip it.
         let max = adapter.limits().max_texture_dimension_2d.max(1);
         let config = wgpu::SurfaceConfiguration {
+            color_space: wgpu::SurfaceColorSpace::Srgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: size.width.clamp(1, max),
@@ -1791,28 +1791,28 @@ impl Presenter {
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("blit-layout"),
-            bind_group_layouts: &[&bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bgl)],
+            immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("blit"),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs",
+                entry_point: Some("vs"),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs",
+                entry_point: Some("fs"),
                 targets: &[Some(format.into())],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
@@ -1872,14 +1872,14 @@ impl Presenter {
         }
         let (tex, bind, _, _) = self.staging.as_ref().unwrap();
         self.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             frame.pixels(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(fw * 4),
                 rows_per_image: Some(fh),
@@ -1893,16 +1893,19 @@ impl Presenter {
 
         // Reconfigure + retry once on a resize-outdated swapchain rather than
         // dropping the frame (smooth resize on the CPU-fallback path too).
+        use wgpu::CurrentSurfaceTexture as Acquired;
         let surface_tex = match self.surface.get_current_texture() {
-            Ok(t) => t,
-            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+            Acquired::Success(t) | Acquired::Suboptimal(t) => t,
+            Acquired::Outdated => {
                 self.surface.configure(&self.device, &self.config);
                 match self.surface.get_current_texture() {
-                    Ok(t) => t,
-                    Err(_) => return,
+                    Acquired::Success(t) | Acquired::Suboptimal(t) => t,
+                    _ => return,
                 }
             }
-            Err(_) => return,
+            // Nothing to present onto right now; the next frame tries again.
+            // This path has no fallback of its own — it IS the fallback.
+            _ => return,
         };
         let sview = surface_tex.texture.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -1912,6 +1915,7 @@ impl Presenter {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &sview,
                     resolve_target: None,
+                    depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
                         store: wgpu::StoreOp::Store,
@@ -1920,13 +1924,15 @@ impl Presenter {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, bind, &[]);
             pass.draw(0..3, 0..1);
         }
         self.queue.submit(Some(enc.finish()));
-        surface_tex.present();
+        // 30: presenting is a queue operation.
+        self.queue.present(surface_tex);
     }
 }
 

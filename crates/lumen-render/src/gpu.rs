@@ -693,53 +693,66 @@ impl Wgpu {
         let (instance, adapter) = [wgpu::Backends::PRIMARY, wgpu::Backends::SECONDARY]
             .into_iter()
             .find_map(|backends| {
+                // 30: `InstanceDescriptor` lost its `Default` (it now holds an
+                // optional display handle, which cannot have one). The
+                // `_from_env` constructor keeps `WGPU_BACKEND` and friends
+                // working, which is what the CI job's `VK_ICD_FILENAMES` and
+                // the lavapipe runs rely on.
                 let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                     backends,
-                    ..Default::default()
+                    ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
                 });
                 let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::HighPerformance,
                     compatible_surface: None,
                     force_fallback_adapter: false,
-                }))?;
+                    // 30: opt into the adapter's limit buckets. `false` keeps
+                    // the 22 behaviour — we ask for limits explicitly below,
+                    // and that request is what the oversize guards are pinned
+                    // to (see `required_limits`).
+                    apply_limit_buckets: false,
+                }))
+                // 30: `request_adapter` reports *why* it found nothing. The
+                // PRIMARY-then-SECONDARY sweep below only cares that it did.
+                .ok()?;
                 Some((instance, adapter))
             })?;
-        let (device, queue) = block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("lumen-gpu"),
-                required_features: wgpu::Features::empty(),
-                // `downlevel_defaults()` alone pins `max_texture_dimension_2d`
-                // to 2048 — and REQUESTED limits are what wgpu validates
-                // against, so that is a hard ceiling even on a 32k-capable GPU.
-                // It made a tall shadow sprite, a large image asset, and any
-                // window over 2048 physical px a hard panic.
-                //
-                // `using_resolution` copies exactly the three
-                // `max_texture_dimension_*` fields from the adapter and nothing
-                // else, so every storage-buffer / workgroup / inter-stage limit
-                // the downlevel profile exists to constrain is untouched. The
-                // GPU path is `cfg(not(target_arch = "wasm32"))`, so no web
-                // target is affected.
-                required_limits: {
-                    let mut l =
-                        wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
-                    // Request exactly the ceiling we intend to honour. Asking for
-                    // the adapter's full resolution while guarding at
-                    // MAX_DIM_CEILING leaves wgpu validating against a limit we
-                    // never use: the guard becomes untestable, and any unguarded
-                    // path fails only on hardware weaker than the developer's.
-                    l.max_texture_dimension_1d = l.max_texture_dimension_1d.min(MAX_DIM_CEILING);
-                    l.max_texture_dimension_2d = l.max_texture_dimension_2d.min(MAX_DIM_CEILING);
-                    l
-                },
-                // Favor low memory over large pre-reserved pools: the default
-                // `Performance` hint makes gpu-alloc keep big blocks, which on the
-                // NVIDIA driver mapped ~128 MB per device. A UI allocates little
-                // and (post-1c) reuses resources, so MemoryUsage is ~free here.
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("lumen-gpu"),
+            required_features: wgpu::Features::empty(),
+            // `downlevel_defaults()` alone pins `max_texture_dimension_2d`
+            // to 2048 — and REQUESTED limits are what wgpu validates
+            // against, so that is a hard ceiling even on a 32k-capable GPU.
+            // It made a tall shadow sprite, a large image asset, and any
+            // window over 2048 physical px a hard panic.
+            //
+            // `using_resolution` copies exactly the three
+            // `max_texture_dimension_*` fields from the adapter and nothing
+            // else, so every storage-buffer / workgroup / inter-stage limit
+            // the downlevel profile exists to constrain is untouched. The
+            // GPU path is `cfg(not(target_arch = "wasm32"))`, so no web
+            // target is affected.
+            // 30: the trace path moved out of `request_device` and into
+            // the descriptor, and experimental features became explicit.
+            trace: wgpu::Trace::Off,
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            required_limits: {
+                let mut l = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+                // Request exactly the ceiling we intend to honour. Asking for
+                // the adapter's full resolution while guarding at
+                // MAX_DIM_CEILING leaves wgpu validating against a limit we
+                // never use: the guard becomes untestable, and any unguarded
+                // path fails only on hardware weaker than the developer's.
+                l.max_texture_dimension_1d = l.max_texture_dimension_1d.min(MAX_DIM_CEILING);
+                l.max_texture_dimension_2d = l.max_texture_dimension_2d.min(MAX_DIM_CEILING);
+                l
             },
-            None,
-        ))
+            // Favor low memory over large pre-reserved pools: the default
+            // `Performance` hint makes gpu-alloc keep big blocks, which on the
+            // NVIDIA driver mapped ~128 MB per device. A UI allocates little
+            // and (post-1c) reuses resources, so MemoryUsage is ~free here.
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+        }))
         .ok()?;
 
         let info = adapter.get_info();
@@ -841,50 +854,50 @@ impl Wgpu {
 
         let rect_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("rect-layout"),
-            bind_group_layouts: &[&viewport_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&viewport_bgl)],
+            immediate_size: 0,
         });
         let rect_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("rect"),
             layout: Some(&rect_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "rect_vs",
-                buffers: &[wgpu::VertexBufferLayout {
+                entry_point: Some("rect_vs"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<RectInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x4, 1 => Float32x4, 2 => Float32x4,
                         3 => Float32x4, 4 => Float32x4
                     ],
-                }],
+                })],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "rect_fs",
+                entry_point: Some("rect_fs"),
                 targets: &[Some(target.clone())],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample,
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         let image_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("image-layout"),
-            bind_group_layouts: &[&viewport_bgl, &image_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&viewport_bgl), Some(&image_bgl)],
+            immediate_size: 0,
         });
         let image_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("image"),
             layout: Some(&image_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "image_vs",
-                buffers: &[wgpu::VertexBufferLayout {
+                entry_point: Some("image_vs"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<RectInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     // `2` lands at offset 32 == `RectInstance::radii`, which an
@@ -892,146 +905,146 @@ impl Wgpu {
                     // normalized source rect. Same trick the glyph pipeline uses
                     // with `GlyphInstance.uv`, so no new struct.
                     attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4],
-                }],
+                })],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "image_fs",
+                entry_point: Some("image_fs"),
                 targets: &[Some(target.clone())],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample,
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         // Glyph pipeline (R3.3): instanced quads sampling the shared coverage
         // atlas (group 1 = atlas texture + sampler, same layout as images).
         let glyph_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("glyph-layout"),
-            bind_group_layouts: &[&viewport_bgl, &atlas_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&viewport_bgl), Some(&atlas_bgl)],
+            immediate_size: 0,
         });
         let glyph_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("glyph"),
             layout: Some(&glyph_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "glyph_vs",
-                buffers: &[wgpu::VertexBufferLayout {
+                entry_point: Some("glyph_vs"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<GlyphInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Uint32],
-                }],
+                })],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "glyph_fs",
+                entry_point: Some("glyph_fs"),
                 targets: &[Some(target.clone())],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample,
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         // Tessellated-path pipeline (R1.3): non-instanced (pos, color) triangles.
         let path_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("path-layout"),
-            bind_group_layouts: &[&viewport_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&viewport_bgl)],
+            immediate_size: 0,
         });
         let path_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("path"),
             layout: Some(&path_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "path_vs",
-                buffers: &[wgpu::VertexBufferLayout {
+                entry_point: Some("path_vs"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<PathVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
-                }],
+                })],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "path_fs",
+                entry_point: Some("path_fs"),
                 targets: &[Some(target.clone())],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample,
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         // Gradient pipeline (R1.4): per-instance rect + ramp texture; the
         // fragment computes the spatial parameter and samples the ramp.
         let gradient_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gradient-layout"),
-            bind_group_layouts: &[&viewport_bgl, &image_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&viewport_bgl), Some(&image_bgl)],
+            immediate_size: 0,
         });
         let gradient_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("gradient"),
             layout: Some(&gradient_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "gradient_vs",
-                buffers: &[wgpu::VertexBufferLayout {
+                entry_point: Some("gradient_vs"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<GradInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
                         0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4
                     ],
-                }],
+                })],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "gradient_fs",
+                entry_point: Some("gradient_fs"),
                 targets: &[Some(target.clone())],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample,
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         // Layer-composite pipeline (R1.5): child texture + rounded clip + opacity.
         let composite_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("composite-layout"),
-            bind_group_layouts: &[&viewport_bgl, &image_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&viewport_bgl), Some(&image_bgl)],
+            immediate_size: 0,
         });
         let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("composite"),
             layout: Some(&composite_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "composite_vs",
-                buffers: &[wgpu::VertexBufferLayout {
+                entry_point: Some("composite_vs"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<CompositeInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4],
-                }],
+                })],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 // Child layers are stored premultiplied (alpha-blended over a
                 // transparent clear), so composite with premultiplied src-over.
-                entry_point: "composite_fs",
+                entry_point: Some("composite_fs"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: TARGET_FORMAT,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
@@ -1042,8 +1055,8 @@ impl Wgpu {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample,
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         // Box-blur pipeline (R1 backdrop): fullscreen pass averaging 2r+1 texels
@@ -1063,21 +1076,21 @@ impl Wgpu {
         });
         let blur_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("blur-layout"),
-            bind_group_layouts: &[&blur_params_bgl, &image_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&blur_params_bgl), Some(&image_bgl)],
+            immediate_size: 0,
         });
         let blur_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("blur"),
             layout: Some(&blur_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "fullscreen_vs",
+                entry_point: Some("fullscreen_vs"),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "blur_fs",
+                entry_point: Some("blur_fs"),
                 // Renders into a single-sample ping-pong target, overwriting.
                 targets: &[Some(wgpu::ColorTargetState {
                     format: TARGET_FORMAT,
@@ -1089,33 +1102,33 @@ impl Wgpu {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         // Backdrop-composite pipeline: draws the blurred backdrop within a rounded
         // clip (+saturation) into the (possibly MSAA) layer attachment.
         let backdrop_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("backdrop-layout"),
-            bind_group_layouts: &[&viewport_bgl, &image_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&viewport_bgl), Some(&image_bgl)],
+            immediate_size: 0,
         });
         let backdrop_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("backdrop"),
             layout: Some(&backdrop_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "backdrop_vs",
-                buffers: &[wgpu::VertexBufferLayout {
+                entry_point: Some("backdrop_vs"),
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<CompositeInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4],
-                }],
+                })],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "backdrop_fs",
+                entry_point: Some("backdrop_fs"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: TARGET_FORMAT,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -1126,8 +1139,8 @@ impl Wgpu {
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample,
-            multiview: None,
             cache: None,
+            multiview_mask: None,
         });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1251,6 +1264,9 @@ impl Wgpu {
             .find(|f| f.is_srgb())
             .unwrap_or(caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
+            // 30: explicit. Srgb matches the sRGB format selected below, which
+            // is what the blit shader and every golden assume.
+            color_space: wgpu::SurfaceColorSpace::Srgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: width.max(1),
@@ -1295,8 +1311,8 @@ impl Wgpu {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("blit-layout"),
-                bind_group_layouts: &[&bgl],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&bgl)],
+                immediate_size: 0,
             });
         let pipeline = self
             .device
@@ -1305,21 +1321,21 @@ impl Wgpu {
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
-                    entry_point: "vs",
+                    entry_point: Some("vs"),
                     buffers: &[],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: "fs",
+                    entry_point: Some("fs"),
                     targets: &[Some(format.into())],
                     compilation_options: Default::default(),
                 }),
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
-                multiview: None,
                 cache: None,
+                multiview_mask: None,
             });
         let sampler = self
             .device
@@ -1396,24 +1412,40 @@ impl Wgpu {
             None => list,
         };
 
+        // wgpu 30 replaced `Result<_, SurfaceError>` with an enum that states
+        // the recovery for each case in its own docs. The three-way split we
+        // had already invented for `Present` maps onto it directly, which is
+        // some evidence the split was the right one.
+        use wgpu::CurrentSurfaceTexture as Acquired;
         let frame = match surf.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+            // `Suboptimal` recommends a reconfigure for performance, but the
+            // texture is valid — present it and let the next resize event
+            // reconfigure. Dropping the frame here would stutter for nothing.
+            Acquired::Success(f) | Acquired::Suboptimal(f) => f,
+            Acquired::Outdated => {
                 surf.surface.configure(&self.device, &surf.config);
                 match surf.surface.get_current_texture() {
-                    Ok(f) => f,
+                    Acquired::Success(f) | Acquired::Suboptimal(f) => f,
                     // Still stale: the window changed size AGAIN between the
                     // reconfigure and the acquire, which is routine during a
                     // resize drag and routine to recover from. Skipping one
                     // frame is the whole cost — reporting this as a dead
                     // surface is what used to crash the process.
-                    Err(_) => return crate::Present::Skipped,
+                    _ => return crate::Present::Skipped,
                 }
             }
-            // A timeout is the compositor being slow; try again next frame.
-            Err(wgpu::SurfaceError::Timeout) => return crate::Present::Skipped,
-            // Out of memory will not fix itself by retrying.
-            Err(wgpu::SurfaceError::OutOfMemory) => return crate::Present::Unavailable,
+            // The compositor is slow, or the window is minimized/covered.
+            // `Occluded` is new in 30 and is exactly a skip: there is nothing
+            // to show and there will be again.
+            Acquired::Timeout | Acquired::Occluded => return crate::Present::Skipped,
+            // A validation error is our bug, not a dead surface. Skipping keeps
+            // it visible (it surfaces through the error scope) without tearing
+            // down the direct path — tearing down on a transient is the exact
+            // shape of the crash this enum's predecessor caused.
+            Acquired::Validation => return crate::Present::Skipped,
+            // Recovering from `Lost` means recreating the surface, which we
+            // cannot do from here: the window handle lives in the shell.
+            Acquired::Lost => return crate::Present::Unavailable,
         };
         let mut keep = KeepAlive::default();
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -1449,6 +1481,7 @@ impl Wgpu {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &sview,
                     resolve_target: None,
+                    depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
                         store: wgpu::StoreOp::Store,
@@ -1457,14 +1490,17 @@ impl Wgpu {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             pass.set_pipeline(&surf.pipeline);
-            pass.set_bind_group(0, &bind, &[]);
+            pass.set_bind_group(0, Some(&bind), &[]);
             pass.draw(0..3, 0..1);
         }
         self.queue.submit(Some(encoder.finish()));
         drop(keep);
-        frame.present();
+        // 30: presenting is a queue operation now, not a method on the
+        // texture. Same ordering — after submit, before the next frame.
+        self.queue.present(frame);
         // Mirror render_at_scale: repack the atlas next frame if it overflowed.
         if self.atlas_overflow.take() {
             self.atlas.borrow_mut().clear();
@@ -1779,15 +1815,15 @@ impl Wgpu {
         let slot = self.readback.borrow();
         let readback = slot.as_ref().unwrap();
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &root,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: readback,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(bpr),
                     rows_per_image: Some(height),
@@ -1805,8 +1841,17 @@ impl Wgpu {
         // Map only the region we wrote (the cached buffer may be larger).
         let slice = readback.slice(..needed);
         slice.map_async(wgpu::MapMode::Read, |_| {});
-        self.device.poll(wgpu::Maintain::Wait);
-        let data = slice.get_mapped_range();
+        // 30: `Maintain` → `PollType`, and `poll` reports completion. A
+        // failed wait means the map callback below has not run; the
+        // caller checks the mapped range either way.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        // 30: mapping is fallible. A failed map means the readback produced
+        // nothing; return an empty frame rather than panic — this path feeds
+        // screenshots and goldens, not the display.
+        let Ok(data) = slice.get_mapped_range() else {
+            readback.unmap();
+            return RgbaImage::new(width, height);
+        };
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         for row in 0..height {
             let start = (row * bpr) as usize;
@@ -2168,7 +2213,7 @@ impl Wgpu {
                             };
                             if fresh {
                                 self.queue.write_texture(
-                                    wgpu::ImageCopyTexture {
+                                    wgpu::TexelCopyTextureInfo {
                                         texture: &self.atlas_tex,
                                         mip_level: 0,
                                         origin: wgpu::Origin3d {
@@ -2179,7 +2224,7 @@ impl Wgpu {
                                         aspect: wgpu::TextureAspect::All,
                                     },
                                     &gi.coverage,
-                                    wgpu::ImageDataLayout {
+                                    wgpu::TexelCopyBufferLayout {
                                         offset: 0,
                                         bytes_per_row: Some(gi.width),
                                         rows_per_image: Some(gi.height),
@@ -2314,6 +2359,7 @@ impl Wgpu {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: attach_view,
                     resolve_target,
+                    depth_slice: None,
                     ops: wgpu::Operations {
                         load: load_op,
                         store: wgpu::StoreOp::Store,
@@ -2322,6 +2368,7 @@ impl Wgpu {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             // R6.3: confine drawing to the damaged region. Everything outside it
             // is last frame's content, loaded above.
@@ -2356,6 +2403,7 @@ impl Wgpu {
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                                 view: attach_view,
                                 resolve_target,
+                                depth_slice: None,
                                 ops: wgpu::Operations {
                                     load,
                                     store: wgpu::StoreOp::Store,
@@ -2364,12 +2412,13 @@ impl Wgpu {
                             depth_stencil_attachment: None,
                             timestamp_writes: None,
                             occlusion_query_set: None,
+                            multiview_mask: None,
                         });
                         // Composite the previous backdrop's blurred content first.
                         if let Some((bind, buf)) = &pending {
                             pass.set_pipeline(&self.backdrop_pipeline);
                             pass.set_bind_group(0, viewport_bg, &[]);
-                            pass.set_bind_group(1, bind, &[]);
+                            pass.set_bind_group(1, Some(bind), &[]);
                             pass.set_vertex_buffer(0, buf.slice(..));
                             pass.draw(0..6, 0..1);
                         }
@@ -2478,28 +2527,29 @@ impl Wgpu {
             LayerDraw::Gradient { buf, bind } => {
                 pass.set_pipeline(&self.gradient_pipeline);
                 pass.set_bind_group(0, viewport_bg, &[]);
-                pass.set_bind_group(1, bind, &[]);
+                pass.set_bind_group(1, Some(bind), &[]);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..6, 0..1);
             }
             LayerDraw::Image { buf, bind } => {
                 pass.set_pipeline(&self.image_pipeline);
                 pass.set_bind_group(0, viewport_bg, &[]);
-                pass.set_bind_group(1, bind, &[]);
+                // This one is an `Rc<BindGroup>` (the image atlas shares it).
+                pass.set_bind_group(1, Some(&**bind), &[]);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..6, 0..1);
             }
             LayerDraw::Glyphs { buf, count } => {
                 pass.set_pipeline(&self.glyph_pipeline);
                 pass.set_bind_group(0, viewport_bg, &[]);
-                pass.set_bind_group(1, &self.atlas_bind, &[]);
+                pass.set_bind_group(1, Some(&self.atlas_bind), &[]);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..6, 0..*count);
             }
             LayerDraw::Composite { buf, bind } => {
                 pass.set_pipeline(&self.composite_pipeline);
                 pass.set_bind_group(0, viewport_bg, &[]);
-                pass.set_bind_group(1, bind, &[]);
+                pass.set_bind_group(1, Some(bind), &[]);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..6, 0..1);
             }
@@ -2527,14 +2577,14 @@ impl Wgpu {
             view_formats: &[],
         });
         self.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &texels,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(RAMP_TEXELS * 4),
                 rows_per_image: Some(1),
@@ -2654,6 +2704,7 @@ impl Wgpu {
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: dst,
                         resolve_target: None,
+                        depth_slice: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                             store: wgpu::StoreOp::Store,
@@ -2662,6 +2713,7 @@ impl Wgpu {
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 });
                 pass.set_pipeline(&self.blur_pipeline);
                 pass.set_bind_group(0, params, &[]);
@@ -2819,14 +2871,14 @@ impl Wgpu {
             view_formats: &[],
         });
         self.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             img.pixels(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(img.width() * 4),
                 rows_per_image: Some(img.height()),
@@ -2887,14 +2939,15 @@ impl Wgpu {
 
         // Capture WGSL validation errors instead of panicking, so a broken edit
         // becomes a diagnostic and the caller keeps the previous pipeline.
-        self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        // 30: an error scope is a guard object; popping goes through it.
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let module = self
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("user-shader"),
                 source: wgpu::ShaderSource::Wgsl(Cow::Owned(src)),
             });
-        if let Some(err) = block_on(self.device.pop_error_scope()) {
+        if let Some(err) = block_on(scope.pop()) {
             return Err(lumen_core::Diagnostic::new(
                 lumen_core::codes::E0201,
                 err.to_string(),
@@ -2920,10 +2973,11 @@ impl Wgpu {
             .device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("shader-layout"),
-                bind_group_layouts: &[&ubgl],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&ubgl)],
+                immediate_size: 0,
             });
-        self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        // 30: an error scope is a guard object; popping goes through it.
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let pipeline = self
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -2931,13 +2985,13 @@ impl Wgpu {
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &module,
-                    entry_point: "vs_main",
+                    entry_point: Some("vs_main"),
                     buffers: &[],
                     compilation_options: Default::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,
-                    entry_point: "fs_main",
+                    entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: TARGET_FORMAT,
                         blend: None,
@@ -2948,10 +3002,10 @@ impl Wgpu {
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
-                multiview: None,
                 cache: None,
+                multiview_mask: None,
             });
-        if let Some(err) = block_on(self.device.pop_error_scope()) {
+        if let Some(err) = block_on(scope.pop()) {
             return Err(lumen_core::Diagnostic::new(
                 lumen_core::codes::E0201,
                 err.to_string(),
@@ -3009,6 +3063,7 @@ impl Wgpu {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
+                    depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
@@ -3017,9 +3072,10 @@ impl Wgpu {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, &ubg, &[]);
+            pass.set_bind_group(0, Some(&ubg), &[]);
             pass.draw(0..3, 0..1);
         }
 
@@ -3031,15 +3087,15 @@ impl Wgpu {
             mapped_at_creation: false,
         });
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &target,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &readback,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(bpr),
                     rows_per_image: Some(height),
@@ -3055,8 +3111,18 @@ impl Wgpu {
 
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
-        self.device.poll(wgpu::Maintain::Wait);
-        let mapped = slice.get_mapped_range();
+        // 30: `Maintain` → `PollType`, and `poll` reports completion. A
+        // failed wait means the map callback below has not run; the
+        // caller checks the mapped range either way.
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        // Fallible in 30, same as the other readback above.
+        let Ok(mapped) = slice.get_mapped_range() else {
+            readback.unmap();
+            return Err(lumen_core::Diagnostic::new(
+                lumen_core::codes::E0201,
+                "shader readback could not be mapped".to_string(),
+            ));
+        };
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         for row in 0..height {
             let start = (row * bpr) as usize;

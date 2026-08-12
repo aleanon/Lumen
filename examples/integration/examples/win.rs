@@ -72,7 +72,7 @@ impl ApplicationHandler for Host {
         }))
         .expect("adapter");
         let (device, queue) =
-            pollster_block(adapter.request_device(&Default::default(), None)).expect("device");
+            pollster_block(adapter.request_device(&Default::default())).expect("device");
         let size = window.inner_size();
         let config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
@@ -137,28 +137,28 @@ impl ApplicationHandler for Host {
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("hud blit"),
             layout: Some(&pl),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs",
+                entry_point: Some("vs"),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs",
+                entry_point: Some("fs"),
                 targets: &[Some(config.format.into())],
                 compilation_options: Default::default(),
             }),
             primitive: Default::default(),
             depth_stencil: None,
             multisample: Default::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -217,14 +217,14 @@ impl ApplicationHandler for Host {
                 if stats.painted {
                     let frame = hud.screenshot();
                     g.queue.write_texture(
-                        wgpu::ImageCopyTexture {
+                        wgpu::TexelCopyTextureInfo {
                             texture: &g.hud_tex,
                             mip_level: 0,
                             origin: wgpu::Origin3d::ZERO,
                             aspect: wgpu::TextureAspect::All,
                         },
                         frame.pixels(),
-                        wgpu::ImageDataLayout {
+                        wgpu::TexelCopyBufferLayout {
                             offset: 0,
                             bytes_per_row: Some(HUD_W * 4),
                             rows_per_image: Some(HUD_H),
@@ -239,8 +239,9 @@ impl ApplicationHandler for Host {
                 // 2. The host's own scene: an animated clear color.
                 let t = self.t0.elapsed().as_secs_f64();
                 let target = match g.surface.get_current_texture() {
-                    Ok(t) => t,
-                    Err(_) => return,
+                    wgpu::CurrentSurfaceTexture::Success(t)
+                    | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                    _ => return,
                 };
                 let view = target.texture.create_view(&Default::default());
                 let mut enc = g.device.create_command_encoder(&Default::default());
@@ -250,6 +251,7 @@ impl ApplicationHandler for Host {
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &view,
                             resolve_target: None,
+                            depth_slice: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color {
                                     r: 0.12 + 0.08 * t.sin(),
@@ -273,11 +275,11 @@ impl ApplicationHandler for Host {
                         1.0,
                     );
                     pass.set_pipeline(&g.pipeline);
-                    pass.set_bind_group(0, &g.bind, &[]);
+                    pass.set_bind_group(0, Some(&g.bind), &[]);
                     pass.draw(0..3, 0..1);
                 }
                 g.queue.submit([enc.finish()]);
-                target.present();
+                g.queue.present(target);
                 if let Some(w) = &self.window {
                     w.request_redraw(); // host animates continuously
                 }
