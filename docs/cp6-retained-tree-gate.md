@@ -190,6 +190,89 @@ points in the allocation cycle. **Adding the unmemoized control is what turned a
 scary-looking trend into a null result** — the reading was real, the attribution
 was wrong.
 
+## Addendum 2 — ADOPT was implemented, and it mostly does not pay (2026-08-13)
+
+The successor above predicted **1.54×** from making the list widgets memoize.
+Built, measured, and that figure **does not transfer**. Recorded here rather
+than in a separate document because it corrects this ruling's own successor.
+
+### Two things had to be discovered first
+
+**1. Memoizing a row is unsound without a caller-supplied dependency.**
+`cx.scope` invalidates on the signals its closure *reads*, and the usual list
+shape reads none — the caller pulls data out of a signal in the parent and
+captures it:
+
+```rust
+let items = items.get(cx.runtime());               // read HERE
+VirtualList::new(cx, "l", items.len(), .., move |i| row(&items[i]))
+```
+
+An empty `ReadSet` is always "current", so such a row would be memo-hit forever
+and **freeze**. So `cx.scope_with_deps(id, deps, f)` was added — the same idiom
+`cx.task(key, deps, f)` already uses — with deps stored *beside* the key rather
+than folded into it, so a deps change re-runs the closure without shedding the
+scope's own signals. `crates/lumen-widgets/tests/scope_deps.rs` asserts the
+hazard is real, deliberately, so nobody later "fixes" `scope` into unsoundness.
+
+**2. The 1.54× was measured on the wrong shape.** It came from `scoped_app(500)`
+— a **non-virtualized** 500-row list where all 500 rows are materialized, so
+memoizing saves 499 row builds. Every widget ADOPT targeted is *virtualized*.
+
+### The measurement
+
+100 000-item `VirtualList`, ~44 rows materialized, one row changing per frame:
+
+| elements per row | plain | memoized | speedup |
+|---:|---:|---:|---:|
+| 1 | 1085.7 µs | 1076.5 µs | **1.01×** |
+| 4 | 1973.6 | 1509.5 | 1.31× |
+| 16 | 4088.9 | 3718.3 | 1.10× |
+| 64 | 13266.1 | 12046.5 | 1.10× |
+
+**Virtualization already captures what memoization would.** A virtual list
+builds ~44 rows; the frame is dominated by *rasterizing* those 44 rows, not
+building them. The two optimizations overlap, and virtualization got there
+first.
+
+### Method note — this nearly shipped as a 1.49× win
+
+The first run measured **1.49×**, reproducibly, across three runs. It was an
+artifact: whichever app ran *first in the process* paid for font loading and
+first-touch caches. Swapping the order inverted the result exactly —
+
+```
+plain first:  plain 1553.5 µs, memo 1054.5 µs   → 1.47x
+memo  first:  memo  1554.9 µs, plain 1063.8 µs  → 0.68x
+```
+
+— and the criterion pair, which warms up properly, had said ratio ≈ 1.00 all
+along. **Reproducibility was not the check that caught it; swapping the order
+was.** Three consistent runs of a biased harness are three consistent wrong
+answers. `benches/benches/nodecost.rs::vlist_changed_frame` keeps the honest
+pair.
+
+### What shipped, and why
+
+* **`cx.scope_with_deps` — kept.** It fixes a real unsoundness and is a
+  prerequisite for *any* correct memoization of captured data. Its value does
+  not depend on this null result.
+* **`VirtualList::memoized` — kept, opt-in, documented with the table above.**
+  It is correct and it does help an expensive row builder. Its doc leads with
+  "measure before reaching for this" and states the 1.01× case, because an API
+  that quietly costs 2.5 KB/row and a freeze footgun for 1% is worse than no
+  API.
+* **No perf-gate ratio was added.** A gate asserting a win that does not exist
+  would be theatre.
+
+### And it further weakens CP6
+
+CP5.1's 20–34% and this ruling's 0.43–0.52 were both measured on the same
+non-virtualized 500-row shape. On a *virtualized* list, `copy_span` runs over
+~44 nodes rather than 500, so the retention saving shrinks with it. The
+successor that was meant to give CP6 a beneficiary instead showed that the
+beneficiary's own workload is smaller than the gate assumed.
+
 ## What this does not say
 
 * **Nothing about the egui gap.** BENCH1's workload has no `cx.scope`, so

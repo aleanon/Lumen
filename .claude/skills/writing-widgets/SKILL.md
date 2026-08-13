@@ -253,6 +253,18 @@ are still strings (they're selectors, not reactive keys).
   the run stays on one line: the containing block isn't resolved until layout,
   and the measure happens during the build. Want wrapping at a relative width?
   Put the label inside a percentage-sized container.
+- **Memoizing a subtree needs a *dep* unless the closure reads the signal
+  itself.** `cx.scope` invalidates on the signals its closure READS. The usual
+  list shape reads none — the parent does `items.get(rt)` and the row captures
+  the value — and an empty read set is always "current", so that row memo-hits
+  **forever** and freezes. Use `cx.scope_with_deps(id, deps, f)` (same idiom as
+  `cx.task(key, deps, f)`) whenever the subtree is a function of plain data.
+  `lumen-widgets/tests/scope_deps.rs` asserts the freeze so it stays visible.
+- **Memoizing a *virtualized* list row buys almost nothing.** Virtualization
+  already bounds the work: only the ~44 rows in the window are built, and the
+  frame is dominated by rasterizing them. Measured 1.01× for a one-element row,
+  ~1.1× at 16 elements. `VirtualList::memoized` exists for genuinely expensive
+  row builders; reach for it with a measurement, not on principle.
 - **Hit-test / paint priority = document order.** Later siblings paint on top and
   win hit-testing. Push interactive overlays (resize handles, thumbs) **after** the
   things they must sit above.

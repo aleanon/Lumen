@@ -720,6 +720,21 @@ impl AbortHandle {
 /// instead of re-running the scope closure.
 pub(crate) struct CachedScope {
     reads: lumen_core::state::ReadSet,
+    /// Hash of the caller-supplied deps, or `None` for a plain `cx.scope`.
+    /// `IdHash` rather than `u64` — the same fold the rest of identity uses.
+    ///
+    /// A scope invalidates on tracked signal reads — which is exactly nothing
+    /// when the closure captures plain data read by its *parent*:
+    ///
+    /// ```ignore
+    /// let items = items_signal.get(rt);            // read HERE, in the parent
+    /// cx.scope(("row", i), move |_| row(&items[i]))  // this scope reads nothing
+    /// ```
+    ///
+    /// An empty `ReadSet` is always "current", so that scope would be memo-hit
+    /// forever and the row would freeze. `deps` is how the caller says what the
+    /// subtree is a function of when it is not a function of any signal.
+    deps: Option<IdHash>,
     /// Shared, immutable cached subtree (A.3.2) — hits hand out a stub
     /// holding this `Rc` instead of deep-cloning the tree; `build_node`
     /// either copies the scope's retained per-node work forward or (fallback)
@@ -903,12 +918,48 @@ impl<'a> BuildCx<'a> {
         id: K,
         f: impl FnOnce(&mut BuildCx) -> Element,
     ) -> Element {
+        self.scope_impl(id, None, f)
+    }
+
+    /// A memoized region that is also a function of `deps` — the form to use
+    /// when the subtree is built from plain data rather than from signals.
+    ///
+    /// [`scope`](Self::scope) alone invalidates on the signals its closure
+    /// *reads*. A closure that reads none — because its data was read by the
+    /// parent and captured — has an empty read set, which is always current, so
+    /// it would be memo-hit forever and render frozen content. Passing the data
+    /// (or a version of it) as `deps` states the dependency the read tracker
+    /// cannot see, exactly as [`task`](Self::task) does for background work.
+    ///
+    /// ```ignore
+    /// let items = items.get(cx.runtime());
+    /// cx.scope_with_deps(("row", i), &items[i], move |_| row(&items[i]))
+    /// ```
+    ///
+    /// Changing `deps` re-runs the closure and keeps the scope's identity, so
+    /// scope-local signals and tasks survive — unlike folding the deps into the
+    /// `id`, which would create a *new* scope and shed them.
+    pub fn scope_with_deps<K: Hash + Debug, D: Hash>(
+        &mut self,
+        id: K,
+        deps: D,
+        f: impl FnOnce(&mut BuildCx) -> Element,
+    ) -> Element {
+        self.scope_impl(id, Some(hash_id(&deps)), f)
+    }
+
+    fn scope_impl<K: Hash + Debug>(
+        &mut self,
+        id: K,
+        deps: Option<IdHash>,
+        f: impl FnOnce(&mut BuildCx) -> Element,
+    ) -> Element {
         let parent = self.prefix_hash.get();
         let key = fold_id(parent, hash_id(&id));
         self.scope_live.borrow_mut().insert(key);
         // The memo-hit path needs identity only — no name, no allocation. This
         // is the steady state for an unchanged list row.
-        if let Some(el) = self.cached_if_current(key) {
+        if let Some(el) = self.cached_if_current(key, deps) {
             // The closure did not run, so any `cx.scope` nested inside it never
             // reached the `scope_live` insert above — even though those children
             // are still on screen inside the reused subtree. Note the skip so the
@@ -940,6 +991,7 @@ impl<'a> BuildCx<'a> {
                 key,
                 CachedScope {
                     reads,
+                    deps,
                     element: std::rc::Rc::new(element.clone()),
                 },
             );
@@ -953,10 +1005,10 @@ impl<'a> BuildCx<'a> {
     /// A skipped scope replays its deps into the enclosing collectors so they
     /// still count as structural (F1 × F3.4) — otherwise a change to a memoized
     /// scope's signal would go unnoticed.
-    fn cached_if_current(&self, key: IdHash) -> Option<Element> {
+    fn cached_if_current(&self, key: IdHash, deps: Option<IdHash>) -> Option<Element> {
         let cache = self.scope_cache.borrow();
         let cached = cache.get(&key)?;
-        if cached.reads.is_current(self.rt) {
+        if cached.deps == deps && cached.reads.is_current(self.rt) {
             self.rt.replay_reads(&cached.reads);
             // A.3.2: hand out a lightweight stub — an `Rc` bump, not a deep
             // clone. `build_node` resolves it (copy-forward or materialize).

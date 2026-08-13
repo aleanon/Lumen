@@ -243,6 +243,65 @@ fn text_list_scoped_changed_frame(c: &mut Criterion) {
     });
 }
 
+// --- ADOPT: does the shipped list widget's memo actually hit? ----------------
+
+/// The same one-row-changes frame through `VirtualList`, built both ways.
+///
+/// This pair exists to be a RATIO in `perf_gate.sh`, because the failure mode
+/// of a memo is silence: a scope whose key or deps stop matching still renders
+/// correctly and simply costs full price. ADR-021 records exactly that happening
+/// to `scope_memo_one_of_many`, unnoticed. A gated ratio is the only thing that
+/// notices.
+fn vlist_app(memoized: bool) -> App {
+    App::new(move |cx: &mut lumen_widgets::BuildCx| {
+        const ITEMS: usize = 100_000;
+        let target: i64 = cx.signal("target", || 0).get(cx.runtime());
+        let bump: i64 = cx.signal("bump", || 0).get(cx.runtime());
+        let row = move |i: usize| {
+            let v = if i as i64 == target { bump } else { 0 };
+            widgets::column(vec![widgets::text(format!("row {i} — value {v}"))])
+        };
+        let vl = if memoized {
+            lumen_widgets::VirtualList::memoized(
+                cx,
+                "vl",
+                ITEMS,
+                20.0,
+                800.0,
+                move |i| if i as i64 == target { bump } else { 0 },
+                row,
+            )
+        } else {
+            lumen_widgets::VirtualList::new(cx, "vl", ITEMS, 20.0, 800.0, row)
+        };
+        widgets::column(vec![vl.into()])
+    })
+}
+
+fn vlist_changed_frame(c: &mut Criterion) {
+    for (memoized, name) in [
+        (false, "vlist_plain_changed_frame"),
+        (true, "vlist_memo_changed_frame"),
+    ] {
+        let mut h = vlist_app(memoized).run_headless(Size::new(400.0, 800.0));
+        for _ in 0..5 {
+            h.pump();
+        }
+        let target: Signal<i64> = h.runtime().signal("target", || 0);
+        target.set(h.runtime(), 7);
+        h.pump();
+        let bump: Signal<i64> = h.runtime().signal("bump", || 0);
+        let mut i = 0i64;
+        c.bench_function(name, |b| {
+            b.iter(|| {
+                bump.set(h.runtime(), i);
+                i += 1;
+                h.pump();
+            });
+        });
+    }
+}
+
 // --- instrument 4: what is actually in the frame? ----------------------------
 
 /// The same 500-node all-dirty frame with **text** leaves vs **rect** leaves.
@@ -516,6 +575,7 @@ criterion_group!(
     allocs_per_frame,
     text_vs_rect_frame,
     text_list_scoped_changed_frame,
+    vlist_changed_frame,
     scope_scaling,
     semantics_share,
     restyle_hover_frame,

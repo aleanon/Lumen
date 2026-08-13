@@ -126,9 +126,119 @@ pub struct VirtualList {
     el: Element,
 }
 
+/// The scroll window a `VirtualList` materializes: which items, and where the
+/// first one sits. Shared by the plain and memoized constructors so the two
+/// cannot drift — they differ only in how each row is produced.
+struct Window {
+    offset: lumen_core::state::Signal<f64>,
+    y: f64,
+    max_y: f64,
+    first: usize,
+    last: usize,
+}
+
+fn window(
+    cx: &BuildCx,
+    name: &str,
+    item_count: usize,
+    item_height: f64,
+    viewport_h: f64,
+) -> Window {
+    const OVERSCAN: usize = 2;
+    let offset = cx.signal(name, || 0.0f64);
+    let max_y = (item_count as f64 * item_height - viewport_h).max(0.0);
+    // Clamp on READ, like `Scrollable` does. Without it a stale offset
+    // survives when the list shrinks, and — since the wheel router now
+    // consults `ScrollInfo` to decide whether to chain — a `y > max_y`
+    // would make this list look scrollable when it is stuck.
+    let y = offset.get(cx.runtime()).clamp(0.0, max_y);
+    let first = ((y / item_height).floor() as usize).saturating_sub(OVERSCAN);
+    let per_view = (viewport_h / item_height).ceil() as usize;
+    let last = (first + per_view + OVERSCAN * 2).min(item_count);
+    Window {
+        offset,
+        y,
+        max_y,
+        first,
+        last,
+    }
+}
+
+/// Position one row in the window. Every row goes through this, memoized or not.
+fn place(mut el: Element, i: usize, y: f64, item_height: f64) -> Element {
+    let top = (i as f64 * item_height) - y;
+    el.style.position = Position::Absolute;
+    // `left` AND `right` pinned with `width: auto` stretches the item to the
+    // viewport, which is what an author expects of a row. Setting `width: 100%`
+    // unconditionally (the workaround consumers were writing) would clobber an
+    // item that sets its own width; pinning both insets composes with it.
+    el.style.inset = Edges {
+        left: Dim::px(0.0),
+        right: Dim::px(0.0),
+        top: Dim::px(top as f32),
+        ..Edges::AUTO
+    };
+    // …except the insets do NOT stretch a text-bearing row: a text element's
+    // measure fixes its own width, so `|i| widgets::text(…)` — the most obvious
+    // way to write a list — shrink-wrapped to its glyphs (42 px in a 300 px
+    // list), and everything right of the label missed the row on a tap. A
+    // *definite* width is resolved before measure runs, so it lands where the
+    // insets cannot. Applied only when the caller left the width `Auto`, which
+    // keeps the composition the insets were chosen for.
+    if el.style.width == Dim::Auto {
+        el.style.width = Dim::pct(1.0);
+    }
+    el.style.height = Dim::px(item_height as f32);
+    el
+}
+
+/// Assemble the viewport around already-placed rows.
+fn viewport(w: &Window, viewport_h: f64, children: Vec<Element>) -> Element {
+    let (offset, y, max_y) = (w.offset, w.y, w.max_y);
+    Element {
+        role: Role::List,
+        // Overscan rows (up to two above and below) sit outside the viewport
+        // box. Without clipping they PAINT and stay HIT-TESTABLE there — the
+        // same defect `scroll_hit_clip.rs` exists for on `Scrollable`, which
+        // has always set this.
+        clip: true,
+        scroll: Some(ScrollInfo {
+            x: 0.0,
+            y,
+            max_x: 0.0,
+            max_y,
+        }),
+        actions: vec![Action::ScrollIntoView],
+        style: LayoutStyle {
+            position: Position::Relative,
+            width: Dim::pct(1.0),
+            height: Dim::px(viewport_h as f32),
+            ..LayoutStyle::default()
+        },
+        on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
+            offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
+        })),
+        children: match crate::scrollable::overlay_scrollbar(viewport_h, y, max_y, offset) {
+            Some(bar) => {
+                let mut c = children;
+                c.push(bar);
+                c
+            }
+            None => children,
+        },
+        ..Element::default()
+    }
+}
+
 impl VirtualList {
     /// A windowing list (02 §10): materializes only the visible items plus overscan,
     /// regardless of `item_count`. State (`name`) is the scroll offset.
+    ///
+    /// Rows are rebuilt every frame — and **that is usually the right default**.
+    /// A virtual list only builds the ~44 rows in its window, so rebuilding them
+    /// is a small part of a frame that is dominated by *rasterizing* them.
+    /// [`memoized`](Self::memoized) skips unchanged row builders; measured, it
+    /// buys **1.01× for a one-element row** and ~1.1× for a 16-element one.
     pub fn new(
         cx: &BuildCx,
         name: &str,
@@ -137,87 +247,78 @@ impl VirtualList {
         viewport_h: f64,
         render: impl Fn(usize) -> Element,
     ) -> VirtualList {
-        let el = {
-            const OVERSCAN: usize = 2;
-            let offset = cx.signal(name, || 0.0f64);
-            let max_y = (item_count as f64 * item_height - viewport_h).max(0.0);
-            // Clamp on READ, like `Scrollable` does. Without it a stale offset
-            // survives when the list shrinks, and — since the wheel router now
-            // consults `ScrollInfo` to decide whether to chain — a `y > max_y`
-            // would make this list look scrollable when it is stuck.
-            let y = offset.get(cx.runtime()).clamp(0.0, max_y);
+        let w = window(cx, name, item_count, item_height, viewport_h);
+        let children: Vec<Element> = (w.first..w.last)
+            .map(|i| place(render(i), i, w.y, item_height))
+            .collect();
+        VirtualList {
+            el: viewport(&w, viewport_h, children),
+        }
+    }
 
-            let first = ((y / item_height).floor() as usize).saturating_sub(OVERSCAN);
-            let per_view = (viewport_h / item_height).ceil() as usize;
-            let last = (first + per_view + OVERSCAN * 2).min(item_count);
-
-            let children: Vec<Element> = (first..last)
-                .map(|i| {
-                    let top = (i as f64 * item_height) - y;
-                    let mut el = render(i);
-                    el.style.position = Position::Absolute;
-                    // `left` AND `right` pinned with `width: auto` stretches the
-                    // item to the viewport, which is what an author expects of a
-                    // row. Setting `width: 100%` unconditionally (the workaround
-                    // consumers were writing) would clobber an item that sets its
-                    // own width; pinning both insets composes with it.
-                    el.style.inset = Edges {
-                        left: Dim::px(0.0),
-                        right: Dim::px(0.0),
-                        top: Dim::px(top as f32),
-                        ..Edges::AUTO
-                    };
-                    // …except the insets do NOT stretch a text-bearing row: a
-                    // text element's measure fixes its own width, so
-                    // `|i| widgets::text(…)` — the most obvious way to write a
-                    // list — shrink-wrapped to its glyphs (42 px in a 300 px
-                    // list), and everything right of the label missed the row on
-                    // a tap. A *definite* width is resolved before measure runs,
-                    // so it lands where the insets cannot. Applied only when the
-                    // caller left the width `Auto`, which keeps the composition
-                    // the insets were chosen for.
-                    if el.style.width == Dim::Auto {
-                        el.style.width = Dim::pct(1.0);
-                    }
-                    el.style.height = Dim::px(item_height as f32);
-                    el
-                })
-                .collect();
-            Element {
-                role: Role::List,
-                // Overscan rows (up to two above and below) sit outside the
-                // viewport box. Without clipping they PAINT and stay
-                // HIT-TESTABLE there — the same defect `scroll_hit_clip.rs`
-                // exists for on `Scrollable`, which has always set this.
-                clip: true,
-                scroll: Some(ScrollInfo {
-                    x: 0.0,
-                    y,
-                    max_x: 0.0,
-                    max_y,
-                }),
-                actions: vec![Action::ScrollIntoView],
-                style: LayoutStyle {
-                    position: Position::Relative,
-                    width: Dim::pct(1.0),
-                    height: Dim::px(viewport_h as f32),
-                    ..LayoutStyle::default()
-                },
-                on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
-                    offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
-                })),
-                children: match crate::scrollable::overlay_scrollbar(viewport_h, y, max_y, offset) {
-                    Some(bar) => {
-                        let mut c = children;
-                        c.push(bar);
-                        c
-                    }
-                    None => children,
-                },
-                ..Element::default()
-            }
-        };
-        VirtualList { el }
+    /// [`new`](Self::new), but each row is memoized on `dep(i)` — an unchanged
+    /// row is not rebuilt.
+    ///
+    /// **Measure before reaching for this.** Virtualization already bounds the
+    /// work memoization would save: only the ~44 rows in the window are built at
+    /// all, and the frame is dominated by rasterizing them. Measured on a
+    /// 100 000-item list with one row changing per frame:
+    ///
+    /// | elements per row | speedup |
+    /// |---:|---:|
+    /// | 1 | **1.01×** |
+    /// | 4 | 1.31× |
+    /// | 16 | 1.10× |
+    /// | 64 | 1.10× |
+    ///
+    /// So it is worth it when a row is *expensive to build* — parsing,
+    /// formatting, many child elements — and worth nothing when it is a label.
+    /// It also costs ~1 KB of retained `Element` per materialized row (~121 KiB
+    /// for a full window, whatever the item count).
+    ///
+    /// **Why `dep` and not just the index.** A memoized row invalidates on the
+    /// signals its closure *reads*, and the usual shape reads none: the caller
+    /// pulls its data out of a signal, then captures it.
+    ///
+    /// ```ignore
+    /// let items = items.get(cx.runtime());       // read HERE, in the parent
+    /// VirtualList::memoized(cx, "l", items.len(), 24.0, 400.0,
+    ///     |i| items[i].version,                  // …so state the dependency
+    ///     |i| row_view(&items[i]))
+    /// ```
+    ///
+    /// Without `dep` the row's read set is empty, which is always "current", and
+    /// the row would freeze forever. `dep` is the same idea as `cx.task`'s deps,
+    /// and `crates/lumen-widgets/tests/scope_deps.rs` asserts the hazard is real.
+    ///
+    /// A dep that is cheap to hash and changes exactly when the row's appearance
+    /// changes is the right one — an item's version, its whole value if it is
+    /// small and `Hash`, or `()` for a row that genuinely never changes.
+    ///
+    /// Row identity is the index, so scope-local state follows the *position*,
+    /// not the item. For a reorderable list, prefer [`widgets::keyed`] over a
+    /// virtual list, or make `dep` carry the item id.
+    ///
+    /// [`widgets::keyed`]: crate::widgets::keyed
+    pub fn memoized<D: std::hash::Hash>(
+        cx: &mut BuildCx,
+        name: &str,
+        item_count: usize,
+        item_height: f64,
+        viewport_h: f64,
+        dep: impl Fn(usize) -> D,
+        render: impl Fn(usize) -> Element,
+    ) -> VirtualList {
+        let w = window(cx, name, item_count, item_height, viewport_h);
+        let children: Vec<Element> = (w.first..w.last)
+            .map(|i| {
+                let el = cx.scope_with_deps(("vlist-row", i), dep(i), |_cx| render(i));
+                place(el, i, w.y, item_height)
+            })
+            .collect();
+        VirtualList {
+            el: viewport(&w, viewport_h, children),
+        }
     }
 }
 
