@@ -128,6 +128,68 @@ column, and — still outstanding from every previous ruling — **with an ARM
 number**. CP4 remains hardware-blocked (`docs/cp4-arm-measurement-blocked.md`),
 and per-node cost is the thing most likely to look different there.
 
+## Addendum — what ADOPT costs in memory (2026-08-13)
+
+Asked before committing to the successor, and measured rather than reasoned
+about: a live-bytes allocator (subtracting on free, unlike `nodecost.rs`'s churn
+counter), release build.
+
+`CachedScope` holds an `Rc<Element>`, so memoizing keeps a row's built subtree
+alive between frames where an unmemoized row's `Element` is consumed by
+`build_node` and dropped. That is the entire cost, and it prices out at:
+
+| | live KiB (500 rows) | per row |
+|---|---:|---:|
+| flat, no scopes | 4509.6 | 9236 B |
+| memoized, rows read shared state | 5718.4 | 11711 B |
+| memoized, each row owns a signal | 6019.3 | 12327 B |
+| **→ memoizing costs** | **1208.7** | **2475 B** |
+| → a scope-local signal adds, on top | 300.9 | 616 B |
+
+`Element` is 1072 B and a row here is two of them (container + label), so **2144
+of the 2475 B is the retained `Element`s themselves**; the remaining ~330 B is
+the string, the children `Vec`, the `ReadSet`, and the `SpanRec`/cache entries.
+Useful rule of thumb: **~1 KB per `Element` kept alive.**
+
+**It is per *materialized* row, not per item** — which is what makes it a
+non-issue for the widgets ADOPT targets:
+
+| | cost |
+|---|---:|
+| `VirtualList` window (1080p, 24 px rows ⇒ ~50 materialized) | **~121 KiB**, whatever the item count |
+| a non-virtualized 500-row list | ~1.2 MiB |
+| a non-virtualized 5000-row list | ~12 MiB |
+
+So a 1M-row virtual list costs the same as a 50-row one. A *non*-virtualized
+list of thousands of rows is where this would bite — and such a list has larger
+problems already.
+
+### Scrolling does not accumulate
+
+The interesting risk was churn: scrolling abandons row keys and creates new
+ones, so a cache without a working GC would grow with rows-scrolled-past.
+Scrolling a 14-row window through **20 000 rows**:
+
+| rows scrolled | flat window (control) | memoized window |
+|---:|---:|---:|
+| 4 000 | 13144.6 KiB | 13120.3 KiB |
+| 8 000 | 13278.4 | 13200.2 |
+| 12 000 | 12966.9 | 12834.8 |
+| 16 000 | 13381.7 | 13195.7 |
+| 20 000 | 13119.1 | 12879.1 |
+
+**Flat and indistinguishable, and identical to the unmemoized control.**
+`sweep_dead_scopes` runs every build (F5 GC) and reclaims abandoned scopes; the
+~13 MiB is the app's ordinary working set — glyph and shaping caches — not
+memoization, which the control proves by paying it too.
+
+*Method note:* a first pass sampled every 1000 steps over 5000 and read
+4.5 → 9.4 → 8.6 → 13.1 → 6.9 MiB, which looked like unbounded oscillation. It
+was the working set warming toward its steady ~13 MiB, sampled at different
+points in the allocation cycle. **Adding the unmemoized control is what turned a
+scary-looking trend into a null result** — the reading was real, the attribution
+was wrong.
+
 ## What this does not say
 
 * **Nothing about the egui gap.** BENCH1's workload has no `cx.scope`, so
