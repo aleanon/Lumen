@@ -182,7 +182,7 @@ it needs a push-transport design over the request/response loop (C.7).
 |---|---|
 | `session.assertText` | assert a node's text (recorded as an assertion) |
 | `session.assertState` | assert a node's semantic state |
-| `session.exportTest` | `{ appExpr, fnName?, header? }` | `appExpr` REQUIRED (the expression that builds the app in the generated test); `fnName` defaults `agent_regression` |
+| `session.exportTest` | params `{ appExpr, fnName?, header? }` — `appExpr` REQUIRED (the expression that builds the app in the generated test); `fnName` defaults `agent_regression` |
 
 Available on **both** the live shell (routed through a recording `Session`
 since C.3 — explore the window, commit the exported test) and the

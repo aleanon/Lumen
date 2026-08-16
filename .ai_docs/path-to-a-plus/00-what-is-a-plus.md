@@ -82,7 +82,7 @@ frame-time-percentile data despite decades of shipping).
 | egui | ~1–2ms typical | — | MEASURED (informal) | Framework/community reports, 200–400fps in practice — [Tauri/Iced/egui comparison](http://lukaskalbertodt.github.io/2023/02/03/tauri-iced-egui-performance-comparison.html), 2023 |
 | Slint | — | — | **No steady-state data**; only a resize-stress anecdote (10–15fps) | [Rust GUI benchmark](https://medium.com/@build_break_learn/rust-gui-framework-benchmark-egui-iced-slint-gtk-electron-d88596c042fb) |
 | Dioxus, Makepad | — | — | **No data found for either** | — |
-| Avalonia | — | — | 1,867% FPS improvement claimed for a 350k-element scene (before/after not disclosed); Android scroll 42→120fps after an optimization pass | VENDOR-PUBLISHED | [Avalonia 12 release](https://avaloniaui.net/blog/avalonia-12) |
+| Avalonia | — | — | 1,867% FPS improvement claimed for a 350k-element scene (before/after not disclosed); Android scroll 42→120fps after an optimization pass | VENDOR-PUBLISHED — [Avalonia 12 release](https://avaloniaui.net/blog/avalonia-12) |
 | React/Blink (floor) | 16.65ms avg | 16.75ms | MEASURED, right at budget (little headroom) | [Core Web Vitals](https://www.corewebvitals.io/core-web-vitals); INP ≤200ms at p75 is Google's pass bar |
 
 **Synthesized A+ bar** (derived from the Android Vitals thresholds + the one
@@ -506,8 +506,7 @@ performance](https://developer.android.com/topic/performance/vitals/render),
 Benchmarks](https://developer.android.com/develop/ui/compose/performance/herobenchmark),
 the [Tauri/Iced/egui comparison](http://lukaskalbertodt.github.io/2023/02/03/tauri-iced-egui-performance-comparison.html)
 (Kalbertodt, 2023 — the single most-reused independent Rust-GUI benchmark
-found), [Slint discussion
-#9570](https://github.com/slint-ui/slint/discussions/9570), [Robert Krahn —
+found), [Slint discussion #9570](https://github.com/slint-ui/slint/discussions/9570), [Robert Krahn —
 Hot reloading Rust](https://robert.kra.hn/posts/hot-reloading-rust/), and
 Lumen's own `docs/results-node-cost-n0.md`, `docs/comparison-gtk-mintupdate.md`,
 and `docs/results-idle-and-gpu-context.md`.

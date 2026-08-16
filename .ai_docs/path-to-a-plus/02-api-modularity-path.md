@@ -963,7 +963,7 @@ blur), leaving only the genuinely hard render-engine work for after.
 |---|---|---|
 | #6 `Interactive` capability types, replacing `actions: Vec<Action>` + loose handler fields | ~1-1.5 weeks | Touches every widget file; subsumes `W0106`/`audit_actions()` |
 | #10 `ScopeCx` split (root vs. scoped signal addressing become different types) | ~1 week | Touches every `cx.scope(...)` call site across the widget catalogue and examples |
-| #5 `Element<Semantic|Elided>` marker type | design spike first (~2-3 days), then ~1-1.5 weeks if the spike says go | The one item this note explicitly declines to pre-commit past a spike — see §3's cost caveat |
+| #5 `Element<Semantic\|Elided>` marker type | design spike first (~2-3 days), then ~1-1.5 weeks if the spike says go | The one item this note explicitly declines to pre-commit past a spike — see §3's cost caveat |
 | `register_property` phase 1 (§5) | ~3-5 days | Independent of the above; can run in parallel |
 | `SD3` (real free-function shims), `SD4` (fold `audit_actions`/re-export `theme`/`Shadow`), `SD5.0-5.5` (`.lss` diagnostics for the remaining hard properties) | campaign-scoped, unchanged | Runs in parallel with the above; no new cost from this note |
 

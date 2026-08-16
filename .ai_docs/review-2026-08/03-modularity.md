@@ -205,7 +205,7 @@ into anything. Small, single-purpose (`stable_handler!`, `text!`).
 
 **`lumen-layout`** (1.0k LOC) — A thin, disciplined Taffy wrapper; the ADR-004
 promise ("no taffy type appears in its public API") is honored
-(`crates/lumen-core/src/... ` grep found zero `taffy::` leakage outside this
+(`crates/lumen-core/src/...` grep found zero `taffy::` leakage outside this
 crate). Small but earns its keep as the seam that would let Taffy be swapped.
 **Verdict: stays.**
 
@@ -453,7 +453,7 @@ as regression tests) and the workspace has no `default-members` restricting
 plain `cargo build`/`check` either, so the bloat is already the path of least
 resistance everywhere, not just CI.
 **Restructuring:** either split CI into a fast "framework" job (`-p lumen-core
--p lumen-render -p ... ` the 16 real crates) that runs on every push and a
+-p lumen-render -p ...` the 16 real crates) that runs on every push and a
 slower "examples" job gated to changes under `examples/` or a framework crate,
 or (the review brief's suggestion) hoist `examples/` into its own workspace
 with a path-dependency back into this one — accepting the loss of true

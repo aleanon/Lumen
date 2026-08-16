@@ -1,0 +1,51 @@
+# markdownlint config — read by the Zed `markdownlint` extension
+# (markdownlint-lsp), and by markdownlint/markdownlint-cli2 if run by hand.
+# Nothing in CI enforces markdown style.
+#
+# YAML rather than .jsonc on purpose: markdownlint-lsp parses config files with
+# js-yaml (`PARSERS = [(content) => load(content)]`), which accepts `#` comments
+# but NOT the `//` that .jsonc implies. A .markdownlint.jsonc with slash
+# comments is silently unparseable — verified before writing this file.
+#
+# WHY IT EXISTS: an unconfigured run over this repo reports 5403 diagnostics
+# across 88 files, which buries the Rust ones that matter. Nearly all of it is
+# prose formatting in docs/ and .ai_docs/ — design records and decision logs
+# written to be read, not to satisfy a style guide.
+#
+# Policy: switch off what is purely cosmetic, keep the few rules that catch
+# markdown which RENDERS WRONG. The count after each rule is what it reported
+# before being disabled, so the trade stays visible.
+
+default: true
+
+# --- off: cosmetic, and the bulk of the noise --------------------------------
+MD013: false   # line-length (2839) — prose is hand-wrapped near 80, but tables,
+               #   URLs and code lines legitimately run over.
+MD060: false   # table-column-style (1148) — pipe alignment.
+MD022: false   # blanks-around-headings (668)
+MD032: false   # blanks-around-lists (385)
+MD004: false   # ul-style (60) — `*` vs `-`; identical rendering.
+MD031: false   # blanks-around-fences (59)
+MD025: false   # single-title (55) — decision logs repeat an H1 per dated entry.
+MD024: false   # no-duplicate-heading (48) — every plan doc has several
+               #   "## Decision" / "## Method" sections by design.
+MD040: false   # fenced-code-language (45) — costs only highlighting, and many
+               #   fences here are ASCII tables or shell transcripts.
+MD029: false   # ol-prefix (39) — a repeated `1.` is valid markdown.
+MD012: false   # no-multiple-blanks (10)
+MD055: false   # table-pipe-style (8)
+MD026: false   # no-trailing-punctuation in headings (6)
+MD033: false   # no-inline-html (4) — a few tables use <br>.
+MD028: false   # no-blanks-blockquote (4)
+MD036: false   # no-emphasis-as-heading (1)
+MD041: false   # first-line-heading (1)
+MD001: false   # heading-increment (1)
+
+# --- kept: these mean the markdown is BROKEN, not untidy ---------------------
+#
+#   MD056 table-column-count — a row with the wrong cell count renders mangled.
+#   MD038 no-space-in-code    — ` foo ` keeps the spaces inside the span; a typo.
+#   MD018 no-missing-space-atx — `#Heading` is a literal `#`, not a heading.
+#
+# Everything unlisted keeps its default, so a rule that catches a real defect
+# starts firing rather than being pre-disabled for tidiness.

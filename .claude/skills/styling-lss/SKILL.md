@@ -98,7 +98,7 @@ bundled one rather than rendering tofu.)
 | `@media container(width > 200px)` | tests the nearest `Element::container()` ancestor's laid-out size (not the window); only width/height; false with no container ancestor (B.2b) |
 | widget parts: `slider .track`, `slider .thumb`, `progress .fill` | parts are classes on the internals, scoped by the ancestor chain; custom widgets expose parts with `Element::part("thumb")` (B.7) |
 | relative colors `oklch(from <color or $token> L C H)` | channel keywords `l`/`c`/`h` + `calc(l + 0.06)` (`+ - *`, left-to-right, spaces around operators); alpha from the base; `$token`s resolve inside function args/shorthand lists (B.7) |
-| `@tokens { … }` / `@theme light|dark { … }` / `$token` | full token resolution, theme-scoped first |
+| `@tokens { … }` / `@theme light\|dark { … }` / `$token` | full token resolution, theme-scoped first |
 | **Nested rules** `&:hovered { … }` / `&.class { … }` / `& > .part { … }` | flattened at parse into real rules with correct specificity (B.1) |
 | Descendant/child combinators (`.card .btn`, `#x > .y`) | match the **real ancestor chain** since B.1 — before that only the rightmost compound was checked, so `dialog button` hit every button |
 | `@media (width < 500) { … }` etc. | gates on the **live window** since B.2 (width/height/scale/platform/pointer); resizing re-resolves. Confirm with `ui.getStyles` after a resize |
