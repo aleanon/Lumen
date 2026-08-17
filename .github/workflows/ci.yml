@@ -9,6 +9,32 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
 
+# GTK3 SYSTEM LIBRARIES (read before removing an apt step below).
+#
+# `lumen-shell` pulls gtk 0.18 transitively — rfd's gtk3 backend (P.3b),
+# muda (P.3c) and tray-icon → libappindicator (P.3e), all under ADR-P1. Those
+# bindings need gtk+-3.0's pkg-config files at BUILD time, and the GitHub
+# ubuntu runners ship the runtime libraries without the -dev headers.
+#
+# Nothing installed them, so from the moment those crates landed in mid-July
+# every job that compiles the shell failed with:
+#
+#     The system library `gobject-2.0` required by crate `gobject-sys`
+#     was not found.
+#
+# In the `lint` job that killed clippy, which runs BEFORE cargo-deny in the
+# same job — so cargo-deny had never executed here at all, and was hiding a
+# vulnerability and a license rejection when it finally did (see 07, DEP1).
+#
+# Only `libgtk-3-dev` is required: it brings glib/gobject/gdk/pango/cairo/atk
+# pkg-config files with it. libappindicator-sys resolves its library at run
+# time and needs no -dev package (verified on the reference box, which has
+# libayatana-appindicator3-1 but no -dev and builds clean).
+#
+# Jobs that do NOT need it: `gpu` (lumen-render/lumen-widgets have no gtk in
+# their graphs), `fonts` (lumen-text only) and `executors` (lumen-exec is a
+# leaf; the containment check is `cargo tree`, which does not build).
+
 jobs:
   # Fast lints run once on Linux only.
   lint:
@@ -20,6 +46,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2.9.1
+      - name: GTK3 headers (see the note above `jobs:`)
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy
@@ -41,6 +69,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.1
+      - name: GTK3 headers (Linux only — see the note above `jobs:`)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
       - name: build
         run: cargo build --workspace --all-targets
       - name: test
@@ -84,6 +115,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.1
+      - name: GTK3 headers (see the note above `jobs:`)
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
       - name: check each crate with default features off
         run: |
           set -euo pipefail
@@ -179,7 +212,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers vulkan-tools \
-                                  xvfb openbox wmctrl just
+                                  xvfb openbox wmctrl just libgtk-3-dev
       - name: live window gate
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
@@ -233,6 +266,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.1
+      - name: GTK3 headers (see the note above `jobs:`)
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
       - name: perf budgets
         run: ./scripts/perf_gate.sh
       - name: cold start + memory gates (R.6)

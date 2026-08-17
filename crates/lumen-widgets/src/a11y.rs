@@ -6,7 +6,9 @@
 //! compile until it is mapped here (the "map table complete" guarantee). See
 //! `docs/a11y-checklist.md` for the manual VoiceOver/NVDA verification.
 
-use accesskit::{Action as AkAction, Node, NodeId, Role as AkRole, Toggled, Tree, TreeUpdate};
+use accesskit::{
+    Action as AkAction, Node, NodeId, Role as AkRole, Toggled, Tree, TreeId, TreeUpdate,
+};
 use lumen_core::semantics::{Action, Role, SemanticsNode, State};
 
 /// Map a Lumen [`Role`] to the closest AccessKit role.
@@ -89,13 +91,12 @@ pub fn build_tree(root: &SemanticsNode) -> TreeUpdate {
     let root_id = build_node(root, &mut nodes, &mut focus_id);
     let focus = focus_id.unwrap_or(root_id);
     let mut tree = Tree::new(root_id);
-    // P.4: identify the app on the a11y bus (it showed as an empty-name
-    // application in the AT-SPI registry without this). The binary name is
-    // the best per-app identity the framework has; the toolkit fields are
-    // fixed.
-    tree.app_name = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()));
+    // P.4 set `tree.app_name` here, because without it the app showed as an
+    // empty-name application in the AT-SPI registry. accesskit 0.24 removed the
+    // field — not a regression to drop it: `accesskit_unix` now derives the
+    // name itself from `std::env::current_exe()` (`context.rs::app_name`),
+    // which is the same workaround, upstreamed. It keeps the file extension
+    // where we took the stem; that is now the adapter's call to make.
     tree.toolkit_name = Some("Lumen".into());
     tree.toolkit_version = Some(env!("CARGO_PKG_VERSION").into());
     // ID-0a's guard. Its value is NOT catching birthday collisions in the
@@ -115,6 +116,12 @@ pub fn build_tree(root: &SemanticsNode) -> TreeUpdate {
     TreeUpdate {
         nodes,
         tree: Some(tree),
+        // accesskit 0.24 added subtrees: a `TreeUpdate` now says which tree it
+        // applies to. Lumen publishes one tree per window through the adapter,
+        // so every update is for the root tree. `Node::tree_id` grafts (the
+        // subtree mechanism) are unused — if multi-window a11y ever wants a
+        // real subtree per window, this is where it starts.
+        tree_id: TreeId::ROOT,
         focus,
     }
 }

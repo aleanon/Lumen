@@ -15,6 +15,14 @@ allow = [
     "MPL-2.0",
     "CC0-1.0",
     "Unlicense",
+    # Boost Software License 1.0 — permissive, OSI-approved, no attribution
+    # requirement in binary form, and compatible with MIT OR Apache-2.0 both
+    # ways. Reaches us through `arboard` (ADR-P1 clipboard) on Windows only:
+    # clipboard-win 5.4 and its error-code 3.3. Added 2026-08-17, when
+    # cargo-deny ran for the first time in a year and rejected them; the
+    # alternative was dropping clipboard support on Windows, which is not a
+    # trade worth making for a license this permissive.
+    "BSL-1.0",
 ]
 confidence-threshold = 0.9
 
@@ -27,7 +35,54 @@ allow-wildcard-paths = true
 
 [advisories]
 yanked = "deny"
-ignore = []
+
+# Every entry here is a standing decision, not a snooze. cargo-deny had never
+# actually executed in CI until 2026-08-17 (clippy failed earlier in the same
+# job and short-circuited it), so this list is the first honest accounting.
+# Anything that is a real, reachable vulnerability gets FIXED, not ignored —
+# RUSTSEC-2026-0204 (crossbeam-epoch) was closed by a lockfile bump the same
+# day, and RUSTSEC-2024-0436 (paste) left with accesskit 0.24.
+ignore = [
+    # --- GTK3 bindings are end-of-life -------------------------------------
+    # `unmaintained`, not a vulnerability. There is no maintained GTK3 binding
+    # to move to: gtk-rs ended GTK3 support, and gtk4-rs is a different
+    # toolkit, not an upgrade. These reach us through ADR-P1: rfd's gtk3
+    # backend (P.3b), muda (P.3c) and tray-icon → libappindicator (P.3e).
+    #
+    # Dropping them is an architecture decision with a real cost — the Linux
+    # menu and tray work, and the field finding that the tray must host the
+    # app menu for appindicator to register at all (07, P.3e). rfd alone could
+    # move to `xdg-portal` without pulling an async runtime (the GX2 re-check
+    # in the root Cargo.toml), but muda and tray-icon cannot.
+    { id = "RUSTSEC-2024-0412", reason = "gdk — GTK3 bindings EOL; ADR-P1" },
+    { id = "RUSTSEC-2024-0413", reason = "atk — GTK3 bindings EOL; ADR-P1" },
+    { id = "RUSTSEC-2024-0415", reason = "gtk — GTK3 bindings EOL; ADR-P1" },
+    { id = "RUSTSEC-2024-0416", reason = "atk-sys — GTK3 bindings EOL; ADR-P1" },
+    { id = "RUSTSEC-2024-0418", reason = "gdk-sys — GTK3 bindings EOL; ADR-P1" },
+    { id = "RUSTSEC-2024-0419", reason = "gtk3-macros — GTK3 bindings EOL; ADR-P1" },
+    { id = "RUSTSEC-2024-0420", reason = "gtk-sys — GTK3 bindings EOL; ADR-P1" },
+    # Transitive through glib-macros, which is part of the same GTK3 stack.
+    # Leaves when GTK3 leaves; not separately actionable.
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error — via glib-macros; goes with GTK3" },
+
+    # --- not ours to fix, and not on a reachable path ----------------------
+    # ttf-parser is `unmaintained`. It is NOT Lumen's text stack (that is
+    # parley + swash); it arrives via winit → sctk-adwaita, which uses it to
+    # draw client-side window decorations on Wayland. Ours to inherit, not to
+    # choose, until winit changes it.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser — winit's CSD path, not Lumen's text stack" },
+
+    # quick-xml 0.39: two real DoS vulnerabilities (quadratic duplicate-attr
+    # scan; unbounded namespace allocation). NOT reachable here. Its only
+    # consumer is `wayland-scanner`, a PROC-MACRO: it parses the Wayland
+    # protocol XML vendored inside the crate, at build time, and is never
+    # linked into a shipped binary. There is no path from app input to this
+    # parser. Re-check if quick-xml ever appears outside a proc-macro — the
+    # SVG/PNG decode surface is fuzzed precisely because that class of input
+    # IS attacker-controlled.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml — build-time proc-macro only (wayland-scanner)" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml — build-time proc-macro only (wayland-scanner)" },
+]
 
 [sources]
 unknown-registry = "deny"

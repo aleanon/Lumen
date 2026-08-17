@@ -166,7 +166,7 @@ muda = { version = "0.19", default-features = false, features = ["gtk"] }
 # P.4: AT bridge — publishes the existing a11y TreeUpdate (T4.3) to platform
 # assistive tech (AT-SPI/UIA/NSAccessibility) via winit. 0.23 is the pairing
 # for accesskit 0.17 + winit 0.30.
-accesskit_winit = "0.23"
+accesskit_winit = "0.33"
 # P.3e: system tray realizing SystemRequest::TrayTooltip. Shares muda 0.19
 # and the gtk linkage; on Linux it runs on a dedicated gtk thread (winit owns
 # the main loop) and appindicator shows title text, not tooltips.
@@ -201,7 +201,7 @@ tiny-skia = "0.11"
 # pure-Rust decoders, defaults off (no encoders, no avif/exr/tiff tail).
 # Feature-gated in lumen-widgets so the lean profile drops the whole stack.
 image = { version = "0.25", default-features = false, features = ["jpeg", "gif", "webp"] }
-accesskit = "0.17"
+accesskit = "0.24"
 # proc-macro toolchain (ADR-003 amendment 2026-07-03), for `lumen-macros`.
 syn = { version = "2", features = ["full"] }
 quote = "1"

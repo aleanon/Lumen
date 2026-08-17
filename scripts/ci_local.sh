@@ -241,13 +241,24 @@ done
 # out mid-build does not fail cleanly: rustc reports "couldn't create a temp
 # dir" or "failed to build archive", which reads like a code error and sent this
 # gate's own author hunting a phantom flaky test twice. Refuse up front instead.
-MIN_FREE_GB=${LUMEN_CI_MIN_FREE_GB:-30}
 preflight_disk() {
+  # The 25 GB figure is the `test` leg alone (`--workspace --all-targets`).
+  # Demanding that headroom for `--only gpu` would refuse runs that need a
+  # fraction of it, so scale the requirement to what was actually selected.
+  local need
+  if [ -n "${LUMEN_CI_MIN_FREE_GB:-}" ]; then
+    need=$LUMEN_CI_MIN_FREE_GB
+  elif selected test; then
+    need=30
+  else
+    need=5
+  fi
+  [ "$need" -gt 0 ] || return 0
   local free_gb
   free_gb=$(df -BG --output=avail . | tail -1 | tr -dc '0-9')
   [ -n "$free_gb" ] || return 0          # unknown: do not block on a parse miss
-  if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
-    echo "REFUSING TO START: ${free_gb} GB free, need ~${MIN_FREE_GB} GB." >&2
+  if [ "$free_gb" -lt "$need" ]; then
+    echo "REFUSING TO START: ${free_gb} GB free, need ~${need} GB." >&2
     echo >&2
     echo "A full-workspace --all-targets build writes ~25 GB to target/debug." >&2
     echo "Running out mid-build fails as a confusing rustc error, not a disk one." >&2

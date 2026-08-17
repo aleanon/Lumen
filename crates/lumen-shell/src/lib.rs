@@ -494,7 +494,11 @@ impl ApplicationHandler<ShellEvent> for Shell {
             .with_visible(false);
         let window = Arc::new(el.create_window(attrs).expect("window"));
         if a11y_enabled() {
+            // accesskit_winit 0.33 takes the `ActiveEventLoop` too — it needs it
+            // to register the adapter's handlers with the platform before the
+            // window is shown.
             self.a11y = Some(accesskit_winit::Adapter::with_event_loop_proxy(
+                el,
                 &window,
                 self.proxy.clone(),
             ));
@@ -1414,7 +1418,10 @@ fn route_at_action<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner>(
     // `lumen_widgets::a11y::build_tree`), so compare the same projection. The
     // old `& 0xFFFF_FFFF` masked out an arena index, which stops identifying
     // anything once the arena recycles slots.
-    let Some(bounds) = find_bounds(&root, req.target.0) else {
+    // accesskit 0.24 split `target` into `target_tree` + `target_node` for its
+    // new subtree support. Lumen publishes only `TreeId::ROOT` (see
+    // `a11y::build_tree`), so the node half is the whole address here.
+    let Some(bounds) = find_bounds(&root, req.target_node.0) else {
         return;
     };
     if req.action == accesskit::Action::Click {
@@ -2294,7 +2301,8 @@ mod at_routing_tests {
             &mut h,
             &accesskit::ActionRequest {
                 action: accesskit::Action::Click,
-                target,
+                target_tree: accesskit::TreeId::ROOT,
+                target_node: target,
                 data: None,
             },
         );
@@ -2319,7 +2327,8 @@ mod at_routing_tests {
             &mut h,
             &accesskit::ActionRequest {
                 action: accesskit::Action::Click,
-                target: accesskit::NodeId(u64::MAX),
+                target_tree: accesskit::TreeId::ROOT,
+                target_node: accesskit::NodeId(u64::MAX),
                 data: None,
             },
         );
