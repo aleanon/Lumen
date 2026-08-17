@@ -108,30 +108,28 @@ android-gate:
 run-on platform:
     cargo run -p lumen-cli -- run --platform {{platform}}
 
-# The full check gate (what CI runs).
-check:
-    cargo fmt --all --check
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo test --workspace
-    just check-lean
+# The CI gate, fast tier — what the pre-push hook runs. `just ci --list` shows every leg.
+ci *args:
+    bash scripts/ci_local.sh {{args}}
 
-# LN0: verify the lean (`--no-default-features`) profile still compiles.
-#
-# `cargo check --workspace` CANNOT catch this: Cargo unifies features across all
-# ~70 members, and most examples request full-default `lumen-widgets`, so the
-# lean paths are never compiled there. Each crate must be checked alone.
-check-lean:
+# The CI gate, every leg this machine can run (adds gpu, fonts, perf, live-window, fuzz replay).
+ci-full:
+    bash scripts/ci_local.sh --full
+
+# Install the tracked git hooks (pre-push runs `just ci`). One-time, per clone.
+install-hooks:
     #!/usr/bin/env bash
     set -euo pipefail
-    export RUSTFLAGS="-D warnings"
-    # Tier 1: lib + tests (these crates' snapshot-only tests are cfg-gated).
-    for crate in lumen-core lumen-style lumen-text lumen-render \
-                 lumen-layout lumen-shell-core; do
-        printf '%-18s ' "$crate"
-        cargo check -q -p "$crate" --no-default-features --all-targets && echo "OK (with tests)"
-    done
-    # Tier 2: lib only — see .github/workflows/ci.yml for why.
-    for crate in lumen-app lumen-widgets lumen-shell lumen; do
-        printf '%-18s ' "$crate"
-        cargo check -q -p "$crate" --no-default-features && echo "OK (lib)"
-    done
+    git config core.hooksPath .githooks
+    echo "core.hooksPath = .githooks"
+    echo "pre-push now runs the fast CI tier. Escape hatches:"
+    echo "  git push --no-verify        skip it"
+    echo "  LUMEN_PREPUSH=full git push run every leg"
+
+# Alias kept for muscle memory and the older docs — same gate as `just ci`.
+check:
+    bash scripts/ci_local.sh
+
+# LN0 only: each crate checked alone with default features off (see ci_local.sh).
+check-lean:
+    bash scripts/ci_local.sh --only lean

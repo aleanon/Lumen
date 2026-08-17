@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Run the CI gate before the push leaves the machine.
+#
+# Tracked in-repo rather than left in `.git/hooks/`, so it is versioned and
+# shared; `.git/hooks` is not part of a clone. Enable it once with:
+#
+#     just install-hooks          # == git config core.hooksPath .githooks
+#
+# Controls:
+#   git push --no-verify         skip the hook entirely (git's own escape hatch)
+#   LUMEN_PREPUSH=off git push   same, without --no-verify
+#   LUMEN_PREPUSH=full git push  run every leg, not just the fast tier
+#   LUMEN_PREPUSH="--only clippy --only lean" git push
+#                                any ci_local.sh argument list, passed verbatim
+#
+# Scope: this runs the FAST tier by default (fmt, clippy, deny, build+test,
+# doc tests, lean, executors) — the legs that are cheap and that have actually
+# gone red. It is not the whole matrix, and it prints what it did not cover.
+set -uo pipefail
+
+GATE_ARGS=()
+case "${LUMEN_PREPUSH:-fast}" in
+  off|0|no|skip)
+    echo "pre-push: skipped (LUMEN_PREPUSH=${LUMEN_PREPUSH})" >&2
+    exit 0 ;;
+  full)  GATE_ARGS=(--full) ;;
+  fast)  GATE_ARGS=(--fast) ;;
+  -*)    read -r -a GATE_ARGS <<<"$LUMEN_PREPUSH" ;;   # verbatim arg list
+  *)     echo "pre-push: unrecognised LUMEN_PREPUSH=${LUMEN_PREPUSH}; using --fast" >&2
+         GATE_ARGS=(--fast) ;;
+esac
+
+REPO="$(git rev-parse --show-toplevel)"
+
+# A push that only DELETES remote refs builds nothing, so gate nothing. Git
+# signals deletion with an all-zero local sha. `refs` counts the lines so that
+# running this hook by hand (no stdin) still gates rather than silently exiting.
+refs=0
+have_content=0
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  refs=$((refs + 1))
+  case "$local_sha" in
+    *[!0]*) have_content=1 ;;   # any non-'0' character => real content
+  esac
+done
+if [ "$refs" -gt 0 ] && [ "$have_content" -eq 0 ]; then
+  echo "pre-push: deletion-only push, nothing to gate" >&2
+  exit 0
+fi
+
+# CI checks the COMMITS you push; this gate checks your working tree. When the
+# tree is dirty those are different things, and a green gate can still be
+# followed by a red CI. Warn — do not block, since gating the stash-and-retest
+# dance is worse than the risk.
+if ! git -C "$REPO" diff --quiet HEAD 2>/dev/null; then
+  echo >&2
+  echo "pre-push: WARNING — working tree is dirty." >&2
+  echo "  CI will build the pushed commits; this gate builds your tree." >&2
+  echo "  They are not the same thing." >&2
+  echo >&2
+fi
+
+exec "$REPO/scripts/ci_local.sh" "${GATE_ARGS[@]}"

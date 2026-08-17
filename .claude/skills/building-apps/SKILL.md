@@ -30,7 +30,10 @@ examples/<name>/
   external apps only.
 - Recipes: `just run <name>` (window), `just run-hot <name>` (live `.lss`),
   `just run-agent <name>` (window + agent endpoint), `just render <name>`
-  (headless), `just test <name>`, `just check` (full gate).
+  (headless), `just test <name>`, `just ci` (the pre-push CI gate — fast tier,
+  ~140 s; `just ci-full` adds gpu/fonts/perf/live-window/fuzz-replay, and
+  `just ci --list` shows every leg and the CI job it mirrors). `just check` is
+  an alias for `just ci`. `just install-hooks` makes the gate run on push.
 
 ## Step 2 — composition
 

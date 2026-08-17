@@ -18,9 +18,15 @@ use lumen_core::tree::{NodeFlags, Tree};
 use lumen_core::{Color, NodeIndex, StableId};
 use lumen_layout::{Dim, LayoutEngine, LayoutNode, LayoutStyle, LayoutTree};
 use lumen_render::{
-    cpu, BlendMode, Border, Brush, CornerRadii, Damage, DisplayList, DrawCmd, Present, RgbaImage,
+    cpu, BlendMode, Border, Brush, CornerRadii, Damage, DisplayList, DrawCmd, RgbaImage,
     RoundedRect,
 };
+// `Present` describes a swapchain hand-off, so its only users are the surface
+// methods below — all of which carry this same cfg. Importing it unconditionally
+// is an unused import in the lean profile, which is `-D warnings` in the `lean`
+// CI job (LN0).
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+use lumen_render::Present;
 use lumen_text::{TextBlockApi, TextEngine, TextEngineApi};
 use std::cell::RefCell;
 
