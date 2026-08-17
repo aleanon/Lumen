@@ -60,8 +60,12 @@ fn runs_work(sp: &dyn Spawner, name: &str) {
     );
 }
 
-/// Aborting before the work starts prevents it. True of every spawner, and the
-/// only cancellation guarantee the thread pool can make.
+/// Aborting before the work starts prevents it.
+///
+/// Only the real runtimes use this now. The thread pool needs the ordering to
+/// be *arranged* rather than assumed — see `thread_pool_abort_before_pickup`,
+/// which explains why this shape was a race there.
+#[cfg(any(feature = "tokio", feature = "smol"))]
 fn abort_before_start_prevents_it(sp: &dyn Spawner, name: &str) {
     let n = Arc::new(AtomicUsize::new(0));
     let c = n.clone();
@@ -145,7 +149,47 @@ impl std::future::Future for YieldOnce {
 fn thread_pool_runs_work_and_cancels_before_start() {
     let sp = ThreadPoolSpawner::default();
     runs_work(&sp, "thread-pool");
-    abort_before_start_prevents_it(&sp, "thread-pool");
+    thread_pool_abort_before_pickup();
+}
+
+/// The thread pool's only cancellation guarantee is "aborted before a worker
+/// picked it up" — `queue` checks the skip flag at pickup, and once the job is
+/// running nothing can stop it (std cannot interrupt a thread; `tasks.rs:124`).
+///
+/// Asserting that with a bare spawn-then-abort is a RACE, not a test: `spawn`
+/// hands the job to an mpsc queue an idle worker may `recv` before the very
+/// next line runs. It held in isolation (15/15 here) and lost under
+/// `cargo test --workspace`, where the main thread gets descheduled in exactly
+/// that window — a flake that reds the whole gate and blames whatever else
+/// happens to be in flight.
+///
+/// So make the ordering a fact: ONE worker, already occupied. The channel is
+/// FIFO, so the job under test cannot be picked up until the blocker returns,
+/// and the blocker returns only after `abort()` has been called.
+fn thread_pool_abort_before_pickup() {
+    let sp = ThreadPoolSpawner::new(1);
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    let (busy_tx, busy_rx) = std::sync::mpsc::channel::<()>();
+    sp.spawn_blocking(Box::new(move || {
+        busy_tx.send(()).ok(); // the only worker is now mine…
+        release_rx.recv().ok(); // …and stays mine until released
+    }));
+    busy_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("thread-pool: the worker never started the blocking job");
+
+    let n = Arc::new(AtomicUsize::new(0));
+    let c = n.clone();
+    let h = sp.spawn(Box::pin(async move {
+        c.fetch_add(1, Ordering::SeqCst);
+    }));
+    h.abort(); // provably queued, not running
+    release_tx.send(()).ok(); // now let the worker drain the queue
+
+    assert!(
+        !wait_for(&n, 1, Duration::from_millis(300)),
+        "thread-pool: a job aborted before any worker could pick it up ran anyway"
+    );
 }
 
 #[cfg(feature = "tokio")]
