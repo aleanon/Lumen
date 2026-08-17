@@ -166,12 +166,20 @@ leg_gpu() {
 }
 
 leg_fonts() {
-  python3 -c 'import fontTools' 2>/dev/null || {
-    echo "fontTools missing: pip install fonttools==4.63.0"
-    echo "(the version is pinned — subsetter output is version-dependent)"
-    return $SKIP_CODE; }
-  ./scripts/subset_fonts.sh verify || return 1
-  cargo test -p lumen-text --features pan-unicode
+  # Two halves, and they must not share a fate. LN2's i18n goldens (CJK/RTL,
+  # which need the pan-Unicode face) are plain cargo tests; LN1's subset
+  # reproducibility needs fontTools. Gating both on fontTools meant a machine
+  # without it silently dropped the i18n coverage too — a SKIP that hides
+  # unrelated tests is the same lie as a PASS that skipped them.
+  cargo test -p lumen-text --features pan-unicode || return 1
+  if ! python3 -c 'import fontTools' 2>/dev/null; then
+    echo
+    echo "i18n goldens ran and PASSED; the subset-reproducibility half did not."
+    echo "It needs fontTools, pinned because subsetter output is version-dependent:"
+    echo "    pip install fonttools==4.63.0        # PEP 668: use a venv"
+    return $SKIP_CODE
+  fi
+  ./scripts/subset_fonts.sh verify
 }
 
 leg_perf() {

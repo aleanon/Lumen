@@ -20,7 +20,12 @@ lumen-render = { path = "../crates/lumen-render" }
 lumen-widgets = { path = "../crates/lumen-widgets" }
 lumen-agent = { path = "../crates/lumen-agent", default-features = false }
 serde_json = "1"
-kurbo = "0.11"
+# MUST track the workspace's kurbo (root Cargo.toml). This crate is excluded
+# from the workspace and carries its own lockfile, so a kurbo bump there does
+# not reach here — and the mismatch surfaces as a type error against
+# `run_headless(Size)`, only when someone builds the fuzz targets. Found that
+# way when the workspace moved to 0.13 and this was still on 0.11.
+kurbo = "0.13"
 
 [[bin]]
 name = "lss_parse"

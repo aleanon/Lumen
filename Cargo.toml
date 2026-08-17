@@ -121,7 +121,7 @@ lumen-shell-core = { path = "crates/lumen-shell-core" }
 lumen = { path = "crates/lumen" }
 
 # whitelisted runtime deps (ADR-003) — added to crates as tasks need them
-kurbo = "0.11"
+kurbo = "0.13"
 taffy = "0.7"
 # `complex-scripts` bundles the ICU dictionary line-break models (CJK/Thai/…);
 # without it parley panics ("no segmentation model for language: ja") on CJK.
