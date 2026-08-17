@@ -749,7 +749,15 @@ fn brush_shader(brush: &Brush) -> Shader<'static> {
             stops,
             spread,
         } => RadialGradient::new(
+            // tiny-skia 0.12 takes the full two-circle form
+            // (start_point, start_radius, end_point, end_radius). 0.11 took
+            // (start, end, radius) — SkGradientShader::MakeTwoPointConical with
+            // the START circle's radius implicitly 0. Lumen's radial is
+            // concentric, so the exact translation is the same centre twice
+            // with radii 0 → radius; it is not a new degree of freedom being
+            // used, and the goldens confirm it renders identically.
             tiny_skia::Point::from_xy(center.x as f32, center.y as f32),
+            0.0,
             tiny_skia::Point::from_xy(center.x as f32, center.y as f32),
             (*radius).max(0.001) as f32,
             bake_stops(stops),
