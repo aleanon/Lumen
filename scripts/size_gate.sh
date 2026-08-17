@@ -22,12 +22,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# rustc SIGSEGVs compiling `moxcms` (pulled by `image`) under this gate's
-# `opt-level=z` + linker-plugin-lto profile — a const-eval stack overflow, with
-# rustc's own diagnostic suggesting exactly this. Not caused by anything in this
-# repo: the crate does not depend on us and the same version compiles fine at
-# opt-level 0/3. Remove when rustc or moxcms fixes it.
-export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
+# rustc SIGSEGVs under this gate's `opt-level=z` + linker-plugin-lto profile —
+# a const-eval stack overflow, with rustc's own diagnostic suggesting exactly
+# this knob. Not caused by anything in this repo: the crates involved do not
+# depend on us and the same versions compile fine at opt-level 0/3.
+#
+# NOT one crate, and not deterministic. First seen on `moxcms` (via `image`),
+# which 16 MiB fixed; then on `xcursor` (via winit) WITH 16 MiB set, on a run
+# whose predecessor an hour earlier had passed with the identical lockfile.
+# Whether it trips depends on where the stack happens to land, so a value that
+# "works" is only a value that has not lost yet. Raised to rustc's own
+# suggested 32 MiB. Remove when rustc fixes the underlying overflow.
+export RUST_MIN_STACK="${RUST_MIN_STACK:-33554432}"
 
 # LN2 re-baseline. The default no longer embeds the pan-Unicode face, so the
 # old 24 MB threshold would have passed whatever happened — including the face
