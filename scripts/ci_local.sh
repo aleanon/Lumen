@@ -236,6 +236,33 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# Disk preflight. `cargo build --workspace --all-targets` writes ~25 GB into
+# target/debug on this box (51 example crates × every target kind), and running
+# out mid-build does not fail cleanly: rustc reports "couldn't create a temp
+# dir" or "failed to build archive", which reads like a code error and sent this
+# gate's own author hunting a phantom flaky test twice. Refuse up front instead.
+MIN_FREE_GB=${LUMEN_CI_MIN_FREE_GB:-30}
+preflight_disk() {
+  local free_gb
+  free_gb=$(df -BG --output=avail . | tail -1 | tr -dc '0-9')
+  [ -n "$free_gb" ] || return 0          # unknown: do not block on a parse miss
+  if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
+    echo "REFUSING TO START: ${free_gb} GB free, need ~${MIN_FREE_GB} GB." >&2
+    echo >&2
+    echo "A full-workspace --all-targets build writes ~25 GB to target/debug." >&2
+    echo "Running out mid-build fails as a confusing rustc error, not a disk one." >&2
+    echo >&2
+    echo "Reclaim (largest first, all pure cache):" >&2
+    du -sh target/debug/* 2>/dev/null | sort -rh | head -4 | sed 's/^/  /' >&2
+    echo >&2
+    echo "  rm -rf target/debug/examples     # rebuilt on demand" >&2
+    echo "  cargo clean                      # all of it" >&2
+    echo >&2
+    echo "Override once with: LUMEN_CI_MIN_FREE_GB=0 scripts/ci_local.sh" >&2
+    return 1
+  fi
+}
+
 selected() {
   local l=$1 s
   if [ ${#ONLY[@]} -gt 0 ]; then
@@ -252,6 +279,8 @@ selected() {
 PASSED=(); FAILED=(); SKIPPED=()
 declare -A SECS
 START=$SECONDS
+
+preflight_disk || exit 1
 
 echo "=============================================================="
 if [ ${#ONLY[@]} -gt 0 ]; then
