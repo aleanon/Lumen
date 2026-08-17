@@ -6,10 +6,18 @@
 [build]
 jobs = 12
 
-# Disk-pressure mitigations (2026-07-11, after the third 100%-full incident:
-# a day of dev cycles regrew target/ to 151 GB). Line-tables keep usable
-# backtraces at a fraction of full debuginfo; incremental caches were both
-# multi-GB and the corruption-prone artifact class. Revert if you need full
-# debugger variable info.
-[env]
-CARGO_INCREMENTAL = "0"
+# Disk-pressure mitigation (2026-07-11, after the third 100%-full incident: a
+# day of dev cycles regrew target/ to 151 GB). Incremental caches were both
+# multi-GB and the corruption-prone artifact class. The other half of that
+# mitigation — line-tables-only debuginfo — lives in `[profile.dev]` in the
+# root Cargo.toml.
+#
+# CORRECTED 2026-08-17: this was written as `[env] CARGO_INCREMENTAL = "0"`
+# and never did anything for fifteen months. Cargo's `[env]` table sets
+# variables in the environment of the build scripts and binaries cargo
+# *invokes*; it does not configure cargo's own behaviour, and cargo reads
+# CARGO_INCREMENTAL from its real process environment. The setting that works
+# is this one. Found when target/debug/incremental had quietly grown to 19 GB
+# and filled the disk mid-build; deleting it cost nothing, because nothing
+# here wants incremental compilation in the first place.
+incremental = false
