@@ -319,8 +319,15 @@ printf ' total %ds\n' $((SECONDS - START))
 echo
 echo "NOT covered by this gate, whatever it reported above:"
 echo "  - build + test on windows-latest and macos-latest (CI matrix; this box is Linux)"
-if [ "$WANT_TIER" = fast ]; then
-  echo "  - the full tier: gpu, fonts, perf, live-window, fuzz-replay (--full)"
+# Derived, not hardcoded: a footer that names the wrong legs is the same lie it
+# exists to prevent.
+NOTRUN=()
+for l in "${LEGS[@]}"; do selected "$l" || NOTRUN+=("$l"); done
+if [ ${#NOTRUN[@]} -gt 0 ]; then
+  echo "  - legs that did not run: ${NOTRUN[*]}"
+fi
+if [ ${#SKIPPED[@]} -gt 0 ] && [ -n "${SKIPPED[0]:-}" ]; then
+  echo "  - legs that could not run here: ${SKIPPED[*]}"
 fi
 echo "  - the NIGHTLY fuzz job, which generates new input each run. It is not"
 echo "    triggered by push and no pre-push gate can predict it."
