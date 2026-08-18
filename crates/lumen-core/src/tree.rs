@@ -572,6 +572,15 @@ mod tests {
             check_link("parent", t.parent[i]);
             check_link("first_child", t.first_child[i]);
             check_link("next_sibling", t.next_sibling[i]);
+            // `last_child` is a redundant tail CACHE over the sibling chain,
+            // repaired by hand in `link_last_child` and in two separate
+            // branches of `unlink`. It was omitted here when it was added, so
+            // a stale tail pointing at a recycled slot went unchecked: the
+            // next `link_last_child` would then write `next_sibling` onto a
+            // node no longer in the parent's list, and the appended child
+            // would be parented but unreachable — an element that simply
+            // never appears, with no panic.
+            check_link("last_child", t.last_child[i]);
         }
 
         // document order reaches every live node exactly once (no cycles, no
@@ -593,10 +602,22 @@ mod tests {
         for &n in &order {
             // each child's parent is n, and n is reachable as a child of its parent
             let mut c = t.first_child[n.index() as usize];
+            let mut walked_tail = NodeIndex::NONE;
             while c.is_some() {
                 assert_eq!(t.parent[c.index() as usize], n, "child's parent != n");
+                walked_tail = c;
                 c = t.next_sibling[c.index() as usize];
             }
+            // …and the cached tail must BE the tail. Liveness alone is not
+            // enough: a stale-but-live `last_child` still produces a correct
+            // document order, so every existing assertion here passes while
+            // the very next append goes to the wrong node. This walks the
+            // chain and compares, which is the only way to catch that.
+            assert_eq!(
+                t.last_child[n.index() as usize],
+                walked_tail,
+                "last_child is not the real tail of {n:?}'s sibling chain"
+            );
             let p = t.parent[n.index() as usize];
             if p.is_some() {
                 let mut found = false;

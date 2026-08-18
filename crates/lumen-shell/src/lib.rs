@@ -204,14 +204,54 @@ fn watch_styles(path: &str, proxy: EventLoopProxy<ShellEvent>) {
 /// file — `$LUMEN_AGENT_ADDR_FILE`, or `target/lumen-agent.addr` — which
 /// `scripts/agent_client.py` reads automatically, and printed as a JSON ready
 /// line on stderr.
+/// Is `addr` a loopback bind target?
+///
+/// C.5's fail-closed guard: a non-loopback bind exposes the app's full remote
+/// control surface, so it is refused unless a bearer token is configured.
+///
+/// The original check was `starts_with("127.") || starts_with("localhost:") ||
+/// starts_with("[::1]")`, which a hostname defeats: `127.0.0.1.attacker.example:9000`
+/// begins with `127.` yet resolves wherever its DNS says, so the guard passed
+/// and the socket went public tokenless. Parse instead — an IP literal is the
+/// only thing that can be judged loopback without resolving, and `localhost`
+/// is the one name defined to be it.
+///
+/// Not gated on `agent`: it must be compiled, and tested, in the default
+/// profile the CI test job actually runs.
+#[cfg_attr(not(feature = "agent"), allow(dead_code))]
+fn is_loopback_addr(addr: &str) -> bool {
+    if let Ok(sa) = addr.parse::<std::net::SocketAddr>() {
+        return sa.ip().is_loopback();
+    }
+    if let Ok(ip) = addr.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    // A name, not a literal. Only exactly "localhost" (with a real port)
+    // qualifies; `rsplit_once` so an IPv6-looking name cannot smuggle a colon.
+    match addr.rsplit_once(':') {
+        Some((host, port)) => port.parse::<u16>().is_ok() && host.eq_ignore_ascii_case("localhost"),
+        None => addr.eq_ignore_ascii_case("localhost"),
+    }
+}
+
+/// Does a request carry the configured bearer token?
+///
+/// `token == None` means none is configured, which is only reachable on a
+/// loopback bind (see [`is_loopback_addr`]) and is therefore open by design.
+#[cfg_attr(not(feature = "agent"), allow(dead_code))]
+fn auth_ok(provided: Option<&str>, token: Option<&str>) -> bool {
+    match token {
+        None => true,
+        Some(t) => provided == Some(t),
+    }
+}
+
 #[cfg(feature = "agent")]
 fn serve_agent(addr: &str, proxy: EventLoopProxy<ShellEvent>) {
     // C.5: a non-loopback bind exposes the app to the network — refuse it
     // unless a bearer token is configured (each request must then carry
     // `"auth": "<token>"`; `lumen agent call` attaches LUMEN_AGENT_TOKEN).
-    let loopback =
-        addr.starts_with("127.") || addr.starts_with("localhost:") || addr.starts_with("[::1]");
-    if !loopback && std::env::var("LUMEN_AGENT_TOKEN").is_err() {
+    if !is_loopback_addr(addr) && std::env::var("LUMEN_AGENT_TOKEN").is_err() {
         eprintln!("lumen agent: refusing non-loopback bind {addr} without LUMEN_AGENT_TOKEN");
         return;
     }
@@ -388,8 +428,9 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         .unwrap_or(serde_json::Value::Null);
                     // C.5: when a bearer token is configured, every request
                     // must carry it — checked before anything dispatches.
-                    if let Ok(token) = std::env::var("LUMEN_AGENT_TOKEN") {
-                        if v.get("auth").and_then(|a| a.as_str()) != Some(token.as_str()) {
+                    let token = std::env::var("LUMEN_AGENT_TOKEN").ok();
+                    {
+                        if !auth_ok(v.get("auth").and_then(|a| a.as_str()), token.as_deref()) {
                             let id = v.get("id").cloned().unwrap_or(serde_json::Value::Null);
                             let _ = reply.send(
                                 serde_json::json!({ "jsonrpc": "2.0", "id": id,
@@ -1979,6 +2020,89 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
 mod tests {
     use super::*;
     use winit::keyboard::ModifiersState;
+
+    // --- C.5: the agent endpoint's two security guards -------------------
+    //
+    // These had no test at all. `lumen-shell` has no tests/ directory, and
+    // the only LUMEN_AGENT_TOKEN test in the repo is in lumen-cli and asserts
+    // the CLIENT attaches the token — nothing asserted the server enforces
+    // it, or that it refuses to go public without one.
+
+    #[test]
+    fn loopback_binds_are_recognised() {
+        for addr in [
+            "127.0.0.1:9230",
+            "127.1.2.3:80",
+            "[::1]:9230",
+            "localhost:9230",
+            "LocalHost:9230",
+        ] {
+            assert!(is_loopback_addr(addr), "{addr} should count as loopback");
+        }
+    }
+
+    #[test]
+    fn public_binds_are_not_loopback() {
+        for addr in [
+            "0.0.0.0:9230",
+            "192.168.1.5:9230",
+            "10.0.0.1:9230",
+            "[::]:9230",
+            "example.com:9230",
+            "",
+        ] {
+            assert!(!is_loopback_addr(addr), "{addr} must NOT count as loopback");
+        }
+    }
+
+    /// The bypass the old `starts_with` check allowed: a hostname whose text
+    /// begins with `127.` or `localhost` is a different host entirely, and
+    /// resolves wherever its DNS points. Treating it as loopback published a
+    /// tokenless remote-control socket to the network.
+    #[test]
+    fn a_hostname_that_merely_looks_loopback_is_refused() {
+        for addr in [
+            "127.0.0.1.attacker.example:9230",
+            "127.evil.test:9230",
+            "localhost.attacker.example:9230",
+            "[::1].evil:9230",
+        ] {
+            assert!(
+                !is_loopback_addr(addr),
+                "{addr} is a HOSTNAME, not the loopback interface — treating \
+                 it as loopback exposes the agent socket with no token"
+            );
+        }
+    }
+
+    #[test]
+    fn no_configured_token_leaves_the_endpoint_open() {
+        // Only reachable on a loopback bind, which is the design.
+        assert!(auth_ok(None, None));
+        assert!(auth_ok(Some("anything"), None));
+    }
+
+    #[test]
+    fn a_configured_token_must_match_exactly() {
+        assert!(auth_ok(Some("s3cret"), Some("s3cret")));
+        assert!(
+            !auth_ok(None, Some("s3cret")),
+            "missing auth must be refused"
+        );
+        assert!(
+            !auth_ok(Some(""), Some("s3cret")),
+            "empty auth must be refused"
+        );
+        assert!(!auth_ok(Some("wrong"), Some("s3cret")));
+        assert!(
+            !auth_ok(Some("s3cret "), Some("s3cret")),
+            "no trimming: a near-miss token must be refused"
+        );
+        assert!(
+            !auth_ok(Some("S3CRET"), Some("s3cret")),
+            "comparison must be case-sensitive"
+        );
+    }
 
     #[test]
     fn modifiers_map_to_lumen_flags() {

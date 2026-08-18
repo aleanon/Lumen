@@ -106,6 +106,14 @@ stdio server whose tools come from `mcp_manifest()` (`ui_getTree` ↔
 client at it while `just run-agent` runs. **Auth (C.5):** a non-loopback
 bind is refused unless `LUMEN_AGENT_TOKEN` is set; every request must then
 carry `"auth": "<token>"` (the packaged clients attach it from the env).
+*(TG1, 2026-08-18 — the loopback test is no longer textual. It was
+`starts_with("127.")||starts_with("localhost:")||starts_with("[::1]")`, which
+a hostname defeats: `127.0.0.1.attacker.example:9000` passed it and then
+resolved wherever its DNS pointed, publishing a tokenless remote-control
+socket. The address is now parsed — an IP literal is judged by
+`IpAddr::is_loopback`, and `localhost` is the only name accepted. Both guards
+are pure functions (`is_loopback_addr`, `auth_ok`) compiled outside the
+`agent` feature so the default `cargo test` run covers them.)*
 
 ### 3.1 Observation
 

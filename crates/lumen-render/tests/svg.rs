@@ -183,3 +183,73 @@ fn m2_text_goes_through_the_shaper_callback() {
     assert_eq!(dl.runs.len(), 1);
     assert_eq!(dl.glyph_images.len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// Nesting depth. SVG is the one asset format the framework parses itself from
+// app-supplied bytes, and `walk`/`collect_defs`/`Node::drop` all recurse over
+// the parsed tree. Measured before the cap: 256 levels rendered fine, 512
+// ABORTED the process — a stack overflow is SIGABRT, not a panic, so neither
+// the error boundary nor `rebuild_inner`'s catch_unwind can contain it.
+// ---------------------------------------------------------------------------
+
+fn nested_groups(depth: usize, inner: &str) -> String {
+    let mut s = String::from(r#"<svg viewBox="0 0 100 100" width="100" height="100">"#);
+    for _ in 0..depth {
+        s.push_str("<g>");
+    }
+    s.push_str(inner);
+    for _ in 0..depth {
+        s.push_str("</g>");
+    }
+    s.push_str("</svg>");
+    s
+}
+
+const RECT: &str = r##"<rect x="10" y="10" width="50" height="50" fill="#f00"/>"##;
+
+#[test]
+fn realistically_nested_groups_still_render() {
+    // Real exporters nest tens of levels; the cap must not touch them.
+    let dl = svg::parse(&nested_groups(32, RECT));
+    assert_eq!(
+        dl.cmds.len(),
+        1,
+        "a rect 32 groups deep must still be drawn"
+    );
+}
+
+#[test]
+fn pathological_nesting_is_truncated_instead_of_aborting_the_process() {
+    // Before the depth cap this did not fail — it killed the test binary with
+    // `fatal runtime error: stack overflow`. Reaching the assertion at all is
+    // most of what this test asserts.
+    let dl = svg::parse(&nested_groups(5000, RECT));
+    assert!(
+        dl.cmds.is_empty(),
+        "content nested past the cap must be dropped, not rendered at the \
+         wrong transform; got {} cmds",
+        dl.cmds.len()
+    );
+}
+
+#[test]
+fn truncating_deep_content_does_not_discard_shallow_siblings() {
+    // The over-deep subtree must not corrupt the tree around it: its closing
+    // tags have to be balanced against elements that were never kept.
+    let src = format!(
+        r#"<svg viewBox="0 0 100 100" width="100" height="100">{}{}</svg>"#,
+        nested_groups(5000, RECT)
+            .replace(
+                r#"<svg viewBox="0 0 100 100" width="100" height="100">"#,
+                ""
+            )
+            .replace("</svg>", ""),
+        RECT
+    );
+    let dl = svg::parse(&src);
+    assert_eq!(
+        dl.cmds.len(),
+        1,
+        "the shallow sibling rect must survive its over-deep neighbour"
+    );
+}

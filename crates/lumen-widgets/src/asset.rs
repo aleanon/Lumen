@@ -27,6 +27,31 @@ thread_local! {
 /// data-driven) grew without bound.
 const MAX_CACHED_IMAGES: usize = 64;
 
+/// Animations are capped far lower than still images because an entry is not
+/// one decoded frame but N of them — 64 GIFs could be thousands of full RGBA
+/// buffers, which is the largest thing this process would hold.
+#[cfg(feature = "codecs")]
+const MAX_CACHED_ANIMATIONS: usize = 8;
+
+/// Insert into a content-keyed cache, evicting wholesale at `cap`.
+///
+/// Whole-cache eviction rather than LRU: tracking recency needs a counter per
+/// entry and a scan per hit, which is real cost on the hot path to protect
+/// against a case that is already unusual. Dropping everything is O(1), keeps
+/// the hit path free, and the next frame re-decodes only what it actually
+/// draws.
+///
+/// This lives in one place deliberately. The policy used to be written out at
+/// each insert site, and `decode` — the jpeg/gif/webp entry point — simply did
+/// not have it, so the CACHE1 unbounded-growth bug was still live on every
+/// format except PNG.
+fn insert_capped<V>(c: &mut HashMap<u64, V>, cap: usize, k: u64, v: V) {
+    if c.len() >= cap {
+        c.clear();
+    }
+    c.insert(k, v);
+}
+
 fn key(bytes: &[u8]) -> u64 {
     let mut h = DefaultHasher::new();
     bytes.hash(&mut h);
@@ -42,18 +67,7 @@ pub fn png(bytes: &[u8]) -> Result<RgbaImage, String> {
         return Ok(img);
     }
     let img = RgbaImage::from_png(bytes)?;
-    CACHE.with(|c| {
-        let mut c = c.borrow_mut();
-        // Whole-cache eviction rather than LRU: tracking recency needs a
-        // counter per entry and a scan per hit, which is real cost on the hot
-        // path to protect against a case (>64 live images on one thread) that
-        // is already unusual. Dropping everything is O(1), keeps the hit path
-        // free, and the next frame re-decodes only what it actually draws.
-        if c.len() >= MAX_CACHED_IMAGES {
-            c.clear();
-        }
-        c.insert(k, img.clone());
-    });
+    CACHE.with(|c| insert_capped(&mut c.borrow_mut(), MAX_CACHED_IMAGES, k, img.clone()));
     Ok(img)
 }
 
@@ -64,6 +78,18 @@ pub fn png(bytes: &[u8]) -> Result<RgbaImage, String> {
 /// else.
 pub fn clear_cache() {
     CACHE.with(|c| c.borrow_mut().clear());
+    // The animation cache holds N decoded frames per entry, so it is the
+    // BIGGEST thing this hook exists to release. It was omitted, which meant
+    // the iOS memory-warning and Android LowMemory handlers reported releasing
+    // derived caches while leaving the largest one resident.
+    #[cfg(feature = "codecs")]
+    ANIM_CACHE.with(|c| c.borrow_mut().clear());
+}
+
+/// Number of decoded animations currently retained on this thread.
+#[cfg(feature = "codecs")]
+pub fn anim_cache_len() -> usize {
+    ANIM_CACHE.with(|c| c.borrow().len())
 }
 
 /// Number of decoded images currently retained on this thread.
@@ -95,7 +121,7 @@ pub fn decode(bytes: &[u8]) -> Result<RgbaImage, String> {
         return Ok(img);
     }
     let img = decode_uncached(bytes)?;
-    CACHE.with(|c| c.borrow_mut().insert(k, img.clone()));
+    CACHE.with(|c| insert_capped(&mut c.borrow_mut(), MAX_CACHED_IMAGES, k, img.clone()));
     Ok(img)
 }
 
@@ -194,7 +220,7 @@ pub fn animation(bytes: &[u8]) -> Result<Animation, String> {
         frames,
         delays_ms: delays,
     };
-    ANIM_CACHE.with(|c| c.borrow_mut().insert(k, a.clone()));
+    ANIM_CACHE.with(|c| insert_capped(&mut c.borrow_mut(), MAX_CACHED_ANIMATIONS, k, a.clone()));
     Ok(a)
 }
 

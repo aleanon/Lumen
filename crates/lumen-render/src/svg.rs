@@ -80,6 +80,22 @@ struct Node {
 
 /// A tiny fault-tolerant XML tree parser (elements, attributes as raw tag
 /// text, text content). Comments/PI/doctype skipped.
+/// Maximum `<g>`/element nesting kept from a document.
+///
+/// SVG is the one asset format the framework parses itself from app-supplied
+/// (and therefore possibly untrusted) bytes. `parse_tree` is iterative, but
+/// `walk`, `collect_defs` and `Node`'s own `Drop` all recurse over the result,
+/// so an over-deep document overflows the stack — and a stack overflow is a
+/// `SIGABRT`, not a panic, so `catch_unwind` cannot contain it and neither the
+/// error boundary nor `rebuild_inner` protects the window.
+///
+/// Measured on this box before the cap existed: 256 levels parsed and rendered
+/// fine, 512 aborted the process. 64 is far beyond what any real exporter
+/// emits (Illustrator/Inkscape output nests tens, not hundreds) and leaves
+/// several times the margin on the smallest stack we run on, a 2 MiB test
+/// thread. Content deeper than this is dropped, not rendered wrong.
+const MAX_SVG_DEPTH: usize = 64;
+
 fn parse_tree(src: &str) -> Node {
     let mut root = Node {
         name: "svg".into(),
@@ -88,6 +104,10 @@ fn parse_tree(src: &str) -> Node {
         children: Vec::new(),
     };
     let mut stack: Vec<Node> = Vec::new();
+    // Open elements discarded for exceeding MAX_SVG_DEPTH. Tracked so their
+    // closing tags do not pop nodes we DID keep, which would corrupt the tree
+    // rather than merely truncate it.
+    let mut over = 0usize;
     let mut rest = src;
     while let Some(open) = rest.find('<') {
         let text_before = &rest[..open];
@@ -105,6 +125,10 @@ fn parse_tree(src: &str) -> Node {
             continue;
         }
         if tag.strip_prefix('/').is_some() {
+            if over > 0 {
+                over -= 1; // closes an element we never kept
+                continue;
+            }
             // closing tag: pop and attach
             if let Some(done) = stack.pop() {
                 match stack.last_mut() {
@@ -121,6 +145,13 @@ fn parse_tree(src: &str) -> Node {
             continue;
         }
         let self_closing = tag.ends_with('/');
+        if over > 0 {
+            // Inside the truncated region: ignore content, track balance only.
+            if !self_closing {
+                over += 1;
+            }
+            continue;
+        }
         let body = tag.trim_end_matches('/').trim();
         let name = body
             .split([' ', '\t', '\n'])
@@ -138,6 +169,8 @@ fn parse_tree(src: &str) -> Node {
                 Some(parent) => parent.children.push(node),
                 None => root.children.push(node),
             }
+        } else if stack.len() >= MAX_SVG_DEPTH {
+            over += 1;
         } else {
             stack.push(node);
         }
