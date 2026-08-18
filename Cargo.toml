@@ -122,7 +122,7 @@ lumen = { path = "crates/lumen" }
 
 # whitelisted runtime deps (ADR-003) — added to crates as tasks need them
 kurbo = "0.13"
-taffy = "0.7"
+taffy = "0.13"
 # `complex-scripts` bundles the ICU dictionary line-break models (CJK/Thai/…);
 # without it parley panics ("no segmentation model for language: ja") on CJK.
 # `default-features = false` still drops fontique's `system` font-enumeration

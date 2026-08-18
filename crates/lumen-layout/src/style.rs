@@ -334,13 +334,22 @@ impl LayoutStyle {
         // Track lists are CONTAINER properties: only meaningful on the grid
         // itself, so they stay gated on this node being a grid.
         if self.display == Display::Grid {
+            // taffy 0.13: a template entry is a `GridTemplateComponent`, which
+            // is either one track or a `repeat()` group. Lumen's `GridTrack`
+            // has no repetition form, so every entry is `Single` — the wrap is
+            // the whole port, not a lost feature.
             s.grid_template_columns = self
                 .grid_template_columns
                 .iter()
                 .copied()
-                .map(track)
+                .map(|t| taffy::GridTemplateComponent::Single(track(t)))
                 .collect();
-            s.grid_template_rows = self.grid_template_rows.iter().copied().map(track).collect();
+            s.grid_template_rows = self
+                .grid_template_rows
+                .iter()
+                .copied()
+                .map(|t| taffy::GridTemplateComponent::Single(track(t)))
+                .collect();
         }
         // `grid-column`/`grid-row` are ITEM properties — they are set on a
         // CHILD of a grid, whose own display is whatever it likes (usually the
@@ -403,27 +412,33 @@ fn placement(l: GridLine) -> taffy::GridPlacement {
     }
 }
 
+// taffy 0.13 turned `AlignItems`/`AlignContent` from enums into structs of
+// `{ keyword, safety }`, exposing the old variants as associated CONSTS. The
+// consts all carry `AlignmentSafety::Unsafe`, which is CSS's default and what
+// 0.7 did, so the rename is the whole change — Lumen does not opt into the new
+// `SAFE_*` overflow behaviour, and turning it on would be a layout change, not
+// a port.
 fn align_items(a: Align) -> taffy::AlignItems {
     match a {
-        Align::Start => taffy::AlignItems::Start,
-        Align::End => taffy::AlignItems::End,
-        Align::Center => taffy::AlignItems::Center,
-        Align::Stretch => taffy::AlignItems::Stretch,
-        Align::Baseline => taffy::AlignItems::Baseline,
+        Align::Start => taffy::AlignItems::START,
+        Align::End => taffy::AlignItems::END,
+        Align::Center => taffy::AlignItems::CENTER,
+        Align::Stretch => taffy::AlignItems::STRETCH,
+        Align::Baseline => taffy::AlignItems::BASELINE,
         // not meaningful for items; fall back to stretch
-        Align::SpaceBetween | Align::SpaceAround | Align::SpaceEvenly => taffy::AlignItems::Stretch,
+        Align::SpaceBetween | Align::SpaceAround | Align::SpaceEvenly => taffy::AlignItems::STRETCH,
     }
 }
 
 fn align_content(a: Align) -> taffy::AlignContent {
     match a {
-        Align::Start => taffy::AlignContent::Start,
-        Align::End => taffy::AlignContent::End,
-        Align::Center => taffy::AlignContent::Center,
-        Align::Stretch => taffy::AlignContent::Stretch,
-        Align::Baseline => taffy::AlignContent::Start,
-        Align::SpaceBetween => taffy::AlignContent::SpaceBetween,
-        Align::SpaceAround => taffy::AlignContent::SpaceAround,
-        Align::SpaceEvenly => taffy::AlignContent::SpaceEvenly,
+        Align::Start => taffy::AlignContent::START,
+        Align::End => taffy::AlignContent::END,
+        Align::Center => taffy::AlignContent::CENTER,
+        Align::Stretch => taffy::AlignContent::STRETCH,
+        Align::Baseline => taffy::AlignContent::START,
+        Align::SpaceBetween => taffy::AlignContent::SPACE_BETWEEN,
+        Align::SpaceAround => taffy::AlignContent::SPACE_AROUND,
+        Align::SpaceEvenly => taffy::AlignContent::SPACE_EVENLY,
     }
 }
