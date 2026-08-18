@@ -52,11 +52,32 @@ def require(cond: bool, leg: str, msg: str) -> bool:
     return cond
 
 
+def workspace_version() -> str:
+    """The `[workspace.package]` version, read rather than hardcoded.
+
+    `just run` pins members as `-p <name>@<version>` to disambiguate the
+    `image` EXAMPLE crate from the `image` dependency, and this gate mirrors
+    that command. The version used to be written out here as a literal, so the
+    2026-08-18 bump to 0.0.1 broke this gate while every other leg stayed
+    green — the pin resolved to nothing and `cargo build` exited 101.
+    Deriving it removes the coupling instead of documenting it.
+    """
+    in_section = False
+    with open(os.path.join(ROOT, "Cargo.toml"), encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line.startswith("["):
+                in_section = line == "[workspace.package]"
+            elif in_section and line.startswith("version"):
+                return line.split("=", 1)[1].strip().strip('"')
+    raise SystemExit("could not read [workspace.package] version from Cargo.toml")
+
+
 def build_cmd(example: str) -> list[str]:
     """The build `just run-agent` performs, run separately so its cost sits
     outside every timeout in this gate."""
     if os.path.exists(os.path.join(ROOT, "examples", example, "examples", "win.rs")):
-        return ["cargo", "build", "-q", "--release", "-p", f"{example}@0.0.0",
+        return ["cargo", "build", "-q", "--release", "-p", f"{example}@{workspace_version()}",
                 "--example", f"{example}-win", "--features", "lumen-shell/agent"]
     return ["cargo", "build", "-q", "--release", "-p", "iced-parity",
             "--example", "win", "--features", "lumen-shell/agent"]

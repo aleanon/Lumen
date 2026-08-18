@@ -142,7 +142,7 @@ fn cmd_package(json: bool) -> i32 {
                         .and_then(|p| p["version"].as_str().map(String::from))
                 })
             })
-            .unwrap_or_else(|| "0.0.0".to_string());
+            .unwrap_or_else(|| "0.0.1".to_string());
     }
 
     // E.1: `cargo auditable` embeds the dependency list inside the binary
@@ -381,8 +381,8 @@ fn cmd_new(name: Option<&str>, json: bool) -> i32 {
             ),
         ),
         Err(_) => (
-            "lumen = \"0.0.0\"".to_string(),
-            "lumen-test = \"0.0.0\"".to_string(),
+            "lumen = \"0.0.1\"".to_string(),
+            "lumen-test = \"0.0.1\"".to_string(),
         ),
     };
 

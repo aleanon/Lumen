@@ -9,15 +9,19 @@ run name *args:
     #!/usr/bin/env bash
     set -euo pipefail
     name="{{name}}"
+    # Read the lockstep version rather than repeating it: the 0.0.1 bump broke
+    # scripts/live_window_gate.py, which had the same pin written out as a
+    # literal, while everything else stayed green.
+    ver=$(awk '/^\[workspace\.package\]/{f=1;next} f&&/^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
     # Release: a debug build of the CPU renderer + text stack is ~35x slower,
     # which shows up as a low animation frame rate and laggy resize.
-    # `@0.0.0` pins the workspace member (pre-1.0 lockstep version): the
+    # `@$ver` pins the workspace member (pre-1.0 lockstep version): the
     # `image` example would otherwise be ambiguous with the ADR-M1 `image`
     # dependency.
     if [[ -f "examples/$name/examples/win.rs" ]]; then
-        cargo run -q --release -p "$name@0.0.0" --example "$name-win"  # standalone example crate
+        cargo run -q --release -p "$name@$ver" --example "$name-win"  # standalone example crate
     elif [[ -d "examples/$name" && -f "examples/$name/src/main.rs" ]]; then
-        cargo run -p "$name@0.0.0" {{args}}                    # binary example (headless smoke)
+        cargo run -p "$name@$ver" {{args}}                    # binary example (headless smoke)
     else
         cargo run -q --release -p iced-parity --example win -- "$name"   # gallery example
     fi
@@ -47,10 +51,14 @@ run-agent name addr="127.0.0.1:9230":
     #!/usr/bin/env bash
     set -euo pipefail
     name="{{name}}"
+    # Read the lockstep version rather than repeating it: the 0.0.1 bump broke
+    # scripts/live_window_gate.py, which had the same pin written out as a
+    # literal, while everything else stayed green.
+    ver=$(awk '/^\[workspace\.package\]/{f=1;next} f&&/^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
     export LUMEN_AGENT_ADDR="{{addr}}"
     # The agent RPC server is behind lumen-shell's default-off `agent` feature.
     if [[ -f "examples/$name/examples/win.rs" ]]; then
-        cargo run -q --release -p "$name@0.0.0" --example "$name-win" --features lumen-shell/agent
+        cargo run -q --release -p "$name@$ver" --example "$name-win" --features lumen-shell/agent
     else
         cargo run -q --release -p iced-parity --example win --features lumen-shell/agent -- "$name"
     fi
