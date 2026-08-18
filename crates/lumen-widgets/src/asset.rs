@@ -27,17 +27,32 @@ thread_local! {
 /// data-driven) grew without bound.
 const MAX_CACHED_IMAGES: usize = 64;
 
-/// Animations are capped far lower than still images because an entry is not
-/// one decoded frame but N of them — 64 GIFs could be thousands of full RGBA
-/// buffers, which is the largest thing this process would hold.
+/// Animations cost more per entry than still images — an entry is N decoded
+/// frames, not one — but the cap cannot be set from that alone, because
+/// eviction here is whole-cache.
+///
+/// KNOWN LIMITATION, stated because the number is a trade and not a
+/// derivation: `animated()` re-enters `animation()` on every frame edge, so if
+/// the number of DISTINCT animations on screen ever exceeds this cap, each
+/// frame evicts the whole map and re-decodes all of them — a CPU cliff, not a
+/// graceful degradation. 8 was the first value here and is too low: a sticker
+/// picker or an animated-emoji grid is plausibly 30+. 32 covers those with
+/// margin while still bounding the leak this cap exists to stop.
+///
+/// The real fix is eviction that knows what the current frame touched, so a
+/// live working set is never dropped; that needs frame awareness this cache
+/// does not have, and is deliberately left as follow-up rather than guessed at
+/// here.
 #[cfg(feature = "codecs")]
-const MAX_CACHED_ANIMATIONS: usize = 8;
+const MAX_CACHED_ANIMATIONS: usize = 32;
 
 /// Insert into a content-keyed cache, evicting wholesale at `cap`.
 ///
 /// Whole-cache eviction rather than LRU: tracking recency needs a counter per
 /// entry and a scan per hit, which is real cost on the hot path to protect
-/// against a case that is already unusual. Dropping everything is O(1), keeps
+/// against a case that is uncommon but NOT rare — a list of 65+ distinct
+/// images does reach it, and pays a re-decode per frame while it does.
+/// Dropping everything is O(1), keeps
 /// the hit path free, and the next frame re-decodes only what it actually
 /// draws.
 ///

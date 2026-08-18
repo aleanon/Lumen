@@ -32,8 +32,9 @@ env:
 # libayatana-appindicator3-1 but no -dev and builds clean).
 #
 # Jobs that do NOT need it: `gpu` (lumen-render/lumen-widgets have no gtk in
-# their graphs), `fonts` (lumen-text only) and `executors` (lumen-exec is a
-# leaf; the containment check is `cargo tree`, which does not build).
+# their graphs) and `fonts` (lumen-text only). `executors` DOES need it as of
+# TG1 — it was gtk-free while it only built the `lumen-exec` leaf, but it now
+# also compiles `lumen-shell --features agent`, which pulls the whole cluster.
 
 jobs:
   # Fast lints run once on Linux only.
@@ -180,8 +181,17 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2.9.1
+      - name: GTK3 headers (needed since this job also builds lumen-shell)
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev
       - name: test both adapters
         run: cargo test -p lumen-exec --features tokio,smol
+      # Same reasoning, different crate: `agent` is default-OFF, so nothing
+      # else in this file compiles `serve_agent` or the per-request auth check.
+      # Their guards are pure functions tested in the default profile, but only
+      # this step compiles the code that CALLS them — without it, reverting a
+      # call site to the old string-prefix check is invisible to CI.
+      - name: the live-window agent server compiles and its tests run
+        run: cargo test -p lumen-shell --features agent
       - name: the default graph must contain neither runtime
         run: |
           if cargo tree -p lumen -e normal | grep -qiE "^[^a-z]*(tokio|smol) "; then

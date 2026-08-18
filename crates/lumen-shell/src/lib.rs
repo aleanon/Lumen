@@ -220,6 +220,10 @@ fn watch_styles(path: &str, proxy: EventLoopProxy<ShellEvent>) {
 /// profile the CI test job actually runs.
 #[cfg_attr(not(feature = "agent"), allow(dead_code))]
 fn is_loopback_addr(addr: &str) -> bool {
+    // Env vars sourced from a file commonly carry a trailing newline, and the
+    // parsers below are strict; without this the guard fails CLOSED on a
+    // perfectly good loopback address and the endpoint silently never starts.
+    let addr = addr.trim();
     if let Ok(sa) = addr.parse::<std::net::SocketAddr>() {
         return sa.ip().is_loopback();
     }
@@ -234,16 +238,44 @@ fn is_loopback_addr(addr: &str) -> bool {
     }
 }
 
+/// Normalise a raw `LUMEN_AGENT_TOKEN` value into "is a token configured?".
+///
+/// An EMPTY value counts as UNSET. `LUMEN_AGENT_TOKEN=` yields `Ok("")` from
+/// `env::var`, so testing it with `is_err()` treated it as configured: the
+/// non-loopback refusal was skipped, and `auth_ok(Some(""), Some(""))` then
+/// accepted every request — publishing exactly the tokenless remote-control
+/// socket the guard exists to prevent. Both call sites go through here so the
+/// two cannot disagree again.
+#[cfg_attr(not(feature = "agent"), allow(dead_code))]
+fn normalize_token(raw: Option<String>) -> Option<String> {
+    raw.filter(|t| !t.trim().is_empty())
+}
+
+/// The configured bearer token, or `None` if none is set.
+#[cfg_attr(not(feature = "agent"), allow(dead_code))]
+fn configured_token() -> Option<String> {
+    normalize_token(std::env::var("LUMEN_AGENT_TOKEN").ok())
+}
+
 /// Does a request carry the configured bearer token?
 ///
 /// `token == None` means none is configured, which is only reachable on a
 /// loopback bind (see [`is_loopback_addr`]) and is therefore open by design.
 #[cfg_attr(not(feature = "agent"), allow(dead_code))]
 fn auth_ok(provided: Option<&str>, token: Option<&str>) -> bool {
-    match token {
-        None => true,
-        Some(t) => provided == Some(t),
+    let Some(t) = token else { return true };
+    let Some(p) = provided else { return false };
+    // Constant-time comparison. `==` on `&str` stops at the first differing
+    // byte, and this gates a socket granting full remote control. A TCP round
+    // trip plus the hop onto the winit event loop buries a few nanoseconds of
+    // prefix difference in jitter, so this is closing a question rather than a
+    // demonstrated hole — but it is three lines. Length is not hidden; that is
+    // standard for bearer tokens.
+    let (p, t) = (p.as_bytes(), t.as_bytes());
+    if p.len() != t.len() {
+        return false;
     }
+    p.iter().zip(t).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 #[cfg(feature = "agent")]
@@ -251,7 +283,7 @@ fn serve_agent(addr: &str, proxy: EventLoopProxy<ShellEvent>) {
     // C.5: a non-loopback bind exposes the app to the network — refuse it
     // unless a bearer token is configured (each request must then carry
     // `"auth": "<token>"`; `lumen agent call` attaches LUMEN_AGENT_TOKEN).
-    if !is_loopback_addr(addr) && std::env::var("LUMEN_AGENT_TOKEN").is_err() {
+    if !is_loopback_addr(addr) && configured_token().is_none() {
         eprintln!("lumen agent: refusing non-loopback bind {addr} without LUMEN_AGENT_TOKEN");
         return;
     }
@@ -428,7 +460,7 @@ impl ApplicationHandler<ShellEvent> for Shell {
                         .unwrap_or(serde_json::Value::Null);
                     // C.5: when a bearer token is configured, every request
                     // must carry it — checked before anything dispatches.
-                    let token = std::env::var("LUMEN_AGENT_TOKEN").ok();
+                    let token = configured_token();
                     {
                         if !auth_ok(v.get("auth").and_then(|a| a.as_str()), token.as_deref()) {
                             let id = v.get("id").cloned().unwrap_or(serde_json::Value::Null);
@@ -2050,9 +2082,44 @@ mod tests {
             "[::]:9230",
             "example.com:9230",
             "",
+            // Narrowed vs the old string check, deliberately. Both fail CLOSED
+            // (serve_agent prints "refusing non-loopback bind" and returns),
+            // which is the safe direction for a guard like this.
+            "[::ffff:127.0.0.1]:9230", // IPv4-mapped: Ipv6Addr::is_loopback is
+            // true only for ::1, so this is refused even though bind() would
+            // land on the loopback interface.
+            "[::1]", // no port; bind() rejects it anyway
         ] {
             assert!(!is_loopback_addr(addr), "{addr} must NOT count as loopback");
         }
+    }
+
+    /// An address read from a file or a `.env` commonly carries a trailing
+    /// newline, and the parsers are strict. Failing closed there would silently
+    /// refuse to start the endpoint on a perfectly good address.
+    #[test]
+    fn surrounding_whitespace_does_not_defeat_the_guard() {
+        assert!(is_loopback_addr(" 127.0.0.1:9230"));
+        assert!(is_loopback_addr("127.0.0.1:9230\n"));
+        assert!(is_loopback_addr("\tlocalhost:9230 "));
+        assert!(!is_loopback_addr(" 0.0.0.0:9230\n"));
+    }
+
+    /// `LUMEN_AGENT_TOKEN=` is `Ok("")`, not an error. Testing it with
+    /// `is_err()` treated empty as CONFIGURED, which skipped the non-loopback
+    /// refusal and then accepted `"auth": ""` from anyone —
+    /// `LUMEN_AGENT_ADDR=0.0.0.0:9230 LUMEN_AGENT_TOKEN= ./app` published a
+    /// tokenless remote-control socket.
+    #[test]
+    fn an_empty_token_counts_as_unset() {
+        assert_eq!(normalize_token(None), None);
+        assert_eq!(normalize_token(Some(String::new())), None);
+        assert_eq!(normalize_token(Some("   ".into())), None);
+        assert_eq!(normalize_token(Some("\n".into())), None);
+        assert_eq!(
+            normalize_token(Some("s3cret".into())),
+            Some("s3cret".into())
+        );
     }
 
     /// The bypass the old `starts_with` check allowed: a hostname whose text
@@ -2082,6 +2149,9 @@ mod tests {
         assert!(auth_ok(Some("anything"), None));
     }
 
+    /// These pin a POLICY, not `PartialEq`: the failure this guards against is
+    /// someone "helpfully" adding `.trim()` or `eq_ignore_ascii_case` to make a
+    /// copy-paste token work, which silently widens what is accepted.
     #[test]
     fn a_configured_token_must_match_exactly() {
         assert!(auth_ok(Some("s3cret"), Some("s3cret")));

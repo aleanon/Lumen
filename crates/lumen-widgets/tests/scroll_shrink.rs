@@ -81,26 +81,47 @@ fn shrinking_the_content_under_a_scrolled_offset_still_shows_it() {
     );
 }
 
-/// The clamp must not fight a legitimate scroll: growing the content back
-/// leaves the offset usable rather than pinned at 0.
+/// The clamp is applied to the RENDER, not written back to the signal.
+///
+/// This is the property that distinguishes the real implementation from the
+/// obvious wrong fix (clamping the stored value), and it is only observable by
+/// shrinking and then growing again: if the shrink had written 0 back, the
+/// offset would be lost and the list would jump to the top when the content
+/// returns.
+///
+/// The first version of this test set the offset AFTER the shrink, at a value
+/// the final extent made legal — so `clamp` was an identity function on it and
+/// the test passed with the clamp deleted. It asserted nothing.
 #[test]
-fn growing_the_content_again_restores_scrollability() {
+fn the_clamp_is_render_only_and_does_not_destroy_the_stored_offset() {
     let mut h = app().run_headless(Size::new(200.0, VIEWPORT));
-    h.pump();
-    let n: Signal<usize> = h.runtime().signal("rows", || MANY);
-    n.set(h.runtime(), FEW);
     h.pump();
 
     let off: Signal<f64> = h.runtime().signal("sc", || 0.0);
-    off.set(h.runtime(), 300.0);
-    n.set(h.runtime(), MANY);
+    let bottom = (MANY as f64) * ROW_H - VIEWPORT; // 700
+    off.set(h.runtime(), bottom);
     h.pump();
 
+    // Shrink: the render must clamp to 0…
+    let n: Signal<usize> = h.runtime().signal("rows", || MANY);
+    n.set(h.runtime(), FEW);
+    h.pump();
     let first = h.node_bounds_by_id("row-0").expect("row-0 laid out");
     assert!(
-        first.y0 < -100.0,
-        "with 800px of content the 300px offset is valid and row-0 should be \
-         scrolled above the viewport, got y0={}",
+        first.y0.abs() < 0.5,
+        "while shrunk, the render must clamp to the top; got y0={}",
+        first.y0
+    );
+
+    // …but the stored 700 must survive, so growing back restores the position.
+    n.set(h.runtime(), MANY);
+    h.pump();
+    let first = h.node_bounds_by_id("row-0").expect("row-0 laid out");
+    assert!(
+        (first.y0 + bottom).abs() < 0.5,
+        "the offset must be clamped for display only, never written back: \
+         after growing again row-0 should be at y0={}, got {}",
+        -bottom,
         first.y0
     );
 }

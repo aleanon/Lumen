@@ -545,6 +545,52 @@ mod tests {
         best.map(|(_, _, n)| n)
     }
 
+    /// The shape the `last_child` tail cache actually gets wrong: remove a
+    /// node from the MIDDLE of a sibling list, so `unlink` takes its
+    /// mid-list-removal branch rather than the head branch.
+    ///
+    /// Written explicitly rather than left to the proptest's saved-seed file.
+    /// The seed was produced by deliberately ablating that branch while adding
+    /// the invariant, so checking it in would have recorded a "failure case
+    /// proptest generated in the past" for a failure that never happened —
+    /// legible only via a disclaimer. A named test says what it means.
+    #[test]
+    fn removing_from_the_middle_keeps_last_child_pointing_at_the_real_tail() {
+        let mut t = Tree::new();
+        let root = t.insert_root();
+        let kids: Vec<_> = (0..5).map(|_| t.insert_child(root)).collect();
+        check_invariants(&t);
+
+        // Middle removal: not the head, not the tail.
+        t.remove(kids[2]);
+        check_invariants(&t);
+        assert_eq!(
+            t.last_child[root.index() as usize],
+            kids[4],
+            "removing a middle child must not disturb the tail"
+        );
+
+        // Now the tail itself, which is the other branch.
+        t.remove(kids[4]);
+        check_invariants(&t);
+        assert_eq!(
+            t.last_child[root.index() as usize],
+            kids[3],
+            "removing the tail must move it back to the new last child"
+        );
+
+        // …down to empty.
+        for k in [kids[0], kids[1], kids[3]] {
+            t.remove(k);
+            check_invariants(&t);
+        }
+        assert_eq!(
+            t.last_child[root.index() as usize],
+            NodeIndex::NONE,
+            "an empty child list must have no tail"
+        );
+    }
+
     /// Panics if any binding invariant is violated.
     fn check_invariants(t: &Tree) {
         // allocator accounting

@@ -4,10 +4,4 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
-#
-# PROVENANCE (TG1, 2026-08-18): the seed below was produced by DELIBERATELY
-# ablating `unlink`'s mid-list tail repair while adding the `last_child`
-# invariant check — it does not record a bug that ever shipped. It is kept
-# because the shrunk case is exactly the shape that invariant guards: several
-# inserts followed by a removal from the middle of a sibling list.
-cc e7fbec6abd49584bd04abcc5475e6d1390a2a1a12c84e9f19174929e8b3ccdab # shrinks to ops = [Insert(0), Insert(0), Insert(3521415209993852449), Insert(7538281398792146541), Insert(1746165869411722817), Remove(13725779645453935828)]
+cc a41ed32f17234acd7a563fb4b0269a1eaa54b7a622d6c77cd5ccd2c01a4f3e36 # shrinks to ops = [Insert(0), Insert(0), Insert(469745149756068464), Reparent(1616990292272344328, 11748356410131063)]

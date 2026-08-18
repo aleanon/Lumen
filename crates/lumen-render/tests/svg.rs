@@ -192,8 +192,10 @@ fn m2_text_goes_through_the_shaper_callback() {
 // the error boundary nor `rebuild_inner`'s catch_unwind can contain it.
 // ---------------------------------------------------------------------------
 
+const SVG_OPEN: &str = r#"<svg viewBox="0 0 100 100" width="100" height="100">"#;
+
 fn nested_groups(depth: usize, inner: &str) -> String {
-    let mut s = String::from(r#"<svg viewBox="0 0 100 100" width="100" height="100">"#);
+    let mut s = String::from(SVG_OPEN);
     for _ in 0..depth {
         s.push_str("<g>");
     }
@@ -215,6 +217,84 @@ fn realistically_nested_groups_still_render() {
         dl.cmds.len(),
         1,
         "a rect 32 groups deep must still be drawn"
+    );
+}
+
+/// Pin the boundary itself. Without this the cap could be lowered to 8 or
+/// raised to 4096 — the latter being the tempting "fix" when someone reports a
+/// legitimate file truncated, and the one that reopens the overflow — and
+/// nothing in the suite would notice.
+///
+/// 62 rather than 64 because the depth budget counts the whole chain: `<svg>`
+/// takes one level and the `<rect>` itself takes the last.
+#[test]
+fn the_depth_boundary_is_exactly_where_it_claims_to_be() {
+    assert_eq!(
+        svg::parse(&nested_groups(62, RECT)).cmds.len(),
+        1,
+        "62 groups is the deepest that still renders"
+    );
+    assert_eq!(
+        svg::parse(&nested_groups(63, RECT)).cmds.len(),
+        0,
+        "63 groups must be past the cap"
+    );
+}
+
+/// Fault tolerance, which the depth guard must not cost us. The parser is
+/// documented as tolerant of malformed input, and the first version of this
+/// cap broke that: it counted "opens I skipped" and decremented on any close,
+/// so a closing tag it could not attribute left the counter permanently skewed
+/// and silently swallowed everything after it. Bounding ATTACHMENT instead of
+/// the parse stack keeps the push/pop sequence identical to the pre-cap
+/// parser, and these three inputs are how that is checked.
+#[test]
+fn depth_truncation_recovers_and_survives_malformed_input() {
+    // (a) a deep region that closes properly, then genuinely shallow content
+    let mut a = String::from(SVG_OPEN);
+    for _ in 0..70 {
+        a.push_str("<g>");
+    }
+    for _ in 0..70 {
+        a.push_str("</g>");
+    }
+    a.push_str(RECT);
+    a.push_str("</svg>");
+    assert_eq!(
+        svg::parse(&a).cmds.len(),
+        1,
+        "once nesting returns below the cap, content must render again — a          truncated region must not poison the rest of the document"
+    );
+
+    // (b) a stray closing tag with no matching open, inside the deep region
+    let mut b = String::from(SVG_OPEN);
+    for _ in 0..70 {
+        b.push_str("<g>");
+    }
+    b.push_str("</x>");
+    for _ in 0..69 {
+        b.push_str("</g>");
+    }
+    b.push_str(RECT);
+    b.push_str("</svg>");
+    assert_eq!(
+        svg::parse(&b).cmds.len(),
+        1,
+        "a stray close must not desynchronise the depth accounting"
+    );
+
+    // (c) unclosed opens: the rect really IS at depth 71 here, so dropping it
+    //     is correct — asserted so the behaviour is deliberate, not incidental.
+    let mut c = String::from(SVG_OPEN);
+    for _ in 0..70 {
+        c.push_str("<g>");
+    }
+    c.push_str("</svg>");
+    c.push_str(RECT);
+    assert_eq!(
+        svg::parse(&c).cmds.len(),
+        0,
+        "after 70 UNCLOSED groups the rect is nested 71 deep, not shallow"
     );
 }
 

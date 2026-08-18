@@ -60,10 +60,14 @@ fn caching_still_works_for_repeats() {
 // each test below FAILS against the pre-fix implementation.
 // ---------------------------------------------------------------------------
 
-/// `png()` capped the cache; `decode()` — the jpeg/gif/webp entry point that
-/// `image_any` routes through — did not, so CACHE1's unbounded growth was
-/// still live on every format except PNG.
-#[cfg(feature = "codecs")]
+/// `png()` capped the cache; `decode()` — which `image_any` routes through —
+/// did not, so CACHE1's unbounded growth was still live on every format
+/// except PNG.
+///
+/// Not `cfg(codecs)`-gated: `decode_uncached` short-circuits on the PNG magic
+/// BEFORE the codecs block, so this path exists in the lean profile too, and
+/// that is exactly where `decode` degenerates to a PNG wrapper. The first
+/// version of this test was gated on the one feature its input never used.
 #[test]
 fn decode_honours_the_cap_that_png_does() {
     asset::clear_cache();
@@ -75,6 +79,25 @@ fn decode_honours_the_cap_that_png_does() {
         len <= 64,
         "decode() shares CACHE with png() and must share its bound; \
          retained {len} images"
+    );
+}
+
+/// …and the same for a format that really does go through the codecs block,
+/// so the claim above is exercised rather than asserted.
+#[cfg(feature = "codecs")]
+#[test]
+fn decode_honours_the_cap_on_the_codec_path_too() {
+    const JPG: &[u8] = include_bytes!("assets/red.jpg");
+    asset::clear_cache();
+    for i in 0..200u16 {
+        let mut bytes = JPG.to_vec();
+        bytes.extend_from_slice(&i.to_le_bytes()); // trailing bytes: new key
+        asset::decode(&bytes).expect("jpeg decodes");
+    }
+    let len = asset::cache_len();
+    assert!(
+        len <= 64,
+        "the codec path shares the same bound; retained {len}"
     );
 }
 
@@ -108,16 +131,23 @@ fn clearing_releases_animations_not_just_still_images() {
 #[test]
 fn animation_cache_stays_bounded() {
     const GIF: &[u8] = include_bytes!("assets/anim.gif");
+    // The count must not be a multiple of the cap. Eviction is whole-cache, so
+    // after n inserts the length is ((n-1) % cap) + 1 — and the first version
+    // of this test used 40 against a cap of 8, which is also satisfied by a cap
+    // of 16 or 32. It asserted a divisibility coincidence, not a bound.
+    const CAP: usize = 32;
+    const INSERTS: usize = CAP * 3 + 1; // 97 -> exactly 1 retained at cap 32
     asset::clear_cache();
-    for i in 0..40u8 {
+    for i in 0..INSERTS {
         let mut bytes = GIF.to_vec();
-        bytes.push(i); // past the 0x3B trailer: new content hash, same image
+        bytes.extend_from_slice(&i.to_le_bytes()); // past the 0x3B trailer
         asset::animation(&bytes).expect("gif decodes");
     }
-    let len = asset::anim_cache_len();
-    assert!(
-        len <= 8,
-        "the animation cache must stay bounded; retained {len} animations, \
-         each of which is N full RGBA frames"
+    assert_eq!(
+        asset::anim_cache_len(),
+        1,
+        "with whole-cache eviction, {INSERTS} inserts against a cap of {CAP} \
+         must leave exactly one entry; any other cap gives another number, \
+         which is the point"
     );
 }

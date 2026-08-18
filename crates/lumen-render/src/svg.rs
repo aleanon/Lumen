@@ -89,12 +89,53 @@ struct Node {
 /// `SIGABRT`, not a panic, so `catch_unwind` cannot contain it and neither the
 /// error boundary nor `rebuild_inner` protects the window.
 ///
-/// Measured on this box before the cap existed: 256 levels parsed and rendered
-/// fine, 512 aborted the process. 64 is far beyond what any real exporter
-/// emits (Illustrator/Inkscape output nests tens, not hundreds) and leaves
-/// several times the margin on the smallest stack we run on, a 2 MiB test
-/// thread. Content deeper than this is dropped, not rendered wrong.
+/// Reproduce the pre-cap failure with `MAX_SVG_DEPTH = usize::MAX` and
+/// `cargo test -p lumen-render --test svg` (libtest gives each test a 2 MiB
+/// thread, `RUST_MIN_STACK` unset): 256 levels of `<g>` parsed and rendered,
+/// 512 aborted with `fatal runtime error: stack overflow`. 64 is far beyond
+/// what any exporter emits — Illustrator/Inkscape nest tens — and leaves
+/// several times that margin.
+///
+/// Note this bounds DEPTH only. Breadth is still unbounded: a document of a
+/// million sibling `<rect/>` allocates a million `Node`s. That degrades, it
+/// does not abort, so it is a separate concern from this one.
 const MAX_SVG_DEPTH: usize = 64;
+
+/// Attach a finished node to its parent, unless doing so would push the built
+/// tree past [`MAX_SVG_DEPTH`], in which case it is dropped.
+///
+/// The depth guard lives HERE, on attachment, and deliberately not on the
+/// parse stack. `parse_tree` is iterative, so a deep `stack` is heap and
+/// harmless; what overflows is the recursion over the RESULT (`walk`,
+/// `collect_defs`, and `Node`'s own `Drop`). Bounding attachment leaves the
+/// push/pop sequence byte-identical to the pre-cap parser, which is what keeps
+/// this module's advertised fault tolerance intact.
+///
+/// A first attempt used a counter for "opens we skipped" instead. It broke
+/// exactly that: a closing tag cannot tell "closes an element we never kept"
+/// from "closes an element that was never opened", so `<svg>` + 70 `<g>` +
+/// `</svg>` + `<rect/>` had the `</svg>` consume a phantom, leaving the
+/// counter permanently positive and silently dropping the well-formed rect
+/// that followed. Verified: 1 cmd before the cap, 0 after — a real regression,
+/// caught in review.
+///
+/// A dropped node is always a leaf: its own children were dropped when they
+/// closed, so this cannot recurse either.
+fn attach(stack: &mut [Node], root: &mut Node, done: Node) {
+    if stack.len() >= MAX_SVG_DEPTH {
+        return; // deeper than we are willing to recurse over later
+    }
+    match stack.last_mut() {
+        Some(parent) => parent.children.push(done),
+        None => {
+            if done.name == "svg" {
+                *root = done;
+            } else {
+                root.children.push(done);
+            }
+        }
+    }
+}
 
 fn parse_tree(src: &str) -> Node {
     let mut root = Node {
@@ -104,10 +145,6 @@ fn parse_tree(src: &str) -> Node {
         children: Vec::new(),
     };
     let mut stack: Vec<Node> = Vec::new();
-    // Open elements discarded for exceeding MAX_SVG_DEPTH. Tracked so their
-    // closing tags do not pop nodes we DID keep, which would corrupt the tree
-    // rather than merely truncate it.
-    let mut over = 0usize;
     let mut rest = src;
     while let Some(open) = rest.find('<') {
         let text_before = &rest[..open];
@@ -125,33 +162,13 @@ fn parse_tree(src: &str) -> Node {
             continue;
         }
         if tag.strip_prefix('/').is_some() {
-            if over > 0 {
-                over -= 1; // closes an element we never kept
-                continue;
-            }
-            // closing tag: pop and attach
+            // closing tag: pop and attach (attachment applies the depth cap)
             if let Some(done) = stack.pop() {
-                match stack.last_mut() {
-                    Some(parent) => parent.children.push(done),
-                    None => {
-                        if done.name == "svg" {
-                            root = done;
-                        } else {
-                            root.children.push(done);
-                        }
-                    }
-                }
+                attach(&mut stack, &mut root, done);
             }
             continue;
         }
         let self_closing = tag.ends_with('/');
-        if over > 0 {
-            // Inside the truncated region: ignore content, track balance only.
-            if !self_closing {
-                over += 1;
-            }
-            continue;
-        }
         let body = tag.trim_end_matches('/').trim();
         let name = body
             .split([' ', '\t', '\n'])
@@ -165,28 +182,14 @@ fn parse_tree(src: &str) -> Node {
             children: Vec::new(),
         };
         if self_closing {
-            match stack.last_mut() {
-                Some(parent) => parent.children.push(node),
-                None => root.children.push(node),
-            }
-        } else if stack.len() >= MAX_SVG_DEPTH {
-            over += 1;
+            attach(&mut stack, &mut root, node);
         } else {
             stack.push(node);
         }
     }
     // Unclosed leftovers attach upward.
     while let Some(done) = stack.pop() {
-        match stack.last_mut() {
-            Some(parent) => parent.children.push(done),
-            None => {
-                if done.name == "svg" {
-                    root = done;
-                } else {
-                    root.children.push(done);
-                }
-            }
-        }
+        attach(&mut stack, &mut root, done);
     }
     root
 }

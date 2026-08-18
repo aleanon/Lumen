@@ -68,7 +68,7 @@ declare -A WHAT=(
   [test]="cargo build --workspace --all-targets && cargo test --workspace"
   [doc]="cargo test --workspace --doc"
   [lean]="per-crate --no-default-features check (RUSTFLAGS=-D warnings)"
-  [executors]="cargo test -p lumen-exec --features tokio,smol + runtime containment"
+  [executors]="default-off features: lumen-exec tokio/smol + lumen-shell agent"
   [gpu]="cargo test -p lumen-render -p lumen-widgets --features wgpu"
   [fonts]="scripts/subset_fonts.sh verify + pan-unicode goldens"
   [perf]="perf_gate.sh + cold_start_gate.sh + size_gate.sh"
@@ -147,6 +147,10 @@ _leg_lean_inner() {
 
 leg_executors() {
   cargo test -p lumen-exec --features tokio,smol || return 1
+  # `agent` is default-off, so no other leg compiles serve_agent or the
+  # per-request auth check — only their extracted guards. Without this, a
+  # revert at the CALL SITE is invisible.
+  cargo test -p lumen-shell --features agent || return 1
   # The default graph must contain neither runtime (ADR-003 amendment, 07 EX).
   if cargo tree -p lumen -e normal | grep -qiE "^[^a-z]*(tokio|smol) "; then
     echo "a default lumen build pulled an async runtime — the containment that"
