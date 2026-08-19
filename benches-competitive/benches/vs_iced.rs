@@ -262,5 +262,49 @@ fn iced_churn(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, lumen_frame, iced_frame, lumen_churn, iced_churn);
+/// Lumen with its incremental path actually ENGAGED.
+///
+/// `build_frame/lumen` above rebuilds 100% of nodes for a one-row change:
+/// copy-forward only triggers on a memo-hit stub (`Element::shared`), which
+/// only `cx.scope` produces, and the plain view has none. `FrameStats` says
+/// 3001 rebuilt / 0 copied.
+///
+/// With `cx.scope_with_deps` per row the same frame reports **2 rebuilt /
+/// 2999 copied**. This group measures what that is worth in time — i.e.
+/// whether Lumen's opt-in memoization can reach the reuse iced gets for free
+/// from persistent widget state.
+fn lumen_memoized(c: &mut Criterion) {
+    let mut g = c.benchmark_group("build_frame/lumen_memoized");
+    for n in SIZES {
+        let mut h = App::new(move |cx| {
+            let bump = cx.signal("n", || 0i64).get(cx.runtime());
+            let rows: Vec<_> = (0..n)
+                .map(|i| {
+                    let dep = if i == 0 { bump } else { 0 };
+                    cx.scope_with_deps(("row", i), dep, move |_cx| {
+                        if i == 0 {
+                            widgets::text(format!("counter: {bump}"))
+                        } else {
+                            widgets::text(format!("row {i}"))
+                        }
+                    })
+                })
+                .collect();
+            widgets::column(rows)
+        })
+        .with_renderer(NullRenderer)
+        .run_headless(KSize::new(VIEW_W as f64, VIEW_H as f64));
+        h.pump();
+        let sig: Signal<i64> = h.runtime().signal("n", || 0);
+        g.bench_function(format!("{n}_rows"), |b| {
+            b.iter(|| {
+                sig.update(h.runtime(), |v| *v += 1);
+                h.pump();
+            });
+        });
+    }
+    g.finish();
+}
+
+criterion_group!(benches, lumen_frame, lumen_memoized, iced_frame, lumen_churn, iced_churn);
 criterion_main!(benches);

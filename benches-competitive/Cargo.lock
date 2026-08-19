@@ -1677,9 +1677,12 @@ dependencies = [
  "iced_widget",
  "kurbo 0.13.1",
  "lumen-core",
+ "lumen-layout",
  "lumen-render",
  "lumen-widgets",
  "masonry",
+ "rustc-hash 2.1.3",
+ "taffy",
  "vello",
 ]
 

@@ -15,6 +15,13 @@ publish = false
 [dependencies]
 lumen-widgets = { path = "../crates/lumen-widgets" }
 lumen-core = { path = "../crates/lumen-core" }
+# For `Dim` in the subtractive phase probe (src/bin/probe_phases.rs).
+lumen-layout = { path = "../crates/lumen-layout" }
+# For pricing the per-node primitives in src/bin/probe_ops.rs.
+taffy = "0.13"
+# Same FxHash construction lumen-app uses for its per-node side tables
+# (crate::fxhash is pub(crate), so it cannot be imported here).
+rustc-hash = "2"
 # For `NullRenderer`: the harness supplies its own `Renderer` so the Lumen side
 # stops at the display list, matching where egui's `tessellate()` stops.
 lumen-render = { path = "../crates/lumen-render", default-features = false }
