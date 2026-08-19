@@ -1,5 +1,12 @@
 # BENCH2 — Lumen vs iced, Xilem, GTK3 and Flutter (2026-08-19)
 
+> **Two claims here are corrected by `results-competitive-bench3.md`
+> (BENCH3):** "lightest GPU framework measured" is too strong — Slint idles at
+> 66.9 MB against Lumen's 157.8, so the defensible claim is *lightest of the
+> wgpu-based* frameworks; and the GTK3 row does not stand for "GTK", since
+> GTK4 idles at 133.9 MB, 4.5x GTK3. BENCH3 also adds masonry frame cost,
+> where the gap is under 3.5x rather than iced's 7-8x.
+
 Successor to `results-competitive-2026-08.md` (BENCH1, vs egui), whose "Next"
 list asked for exactly this. Read BENCH1's methodology first; this document
 restates only what differs.

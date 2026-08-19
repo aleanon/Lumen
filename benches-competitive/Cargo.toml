@@ -49,6 +49,14 @@ iced_tiny_skia = "0.14"
 # GPU stack neither side is being timed on).
 iced_renderer = { version = "0.14", default-features = false, features = ["tiny-skia"] }
 
+# masonry is Xilem's widget/layout layer, and its `testing` feature ships the
+# TestHarness Xilem itself uses. `render()` builds a vello `Scene` and only
+# then rasterizes on the GPU — and honours SKIP_RENDER_TESTS to stop after the
+# scene, which is the matched stopping point (Lumen's display list, iced's
+# primitives).
+masonry = { version = "0.4", features = ["testing"] }
+vello = "0.6"
+
 [dev-dependencies]
 criterion = "0.5"
 
@@ -58,6 +66,10 @@ harness = false
 
 [[bench]]
 name = "vs_iced"
+harness = false
+
+[[bench]]
+name = "vs_toolkits"
 harness = false
 
 # Match the root workspace's release profile so Lumen is measured with the

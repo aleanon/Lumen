@@ -7,6 +7,76 @@
 //! assert that each side actually performs the work being timed.
 
 #[cfg(test)]
+mod masonry_harness_is_honest {
+    use masonry::core::{NewWidget, Widget, WidgetTag};
+    use masonry::testing::TestHarness;
+    use masonry::theme::default_property_set;
+    use masonry::widgets::{Flex, Label};
+
+    fn harness(n: usize) -> TestHarness<Flex> {
+        let tag: WidgetTag<Label> = WidgetTag::new("counter");
+        let mut flex = Flex::column()
+            .with_child(NewWidget::new_with_tag(Label::new("counter: 0"), tag));
+        for i in 1..n {
+            flex = flex.with_child(Label::new(format!("row {i}")).with_auto_id());
+        }
+        TestHarness::create_with_size(
+            default_property_set(),
+            flex.with_auto_id(),
+            masonry::kurbo::Size::new(400.0, 800.0),
+        )
+    }
+
+    /// SKIP_RENDER_TESTS must actually short-circuit the GPU submission.
+    ///
+    /// `render()` builds a vello Scene and updates the AccessKit tree, then
+    /// rasterizes through vello on a real device. The benchmark's whole
+    /// stopping-point claim rests on that last step being skipped; if the env
+    /// var stopped being honoured, the masonry side would silently start
+    /// including a GPU round trip that Lumen's NullRenderer never does.
+    #[test]
+    fn skip_render_tests_stops_before_the_gpu() {
+        // SAFETY: this test process is single-threaded at this point.
+        unsafe { std::env::set_var("SKIP_RENDER_TESTS", "1") };
+        let mut h = harness(10);
+        let img = h.render();
+        assert_eq!(
+            (img.width(), img.height()),
+            (1, 1),
+            "with SKIP_RENDER_TESTS set, render() must return the 1x1 \
+             placeholder — a real frame here means the benchmark is timing a \
+             GPU rasterization the Lumen side never performs"
+        );
+    }
+
+    /// …and masonry must really lay out every row, as Lumen does.
+    #[test]
+    fn masonry_lays_out_every_row() {
+        unsafe { std::env::set_var("SKIP_RENDER_TESTS", "1") };
+        // Both sizes must OVERFLOW the 800px window: a Flex column fills the
+        // viewport, so at small N the root rect is clamped to 800 and says
+        // nothing about how many rows were laid out. (This assertion caught
+        // that on its first run — with 2 vs 40 rows it read 800 vs 1110 and
+        // looked like culling, which it was not.)
+        let mut a = harness(200);
+        let _ = a.render();
+        let h200 = a.root_widget().ctx().local_layout_rect().height();
+
+        let mut b = harness(400);
+        let _ = b.render();
+        let h400 = b.root_widget().ctx().local_layout_rect().height();
+
+        assert!(h200 > 800.0, "200 rows must overflow the window, got {h200}");
+        assert!(
+            h400 > h200 * 1.8,
+            "doubling the rows must roughly double the laid-out height \
+             ({h400} vs {h200}); if it does not, masonry is culling and Lumen \
+             — which does not — would be doing strictly more work"
+        );
+    }
+}
+
+#[cfg(test)]
 mod harness_is_honest {
     use iced_core::{
         layout::Limits, widget::Tree, Element, Font, Length, Pixels, Size, Theme, Widget,
