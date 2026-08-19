@@ -1,5 +1,14 @@
 # BENCH1 — first competitive measurement (Lumen vs egui), 2026-08-08
 
+> **Superseded in scope by `results-competitive-2026-08-19.md` (BENCH2)**,
+> which adds iced, Xilem, GTK3 and Flutter, and answers this document's open
+> question. BENCH1 concluded the gap "was never mainly about immediate-mode
+> versus retained — it was one framework's string cache working and the
+> other's defeating itself." BENCH2 measures that directly: with text caches
+> DENIED on both sides, Lumen matches iced and is 6% faster at 3000 rows; in
+> the steady state iced's cache buys it 54x and Lumen's buys 6x. The gap is
+> the cache, not the pipeline.
+
 The project's performance bar is **relative**: A = match the industry leader,
 A+ = surpass it. It had never been benchmarked against another framework. This
 is the first external number it has.

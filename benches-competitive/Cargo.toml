@@ -18,17 +18,46 @@ lumen-core = { path = "../crates/lumen-core" }
 # For `NullRenderer`: the harness supplies its own `Renderer` so the Lumen side
 # stops at the display list, matching where egui's `tessellate()` stops.
 lumen-render = { path = "../crates/lumen-render", default-features = false }
-kurbo = "0.11"
+# MUST track the root workspace's kurbo (root Cargo.toml). This is its own
+# workspace with its own lockfile, so a bump there does not reach here — and
+# the mismatch surfaces as `expected lumen_core::geometry::Size, found
+# kurbo::Size`, because lumen-core re-exports the kurbo types as its public
+# geometry. That is exactly what a downstream app sees; this harness was
+# already broken by the 0.11 -> 0.13 bump before anyone ran it.
+kurbo = "0.13"
 
 # `egui` core only — deliberately NOT `eframe`, which would drag in winit/wgpu
 # and measure a windowing stack rather than the framework's build+layout cost.
 egui = { version = "0.29", default-features = false, features = ["default_fonts"] }
+
+# iced, driven at the widget layer rather than through `iced::application`,
+# which would pull winit+wgpu and measure a windowing stack.
+#
+# `iced_tiny_skia` is the renderer deliberately: its `text::Renderer` has a
+# REAL `Paragraph` backed by cosmic-text, so iced shapes text like Lumen does.
+# The obvious alternative — iced_core's built-in null renderer, `impl Renderer
+# for ()` — sets `type Paragraph = ()`, making text shaping a NO-OP. Measuring
+# an N-row text list against that would have compared Lumen's parley/swash
+# shaping to iced doing nothing, which is the same class of unfairness the
+# 2026-08-09 stopping-point correction fixed for egui.
+iced_core = "0.14"
+iced_widget = "0.14"
+iced_tiny_skia = "0.14"
+# Pulled in transitively by iced_widget; it refuses to build in release mode
+# without a backend feature, and `tiny-skia` is the one that keeps this a
+# CPU-only, windowless measurement (the alternative, `wgpu`, would drag in a
+# GPU stack neither side is being timed on).
+iced_renderer = { version = "0.14", default-features = false, features = ["tiny-skia"] }
 
 [dev-dependencies]
 criterion = "0.5"
 
 [[bench]]
 name = "vs_egui"
+harness = false
+
+[[bench]]
+name = "vs_iced"
 harness = false
 
 # Match the root workspace's release profile so Lumen is measured with the
