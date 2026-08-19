@@ -25,6 +25,31 @@ explanation, not a Lumen regression, but the original sentence overstated it.
 29.6 MB** — 4.5×, because GSK renders through the GPU where GTK3's cairo path
 does not. BENCH2 measured GTK3 and let it stand for "GTK". It does not.
 
+**3. Lumen does NOT rebuild the semantics tree every frame — and this report
+said so twice.** `Headless::sem_root()` is lazy (OB2, which BENCH1 recorded as
+unlanded and which has since landed): it builds on demand and caches, and
+`pump()` never calls it. Every caller is a query path — `semantics_doc`,
+`semantics_elided`, node lookup. So **every frame-cost number in BENCH2 and
+BENCH3 was measured with no accessibility tree being built at all**, and the
+"unfair to Lumen" caveat both reports leaned on was false.
+
+Measured directly by forcing one per frame (`frame/lumen+semantics`):
+
+| rows | pump() | pump() + semantics | cost of the tree |
+|-----:|-------:|-------------------:|-----------------:|
+| 100 | 116.1 µs | 132.0 µs | +13.6% |
+| 500 | 426.5 µs | 481.7 µs | +12.9% |
+| 1000 | 797.7 µs | 925.5 µs | +16.0% |
+| 2000 | 1690.3 µs | 1990.5 µs | +17.8% |
+| 3000 | 2672.0 µs | 3027.4 µs | +13.3% |
+
+**12–18%.** So even had the assumption been true, it could not have explained a
+gap that differs by 2.5× between opponents. Two reports reasoned from an
+unmeasured premise; this is the measurement.
+
+**4. GTK4 frame cost is now measured — partially, and the reason for the
+partiality is the interesting part.** See the next section.
+
 ---
 
 ## 1. Frame cost — Lumen vs masonry
@@ -57,12 +82,14 @@ measurement cannot silently drift into including a GPU round trip.
 
 **2.8–3.5×, against iced's 7.2–8.3×.**
 
-The likely reason is the thing BENCH2 flagged as unfair to Lumen and could not
-test: **masonry maintains an accessibility tree every frame and iced does
-not.** This is the first comparison where Lumen is not paying for a11y alone,
-and the gap more than halves. That does not fully explain 8× → 3×, and this
-does not isolate the variable — but it is the first evidence that the
-semantics-tree caveat was carrying real weight rather than being an excuse.
+**The first published explanation for this was wrong, twice over, and is
+retracted below.** It attributed the halving to masonry maintaining an
+accessibility tree where iced does not, on the assumption that Lumen rebuilds
+its semantics tree every frame. Lumen does not — see *Correction 3*. The
+actual explanation is arithmetic: at 3000 rows Lumen is 2672 µs, iced 328 µs,
+masonry 874 µs. **masonry is itself 2.7× slower than iced.** Lumen's ratio
+against masonry is smaller because the opponent is slower, not because
+anything about Lumen or accessibility changed.
 
 *Same-run baselines.* Each pairing uses the Lumen column from its own run.
 Lumen measured 3086.8 µs at 3000 rows here against 2736.2 µs in the iced run —
@@ -114,11 +141,78 @@ Lumen's softbuffer profile at **11.6 MB is 2.5× lighter than GTK3 and 11×
 lighter than GTK4** — the strongest whole-app result in either report, and it
 survives the correction above because it is not a GPU comparison at all.
 
+### Does RSS capture what a GPU framework actually uses?
+
+Worth asking, because a framework that pushes more onto the GPU would look
+lighter in RSS for free — and Slint, the framework that most undercuts Lumen
+here, is the one on a GL backend. Checked rather than assumed:
+
+| framework | resident (RSS) | address space (VmSize) | GPU-side |
+|---|---:|---:|---:|
+| Slint (GL) | 66.7 MB | 572.7 MB | **4 MiB** |
+| GTK4 (GSK) | 133.9 MB | 778.0 MB | **7 MiB** |
+| Lumen (wgpu) | 158.2 MB | 1400.4 MB | **19 MiB** |
+| iced (wgpu) | 192.2 MB | 3410.8 MB | 18 MiB |
+
+GPU-side memory is from `nvidia-smi`'s per-process table, which lists graphics
+contexts as well as compute. It is **single-digit to 19 MiB for everyone** and
+nowhere near large enough to change the ordering. Slint really does use a GPU
+renderer — 81 GL/EGL/driver mappings in `/proc/<pid>/maps` — and its 66.7 MB is
+genuinely its footprint, not an artefact of allocations hiding in VRAM.
+
+`VmSize` is included to head off the opposite misreading: iced reserves 3.4 GB
+of *address space* against Lumen's 1.4 GB and Slint's 0.6 GB. That is
+reservation, not use, and it is why RSS is the figure reported.
+
 Among **wgpu** frameworks Lumen is still the lightest, by 18% over iced. But
 the ordering across stacks is dominated by which renderer a framework chose,
 not by the framework, which is why the table is grouped rather than ranked.
 
 ---
+
+## GTK4 frame cost — and why only half of it
+
+BENCH3 originally omitted GTK from the frame axis without justifying it. That
+was a gap, not a decision. Having now built the harness, the honest position
+is more interesting than either "impossible" or "here is the number".
+
+**GTK4's layout is measurable and scales linearly.** `gtk_widget_measure` over
+N labels, one label's text changing per iteration, 400 px width, median of 200:
+
+| rows | GTK4 layout | Lumen full frame |
+|-----:|------------:|-----------------:|
+| 100 | 8.8 µs | 116.1 µs |
+| 250 | 15.1 µs | 240.0 µs |
+| 500 | 25.0 µs | 426.5 µs |
+| 1000 | 45.0 µs | 797.7 µs |
+| 2000 | 82.3 µs | 1690.3 µs |
+| 3000 | 123.2 µs | 2672.0 µs |
+
+**These two columns are not the same measurement** and the table is placed
+side by side only to give the layout figure a scale. GTK's column is layout
+alone — no view rebuild, no paint. Lumen's is build + reconcile + layout +
+paint to a display list. Reading a ratio off it would be meaningless.
+
+**GTK4's paint could not be added, because GTK culls and the others do not.**
+`GtkWidgetPaintable` yields a `GskRenderNode` — GTK's display list, the exact
+counterpart of Lumen's — but only once the widget is realized *and mapped*,
+which needs a live frame clock rather than a synchronous call. Driving that
+and snapshotting produces a node whose bounds are **40×796 at 100 rows and
+48×800 at 1000 rows**: essentially constant. GTK snapshots only what is
+visible in the viewport.
+
+Lumen, iced and masonry all lay out and paint every one of the N rows — the
+BENCH2 harness asserts iced does, and BENCH2's caveats say Lumen does. So the
+same benchmark asks GTK for ~50 rows of paint work and the others for 3000.
+That is not a fair fight in either direction, and a single "GTK frame cost"
+number would hide it.
+
+Three attempts are recorded here rather than the successful one alone, because
+the first version of this harness produced **sub-microsecond, perfectly flat**
+timings across a 30× size range — 1.17 µs at 100 rows and 0.61 µs at 3000. That
+is the signature of an opponent doing nothing, the same tell as iced's null
+renderer, and it was `gdk_paintable_snapshot` returning NULL on an unrooted
+widget. It would have published as "GTK is 4000× faster than Lumen".
 
 ## Why Slint has no frame-cost row
 

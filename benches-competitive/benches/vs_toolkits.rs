@@ -137,4 +137,45 @@ fn main() {
     Criterion::default().configure_from_args().final_summary();
 }
 
-criterion_group!(benches, lumen_frame, masonry_frame);
+/// Isolates the accessibility tree, which BENCH2 and BENCH3 both assumed Lumen
+/// pays for on every frame. It does not: `sem_root()` is lazy (OB2), and
+/// `pump()` never calls it — every caller is a query path
+/// (`semantics_doc`, `semantics_elided`, node lookup). So the `frame/lumen`
+/// group above measures Lumen WITHOUT an accessibility tree.
+///
+/// This group forces one per frame. The difference between the two is the
+/// real cost of the feature, and it is the number both earlier reports
+/// reasoned about without measuring.
+fn lumen_frame_with_semantics(c: &mut Criterion) {
+    let mut g = c.benchmark_group("frame/lumen+semantics");
+    for n in SIZES {
+        let mut h = App::new(move |cx| {
+            let bump = cx.signal("n", || 0i64).get(cx.runtime());
+            let rows: Vec<_> = (0..n)
+                .map(|i| {
+                    if i == 0 {
+                        widgets::text(format!("counter: {bump}"))
+                    } else {
+                        widgets::text(format!("row {i}"))
+                    }
+                })
+                .collect();
+            widgets::column(rows)
+        })
+        .with_renderer(NullRenderer)
+        .run_headless(KSize::new(VIEW_W, VIEW_H));
+        h.pump();
+        let sig: Signal<i64> = h.runtime().signal("n", || 0);
+        g.bench_function(format!("{n}_rows"), |b| {
+            b.iter(|| {
+                sig.update(h.runtime(), |v| *v += 1);
+                h.pump();
+                // Forces the lazy build that pump() alone skips.
+                std::hint::black_box(h.semantics_doc());
+            });
+        });
+    }
+    g.finish();
+}
+
+criterion_group!(benches, lumen_frame, lumen_frame_with_semantics, masonry_frame);
