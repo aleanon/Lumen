@@ -271,46 +271,58 @@ impl TextStyle {
 /// Cache key for a shaped [`TextBlock`] — the **geometry-affecting** style only.
 /// Color is excluded (it doesn't affect shaping/metrics; the glyph run applies it
 /// at emission), so measure and a `.lss`-recolored paint share one entry.
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct ShapeKey {
-    text: String,
-    size: u32,
-    weight: u32,
-    line_height: Option<u32>,
-    letter_spacing: u32,
-    family: Option<String>,
-    wrap: Option<u32>,
-    align: u8,
-    /// PROP1. Axis settings change the OUTLINES a face produces, so like
-    /// `features` they must key the cache.
-    variations: Option<String>,
-    /// PROP1. Feature settings change glyph SELECTION (`smcp` substitutes small
-    /// caps), so like `italic` they must key the cache or differently-featured
-    /// runs of one string collide.
-    features: Option<String>,
-    /// PROP1. Load-bearing for CORRECTNESS, not just completeness: `italic`
-    /// changes which face parley selects and therefore the synthesis flag the
-    /// shaped run carries. Omitted from this key, the first block shaped for a
-    /// given string wins and every later node with a different `font-style`
-    /// silently reuses it.
-    italic: bool,
-}
+///
+/// # R2: a 128-bit content hash, not the content
+///
+/// This used to be a struct owning the full `String` plus three
+/// `Option<String>`s. Every lookup therefore allocated the key it was about to
+/// hash (`text.to_string()`), and every HIT compared the whole string again —
+/// `ShapeKey::eq` 4.3% of a 3000-row frame and `__memcmp_avx2` 2.9%, on top of
+/// the allocator traffic (`docs/profile-vs-iced-2026-08-19.md`).
+///
+/// Now the key IS the hash. Lookups allocate nothing, `eq` compares 16 bytes,
+/// and the map hashes 16 bytes instead of the whole string.
+///
+/// **Collision policy** is ADR-021's, and deliberately the same argument: 128
+/// bits is chosen so no collision probe is needed. `IdHasher`'s two
+/// independent lanes are full-entropy by construction, so at this cache's hard
+/// cap of 16 384 entries the birthday probability is ~1e-30. A collision here
+/// would render one string with another's shaping — visible, wrong, and
+/// strictly less severe than the snapshot corruption ADR-021 accepts the same
+/// risk for.
+///
+/// Every field that fed the old struct still feeds the hash; the PROP1 notes
+/// below record why each is load-bearing.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct ShapeKey(lumen_core::identity::IdHash);
 
 impl ShapeKey {
     fn new(text: &str, s: &TextStyle, wrap: Option<f32>, align: TextAlign) -> ShapeKey {
-        ShapeKey {
-            text: text.to_string(),
-            size: s.font_size.to_bits(),
-            weight: s.weight.to_bits(),
-            line_height: s.line_height.map(f32::to_bits),
-            letter_spacing: s.letter_spacing.to_bits(),
-            family: s.family.clone(),
-            wrap: wrap.map(f32::to_bits),
-            align: align as u8,
-            features: s.features.clone(),
-            variations: s.variations.clone(),
-            italic: s.italic,
-        }
+        // Borrowed throughout — nothing here allocates.
+        //
+        // `variations` (PROP1): axis settings change the OUTLINES a face
+        // produces, so like `features` they must key the cache.
+        // `features` (PROP1): feature settings change glyph SELECTION (`smcp`
+        // substitutes small caps), so like `italic` they must key the cache or
+        // differently-featured runs of one string collide.
+        // `italic` (PROP1): load-bearing for CORRECTNESS, not completeness —
+        // it changes which face parley selects and therefore the synthesis
+        // flag the shaped run carries. Omitted, the first block shaped for a
+        // given string wins and every later node with a different `font-style`
+        // silently reuses it.
+        ShapeKey(lumen_core::identity::hash_id(&(
+            text,
+            s.font_size.to_bits(),
+            s.weight.to_bits(),
+            s.line_height.map(f32::to_bits),
+            s.letter_spacing.to_bits(),
+            s.family.as_deref(),
+            wrap.map(f32::to_bits),
+            align as u8,
+            s.variations.as_deref(),
+            s.features.as_deref(),
+            s.italic,
+        )))
     }
 }
 
@@ -749,7 +761,7 @@ impl TextEngine {
             }
             let epoch = self.epoch;
             self.shape_cache.insert(
-                key.clone(),
+                key,
                 Aged {
                     value: block,
                     epoch,
@@ -805,7 +817,7 @@ impl TextEngine {
             }
             let epoch = self.epoch;
             self.run_cache.insert(
-                key.clone(),
+                key,
                 Aged {
                     value: cached,
                     epoch,
