@@ -746,6 +746,23 @@ impl TextEngine {
         align: TextAlign,
     ) -> &TextBlock {
         let key = ShapeKey::new(text, base, max_width, align);
+        self.shaped_by_key(key, text, base, max_width, align)
+    }
+
+    /// [`shaped`](Self::shaped) with the cache key already computed.
+    ///
+    /// R5: `shaped_run` needs the same key for its own `(ShapeKey, scale)`
+    /// lookup, and used to build a second one by calling `shaped`, hashing the
+    /// text twice per painted node per frame. `ShapeKey::new` was 2.2% of a
+    /// 3000-row frame with two of the three constructions redundant.
+    fn shaped_by_key(
+        &mut self,
+        key: ShapeKey,
+        text: &str,
+        base: &TextStyle,
+        max_width: Option<f32>,
+        align: TextAlign,
+    ) -> &TextBlock {
         if let Some(entry) = self.shape_cache.get_mut(&key) {
             entry.epoch = self.epoch;
         } else {
@@ -783,12 +800,14 @@ impl TextEngine {
         align: TextAlign,
         scale: f32,
     ) -> &CachedRun {
-        let key = (ShapeKey::new(text, base, max_width, align), scale.to_bits());
+        let shape_key = ShapeKey::new(text, base, max_width, align);
+        let key = (shape_key, scale.to_bits());
         if let Some(entry) = self.run_cache.get_mut(&key) {
             entry.epoch = self.epoch;
         } else {
             let cached = {
-                let block = self.shaped(text, base, max_width, align);
+                // R5: reuse the key just built rather than hashing the text again.
+                let block = self.shaped_by_key(shape_key, text, base, max_width, align);
                 let (run, images) = block.glyph_run(0.0, 0.0, scale);
                 // Origin-relative ink; starts at the origin (0,0) like the paint
                 // layer's `run_rect`, then unions each glyph.
