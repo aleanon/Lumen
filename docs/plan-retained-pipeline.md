@@ -100,6 +100,15 @@ Steps (each oracle-gated, landable separately):
    of the cached subtree lowered normally. Meters:
    `FrameStats::{nodes_rebuilt, nodes_copied}`. Guarded by
    tests/copy_forward.rs + the whole-suite coherence oracle.
+
+   > **Correction (2026-08-20, F2 prep).** This plan cited
+   > `tests/copy_forward.rs` as a guard in three places while the file was an
+   > empty 1-byte stub — created in July and never filled in. The copy path
+   > was in practice covered only by the whole-suite oracle, which does not
+   > exercise it: disabling `copy_span` entirely, or breaking the nested-span
+   > remap, left every `lumen-widgets` test green. The file now holds real
+   > tests (ablation-checked: 3/3 and 1/3 fail respectively), so these
+   > citations are accurate from this commit onward.
 3. **A.3.3 — superseded by copy-forward (amendment 2026-07-10).** The
    acceptance below (O(changed) re-lowering, counted) is met by A.3.2:
    memo-hit spans skip style resolution, text measurement, meta
