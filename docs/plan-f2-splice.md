@@ -118,3 +118,38 @@ invalidation scope rather than new machinery.
 * **The bisect hatch stays.** `LUMEN_FULL_REBUILD=1` already forces the naive
   path; every stage below keeps it working, so any incoherence can be bisected
   against a known-good rebuild in a live run.
+
+## Measured before implementing (2026-08-20)
+
+`benches-competitive/src/bin/probe_f2_reparent.rs`, `taskset -c 2`, 3000 rows,
+min of 30. Each line is one frame's worth of taffy work — node creation plus
+`compute_layout`:
+
+| shape | µs | |
+|---|---:|---|
+| A. clear + re-mint all 3000, compute | 540.8 | **today** |
+| B. reuse 3000 nodes, mint the parent, adopt 3000 | 300.1 | **F2.1, real shape** |
+| C. compute only, nothing dirty | 85.7 | the floor |
+| E. reuse a whole span, parent adopts **1** child | 84.9 | needs a memoized container |
+
+Three things this settles:
+
+1. **The re-parenting order is safe.** Adopting the reused children into the
+   new parent *first* and removing the stale parent *second* leaves layout
+   correct and the live node count flat across 30 frames (3001 → 3001). The
+   ordering hazard the design was working around does not exist in taffy 0.13,
+   so `copy_node` can adopt naively and free stale nodes in a later pass.
+2. **F2.1 is worth ~240 µs** (A → B), about 13% of the 1820 µs memoized frame.
+   Consistent with the profile's `to_taffy` 4.2% + `slotmap` 3.0% +
+   `compute_preliminary` 6.7% + `compute_child_layout` 4.0% ≈ 18%.
+3. **The other ~215 µs is the adoption itself** (B − C). `vs_iced.rs` scopes
+   each row separately and leaves `widgets::column(rows)` outside the memo, so
+   the container is re-minted every frame and rewrites 3000 parent pointers.
+   Shape E — the 85 µs floor — is only reachable once an *unchanged container*
+   can keep its taffy node instead of re-adopting an identical child list.
+   That is the real prize, and it belongs to F2.2/F2.3, not F2.1.
+
+Not a target: reusing a *changed* row's node and calling `set_style` on it
+measured **650.7 µs** — worse than re-minting the whole tree, because dirty
+propagation forces a full re-solve of the flex column on top of the adoption.
+Re-lowering a changed span, as the runtime already does, is the faster path.
