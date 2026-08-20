@@ -314,6 +314,49 @@ R1 through R4 are contained, individually testable, and together address about
 **30% of the frame**. R5 and R6 are the architectural items and remain as
 PROF1 described them.
 
+## Results — R1 through R6 landed (2026-08-20)
+
+| rows | before | after | iced | ratio before | ratio after |
+|-----:|-------:|------:|-----:|------:|------:|
+| 100 | 116.0 µs | 91.8 µs | 15.8 µs | 7.4× | **5.8×** |
+| 250 | 242.9 µs | 179.3 µs | 31.3 µs | 7.7× | **5.7×** |
+| 500 | 438.6 µs | 323.6 µs | 57.5 µs | 7.6× | **5.6×** |
+| 1000 | 820.1 µs | 597.0 µs | 110.1 µs | 7.3× | **5.4×** |
+| 2000 | 1784.2 µs | 1171.4 µs | 218.0 µs | 8.1× | **5.4×** |
+| 3000 | 2736.2 µs | 1740.8 µs | 320.3 µs | 8.3× | **5.4×** |
+
+**36% faster at 3000 rows; the gap to iced went from 7.2–8.3× to 5.2–5.8×.**
+
+| | what | measured |
+|---|---|---|
+| R1 ☑ | FxHash the text caches | **5.1%** |
+| R2 ☑ | `ShapeKey` is a 128-bit content hash | ~1% alone; R1+R2 took the text bucket **14.3% → 5.4%** |
+| R3+R4 ☑ | size every per-frame container from the previous frame | **30%** — and the p90 tail collapsed 3773 → ~1700 µs |
+| R5 ◐ | thread the `ShapeKey` instead of hashing twice | `ShapeKey::new` 2.20% → 1.97%; the per-node-storage half needs R6 |
+| R6 ◐ | retain the layout scratch | `drop_in_place<LayoutTree>` gone, allocator 13.3% → 11.1%; inside the wall-clock noise floor |
+
+### Two things the series learned that change the roadmap
+
+**PROF1's ordering was wrong about R4.** Memoization used to buy 10%
+(2655 → 2377 µs). It now buys **nothing** — 1794 µs plain against 1820 µs
+memoized. R3/R4 made the plain path cheap enough that the copy path's own
+bookkeeping cancels its benefit, so "make memoization automatic" is now
+*worse* than neutral until F2 lands.
+
+**PROF1's estimates were unreliable in both directions.** R2 was estimated at
+7.2% and delivered ~1% — the estimate counted `eq` + `memcmp` as removable
+without accounting for the hashing added back. R3+R4 were estimated at ~18%
+combined and delivered 30%, because the reallocation spikes were also the
+source of the long tail. Estimates from a flat profile do not compose.
+
+### What is left
+
+The remaining frame is `build_node` 14.5%, taffy ~16% and memmove 16.4% — and
+memmove is **no longer growth**: it is the direct copy of taffy's `Style` into
+the slotmap (5.5%) and of `LayoutStyle`/`NodeMeta` (3.6%). Only node *reuse*
+removes those, which is full F2: stable `NodeIndex` across frames, still
+blocked on incremental layout across disjoint taffy subtrees.
+
 ## Reproducing
 
 ```sh
