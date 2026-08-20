@@ -400,6 +400,20 @@ The single largest win of the series, and the cheapest. `rebuild_inner` built fo
 
 *Next, and now the largest single item:* `slots: HashMap<SignalId, Slot>` in `lumen-core/src/state.rs` is a std `HashMap`, i.e. SipHash, and `ReadSet::is_current` probes it once per dep per scope per frame — **8.4%** of the memoized frame (`sip::Hasher::write` 4.79 + `hash_one` 3.65). Same shape of finding, and same fix, as R1's shape-cache hasher.
 
+## F2.4 ☑ The build's own hashers — SipHash out of the hot path (2026-08-21)
+Follow-up to F2.2, and a **worked example of getting attribution wrong twice before getting it right**. The post-F2.2 profile showed `sip::Hasher::write` 4.71% + `hash_one` 3.61% = **8.3%** of a memoized 3000-row frame. The first guess — `slots: HashMap<SignalId, Slot>` in `state.rs`, probed by `ReadSet::is_current` once per dep per scope — was wrong: switching it to FxHash left the profile unchanged. Only a caller trace (`perf -g caller`) found the real sources, both inside `rebuild_inner`:
+
+* **`span_ctx_hash`** built a `DefaultHasher` **once per scope per build** and hashed the whole ancestor descriptor stack — all string traffic, 3000 times a frame on the one-scope-per-row shape the F-series recommends.
+* **`scope_live` / `scope_skipped`**, two `std::collections::HashSet<IdHash>` written once per scope per build — 6000 SipHash-of-`u128` inserts a frame.
+
+*Fixed:* `span_ctx_hash` and the style-memo key now use `IdHasher` (ADR-021's own construction) and `finish128`, so `SpanRec::ctx_hash` and `style_memo`'s key are **128-bit, not 64**. That is not tidiness: an equal `ctx_hash` makes the runtime *splice* a span instead of re-lowering it, so a collision is a wrong view rather than a slow frame — the same trade R2 made for `ShapeKey`. The two liveness sets moved to FxHash; they are only ever `insert`/`contains`/`clear`ed, never iterated, so no output order depends on them.
+
+*Measured:* `build_frame/lumen_memoized/3000_rows` **942 → 896 µs, −4.9%** (A/B against the same commit, machine idle). SipHash is now **absent from the profile** below a 0.3% threshold. Full-rebuild path unchanged.
+
+*Kept but explicitly NOT claimed as a speedup:* the `state.rs` FxHash swap measured **899 vs 896 µs — inside noise** when isolated. It stays for two reasons that are not performance: the keys are dense `u32` ids the runtime mints itself, so SipHash's DoS resistance buys nothing; and std's `RandomState` reseeds per process, which made `adopt_pending_live`'s restore-diagnostic order vary run to run — FxHash is seed-free, so that order is now stable. Checked against the CP3.1 trap `fxhash`'s module doc warns about: `snapshot()` writes into a `serde_json::Map`, which is a `BTreeMap` here (serde_json is built without `preserve_order` — no `indexmap` in the lock), so its JSON is sorted by key and hasher-independent.
+
+**Method note worth keeping.** Two measurements during this work were nonsense because a user process (`accounts_slice-`, 121–155% CPU) was loading the box — one of them read as a **+38% regression** with a 1.14–1.35 ms interval. The tell was the interval width, not the mean: every honest measurement on this box lands inside ±0.5%. Check `ps` before believing a bench, and A/B against the same commit under the same load rather than against a number recorded earlier.
+
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
 - Any public-API signature in `02 §4`/`§8` that won't compile as written beyond a *minimal semantics-preserving* fix.

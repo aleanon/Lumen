@@ -766,12 +766,12 @@ pub struct BuildCx<'a> {
     /// Scope keys accessed this build (F5 GC): after the build, cached scopes +
     /// scope-local signals whose key is absent are swept, bounding a churning
     /// keyed list's memory.
-    scope_live: &'a RefCell<std::collections::HashSet<IdHash>>,
+    scope_live: &'a RefCell<crate::fxhash::HashSet<IdHash>>,
     /// Scopes that took the memo-hit path this build. Their closures did not
     /// run, so nested `cx.scope` calls inside them never announced themselves in
     /// `scope_live` — yet those children are still on screen, embedded in the
     /// reused subtree. The sweep consults this to tell "skipped" from "gone".
-    scope_skipped: &'a RefCell<std::collections::HashSet<IdHash>>,
+    scope_skipped: &'a RefCell<crate::fxhash::HashSet<IdHash>>,
     /// Live background tasks (TC1), persisted on `Headless` across builds like
     /// `scope_cache`. Declaring a task registers its slot here; the sweep that
     /// drops dead scopes cancels the tasks they own.
@@ -795,8 +795,8 @@ impl<'a> BuildCx<'a> {
         rt: &'a Runtime,
         now_ms: f64,
         scope_cache: &'a RefCell<ScopeCache>,
-        scope_live: &'a RefCell<std::collections::HashSet<IdHash>>,
-        scope_skipped: &'a RefCell<std::collections::HashSet<IdHash>>,
+        scope_live: &'a RefCell<crate::fxhash::HashSet<IdHash>>,
+        scope_skipped: &'a RefCell<crate::fxhash::HashSet<IdHash>>,
         tasks_table: &'a RefCell<TaskTable>,
         size: lumen_core::geometry::Size,
     ) -> BuildCx<'a> {

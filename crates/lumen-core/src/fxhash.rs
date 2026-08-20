@@ -84,3 +84,6 @@ pub type FxBuildHasher = std::hash::BuildHasherDefault<FxHasher>;
 /// Same API except `new()`, which std only provides for `RandomState`; use
 /// `default()`. Shadowing the std name keeps call sites unchanged.
 pub type HashMap<K, V> = std::collections::HashMap<K, V, FxBuildHasher>;
+
+/// A [`HashSet`](std::collections::HashSet) using [`FxHasher`].
+pub type HashSet<T> = std::collections::HashSet<T, FxBuildHasher>;

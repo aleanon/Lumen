@@ -28,7 +28,29 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+// F2.4: the reactive store's own maps use FxHash, not std's SipHash.
+//
+// `ReadSet::is_current` probes `slots` once per dep per memoized scope on
+// EVERY frame — with one scope per row that is one hash of a `u32` key per row
+// per frame, and it measured **8.4%** of a 3000-row memoized frame
+// (`sip::Hasher::write` 4.79% + `hash_one` 3.65%). These keys are dense
+// interned ids the runtime mints itself, so SipHash's DoS resistance buys
+// nothing here — the same argument, and the same fix, as R1's shape cache.
+//
+// Iteration order changes as a result. Two places iterate these maps into
+// output, and both were checked (see `fxhash`'s module note on CP3.1, which is
+// the trap this can spring):
+//
+//   * `snapshot()` inserts into a `serde_json::Map`, which is a `BTreeMap`
+//     here — serde_json is built without `preserve_order`, no `indexmap` in
+//     the lock — so its JSON is sorted by key and hasher-independent.
+//   * `adopt_pending_live()` collects restore diagnostics in `slots` order.
+//     Nothing asserts their order (every test uses `.any`), and this is in
+//     fact an improvement: std's `RandomState` reseeds per process, so that
+//     order was already nondeterministic run to run. FxHash has no random
+//     seed, so it becomes stable.
+use crate::fxhash::{HashMap, HashSet};
+use std::collections::HashSet as StdHashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -578,9 +600,9 @@ impl Runtime {
     /// instead. Iterating to a fixed point over `scope_parent` (scopes, not
     /// signals — a small map) keeps this transitive regardless of nesting depth
     /// or insertion order.
-    pub fn subtree_scopes(&self, scope: IdHash) -> HashSet<IdHash> {
+    pub fn subtree_scopes(&self, scope: IdHash) -> StdHashSet<IdHash> {
         let b = self.inner.borrow();
-        let mut set: HashSet<IdHash> = HashSet::new();
+        let mut set: StdHashSet<IdHash> = StdHashSet::new();
         set.insert(scope);
         loop {
             let mut grew = false;
@@ -670,7 +692,7 @@ impl Runtime {
     /// Stamp a list of read signal ids with their current versions (dedup).
     fn snapshot_reads(&self, ids: Vec<SignalId>) -> ReadSet {
         let b = self.inner.borrow();
-        let mut seen = HashSet::new();
+        let mut seen = HashSet::default();
         let deps: Vec<(SignalId, u64)> = ids
             .into_iter()
             .filter(|id| seen.insert(*id))
@@ -773,7 +795,7 @@ impl Runtime {
                 id,
                 Slot {
                     value,
-                    subs: HashSet::new(),
+                    subs: HashSet::default(),
                     version: 0,
                     owner,
                     type_name: std::any::type_name::<T>(),
@@ -803,7 +825,7 @@ impl Runtime {
             b.scopes.insert(
                 id,
                 ScopeData {
-                    deps: HashSet::new(),
+                    deps: HashSet::default(),
                     run: Rc::new(f),
                 },
             );
@@ -853,7 +875,7 @@ impl Runtime {
             b.scopes.insert(
                 scope_id,
                 ScopeData {
-                    deps: HashSet::new(),
+                    deps: HashSet::default(),
                     run: Rc::new(run),
                 },
             );
@@ -1151,7 +1173,7 @@ impl Runtime {
                     id,
                     Slot {
                         value: Box::new(value),
-                        subs: HashSet::new(),
+                        subs: HashSet::default(),
                         version: ver,
                         owner,
                         type_name: std::any::type_name::<T>(),

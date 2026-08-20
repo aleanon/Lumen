@@ -351,8 +351,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             force_rebuild: false,
             last_build_clock: 0.0,
             scope_cache: RefCell::new(HashMap::default()),
-            scope_live: RefCell::new(std::collections::HashSet::new()),
-            scope_skipped: RefCell::new(std::collections::HashSet::new()),
+            scope_live: RefCell::new(crate::fxhash::HashSet::default()),
+            scope_skipped: RefCell::new(crate::fxhash::HashSet::default()),
             tasks_table: RefCell::new(HashMap::default()),
             bg_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
@@ -542,7 +542,9 @@ struct KeyStop {
 struct SpanRec {
     root: NodeIndex,
     count: u32,
-    ctx_hash: u64,
+    /// F2.4: 128-bit. This value decides whether a span is spliced, so a
+    /// collision shows up as a stale subtree on screen, not as a slow frame.
+    ctx_hash: IdHash,
     impure: bool,
 }
 
@@ -763,7 +765,7 @@ pub struct Headless<
     /// resolved pair. Most nodes share a handful of keys, so a rebuild does
     /// O(distinct keys) cascades instead of O(nodes). Cleared with the view
     /// caches (stylesheet/theme/resize force-rebuilds).
-    style_memo: HashMap<u64, std::rc::Rc<StylePair>>,
+    style_memo: HashMap<IdHash, std::rc::Rc<StylePair>>,
     style_memo_hits: u64,
     style_memo_misses: u64,
     /// B.5: running `transition:` animations keyed by (stable id, property).
@@ -849,11 +851,11 @@ pub struct Headless<
     scope_cache: RefCell<crate::element::ScopeCache>,
     /// Scope keys accessed during the current build (F5 GC). After the build,
     /// cached scopes + scope-local signals whose key is absent are swept.
-    scope_live: RefCell<std::collections::HashSet<IdHash>>,
+    scope_live: RefCell<crate::fxhash::HashSet<IdHash>>,
     /// Scopes that memo-hit during the current build. Their children never got
     /// to announce themselves in `scope_live`, so the sweep treats a scope with
     /// a skipped ancestor as live (F5 × F1).
-    scope_skipped: RefCell<std::collections::HashSet<IdHash>>,
+    scope_skipped: RefCell<crate::fxhash::HashSet<IdHash>>,
     /// Live background tasks by identity (TC1). Declaring a task registers its
     /// slot; `sweep_dead_scopes` cancels the ones whose owning scope vanished,
     /// and dropping the table on teardown cancels the rest.
@@ -3569,9 +3571,28 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         })
     }
 
-    fn span_ctx_hash(&self, in_overlay: bool) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+    fn span_ctx_hash(&self, in_overlay: bool) -> IdHash {
+        use std::hash::Hash;
+        // F2.4: `IdHasher`, not `DefaultHasher`.
+        //
+        // This runs once per scope per build — 3000 times a frame on the
+        // one-scope-per-row shape the F-series tells authors to write — and it
+        // hashes the whole ancestor descriptor stack, so it is all string
+        // traffic. `DefaultHasher` is SipHash-1-3, whose DoS resistance is
+        // worthless for keys the build itself mints: it measured **8.3%** of a
+        // memoized 3000-row frame (`sip::Hasher::write` 4.71% + `hash_one`
+        // 3.61%), which is more than the whole splice path it guards.
+        //
+        // `IdHasher` is the project's own construction (ADR-021) — two
+        // multiply-rotate lanes per word — and `finish128` gives 128 bits
+        // rather than 64. That matters here and is not just tidiness: an equal
+        // hash makes the runtime splice a span instead of re-lowering it, so a
+        // collision is a wrong view, not a slow frame. Same trade R2 made for
+        // `ShapeKey`.
+        //
+        // The value is compared only in memory, never serialized, so it is not
+        // bound by ADR-021's stability rule either way.
+        let mut h = lumen_core::identity::IdHasher::new();
         for d in &self.desc_stack {
             d.id.hash(&mut h);
             d.classes.hash(&mut h);
@@ -3585,7 +3606,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         in_overlay.hash(&mut h);
         (self.hidden_count > 0).hash(&mut h);
         (self.disabled_count > 0).hash(&mut h);
-        h.finish()
+        h.finish128()
     }
 
     /// Splice a memo-hit scope's span into this build (F2.2).
@@ -3612,7 +3633,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         &mut self,
         key: IdHash,
         span: SpanRec,
-        hash: u64,
+        hash: IdHash,
         tree: &mut Tree,
         meta: &HashMap<NodeIndex, NodeMeta>,
         parent: Option<NodeIndex>,
@@ -3953,7 +3974,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let span_key = el.scope_key.take();
         let span_hash = span_key
             .map(|_| self.span_ctx_hash(in_overlay))
-            .unwrap_or(0);
+            .unwrap_or(lumen_core::identity::ROOT_ID);
         let impure_at = self.impure_seen;
         if el.dyn_text.is_some()
             || el.dyn_bg.is_some()
@@ -4124,14 +4145,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // A.5b: resolution is a pure function of (desc, ancestor chain,
             // container size) for a fixed sheet/theme/media — memoize it.
             let style_key = {
-                use std::hash::{Hash, Hasher};
-                let mut h = std::collections::hash_map::DefaultHasher::new();
+                use std::hash::Hash;
+                // F2.4: same swap, same reasoning as `span_ctx_hash` — this
+                // one runs per node per build whenever a stylesheet is loaded,
+                // and a collision hands a node another node's resolved style.
+                let mut h = lumen_core::identity::IdHasher::new();
                 desc.id.hash(&mut h);
                 desc.classes.hash(&mut h);
                 desc.states.hash(&mut h);
                 desc.ty.hash(&mut h);
                 self.span_ctx_hash(this_overlay).hash(&mut h);
-                h.finish()
+                h.finish128()
             };
             let (mut css, mut resolved) = if let Some(pair) = self.style_memo.get(&style_key) {
                 self.style_memo_hits += 1;
