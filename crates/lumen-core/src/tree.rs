@@ -20,6 +20,10 @@ use crate::identity::NodeIndex;
 use bitflags::bitflags;
 use kurbo::{Affine, Point, Rect};
 
+/// Sentinel for "this node has no taffy node yet" in [`Tree::lnode`].
+/// `u64::MAX` rather than `0`, because a real `taffy::NodeId` can be 0.
+const NO_LNODE: u64 = u64::MAX;
+
 bitflags! {
     /// Per-node state bits stored in the SoA `flags` array (02 §5).
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -61,6 +65,16 @@ pub struct Tree {
     clip: Vec<Option<Rect>>,
     flags: Vec<NodeFlags>,
     z: Vec<u32>,
+    /// F2.1: the taffy node this arena node was laid out with, as an opaque
+    /// `u64` (`LayoutNode::raw`), or `NO_LNODE` if it has none yet.
+    ///
+    /// Stored here rather than in a side `HashMap<NodeIndex, LayoutNode>`
+    /// because the copy-forward path needs it keyed by *previous-frame* node
+    /// on every copied node — a dense slot is O(1) with no hashing, and
+    /// hashing per node is exactly what R3/R4 were removing. `lumen-core`
+    /// cannot name `LayoutNode` (it sits below `lumen-layout`), which is what
+    /// `LayoutNode::{raw, from_raw}` exist for.
+    lnode: Vec<u64>,
 
     // intrusive tree links (02 §5)
     parent: Vec<NodeIndex>,
@@ -105,6 +119,7 @@ impl Tree {
             clip: Vec::with_capacity(c),
             flags: Vec::with_capacity(c),
             z: Vec::with_capacity(c),
+            lnode: Vec::with_capacity(c),
             parent: Vec::with_capacity(c),
             first_child: Vec::with_capacity(c),
             last_child: Vec::with_capacity(c),
@@ -207,6 +222,21 @@ impl Tree {
     }
     pub fn set_z(&mut self, n: NodeIndex, z: u32) {
         self.z[n.index() as usize] = z;
+    }
+    /// The taffy node this node was laid out with (F2.1), or `None`.
+    ///
+    /// Opaque here: the value round-trips through
+    /// `lumen_layout::LayoutNode::{raw, from_raw}` at the call site.
+    /// Bounds-checked like [`z`](Self::z) — a stale index reads `None`.
+    pub fn lnode(&self, n: NodeIndex) -> Option<u64> {
+        self.lnode
+            .get(n.index() as usize)
+            .copied()
+            .filter(|v| *v != NO_LNODE)
+    }
+    /// Record the taffy node this node was laid out with (F2.1).
+    pub fn set_lnode(&mut self, n: NodeIndex, raw: u64) {
+        self.lnode[n.index() as usize] = raw;
     }
     /// Bounds-checked (see [`bounds`](Self::bounds)): a stale index returns
     /// `NodeFlags::empty()`.
@@ -353,6 +383,7 @@ impl Tree {
             self.clip[iu] = None;
             self.flags[iu] = NodeFlags::VISIBLE;
             self.z[iu] = 0;
+            self.lnode[iu] = NO_LNODE;
             self.parent[iu] = parent;
             self.first_child[iu] = NodeIndex::NONE;
             self.last_child[iu] = NodeIndex::NONE;
@@ -368,6 +399,7 @@ impl Tree {
             self.clip.push(None);
             self.flags.push(NodeFlags::VISIBLE);
             self.z.push(0);
+            self.lnode.push(NO_LNODE);
             self.parent.push(parent);
             self.first_child.push(NodeIndex::NONE);
             self.last_child.push(NodeIndex::NONE);

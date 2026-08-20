@@ -74,7 +74,7 @@ Each stage is gated on `assert_view_coherent` (the F0 oracle — 86 call sites
 compare the display list *and* the semantics tree against a fresh rebuild),
 the golden corpus, and the full twelve-leg gate.
 
-### F2.1 — reuse taffy nodes for copied spans
+### F2.1 — reuse taffy nodes for copied spans — **LANDED 2026-08-20, −18.3%**
 
 Retain the `LayoutTree` across frames instead of clearing it, keep a
 `NodeIndex → LayoutNode` map for the previous frame, and have `copy_node`

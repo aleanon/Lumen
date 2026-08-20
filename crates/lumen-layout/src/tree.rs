@@ -121,6 +121,31 @@ impl LayoutTree {
         )
     }
 
+    /// Free a node, detaching it from its parent.
+    ///
+    /// F2.1: with the tree retained across frames, the nodes of spans that
+    /// were *re-lowered* (rather than copied forward) are orphaned and must be
+    /// released, or the tree grows by the size of the changed span every
+    /// frame. Removing a node does not remove its children — the runtime frees
+    /// each stale node individually, which is what its `prev_meta` leftovers
+    /// enumerate.
+    ///
+    /// A node id that is no longer in the tree is ignored rather than
+    /// panicking: double-free is a bookkeeping bug, not a reason to take the
+    /// app down, and `debug_assert`s on the node count catch it in tests.
+    pub fn remove(&mut self, node: LayoutNode) {
+        if self.taffy.style(node.0).is_ok() {
+            let _ = self.taffy.remove(node.0);
+        }
+        self.abs.remove(&node.0);
+    }
+
+    /// Live node count — the runtime debug-asserts this against its own arena
+    /// to catch a leak in the F2.1 reuse path.
+    pub fn node_count(&self) -> usize {
+        self.taffy.total_node_count()
+    }
+
     /// Replace a node's style and mark it (and its ancestors) dirty.
     pub fn set_style(&mut self, node: LayoutNode, style: LayoutStyle) {
         self.taffy

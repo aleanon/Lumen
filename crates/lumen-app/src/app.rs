@@ -322,6 +322,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             node_layout_style: HashMap::default(),
             prev_layout_style: HashMap::default(),
             layout_scratch: P::Layout::default(),
+            layout_reuse: false,
+            prev_nodes_copied: 0,
             allow_copy_forward: false,
             impure_seen: 0,
             nodes_rebuilt: 0,
@@ -762,6 +764,14 @@ pub struct Headless<
     /// freeing the whole slotmap every frame. Kept and `clear`ed instead, so
     /// the capacity survives.
     layout_scratch: P::Layout,
+    /// F2.1: whether the layout engine keeps its nodes across frames, so a
+    /// memo-hit span can reuse them instead of re-creating them. Read once per
+    /// rebuild from `LayoutEngine::retains_nodes` and cached here because
+    /// `copy_node` consults it per node.
+    layout_reuse: bool,
+    /// F2.1: how many nodes the *previous* build copied forward — the signal
+    /// for whether retaining the layout tree is worth it this frame.
+    prev_nodes_copied: u32,
     allow_copy_forward: bool,
     /// Count of elements this build encountered carrying non-memoizable
     /// per-node work (dyn bindings, custom/canvas content) — spans containing
@@ -3273,7 +3283,25 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // scratch and cleared rather than constructed, so its capacity
         // survives the frame; put back at every exit below.
         let mut layout = std::mem::take(&mut self.layout_scratch);
-        layout.clear();
+        // F2.1: a retaining engine keeps last frame's nodes so memo-hit spans
+        // can reuse them (`copy_node`); the nodes that were NOT reused are
+        // freed after the build, below. An engine that does not retain keeps
+        // the original clear-and-rebuild behaviour exactly.
+        // …but only when the previous build actually produced memo hits.
+        // Retaining costs a per-node `remove` for everything that was not
+        // reused, where `clear` releases the whole tree in one go; on a build
+        // that copies nothing that trade is pure loss — measured at **+7.9%**
+        // on `build_frame/lumen` (the no-scope bench) before this guard.
+        //
+        // Using the previous frame's copy count rather than "does this app use
+        // scopes" also covers an app whose spans exist but miss every frame.
+        // It is a prediction, so it can be wrong for exactly one frame after a
+        // change in behaviour, and it is self-correcting: a mispredicted frame
+        // is merely built the old way, never built incorrectly.
+        self.layout_reuse = layout.retains_nodes() && self.prev_nodes_copied > 0;
+        if !self.layout_reuse {
+            layout.clear();
+        }
         let mut meta = HashMap::with_capacity_and_hasher(hint, Default::default());
         let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::with_capacity(hint);
         let (_root_node, root_lnode) = self.build_node(
@@ -3293,6 +3321,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         for (node, lnode) in &built {
             let b = layout.bounds(*lnode);
             tree.set_bounds(*node, b);
+            // F2.1: remember which taffy node laid this one out, so next
+            // frame's `copy_node` can hand it straight back.
+            tree.set_lnode(*node, lnode.raw());
             // Propagate clipping to the hit-test tree: a `clip: true` node (e.g. a
             // Scrollable viewport) must reject pointer events on descendants that
             // overflow its box. Otherwise scrolled-out rows — laid out *above* the
@@ -3334,6 +3365,67 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 return;
             }
         }
+
+        // F2.1: release the taffy nodes of everything that was NOT copied
+        // forward. `copy_node` removes each node it reuses from `prev_meta`,
+        // so what is left in there after the build is exactly the set of
+        // previous-frame nodes this frame did not adopt — the re-lowered
+        // spans and the rebuilt spine. Without this the tree grows by the
+        // size of the changed span every frame.
+        if self.layout_reuse {
+            // ORDER MATTERS, and not for the reason it looks like.
+            //
+            // `taffy::TaffyTree::remove` nulls the parent pointer of every
+            // node in the removed node's child list. A stale container's list
+            // still names the span roots this frame REUSED (they were its
+            // children last frame), so removing it sets `parents[R] = None`
+            // even though a live container has just adopted R. That is
+            // invisible until R itself goes stale in some later frame: with
+            // its parent pointer nulled, taffy's `children.retain` cleans the
+            // wrong list and leaves R's dead key inside a live container's
+            // children — and removing THAT container indexes a dead slot and
+            // panics with "invalid SlotMap key used".
+            //
+            // Walking `prev_meta` in hash order hits this within a few frames
+            // (`virtual_list_memo.rs` did). Removing parents before children
+            // does not: a stale node's list-owner is its previous-frame
+            // parent, and `copy_span` copies whole subtrees, so a stale node's
+            // ancestors are always stale too. Removing the parent first drops
+            // its child list wholesale, so no dead key is ever left behind.
+            //
+            // The walk skips reused subtrees entirely — a node still absent
+            // from `prev_meta` was copied forward, and so was everything under
+            // it — which keeps this O(stale), not O(tree).
+            let mut stack = vec![self.prev_tree.root()];
+            while let Some(n) = stack.pop() {
+                if n.is_none() || !self.prev_meta.contains_key(&n) {
+                    continue;
+                }
+                if let Some(raw) = self.prev_tree.lnode(n) {
+                    layout.remove(LayoutNode::from_raw(raw));
+                }
+                let mut c = self.prev_tree.first_child(n);
+                while c.is_some() {
+                    stack.push(c);
+                    c = self.prev_tree.next_sibling(c);
+                }
+            }
+            debug_assert_eq!(
+                layout.node_count(),
+                tree.len(),
+                "F2.1 layout leak: {} taffy nodes for {} arena nodes — a stale \
+                 node was neither reused nor freed",
+                layout.node_count(),
+                tree.len(),
+            );
+        }
+
+        // F2.1: remember what this build copied, for next build's decision on
+        // whether retaining the layout tree pays. Recorded HERE, at the
+        // commit, and not at the top of the rebuild — `pump` zeroes
+        // `nodes_copied` before `rebuild_inner` is ever called, so reading it
+        // there always saw 0 and silently disabled reuse for good.
+        self.prev_nodes_copied = self.nodes_copied;
 
         self.layout_scratch = layout;
         self.tree = tree;
@@ -3581,10 +3673,27 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // This used to clone the LayoutStyle (256 bytes) purely because
         // `leaf`/`container` took ownership while `node_layout_style` also
         // needed a copy — on the memo-hit path, per node.
-        let lnode = if child_lnodes.is_empty() {
-            layout.leaf(&lstyle)
-        } else {
-            layout.container(&lstyle, &child_lnodes)
+        // F2.1: a memo-hit span keeps the taffy nodes it was laid out with.
+        // Every node in the span is copied, so the subtree's internal
+        // parent/child links are already correct and nothing needs
+        // re-parenting here — the span *root* is adopted when the rebuilt
+        // container above it takes it as a child, and taffy overwrites the
+        // parent pointer at that moment. Measured at 3000 rows: re-minting
+        // the tree costs 540 us against 300 us for reuse
+        // (`benches-competitive/src/bin/probe_f2_reparent.rs`).
+        //
+        // The style is not re-applied: `lstyle` was moved across from the
+        // previous build unchanged, so the node's taffy style already matches.
+        // Calling `set_style` would be worse than a no-op — it dirties the
+        // node and forces the flex column to re-solve (650 us in the probe).
+        let reused = self
+            .layout_reuse
+            .then(|| self.prev_tree.lnode(prev))
+            .flatten();
+        let lnode = match reused {
+            Some(raw) => LayoutNode::from_raw(raw),
+            None if child_lnodes.is_empty() => layout.leaf(&lstyle),
+            None => layout.container(&lstyle, &child_lnodes),
         };
         self.node_layout_style.insert(node, lstyle);
         built.push((node, lnode));

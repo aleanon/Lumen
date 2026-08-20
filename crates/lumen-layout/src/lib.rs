@@ -75,6 +75,34 @@ pub trait LayoutEngine {
 
     /// Nodes whose bounds changed in the last `compute` — the damage input.
     fn touched(&self) -> usize;
+
+    /// Whether this engine keeps its nodes across frames.
+    ///
+    /// F2.1: when `true`, the runtime stops calling [`clear`](Self::clear)
+    /// each frame and instead **reuses** the nodes of a memo-hit span,
+    /// freeing the rest through [`remove`](Self::remove). An engine that
+    /// returns `true` must implement `remove`, or the tree grows by the size
+    /// of every re-lowered span. Defaulted to `false` so an engine that has
+    /// no notion of node identity across frames keeps today's
+    /// clear-and-rebuild behaviour unchanged.
+    fn retains_nodes(&self) -> bool {
+        false
+    }
+
+    /// Free a node that will not be reused next frame.
+    ///
+    /// Only called on engines that return `true` from
+    /// [`retains_nodes`](Self::retains_nodes); defaulted to a no-op for the
+    /// rest.
+    fn remove(&mut self, node: LayoutNode) {
+        let _ = node;
+    }
+
+    /// Live node count, for the runtime's leak `debug_assert`. Defaulted to
+    /// `0`, which the assertion reads as "engine does not report".
+    fn node_count(&self) -> usize {
+        0
+    }
 }
 
 impl LayoutEngine for LayoutTree {
@@ -104,5 +132,14 @@ impl LayoutEngine for LayoutTree {
     }
     fn touched(&self) -> usize {
         LayoutTree::touched(self)
+    }
+    fn retains_nodes(&self) -> bool {
+        true
+    }
+    fn remove(&mut self, node: LayoutNode) {
+        LayoutTree::remove(self, node)
+    }
+    fn node_count(&self) -> usize {
+        LayoutTree::node_count(self)
     }
 }
