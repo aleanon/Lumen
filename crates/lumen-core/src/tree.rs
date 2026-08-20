@@ -85,6 +85,15 @@ pub struct Tree {
     /// largest symbol in a profile of `pump()` at 23%.
     last_child: Vec<NodeIndex>,
     next_sibling: Vec<NodeIndex>,
+    /// F2.2: the sibling *before* this one, making the child list doubly
+    /// linked so [`detach`](Self::detach) is O(1).
+    ///
+    /// Splice-in-place detaches a memo-hit span's root from its
+    /// previous-frame parent on every rebuild. With a singly-linked list that
+    /// costs a scan for the predecessor, which is O(1) only while spans are
+    /// detached in child order — a list whose changed and unchanged rows
+    /// alternate degrades to O(n²). Four bytes a node buys the worst case.
+    prev_sibling: Vec<NodeIndex>,
 
     root: NodeIndex,
 }
@@ -124,6 +133,7 @@ impl Tree {
             first_child: Vec::with_capacity(c),
             last_child: Vec::with_capacity(c),
             next_sibling: Vec::with_capacity(c),
+            prev_sibling: Vec::with_capacity(c),
             root: NodeIndex::NONE,
         }
     }
@@ -182,6 +192,86 @@ impl Tree {
         self.unlink(node);
         self.link_last_child(new_parent, node);
         true
+    }
+
+    /// F2.2 splice primitives — allocate a node with no parent, adopt an
+    /// already-live node, and free one node without touching its children.
+    ///
+    /// These exist because splice-in-place keeps the arena across frames: a
+    /// memo-hit span's nodes are *moved* under their new parent rather than
+    /// re-created, and the previous frame's spine is freed node by node
+    /// afterwards. `insert_root`/`remove` cannot serve — the first asserts the
+    /// tree has no root yet, the second recurses into the subtree it is
+    /// supposed to leave alone.
+    ///
+    /// Allocate a node with no parent and no place in the tree yet.
+    pub fn insert_orphan(&mut self) -> NodeIndex {
+        self.alloc(NodeIndex::NONE)
+    }
+
+    /// Make `n` the tree's root. `n` must be live and parentless.
+    pub fn set_root(&mut self, n: NodeIndex) {
+        debug_assert!(self.is_alive(n), "set_root: dead node");
+        debug_assert!(
+            self.parent[n.index() as usize].is_none(),
+            "set_root: node still has a parent"
+        );
+        self.root = n;
+    }
+
+    /// Detach `n` from its parent's child list; `n` and its subtree stay live.
+    pub fn detach(&mut self, n: NodeIndex) {
+        if self.is_alive(n) {
+            self.unlink(n);
+        }
+    }
+
+    /// Append the already-live, already-detached `child` to `parent`.
+    pub fn attach_last_child(&mut self, parent: NodeIndex, child: NodeIndex) {
+        debug_assert!(self.is_alive(parent), "attach_last_child: dead parent");
+        debug_assert!(self.is_alive(child), "attach_last_child: dead child");
+        debug_assert!(
+            self.parent[child.index() as usize].is_none(),
+            "attach_last_child: child is still attached — detach it first"
+        );
+        self.link_last_child(parent, child);
+    }
+
+    /// Free exactly one node, leaving its children alone.
+    ///
+    /// The caller is enumerating a known-dead set and frees every node in it,
+    /// so unlinking each from its (also dead) parent would be wasted work.
+    /// Reads the node's links before they are cleared, so a caller walking
+    /// the doomed subtree must push a node's children *before* freeing it.
+    pub fn free_one(&mut self, n: NodeIndex) {
+        if self.is_alive(n) {
+            if self.root == n {
+                self.root = NodeIndex::NONE;
+            }
+            self.dealloc(n);
+        }
+    }
+
+    /// The subtree rooted at `n`, in preorder.
+    ///
+    /// F2.2 uses this only for the AN1 animation check, which is gated on an
+    /// animation actually running — a memo hit on a still frame never
+    /// enumerates a span's nodes at all.
+    pub fn subtree_preorder(&self, n: NodeIndex) -> Vec<NodeIndex> {
+        let mut out = Vec::new();
+        if self.is_alive(n) {
+            self.visit_preorder(n, &mut out);
+        }
+        out
+    }
+
+    /// Every live node, in slot order (not document order).
+    pub fn iter_live(&self) -> impl Iterator<Item = NodeIndex> + '_ {
+        self.alive
+            .iter()
+            .enumerate()
+            .filter(|(_, &a)| a)
+            .map(|(i, _)| NodeIndex::new(i as u32, self.generation[i]))
     }
 
     /// Remove `node` and its entire subtree, recycling all their slots.
@@ -388,6 +478,7 @@ impl Tree {
             self.first_child[iu] = NodeIndex::NONE;
             self.last_child[iu] = NodeIndex::NONE;
             self.next_sibling[iu] = NodeIndex::NONE;
+            self.prev_sibling[iu] = NodeIndex::NONE;
             NodeIndex::new(i, self.generation[iu])
         } else {
             let i = self.generation.len() as u32;
@@ -404,6 +495,7 @@ impl Tree {
             self.first_child.push(NodeIndex::NONE);
             self.last_child.push(NodeIndex::NONE);
             self.next_sibling.push(NodeIndex::NONE);
+            self.prev_sibling.push(NodeIndex::NONE);
             NodeIndex::new(i, 0)
         }
     }
@@ -415,6 +507,7 @@ impl Tree {
         self.generation[i] = self.generation[i].wrapping_add(1);
         self.first_child[i] = NodeIndex::NONE;
         self.next_sibling[i] = NodeIndex::NONE;
+        self.prev_sibling[i] = NodeIndex::NONE;
         self.parent[i] = NodeIndex::NONE;
         self.free.push(n.index());
         self.live_count -= 1;
@@ -425,6 +518,7 @@ impl Tree {
         let pi = parent.index() as usize;
         self.parent[child.index() as usize] = parent;
         self.next_sibling[child.index() as usize] = NodeIndex::NONE;
+        self.prev_sibling[child.index() as usize] = self.last_child[pi];
         match self.last_child[pi] {
             tail if tail.is_some() => self.next_sibling[tail.index() as usize] = child,
             _ => self.first_child[pi] = child,
@@ -434,38 +528,28 @@ impl Tree {
 
     /// Detach `node` from its parent's child list (node itself stays alive).
     fn unlink(&mut self, node: NodeIndex) {
-        let parent = self.parent[node.index() as usize];
+        let ni = node.index() as usize;
+        let parent = self.parent[ni];
         if parent.is_none() {
             return;
         }
         let pi = parent.index() as usize;
-        let head = self.first_child[pi];
-        let after = self.next_sibling[node.index() as usize];
-        if head == node {
-            self.first_child[pi] = after;
-            // Removing the only child empties the list; otherwise the tail is
-            // unchanged unless `node` WAS the tail, handled below.
-            if after.is_none() {
-                self.last_child[pi] = NodeIndex::NONE;
-            }
+        let before = self.prev_sibling[ni];
+        let after = self.next_sibling[ni];
+        // F2.2: O(1) — the predecessor is known rather than searched for.
+        if before.is_some() {
+            self.next_sibling[before.index() as usize] = after;
         } else {
-            let mut cur = head;
-            while cur.is_some() {
-                let next = self.next_sibling[cur.index() as usize];
-                if next == node {
-                    self.next_sibling[cur.index() as usize] = after;
-                    // `cur` is `node`'s predecessor: if `node` was the tail,
-                    // `cur` becomes it. The walk already found it, so free.
-                    if after.is_none() {
-                        self.last_child[pi] = cur;
-                    }
-                    break;
-                }
-                cur = next;
-            }
+            self.first_child[pi] = after;
         }
-        self.next_sibling[node.index() as usize] = NodeIndex::NONE;
-        self.parent[node.index() as usize] = NodeIndex::NONE;
+        if after.is_some() {
+            self.prev_sibling[after.index() as usize] = before;
+        } else {
+            self.last_child[pi] = before;
+        }
+        self.next_sibling[ni] = NodeIndex::NONE;
+        self.prev_sibling[ni] = NodeIndex::NONE;
+        self.parent[ni] = NodeIndex::NONE;
     }
 
     fn collect_subtree(&self, node: NodeIndex, out: &mut Vec<NodeIndex>) {
@@ -669,6 +753,36 @@ mod tests {
             // would be parented but unreachable — an element that simply
             // never appears, with no panic.
             check_link("last_child", t.last_child[i]);
+            // F2.2 made the child list doubly linked so `detach` is O(1).
+            // `prev_sibling` is the same kind of redundant cache `last_child`
+            // is, and would fail the same silent way: a stale back-pointer
+            // makes `unlink` splice the wrong node out of the list, dropping
+            // a live element from the tree with no panic.
+            check_link("prev_sibling", t.prev_sibling[i]);
+        }
+
+        // prev_sibling is the exact inverse of next_sibling
+        for i in 0..t.alive.len() {
+            if !t.alive[i] {
+                continue;
+            }
+            let n = NodeIndex::new(i as u32, t.generation[i]);
+            let next = t.next_sibling[i];
+            if next.is_some() {
+                assert_eq!(
+                    t.prev_sibling[next.index() as usize],
+                    n,
+                    "next_sibling/prev_sibling disagree at {n:?}"
+                );
+            }
+            // the head of a child list has no predecessor
+            let parent = t.parent[i];
+            if parent.is_some() && t.first_child[parent.index() as usize] == n {
+                assert!(
+                    t.prev_sibling[i].is_none(),
+                    "list head {n:?} has a prev_sibling"
+                );
+            }
         }
 
         // document order reaches every live node exactly once (no cycles, no

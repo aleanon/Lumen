@@ -314,16 +314,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             style_env: None,
             scope_spans: HashMap::default(),
             prev_spans: HashMap::default(),
-            prev_spans_by_root: HashMap::default(),
-            prev_tree: Tree::new(),
-            prev_meta: HashMap::default(),
-            prev_node_style: HashMap::default(),
-            prev_node_computed: HashMap::default(),
             node_layout_style: HashMap::default(),
-            prev_layout_style: HashMap::default(),
             layout_scratch: P::Layout::default(),
             layout_reuse: false,
-            prev_nodes_copied: 0,
             allow_copy_forward: false,
             impure_seen: 0,
             nodes_rebuilt: 0,
@@ -730,31 +723,21 @@ pub struct Headless<
     /// A.3.1: per-rebuild scope→node-span map (scope key → subtree root +
     /// preorder node count). The retained-graph splice replaces these spans.
     scope_spans: HashMap<IdHash, SpanRec>,
-    /// Last build's spans/tree/per-node work (A.3.2 copy-forward). A memo-hit
-    /// scope whose recorded context hash matches copies its span's retained
-    /// work (meta, styles, layout styles, flags) instead of re-lowering.
+    /// Last build's span records (A.3.2 / F2.2). A memo-hit scope whose
+    /// recorded context hash matches has its span spliced into this build
+    /// instead of being re-lowered.
+    ///
+    /// F2.2 deleted this field's five companions — `prev_tree`, `prev_meta`,
+    /// `prev_node_style`, `prev_node_computed`, `prev_layout_style` — along
+    /// with the `prev_spans_by_root` index CP1 added to make the nested-span
+    /// remap O(1) per node. With the arena retained, none of that work exists:
+    /// the previous build's tree *is* the current tree, its per-node entries
+    /// are already keyed by the indices they still have, and nested spans
+    /// still name the same roots, so there is nothing to remap.
     prev_spans: HashMap<IdHash, SpanRec>,
-    /// CP1: `prev_spans` inverted — previous-build span root -> span key.
-    ///
-    /// `copy_span` needs the nested spans rooted inside the span it is copying.
-    /// It used to find them by scanning ALL of `prev_spans` and testing each
-    /// root against a linear `Vec::contains` over the span's nodes: O(S) per
-    /// copied span with an O(C) probe inside, so O(S² · C) across a build. On
-    /// the shape the F-series tells authors to write (one scope per row) S
-    /// grows with the row count, which is why finer granularity got
-    /// *quadratically* worse — 50→300 scopes measured 1.72×.
-    ///
-    /// Inverting it makes the same lookup O(1) per node, so a copied span costs
-    /// O(its own nodes) instead of O(every span in the app).
-    prev_spans_by_root: HashMap<NodeIndex, IdHash>,
-    prev_tree: Tree,
-    prev_meta: HashMap<NodeIndex, NodeMeta>,
-    prev_node_style: HashMap<NodeIndex, lumen_style::Style>,
-    prev_node_computed: HashMap<NodeIndex, HashMap<String, lumen_style::Computed>>,
-    /// Final (post-css-merge) layout style per node — what copy-forward feeds
-    /// taffy without re-deriving it from the element.
+    /// Final (post-css-merge) layout style per node — retained across frames
+    /// so a spliced span never re-derives it from the element.
     node_layout_style: HashMap<NodeIndex, LayoutStyle>,
-    prev_layout_style: HashMap<NodeIndex, LayoutStyle>,
     /// Whether this rebuild may copy spans forward (false on visual-state
     /// rebuilds: hover/focus/pressed styling must re-resolve).
     /// R6: the layout engine, retained across frames as scratch.
@@ -769,9 +752,6 @@ pub struct Headless<
     /// rebuild from `LayoutEngine::retains_nodes` and cached here because
     /// `copy_node` consults it per node.
     layout_reuse: bool,
-    /// F2.1: how many nodes the *previous* build copied forward — the signal
-    /// for whether retaining the layout tree is worth it this frame.
-    prev_nodes_copied: u32,
     allow_copy_forward: bool,
     /// Count of elements this build encountered carrying non-memoizable
     /// per-node work (dyn bindings, custom/canvas content) — spans containing
@@ -2814,10 +2794,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// over the gallery and examples.
     pub fn assert_view_coherent(&mut self) {
         let dl_before = self.last_dl.as_ref().map(|d| d.cmds.clone());
-        let sem_before = format!("{:?}", self.sem_root());
+        let sem_before = Self::sem_fingerprint(&self.sem_root());
         self.rebuild_fresh();
         let dl_after = self.last_dl.as_ref().map(|d| d.cmds.clone());
-        let sem_after = format!("{:?}", self.sem_root());
+        let sem_after = Self::sem_fingerprint(&self.sem_root());
         assert!(
             dl_before == dl_after,
             "view incoherent: display list differs from a fresh rebuild"
@@ -2826,6 +2806,36 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             sem_before == sem_after,
             "view incoherent: semantics tree differs from a fresh rebuild"
         );
+    }
+
+    /// The semantics tree rendered for comparison, with the raw arena slot
+    /// masked out.
+    ///
+    /// F2.2: `SemanticsNode::index` is the node's arena slot, and its own
+    /// documentation calls it "NOT an identity … will be recycled once the
+    /// arena persists". The arena now does persist: a spliced span keeps the
+    /// slots it already had, while a from-scratch rebuild allocates new ones.
+    /// Comparing slots would therefore fail on every memo hit while saying
+    /// nothing about the view.
+    ///
+    /// Everything that *is* identity stays in the comparison — including
+    /// `SemanticsNode::node`, the `NodeHandle` derived from the node's path
+    /// through the tree, which is precisely the field that exists to survive
+    /// slot recycling. If a splice put a node in the wrong place, the handle
+    /// changes and this still catches it.
+    fn sem_fingerprint(root: &lumen_core::semantics::SemanticsNode) -> String {
+        let text = format!("{root:?}");
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find("index: ") {
+            out.push_str(&rest[..at + "index: ".len()]);
+            rest = &rest[at + "index: ".len()..];
+            let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            out.push('_');
+            rest = &rest[digits..];
+        }
+        out.push_str(rest);
+        out
     }
 
     /// F3.4: re-evaluate the paint-only bindings whose deps changed, patch each
@@ -3181,17 +3191,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // A.3.2: last build's tree + per-node work become the copy-forward
         // source; this build's maps start empty and are filled by lowering
         // or by moving entries across from `prev_*`.
+        //
+        // F2.2: the arena and its side tables are RETAINED. Only the span
+        // records are rotated — everything else stays keyed by the node
+        // indices it was already keyed by, which is the whole point of
+        // splice-in-place: a memo-hit span's `NodeMeta`, styles and layout
+        // styles never move, so the per-node memmove they used to cost is
+        // simply not paid. Entries belonging to nodes this build replaces are
+        // dropped by the free walk further down, after the build knows which
+        // those are.
         self.prev_spans = std::mem::take(&mut self.scope_spans);
-        // CP1: rebuild the inverted index alongside, once per rebuild, so
-        // `copy_span` never scans the whole span table.
-        self.prev_spans_by_root.clear();
-        self.prev_spans_by_root
-            .extend(self.prev_spans.iter().map(|(k, r)| (r.root, *k)));
-        self.prev_meta = std::mem::take(&mut self.meta);
-        self.prev_node_style = std::mem::take(&mut self.node_style);
-        self.prev_node_computed = std::mem::take(&mut self.node_computed);
-        self.prev_layout_style = std::mem::take(&mut self.node_layout_style);
-        self.prev_tree = std::mem::replace(&mut self.tree, Tree::new());
         self.impure_seen = 0;
         self.nodes_rebuilt = 0;
         self.nodes_copied = 0;
@@ -3277,8 +3286,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // inserts and ~1.1% in the arena (`docs/profile-vs-iced-2026-08-19.md`).
         // The count is a hint, not a contract: a frame that grows simply
         // reallocates once, as before.
-        let hint = self.prev_tree.len();
-        let mut tree = Tree::with_capacity(hint);
         // MOD1: the bundle's layout engine. R6: taken from the retained
         // scratch and cleared rather than constructed, so its capacity
         // survives the frame; put back at every exit below.
@@ -3287,43 +3294,146 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // can reuse them (`copy_node`); the nodes that were NOT reused are
         // freed after the build, below. An engine that does not retain keeps
         // the original clear-and-rebuild behaviour exactly.
-        // …but only when the previous build actually produced memo hits.
-        // Retaining costs a per-node `remove` for everything that was not
-        // reused, where `clear` releases the whole tree in one go; on a build
-        // that copies nothing that trade is pure loss — measured at **+7.9%**
-        // on `build_frame/lumen` (the no-scope bench) before this guard.
+        // …but only when a splice is possible at all, i.e. the previous build
+        // recorded at least one scope span. Retaining costs a per-node free
+        // for everything not reused, where a wholesale reset releases the
+        // frame in one go; for a view with no `cx.scope` in it that trade is
+        // pure loss — measured at **+7.9%** on `build_frame/lumen` (the
+        // no-scope bench) before this guard.
         //
-        // Using the previous frame's copy count rather than "does this app use
-        // scopes" also covers an app whose spans exist but miss every frame.
-        // It is a prediction, so it can be wrong for exactly one frame after a
-        // change in behaviour, and it is self-correcting: a mispredicted frame
-        // is merely built the old way, never built incorrectly.
-        self.layout_reuse = layout.retains_nodes() && self.prev_nodes_copied > 0;
-        if !self.layout_reuse {
+        // The predictor is "are there spans", NOT "did the last build splice
+        // anything". The latter deadlocks: splicing requires the retained
+        // arena, so a splice count of zero would disable the very thing that
+        // makes it non-zero, and the count could never rise again.
+        //
+        // The arena and the layout tree MUST be reset together. Every arena
+        // node carries the taffy handle it was laid out with, so clearing one
+        // and keeping the other leaves live nodes pointing at freed taffy
+        // slots — which taffy reports as a panic inside `new_with_children`
+        // the moment a rebuilt container tries to adopt one.
+        self.layout_reuse = layout.retains_nodes() && !self.prev_spans.is_empty();
+        let mut tree;
+        let mut meta;
+        if self.layout_reuse {
+            // F2.2: take the LIVE tree, not a fresh one. Nodes this build does
+            // not touch stay exactly where they are; `build_node` allocates
+            // alongside them and the previous frame's spine is freed once the
+            // build knows which nodes that is.
+            tree = std::mem::replace(&mut self.tree, Tree::new());
+            meta = std::mem::take(&mut self.meta);
+        } else {
             layout.clear();
+            let hint = self.tree.len();
+            self.tree = Tree::new();
+            tree = Tree::with_capacity(hint);
+            meta = std::mem::take(&mut self.meta);
+            meta.clear();
+            self.node_style.clear();
+            self.node_computed.clear();
+            self.node_layout_style.clear();
+            // Every span record now names a dead node, so `splice_span` bails
+            // and each scope is lowered normally — a mispredicted frame is
+            // slower, never wrong.
         }
-        let mut meta = HashMap::with_capacity_and_hasher(hint, Default::default());
-        let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::with_capacity(hint);
-        let (_root_node, root_lnode) = self.build_node(
-            root_el,
-            &mut tree,
-            &mut layout,
-            &mut meta,
-            &mut built,
-            None,
-            false,
+        let old_root = tree.root();
+        let (root_node, root_lnode) =
+            self.build_node(root_el, &mut tree, &mut layout, &mut meta, None, false);
+        debug_assert_eq!(root_node, tree.root(), "build left the tree root unset");
+
+        // F2.2: free the previous frame's spine — arena node, side-table
+        // entries and taffy node together.
+        //
+        // The doomed set is exactly what is still reachable from the OLD root
+        // once every spliced span has been detached out of it. `splice_span`
+        // detaches each span root from its previous parent as it moves it, so
+        // walking down from `old_root` never crosses into a surviving span and
+        // the walk is O(dead), not O(tree). The check against the *current*
+        // root covers the one case detaching cannot: a view whose root element
+        // is itself a memo hit, where the old root and the new root are the
+        // same node.
+        //
+        // ORDER MATTERS, and not for the reason it looks like.
+        //
+        // `taffy::TaffyTree::remove` nulls the parent pointer of every node in
+        // the removed node's child list. A dying container's list still names
+        // the span roots this frame reused, so removing it clears a pointer a
+        // live container has just claimed. That is invisible until the reused
+        // node is itself freed, at which point taffy's `children.retain`
+        // cleans the wrong list and leaves a dead key inside a live container
+        // — and removing THAT container panics with "invalid SlotMap key
+        // used". Freeing parents before children avoids it: a dying node's
+        // list-owner is its previous-frame parent, and a parent is always
+        // dying when its child is, so the owner's list is dropped wholesale
+        // before anything looks at it. Children are pushed before the node is
+        // freed, because freeing clears its links.
+        //
+        // `tests/copy_forward_nested_churn.rs` drives the alternation that
+        // would expose a regression here.
+        let mut stack = vec![old_root];
+        while let Some(n) = stack.pop() {
+            if n.is_none() || n == tree.root() || !tree.is_alive(n) {
+                continue;
+            }
+            let mut c = tree.first_child(n);
+            while c.is_some() {
+                stack.push(c);
+                c = tree.next_sibling(c);
+            }
+            if let Some(raw) = tree.lnode(n) {
+                layout.remove(LayoutNode::from_raw(raw));
+            }
+            meta.remove(&n);
+            self.node_style.remove(&n);
+            self.node_computed.remove(&n);
+            self.node_layout_style.remove(&n);
+            tree.free_one(n);
+        }
+        debug_assert_eq!(
+            layout.node_count(),
+            tree.len(),
+            "F2.2 layout leak: {} taffy nodes for {} arena nodes — a node was \
+             neither reused nor freed",
+            layout.node_count(),
+            tree.len(),
         );
+        debug_assert_eq!(
+            meta.len(),
+            tree.len(),
+            "F2.2 meta leak: {} meta entries for {} arena nodes",
+            meta.len(),
+            tree.len(),
+        );
+
+        // F2.2: carry forward the span records of scopes that were never
+        // visited this build because an ancestor took the memo-hit path.
+        //
+        // They still name the right nodes — nothing moved — so the test is
+        // simply whether those nodes survived the free walk. A scope that
+        // really did leave the view had its nodes re-lowered or dropped, so
+        // its root is dead by now and the record is discarded. This replaces
+        // the old per-span remap, which had to walk each copied span to find
+        // the nested records and rewrite their roots.
+        for (k, r) in &self.prev_spans {
+            if !self.scope_spans.contains_key(k) && tree.is_alive(r.root) {
+                self.scope_spans.insert(*k, *r);
+            }
+        }
 
         layout.compute(root_lnode, self.size);
         if self.rtl {
             layout.mirror_rtl(root_lnode);
         }
-        for (node, lnode) in &built {
-            let b = layout.bounds(*lnode);
-            tree.set_bounds(*node, b);
-            // F2.1: remember which taffy node laid this one out, so next
-            // frame's `copy_node` can hand it straight back.
-            tree.set_lnode(*node, lnode.raw());
+
+        // F2.2: bounds and clip for every live node, not just the ones this
+        // build lowered. A spliced span is not walked, so its nodes are not
+        // enumerated anywhere else — and their absolute positions still change
+        // whenever something above them resizes.
+        for node in tree.iter_live().collect::<Vec<_>>() {
+            let Some(raw) = tree.lnode(node) else {
+                continue;
+            };
+            let b = layout.bounds(LayoutNode::from_raw(raw));
+            tree.set_bounds(node, b);
             // Propagate clipping to the hit-test tree: a `clip: true` node (e.g. a
             // Scrollable viewport) must reject pointer events on descendants that
             // overflow its box. Otherwise scrolled-out rows — laid out *above* the
@@ -3335,11 +3445,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // need it set.
             let clip_on = self
                 .node_style
-                .get(node)
+                .get(&node)
                 .and_then(|s| s.clip)
                 .map(|c| c != lumen_style::StyleClip::None)
-                .unwrap_or_else(|| meta.get(node).is_some_and(|m| m.clip));
-            tree.set_clip(*node, clip_on.then_some(b));
+                .unwrap_or_else(|| meta.get(&node).is_some_and(|m| m.clip));
+            tree.set_clip(node, clip_on.then_some(b));
         }
 
         // B.2b: container queries resolved against the *previous* layout's
@@ -3365,67 +3475,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 return;
             }
         }
-
-        // F2.1: release the taffy nodes of everything that was NOT copied
-        // forward. `copy_node` removes each node it reuses from `prev_meta`,
-        // so what is left in there after the build is exactly the set of
-        // previous-frame nodes this frame did not adopt — the re-lowered
-        // spans and the rebuilt spine. Without this the tree grows by the
-        // size of the changed span every frame.
-        if self.layout_reuse {
-            // ORDER MATTERS, and not for the reason it looks like.
-            //
-            // `taffy::TaffyTree::remove` nulls the parent pointer of every
-            // node in the removed node's child list. A stale container's list
-            // still names the span roots this frame REUSED (they were its
-            // children last frame), so removing it sets `parents[R] = None`
-            // even though a live container has just adopted R. That is
-            // invisible until R itself goes stale in some later frame: with
-            // its parent pointer nulled, taffy's `children.retain` cleans the
-            // wrong list and leaves R's dead key inside a live container's
-            // children — and removing THAT container indexes a dead slot and
-            // panics with "invalid SlotMap key used".
-            //
-            // Walking `prev_meta` in hash order hits this within a few frames
-            // (`virtual_list_memo.rs` did). Removing parents before children
-            // does not: a stale node's list-owner is its previous-frame
-            // parent, and `copy_span` copies whole subtrees, so a stale node's
-            // ancestors are always stale too. Removing the parent first drops
-            // its child list wholesale, so no dead key is ever left behind.
-            //
-            // The walk skips reused subtrees entirely — a node still absent
-            // from `prev_meta` was copied forward, and so was everything under
-            // it — which keeps this O(stale), not O(tree).
-            let mut stack = vec![self.prev_tree.root()];
-            while let Some(n) = stack.pop() {
-                if n.is_none() || !self.prev_meta.contains_key(&n) {
-                    continue;
-                }
-                if let Some(raw) = self.prev_tree.lnode(n) {
-                    layout.remove(LayoutNode::from_raw(raw));
-                }
-                let mut c = self.prev_tree.first_child(n);
-                while c.is_some() {
-                    stack.push(c);
-                    c = self.prev_tree.next_sibling(c);
-                }
-            }
-            debug_assert_eq!(
-                layout.node_count(),
-                tree.len(),
-                "F2.1 layout leak: {} taffy nodes for {} arena nodes — a stale \
-                 node was neither reused nor freed",
-                layout.node_count(),
-                tree.len(),
-            );
-        }
-
-        // F2.1: remember what this build copied, for next build's decision on
-        // whether retaining the layout tree pays. Recorded HERE, at the
-        // commit, and not at the top of the rebuild — `pump` zeroes
-        // `nodes_copied` before `rebuild_inner` is ever called, so reading it
-        // there always saw 0 and silently disabled reuse for good.
-        self.prev_nodes_copied = self.nodes_copied;
 
         self.layout_scratch = layout;
         self.tree = tree;
@@ -3500,12 +3549,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// Animations are keyed by `StableId`, so this is a lookup per node that
     /// has an id — and only ids can animate, so nodes without one are free.
     /// Cheap enough to run per copied span, and it replaces a global veto.
-    fn span_has_running_anim(&self, nodes: &[NodeIndex]) -> bool {
+    fn span_has_running_anim(
+        &self,
+        nodes: &[NodeIndex],
+        meta: &HashMap<NodeIndex, NodeMeta>,
+    ) -> bool {
         if self.prop_anims.is_empty() && self.key_anims.is_empty() {
             return false; // the overwhelmingly common case
         }
         nodes.iter().any(|n| {
-            let Some(id) = self.prev_meta.get(n).and_then(|m| m.id.as_ref()) else {
+            let Some(id) = meta.get(n).and_then(|m| m.id.as_ref()) else {
                 return false;
             };
             self.key_anims.get(id).is_some_and(|(_, done)| !done)
@@ -3535,170 +3588,72 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         h.finish()
     }
 
-    /// Copy a memo-hit scope's span forward from the previous build (A.3.2):
-    /// re-insert its nodes under `parent` with the retained meta, styles, and
-    /// layout styles moved (not cloned) across, flags refreshed against the
-    /// current focus/hover/pressed ids, and taffy nodes rebuilt from the
-    /// retained layout styles. Returns `None` (caller falls back to a full
-    /// lower) if any retained entry is missing.
-    #[allow(clippy::too_many_arguments)]
-    fn copy_span(
+    /// Splice a memo-hit scope's span into this build (F2.2).
+    ///
+    /// The arena is retained across frames, so the span's nodes are already
+    /// exactly right — same `NodeIndex`, same meta, same styles, same taffy
+    /// nodes, same interaction flags. All that is left is to move the span
+    /// *root* under its new parent; the subtree beneath it is not visited at
+    /// all (F2.3), which is what makes a memo hit O(1) instead of O(span).
+    ///
+    /// Everything the old copy path did per node is now a non-event:
+    ///
+    /// * **Re-keying the side tables** — entries never move, because the node
+    ///   keeps its index.
+    /// * **Refreshing interaction flags** — the node never left the tree, and
+    ///   `restyle_visual` keeps flags current on the live tree as pointer and
+    ///   focus state change.
+    /// * **Remapping nested span records** — nested spans still name the same
+    ///   roots. They are carried forward wholesale at the end of the build.
+    ///
+    /// Returns `None` (caller lowers normally) if the span's nodes are gone,
+    /// or if AN1 applies.
+    fn splice_span(
         &mut self,
         key: IdHash,
         span: SpanRec,
         hash: u64,
         tree: &mut Tree,
-        layout: &mut P::Layout,
-        meta: &mut HashMap<NodeIndex, NodeMeta>,
-        built: &mut Vec<(NodeIndex, LayoutNode)>,
+        meta: &HashMap<NodeIndex, NodeMeta>,
         parent: Option<NodeIndex>,
     ) -> Option<(NodeIndex, LayoutNode)> {
-        // Pre-validate: every node in the span must still have its retained
-        // work (a nested scope inside this span may have been copied out
-        // already — spans are disjoint per build, so that cannot happen, but
-        // a bail here keeps this robust rather than half-mutated).
-        let mut prev_nodes = Vec::with_capacity(span.count as usize);
-        let mut stack = vec![span.root];
-        while let Some(n) = stack.pop() {
-            if !self.prev_meta.contains_key(&n) || !self.prev_layout_style.contains_key(&n) {
+        let root = span.root;
+        if !tree.is_alive(root) {
+            return None;
+        }
+        let lnode = LayoutNode::from_raw(tree.lnode(root)?);
+        // AN1: refuse to splice a span containing an animating node — its
+        // styles are mid-interpolation, so the retained work is stale.
+        //
+        // This is the one check that still needs the span's node list, so it
+        // is gated on an animation actually running. With none (the
+        // overwhelmingly common case) a memo hit touches one node.
+        if !self.prop_anims.is_empty() || !self.key_anims.is_empty() {
+            let nodes = tree.subtree_preorder(root);
+            if self.span_has_running_anim(&nodes, meta) {
                 return None;
             }
-            prev_nodes.push(n);
-            let mut c = self.prev_tree.first_child(n);
-            while c.is_some() {
-                stack.push(c);
-                c = self.prev_tree.next_sibling(c);
-            }
         }
-        if prev_nodes.len() != span.count as usize {
-            return None;
+        // Move the span under its new parent. `detach` is O(1) (F2.2 made the
+        // child list doubly linked), and the previous parent — which is being
+        // rebuilt — is left with a correct child list, so the free walk below
+        // enumerates only dead nodes.
+        tree.detach(root);
+        match parent {
+            Some(p) => tree.attach_last_child(p, root),
+            None => tree.set_root(root),
         }
-        // AN1: refuse to copy a span that contains an animating node. Its
-        // styles are mid-interpolation, so retained work is stale by
-        // definition — but that is true only of the animating span, not of the
-        // rest of the tree, which is what the old app-wide gate assumed.
-        if self.span_has_running_anim(&prev_nodes) {
-            return None;
-        }
-        // Nested scopes inside this span keep working on the next build:
-        // remap their span records onto the copied nodes as we go.
-        let nested: Vec<(IdHash, SpanRec)> = prev_nodes
-            .iter()
-            .filter_map(|n| self.prev_spans_by_root.get(n))
-            .filter(|k| **k != key)
-            .filter_map(|k| self.prev_spans.get(k).map(|r| (*k, *r)))
-            .collect();
-        let mut root_map: HashMap<NodeIndex, NodeIndex> = HashMap::default();
-        let (node, lnode) =
-            self.copy_node(span.root, parent, tree, layout, meta, built, &mut root_map);
         self.scope_spans.insert(
             key,
             SpanRec {
-                root: node,
+                root,
                 count: span.count,
                 ctx_hash: hash,
                 impure: false,
             },
         );
-        for (k, r) in nested {
-            if let Some(new_root) = root_map.get(&r.root) {
-                self.scope_spans.insert(
-                    k,
-                    SpanRec {
-                        root: *new_root,
-                        ..r
-                    },
-                );
-            }
-        }
-        Some((node, lnode))
-    }
-
-    /// Recursive worker for [`copy_span`]: one previous-build node → one new
-    /// node, retained work moved across, children in order.
-    #[allow(clippy::too_many_arguments)]
-    fn copy_node(
-        &mut self,
-        prev: NodeIndex,
-        parent: Option<NodeIndex>,
-        tree: &mut Tree,
-        layout: &mut P::Layout,
-        meta: &mut HashMap<NodeIndex, NodeMeta>,
-        built: &mut Vec<(NodeIndex, LayoutNode)>,
-        root_map: &mut HashMap<NodeIndex, NodeIndex>,
-    ) -> (NodeIndex, LayoutNode) {
-        let node = match parent {
-            None => tree.insert_root(),
-            Some(p) => tree.insert_child(p),
-        };
-        root_map.insert(prev, node);
-        let m = self
-            .prev_meta
-            .remove(&prev)
-            .expect("validated by copy_span");
-        // Interactive-state flags are host state, not retained work — refresh
-        // them against the *current* ids (the same rule build_node applies).
-        let mut flags = self.prev_tree.flags(prev);
-        flags.remove(NodeFlags::FOCUSED | NodeFlags::HOVERED | NodeFlags::PRESSED);
-        if m.id.is_some() && m.id == self.focused_id {
-            flags |= NodeFlags::FOCUSED;
-        }
-        if m.id.is_some() && m.id == self.hovered_id {
-            flags |= NodeFlags::HOVERED;
-        }
-        if m.id.is_some() && self.pressed.as_ref().is_some_and(|(_, id)| *id == m.id) {
-            flags |= NodeFlags::PRESSED;
-        }
-        tree.set_flags(node, flags);
-        tree.set_z(node, self.prev_tree.z(prev));
-        if let Some(st) = self.prev_node_style.remove(&prev) {
-            self.node_style.insert(node, st);
-        }
-        if let Some(cp) = self.prev_node_computed.remove(&prev) {
-            self.node_computed.insert(node, cp);
-        }
-        let lstyle = self
-            .prev_layout_style
-            .remove(&prev)
-            .expect("validated by copy_span");
-        meta.insert(node, m);
-        let mut child_lnodes = Vec::new();
-        let mut c = self.prev_tree.first_child(prev);
-        while c.is_some() {
-            let (_, l) = self.copy_node(c, Some(node), tree, layout, meta, built, root_map);
-            child_lnodes.push(l);
-            c = self.prev_tree.next_sibling(c);
-        }
-        // CP2.2: build the taffy node from a BORROW, then retain the style.
-        // This used to clone the LayoutStyle (256 bytes) purely because
-        // `leaf`/`container` took ownership while `node_layout_style` also
-        // needed a copy — on the memo-hit path, per node.
-        // F2.1: a memo-hit span keeps the taffy nodes it was laid out with.
-        // Every node in the span is copied, so the subtree's internal
-        // parent/child links are already correct and nothing needs
-        // re-parenting here — the span *root* is adopted when the rebuilt
-        // container above it takes it as a child, and taffy overwrites the
-        // parent pointer at that moment. Measured at 3000 rows: re-minting
-        // the tree costs 540 us against 300 us for reuse
-        // (`benches-competitive/src/bin/probe_f2_reparent.rs`).
-        //
-        // The style is not re-applied: `lstyle` was moved across from the
-        // previous build unchanged, so the node's taffy style already matches.
-        // Calling `set_style` would be worse than a no-op — it dirties the
-        // node and forces the flex column to re-solve (650 us in the probe).
-        let reused = self
-            .layout_reuse
-            .then(|| self.prev_tree.lnode(prev))
-            .flatten();
-        let lnode = match reused {
-            Some(raw) => LayoutNode::from_raw(raw),
-            None if child_lnodes.is_empty() => layout.leaf(&lstyle),
-            None => layout.container(&lstyle, &child_lnodes),
-        };
-        self.node_layout_style.insert(node, lstyle);
-        built.push((node, lnode));
-        self.nodes_copied += 1;
-        (node, lnode)
+        self.nodes_copied += span.count;
+        Some((root, lnode))
     }
 
     /// The node span a [`BuildCx::scope`](crate::BuildCx::scope) produced this
@@ -3966,7 +3921,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         tree: &mut Tree,
         layout: &mut P::Layout,
         meta: &mut HashMap<NodeIndex, NodeMeta>,
-        built: &mut Vec<(NodeIndex, LayoutNode)>,
         parent: Option<NodeIndex>,
         in_overlay: bool,
     ) -> (NodeIndex, LayoutNode) {
@@ -3986,9 +3940,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             if self.allow_copy_forward {
                 if let Some(span) = self.prev_spans.get(&key).copied() {
                     if !span.impure && span.ctx_hash == hash {
-                        if let Some(res) =
-                            self.copy_span(key, span, hash, tree, layout, meta, built, parent)
-                        {
+                        if let Some(res) = self.splice_span(key, span, hash, tree, meta, parent) {
                             return res;
                         }
                     }
@@ -4014,8 +3966,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             self.impure_seen += 1;
         }
         self.nodes_rebuilt += 1;
+        // F2.2: the tree is retained, so the previous frame's root is still
+        // present while this one is being built — `insert_root` would assert.
+        // The new node is created detached and claims the root afterwards; the
+        // old root is freed by the walk at the end of the rebuild.
         let node = match parent {
-            None => tree.insert_root(),
+            None => {
+                let n = tree.insert_orphan();
+                tree.set_root(n);
+                n
+            }
             Some(p) => tree.insert_child(p),
         };
         // Overlay subtrees (dropdown menus, popovers, tooltips) paint in a final
@@ -4388,10 +4348,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         if pushed_disabled {
             self.disabled_count += 1;
         }
-        let child_built: Vec<(NodeIndex, LayoutNode)> = el
+        let child_lnodes: Vec<LayoutNode> = el
             .children
             .into_iter()
-            .map(|c| self.build_node(c, tree, layout, meta, built, Some(node), this_overlay))
+            .map(|c| {
+                self.build_node(c, tree, layout, meta, Some(node), this_overlay)
+                    .1
+            })
             .collect();
         if pushed_desc {
             self.desc_stack.pop();
@@ -4405,7 +4368,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         if pushed_disabled {
             self.disabled_count -= 1;
         }
-        let child_lnodes: Vec<LayoutNode> = child_built.iter().map(|(_, l)| *l).collect();
         // A.3.2: retain the final (post-css) layout style so a copied-forward
         // span can rebuild its taffy nodes without re-deriving it.
         self.node_layout_style.insert(node, style.clone());
@@ -4414,6 +4376,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         } else {
             layout.container(&style, &child_lnodes)
         };
+        // F2.2: remember which taffy node laid this one out. Recorded here,
+        // at creation, rather than in a post-pass over a `built` vector —
+        // spliced spans are never enumerated, so there is no such vector any
+        // more, and the bounds pass reads this back off the arena instead.
+        tree.set_lnode(node, lnode.raw());
 
         // Move the remaining fields into the retained NodeMeta (no clones).
         meta.insert(
@@ -4457,7 +4424,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 display_text: ellipsized,
             },
         );
-        built.push((node, lnode));
         if let Some(key) = span_key {
             self.scope_spans.insert(
                 key,

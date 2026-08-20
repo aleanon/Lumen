@@ -26,7 +26,12 @@ The semantic tree is the single source of truth for accessibility, test locators
 ```json
 {
   "node": "nx-418addb932da6e1a98fc688e3546eb27",  // structural handle: "nx-" + 32 hex (ID1)
-  "index": 42,                        // arena slot, debugging only — NOT an identity
+  "index": 42,                        // arena slot, debugging only — NOT an identity.
+                                      // F2.2: the arena persists across frames, so this is now
+                                      // STABLE for an unchanged subtree and RECYCLED for a
+                                      // changed one — the opposite of the pre-F2.2 behaviour
+                                      // (re-minted every rebuild). Neither is a contract; use
+                                      // "node".
   "id": "save-button",                // StableId if set, else absent
   "role": "button",
   "label": "Save",                    // accessible name (explicit or derived from text)

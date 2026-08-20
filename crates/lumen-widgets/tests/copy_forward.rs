@@ -1,30 +1,30 @@
-//! A.3.2 (docs/plan-retained-pipeline.md): the memo-hit **copy-forward** path.
-//! When `cx.scope` reports a hit, the runtime does not re-lower its subtree —
-//! `copy_span`/`copy_node` move the retained meta, styles and layout styles
-//! across from the previous build and re-derive only what is host state
-//! (interaction flags, the taffy node, the parent link).
+//! A.3.2 / F2.2: the memo-hit **copy-forward** path.
+//!
+//! When `cx.scope` reports a hit, the runtime does not re-lower its subtree.
+//! Since F2.2 it does not copy it either: the arena is retained across frames,
+//! so `splice_span` moves the span *root* under its new parent and never
+//! descends into it. The nodes keep their `NodeIndex`, their meta, their
+//! styles and their taffy nodes.
 //!
 //! This file exists because that path had **no dedicated coverage**: it was
 //! created empty in July 2025 and stayed 1 byte. These tests pin the
-//! *behaviour* (what a copied span must look like from the outside) rather
-//! than any single line, because F2 rewrites how spans carry their state.
+//! *behaviour* (what a spliced span must look like from the outside) rather
+//! than any single line — which is why they survived the F2.2 rewrite that
+//! deleted both functions they were originally written against.
 //!
-//! Ablations run when they were written, to check they bite:
+//! Ablations, re-run against the F2.2 implementation:
 //!
 //! | ablation | result |
 //! |---|---|
-//! | `copy_span` always returns `None` (memo hits re-lowered) | **3/3 fail** |
-//! | nested span records not remapped onto the copied nodes | **1/3 fail** (the nested test) |
-//! | `copy_node`'s interaction-flag refresh removed | 0/3 fail — see below |
+//! | `splice_span` always declines (memo hits re-lowered) | **3/3 fail** |
+//! | span root attached without detaching it first | **panics** in `Tree::attach_last_child` |
+//! | nested span records not carried forward | **1/3 fail** (the nested test) |
 //!
-//! That last row is deliberate, not a gap in the tests. `restyle_visual`
-//! (A.5a) refreshes interaction flags on the live tree the moment pointer or
-//! focus state changes, so `prev_tree` already carries correct flags by the
-//! time any rebuild copies a span — `copy_node`'s refresh is defensive
-//! redundancy on today's code paths and is not independently observable from
-//! outside. It is still the right thing for `copy_node` to do (it must not
-//! depend on another pass having run first), and these tests will catch it if
-//! F2 ever makes a copied span the *only* thing carrying that state.
+//! One ablation that used to be listed here is gone with the code it tested:
+//! `copy_node` refreshed interaction flags per copied node, and removing that
+//! failed nothing, because `restyle_visual` (A.5a) already keeps flags current
+//! on the live tree. F2.2 makes that structural — a spliced node never leaves
+//! the tree, so there are no flags to refresh.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -149,12 +149,13 @@ fn hover_state_inside_a_copied_span_tracks_the_live_pointer() {
     h.assert_view_coherent();
 }
 
-/// `copy_span` remaps the span records of scopes *nested* inside the span it
-/// copies (`root_map`). If that remapping is wrong the inner scope's recorded
-/// root points at a dead node, and the next build either misses the memo or
-/// splices onto the wrong subtree.
+/// A scope *nested* inside a spliced span is never visited during the build —
+/// its enclosing closure does not run. Its span record must survive anyway, or
+/// the next build cannot find it. F2.2 carries such records forward by testing
+/// whether their root is still alive; if that is wrong, the inner scope either
+/// misses its memo or splices onto a dead subtree.
 #[test]
-fn nested_scopes_are_remapped_when_the_outer_span_is_copied() {
+fn nested_scopes_survive_when_the_outer_span_is_spliced() {
     let outer_runs = Rc::new(Cell::new(0u32));
     let inner_runs = Rc::new(Cell::new(0u32));
     let (o, i) = (outer_runs.clone(), inner_runs.clone());
@@ -196,13 +197,13 @@ fn nested_scopes_are_remapped_when_the_outer_span_is_copied() {
     let tick: Signal<usize> = h.runtime().signal("tick", || 0usize);
     tick.set(h.runtime(), 1);
     let stats = h.pump();
-    assert!(stats.nodes_copied > 0, "the outer span was not copied");
+    assert!(stats.nodes_copied > 0, "the outer span was not spliced");
     assert_eq!(outer_runs.get(), o0, "the outer scope re-ran");
     assert_eq!(inner_runs.get(), i0, "the inner scope re-ran");
 
     let (_, inner_after) = h
         .scope_span(ScopePath::root().child("outer").child("inner"))
-        .expect("nested span survives the copy");
+        .expect("nested span survives the splice");
     assert_eq!(inner_after, inner_before, "nested span count changed");
     // There is no public liveness accessor for a raw `NodeIndex`, and adding
     // one just for an assert would widen the API for no user. The remap is

@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc a41ed32f17234acd7a563fb4b0269a1eaa54b7a622d6c77cd5ccd2c01a4f3e36 # shrinks to ops = [Insert(0), Insert(0), Insert(469745149756068464), Reparent(1616990292272344328, 11748356410131063)]
+cc 92b8e022577c4b7b8279d543811db9042998b6eab0cb76cc37013e1a814f4715 # shrinks to ops = [Insert(0), Insert(0), Insert(12597758692417729818), Remove(13963946481272195711), Remove(13379698741508768831), Remove(0)], px = 0, py = 0

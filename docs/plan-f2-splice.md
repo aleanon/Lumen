@@ -86,13 +86,13 @@ Removes `to_taffy` (4.2%), `slotmap::try_insert_with_key` (3.0%) and their
 share of the memmove. Needs a removal path for the taffy nodes of spans that
 *were* rebuilt, or the tree grows without bound.
 
-### F2.2 — reuse arena nodes for copied spans
+### F2.2 — reuse arena nodes for copied spans — **LANDED 2026-08-20, −35.7%**
 
 The retained `Tree` keeps its `NodeIndex` for a copied node, so the nine side
 tables are not re-keyed and `NodeMeta` is not moved. This is where the memmove
 goes.
 
-### F2.3 — stop walking copied spans at all
+### F2.3 — stop walking copied spans at all — **LANDED 2026-08-20 with F2.2** (identity retention makes the walk unreachable rather than merely unnecessary; the remaining O(live) pass is the bounds/clip update, which is irreducible — see 06-task-graph)
 
 With F2.1 and F2.2, a copied span is already identical in place; the walk over
 it becomes pure bookkeeping. Removing it is what turns O(tree) into O(changed)

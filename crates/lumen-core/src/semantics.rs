@@ -379,8 +379,15 @@ pub struct SemanticsNode {
     ///
     /// Kept for one release as a debugging/screenshot-annotation
     /// cross-reference while callers migrate off positional ids. It is NOT an
-    /// identity: it is re-minted every rebuild and will be recycled once the
-    /// arena persists.
+    /// identity.
+    ///
+    /// F2.2 made the arena persist, which is the case that sentence
+    /// anticipated: a node in an unchanged subtree now keeps its slot across
+    /// frames, while a rebuilt one takes whatever slot the free list hands
+    /// back. Stable where it used to churn, recycled where it used to be
+    /// fresh — so it is no more a contract than it was before. Use
+    /// [`node`](Self::node), which is derived from the node's path through
+    /// the tree.
     pub index: u32,
     /// Author id, if set.
     pub id: Option<StableId>,
