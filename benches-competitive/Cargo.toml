@@ -86,6 +86,11 @@ harness = false
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Symbols for `perf`. Debuginfo does not change codegen, so the profiled
+# binary is the same one the benchmarks time — which is the point: profiling a
+# differently-optimised build would attribute costs that do not exist in the
+# measured one.
+debug = true
 
 [profile.bench]
 lto = "thin"

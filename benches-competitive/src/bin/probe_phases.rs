@@ -1,8 +1,13 @@
-//! Bisect Lumen's per-row steady-state cost by REMOVING work from the view.
+//! Subtractive bisection of Lumen's per-row steady-state cost.
 //!
-//! No profiler on this box (perf_event_paranoid=4, no valgrind), so the method
-//! is subtractive: build variants that each drop one candidate cost and see
-//! what the frame time does. 3000 rows, one changing per frame, NullRenderer.
+//! Each variant runs in its OWN process invocation (`probe_phases A|B|C|D`).
+//! Run sequentially in one process they shared allocator state — the first
+//! variant warmed the pages the next one measured — and the first version of
+//! this probe reported a +/-40% spread even pinned to a P-core. 400 timed
+//! iterations after 100 warm-up, median reported, p10/p90 shown so the spread
+//! is visible rather than assumed. Pin it: `taskset -c 2 ...` (this box is a
+//! hybrid i9-13900KF; migrating between P- and E-cores moves the number more
+//! than anything being measured).
 use kurbo::Size;
 use lumen_core::state::Signal;
 use lumen_layout::Dim;
@@ -10,7 +15,7 @@ use lumen_widgets::{widgets, App, BuildCx, Element};
 use std::time::Instant;
 
 const N: usize = 3000;
-const ITERS: u32 = 60;
+const ITERS: usize = 400;
 
 struct NullRenderer;
 impl lumen_render::Renderer for NullRenderer {
@@ -27,62 +32,54 @@ fn time(label: &str, build: impl Fn(&mut BuildCx) -> Element + 'static) {
         .run_headless(Size::new(400.0, 800.0));
     h.pump();
     let sig: Signal<i64> = h.runtime().signal("n", || 0);
-    for _ in 0..5 { sig.update(h.runtime(), |v| *v += 1); h.pump(); }
-    let t0 = Instant::now();
-    for _ in 0..ITERS { sig.update(h.runtime(), |v| *v += 1); h.pump(); }
-    let us = t0.elapsed().as_secs_f64() * 1e6 / f64::from(ITERS);
-    println!("{label:<44} {us:>9.1} us   {:>7.3} us/row", us / N as f64);
+    for _ in 0..100 { sig.update(h.runtime(), |v| *v += 1); h.pump(); }
+    let mut s = Vec::with_capacity(ITERS);
+    for _ in 0..ITERS {
+        sig.update(h.runtime(), |v| *v += 1);
+        let t = Instant::now();
+        h.pump();
+        s.push(t.elapsed().as_secs_f64() * 1e6);
+    }
+    s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let med = s[s.len() / 2];
+    println!(
+        "{label:<40} {med:>8.1} us  {:>6.3} us/row   (p10 {:.0} p90 {:.0})",
+        med / N as f64, s[s.len() / 10], s[s.len() * 9 / 10]
+    );
 }
 
 fn main() {
-    // A. baseline: the benchmark's own view
-    time("A text rows (benchmark baseline)", |cx| {
-        let bump = cx.signal("n", || 0i64).get(cx.runtime());
-        widgets::column((0..N).map(|i| if i == 0 {
-            widgets::text(format!("counter: {bump}"))
-        } else { widgets::text(format!("row {i}")) }).collect::<Vec<_>>())
-    });
-
-    // B. same shape, but every row carries an explicit size: text is still
-    //    shaped for painting, but layout no longer has to MEASURE it.
-    time("B text rows + explicit width/height", |cx| {
-        let bump = cx.signal("n", || 0i64).get(cx.runtime());
-        widgets::column((0..N).map(|i| {
-            let mut e = if i == 0 {
+    match std::env::args().nth(1).unwrap_or_else(|| "A".into()).as_str() {
+        // A. the benchmark's own view
+        "A" => time("A text rows (baseline)", |cx| {
+            let bump = cx.signal("n", || 0i64).get(cx.runtime());
+            widgets::column((0..N).map(|i| if i == 0 {
                 widgets::text(format!("counter: {bump}"))
-            } else { widgets::text(format!("row {i}")) };
-            e.style.width = Dim::px(400.0);
-            e.style.height = Dim::px(16.0);
-            e
-        }).collect::<Vec<_>>())
-    });
-
-    // C. no text at all: empty fixed-size boxes. Isolates the per-node
-    //    pipeline (element -> tree -> taffy -> paint) from anything textual.
-    time("C empty fixed-size boxes (no text)", |cx| {
-        let bump = cx.signal("n", || 0i64).get(cx.runtime());
-        let _ = bump;
-        widgets::column((0..N).map(|_| {
-            let mut e = Element::column(Vec::new());
-            e.style.width = Dim::px(400.0);
-            e.style.height = Dim::px(16.0);
-            e
-        }).collect::<Vec<_>>())
-    });
-
-    // D. C, but the signal is read so the frame is genuinely dirty each time
-    //    (guards against C being optimised into an idle pump).
-    time("D empty boxes, one carries the signal", |cx| {
-        let bump = cx.signal("n", || 0i64).get(cx.runtime());
-        widgets::column((0..N).map(|i| {
-            let mut e = if i == 0 {
-                widgets::text(format!("{bump}"))
-            } else {
-                Element::column(Vec::new())
-            };
-            e.style.width = Dim::px(400.0);
-            e.style.height = Dim::px(16.0);
-            e
-        }).collect::<Vec<_>>())
-    });
+            } else { widgets::text(format!("row {i}")) }).collect::<Vec<_>>())
+        }),
+        // B. text still shaped for painting, but layout need not MEASURE it
+        "B" => time("B text rows + explicit size", |cx| {
+            let bump = cx.signal("n", || 0i64).get(cx.runtime());
+            widgets::column((0..N).map(|i| {
+                let mut e = if i == 0 {
+                    widgets::text(format!("counter: {bump}"))
+                } else { widgets::text(format!("row {i}")) };
+                e.style.width = Dim::px(400.0);
+                e.style.height = Dim::px(16.0);
+                e
+            }).collect::<Vec<_>>())
+        }),
+        // C. no text at all: the per-node pipeline floor
+        _ => time("C empty boxes, no text", |cx| {
+            let bump = cx.signal("n", || 0i64).get(cx.runtime());
+            widgets::column((0..N).map(|i| {
+                let mut e = if i == 0 {
+                    widgets::text(format!("{bump}"))
+                } else { Element::column(Vec::new()) };
+                e.style.width = Dim::px(400.0);
+                e.style.height = Dim::px(16.0);
+                e
+            }).collect::<Vec<_>>())
+        }),
+    }
 }

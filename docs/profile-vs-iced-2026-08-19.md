@@ -1,5 +1,13 @@
 # PROF1 — where Lumen's 8× against iced actually goes (2026-08-19)
 
+> **Updated 2026-08-20 with a real profile.** `perf_event_paranoid` was
+> lowered, so the 45% this document could not attribute is now attributed —
+> see *§ The missing 45%, found*. **Three claims below are corrected there:**
+> "text measurement is 5% of the frame" was noise (the variant that removes it
+> measures *slower*); the 45% is no longer unaccounted; and "the hashmaps are
+> not the problem" is half wrong — the per-node maps are minor, but the **text
+> shape cache's** hashing and key comparison are ~14% of a frame.
+
 BENCH2 established the gap and localised it to "text caching in the steady
 state, not the pipeline". That was half right and the wrong half was load
 bearing. This is the profile.
@@ -190,6 +198,121 @@ is shaping-cache lookup and glyph-run emission, which scale with what is
 actually drawn. Optimising here would move a number that is already sound.
 
 ---
+
+## The missing 45%, found (2026-08-20)
+
+`perf` now works (`perf_event_paranoid=1`). Method notes first, because two of
+them changed numbers:
+
+* **Flat profile, not DWARF.** A first pass with `--call-graph dwarf,16384`
+  reported 54% of the frame in the kernel. That was mostly the profiler: it
+  copies 16 KB of stack per sample. A flat profile puts the kernel at **16%**.
+  Call graphs below come from `--call-graph fp` on a build with
+  `-C force-frame-pointers=yes`, which costs nothing.
+* **Pin to a P-core.** This box is a hybrid i9-13900KF (8 P + 16 E). Unpinned,
+  the same measurement varied ±40%; `taskset -c 2` brings it to ±1%.
+* **One variant per process.** The subtractive probe ran its variants
+  sequentially in one process, so the first warmed the allocator for the next.
+
+### Flat profile — the benchmark's own view, 3000 rows, pinned
+
+| symbol | share |
+|---|---:|
+| `__memmove_avx_unaligned_erms` | **22.8%** |
+| `build_node` | 7.2% |
+| `core::hash::sip::Hasher::write` | 5.4% |
+| `taffy::compute::flexbox::compute_preliminary` | 4.6% |
+| `lumen_text::ShapeKey as PartialEq>::eq` | 4.3% |
+| `_int_malloc` | 3.2% |
+| `__memcmp_avx2_movbe` | 2.9% |
+| `LayoutStyle::to_taffy` | 2.1% |
+| `taffy` compute_child_layout | 2.0% |
+| `malloc_consolidate` | 1.8% |
+| `floorf` | 1.7% |
+| `drop_in_place<LayoutTree>` | 1.7% |
+| `drop_in_place<NodeMeta>` | 1.4% |
+| `cfree` | 1.3% |
+
+### Bucket 1 — memmove, 22.8%: containers regrown from empty every frame
+
+With frame-pointer call graphs, all of it resolves:
+
+| chain | share of frame |
+|---|---:|
+| `build_node` → `LayoutTree::leaf_ref` → slotmap `try_insert_with_key` → `RawVec::grow_one` → `realloc` | 7.9% |
+| `build_node` → `LayoutTree::leaf_ref` → direct memmove (the `Style` copy) | 4.8% |
+| `build_node` → `hashbrown::HashMap::insert` → memmove (large values) | 5.6% |
+| `build_node` → `lumen_core::tree::Tree::alloc` → `grow_one` | ~1.1% |
+
+Every one is the same shape: **a container that starts empty each frame and
+grows by doubling**, memmoving its contents at each step. Confirmed in source
+— `rebuild_inner` does `let mut layout = P::Layout::default()` (`app.rs:3257`),
+so taffy's slotmap grows 0 → 3001 every frame.
+
+### Bucket 2 — the text shape cache costs 14% to *look up*
+
+| symbol | share |
+|---|---:|
+| `sip::Hasher::write` | 5.4% |
+| `ShapeKey as PartialEq>::eq` | 4.3% |
+| `__memcmp_avx2_movbe` | 2.9% |
+| `ShapeKey::hash` | 0.8% |
+| `ShapeKey::new` | 0.4% |
+| `TextEngine::shaped` | 0.6% |
+| **total** | **~14.3%** |
+
+`shape_cache` is a `HashMap<ShapeKey, _>` built with `HashMap::new()` — the
+**std default hasher, SipHash**. `ShapeKey` owns a `String` of the full text
+plus three `Option<String>`s, and `ShapeKey::new` does `text.to_string()`, so
+every lookup allocates the key it is about to hash. On a hit, `PartialEq`
+compares the whole string again.
+
+**Lumen spends ~14% of a frame looking up a cache in order to avoid work it
+then does not do.** iced spends none of it: the shaped paragraph lives in the
+widget's own persistent `tree.state` and is reached by a pointer.
+
+*Validated, not theorised:* swapping that one `HashMap`'s hasher to an
+FxHash-style one and re-measuring pinned, three runs each —
+**2467 µs → 2361 µs, a 4.4% frame-time win from one line**, matching the 4.7%
+the profile predicted. (The experiment was reverted; it also needs `sweep` to
+become generic over the hasher.)
+
+### Bucket 3 — taffy, ~8.7%
+
+`compute_preliminary` 4.6%, `compute_child_layout` 2.0%, `to_taffy` 2.1% —
+plus the 12.7% of memmove above that is slotmap growth and `Style` copying.
+
+### What this corrects in the original PROF1
+
+1. **"Text measurement is 5% of the frame" was noise.** Re-measured properly
+   (pinned, one variant per process, 400 iterations, median), variant B — text
+   with explicit sizes, which removes the measurement — is consistently
+   *slower* than A, not 5% faster. The honest statement is that text
+   *measurement* is not separable at this noise floor.
+2. **"The hashmaps are not the problem" is half wrong.** The per-node maps are
+   indeed minor. But hashing overall is ~7% and the **shape cache's** hashing
+   plus key comparison is ~14%, which is the second-largest bucket in the
+   frame. BENCH1 pointed at the wrong map, not at the wrong idea.
+3. The 45% is no longer unaccounted.
+
+### Revised recommendations
+
+Ordered by measured return per unit of risk. **R1 and R2 are new and did not
+appear in the original list.**
+
+| | change | evidence |
+|---|---|---|
+| **R1** | `shape_cache` → FxHash instead of SipHash | **measured 4.4%**, one line + a generic bound on `sweep` |
+| **R2** | Stop comparing whole `ShapeKey`s: store a content hash in the key and compare that first, or key by hash with a probe | `eq` + `memcmp` = 7.2% |
+| **R3** | Reserve or reuse the taffy tree instead of `Layout::default()` per frame | slotmap growth + `Style` copy = 12.7% of frame |
+| **R4** | Reserve/reuse the per-node `HashMap`s (`with_capacity` + `clear`, not fresh) | hashbrown insert memmove = 5.6% |
+| **R5** | Store the shaped block **per node** rather than in a global keyed cache — iced's model | removes bucket 2 entirely (~14%) |
+| **R6** | F2 retained node graph, stable `NodeIndex` | still the structural fix; R3/R4 are subsets |
+| — | `floorf` at 1.7% is a libm call, not an instruction | `target-feature=+sse4.1` was tested and lost in noise; not recommended |
+
+R1 through R4 are contained, individually testable, and together address about
+**30% of the frame**. R5 and R6 are the architectural items and remain as
+PROF1 described them.
 
 ## Reproducing
 
