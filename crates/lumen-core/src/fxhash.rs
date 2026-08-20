@@ -1,4 +1,9 @@
-//! CP3.2: a fast, non-cryptographic hasher for the rebuild path's hot maps.
+//! A fast, non-cryptographic hasher for the hot maps rebuilt every frame.
+//!
+//! Lives in `lumen-core` (moved from `lumen-app`, R1) because two crates need
+//! it: `lumen-app`'s rebuild path and `lumen-text`'s shape cache. A copy in
+//! each is the "policy written out per site" shape that let `decode()` miss
+//! the cache cap it shared with `png()`.
 //!
 //! The rebuild path is dominated by `HashMap` traffic keyed on `NodeIndex`,
 //! `IdHash` and short strings — none of it adversarial, all of it re-done every
@@ -13,8 +18,13 @@
 //! serialized a `Vec` built in `HashMap` iteration order, so changing the
 //! hasher would have silently permuted agent-visible output.
 
+/// rustc's FxHash: one multiply and one rotate per word.
+///
+/// Fast and non-cryptographic. Use it for maps whose keys the app itself
+/// mints; never for anything an attacker supplies, and never for a value that
+/// is serialized (ADR-021 pins `IdHasher` for that).
 #[derive(Default, Clone, Copy)]
-pub(crate) struct FxHasher {
+pub struct FxHasher {
     hash: u64,
 }
 
@@ -66,11 +76,11 @@ impl std::hash::Hasher for FxHasher {
     }
 }
 
-pub(crate) type FxBuildHasher = std::hash::BuildHasherDefault<FxHasher>;
+/// [`FxHasher`] as a `BuildHasher`, for `HashMap`/`HashSet` type parameters.
+pub type FxBuildHasher = std::hash::BuildHasherDefault<FxHasher>;
 
 /// `std::collections::HashMap` with the module's fast hasher.
 ///
 /// Same API except `new()`, which std only provides for `RandomState`; use
-/// `default()`. Shadowing the std name keeps the ~35 declarations in this file
-/// unchanged.
-pub(crate) type HashMap<K, V> = std::collections::HashMap<K, V, FxBuildHasher>;
+/// `default()`. Shadowing the std name keeps call sites unchanged.
+pub type HashMap<K, V> = std::collections::HashMap<K, V, FxBuildHasher>;

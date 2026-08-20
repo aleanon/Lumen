@@ -19,7 +19,9 @@ pub mod system;
 /// so it can only live in the crate that defines `BuildCx`.
 pub mod tasks;
 
-mod fxhash;
+/// R1: the hasher moved to `lumen-core` so `lumen-text` can share it.
+/// Re-exported under the old path so this crate's call sites are unchanged.
+pub(crate) use lumen_core::fxhash;
 
 pub use app::{App, DefaultPlatform, FrameStats, Headless, PlatformConfig};
 pub use element::{BuildCx, Element, Handler, NodeContent};

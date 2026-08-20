@@ -14,6 +14,7 @@ pub mod binding;
 pub mod color;
 pub mod diagnostics;
 pub mod events;
+pub mod fxhash;
 pub mod geometry;
 pub mod gesture;
 pub mod identity;

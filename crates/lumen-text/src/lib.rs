@@ -15,7 +15,13 @@ use parley::{
 };
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+// R1: these caches are keyed on text and glyph descriptors the app itself
+// mints, re-probed every frame, and never adversarial — std's SipHash-1-3 is
+// the wrong trade. `sip::Hasher::write` was 5.4% of a 3000-row frame and the
+// swap measured 4.4% (docs/profile-vs-iced-2026-08-19.md). Shadowing the std
+// name keeps the declarations below unchanged; only `new()` becomes
+// `default()`, which std reserves for `RandomState`.
+use lumen_core::fxhash::HashMap;
 use swash::scale::{Render, ScaleContext, Source};
 use swash::zeno::Format;
 use swash::FontRef;
@@ -109,7 +115,7 @@ const GLYPH_CACHE_CAP: usize = 8192;
 
 thread_local! {
     static GLYPH_CACHE: RefCell<HashMap<GlyphKey, Option<CachedGlyph>>> =
-        RefCell::new(HashMap::new());
+        RefCell::new(HashMap::default());
     /// Count of actual swash rasterizations (cache misses) — for tests/diagnostics.
     static GLYPH_RASTERS: Cell<u64> = const { Cell::new(0) };
 }
@@ -358,8 +364,8 @@ struct Aged<V> {
 /// frame still carry the previous epoch, and dropping them would re-shape them
 /// moments later — reintroducing the sequential-scan worst case that defeats
 /// plain LRU. Stale strings (the growth source) are exactly what this reclaims.
-fn sweep<K: Eq + std::hash::Hash, V>(
-    map: &mut HashMap<K, Aged<V>>,
+fn sweep<K: Eq + std::hash::Hash, V, S: std::hash::BuildHasher>(
+    map: &mut std::collections::HashMap<K, Aged<V>, S>,
     epoch: u64,
     cap: &mut usize,
     base_cap: usize,
@@ -671,8 +677,8 @@ impl TextEngine {
             },
             layout_cx: LayoutContext::new(),
             family,
-            shape_cache: HashMap::new(),
-            run_cache: HashMap::new(),
+            shape_cache: HashMap::default(),
+            run_cache: HashMap::default(),
             epoch: 0,
             shape_cap: SHAPE_CACHE_CAP,
             run_cap: RUN_CACHE_CAP,
@@ -1543,7 +1549,7 @@ mod eviction_tests {
     /// tens of thousands of real shaping calls.
     #[test]
     fn sweep_drops_stale_and_keeps_the_last_two_epochs() {
-        let mut map: HashMap<u32, Aged<u32>> = HashMap::new();
+        let mut map: HashMap<u32, Aged<u32>> = HashMap::default();
         map.insert(0, Aged { value: 0, epoch: 1 }); // stale
         map.insert(1, Aged { value: 1, epoch: 9 }); // last frame
         map.insert(
@@ -1562,7 +1568,7 @@ mod eviction_tests {
 
     #[test]
     fn sweep_falls_back_to_halving_past_the_hard_cap() {
-        let mut map: HashMap<u32, Aged<u32>> = HashMap::new();
+        let mut map: HashMap<u32, Aged<u32>> = HashMap::default();
         for i in 0..100u32 {
             map.insert(i, Aged { value: i, epoch: 5 });
         }
