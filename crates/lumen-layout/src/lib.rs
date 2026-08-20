@@ -44,6 +44,17 @@ pub trait LayoutEngine {
         Self::default()
     }
 
+    /// Drop every node but keep the allocations, ready for reuse next frame.
+    ///
+    /// R6: defaulted to a fresh engine so an implementation with nothing to
+    /// retain is unaffected; `LayoutTree` overrides it to keep its capacity.
+    fn clear(&mut self)
+    where
+        Self: Default + Sized,
+    {
+        *self = Self::default();
+    }
+
     /// Create a childless node.
     fn leaf(&mut self, style: &LayoutStyle) -> LayoutNode;
 
@@ -67,6 +78,9 @@ pub trait LayoutEngine {
 }
 
 impl LayoutEngine for LayoutTree {
+    fn clear(&mut self) {
+        LayoutTree::clear(self);
+    }
     fn with_capacity(capacity: usize) -> Self {
         LayoutTree::with_capacity(capacity)
     }

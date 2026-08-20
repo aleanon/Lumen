@@ -75,6 +75,21 @@ impl LayoutTree {
         }
     }
 
+    /// Drop every node but keep the allocations, ready for the next frame.
+    ///
+    /// R6: the tree is per-frame scratch — the solved bounds are copied into
+    /// the node arena and the tree itself is discarded. Recreating it each
+    /// frame meant allocating and then freeing the whole slotmap, which showed
+    /// as `drop_in_place<LayoutTree>` plus a share of the ~12% the frame spent
+    /// in malloc/free. `taffy::TaffyTree::clear` empties the node, child and
+    /// parent stores without releasing their capacity, so the next frame
+    /// starts warm.
+    pub fn clear(&mut self) {
+        self.taffy.clear();
+        self.abs.clear();
+        self.last_count = 0;
+    }
+
     /// Create a childless node.
     pub fn leaf(&mut self, style: LayoutStyle) -> LayoutNode {
         self.leaf_ref(&style)

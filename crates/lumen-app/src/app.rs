@@ -321,6 +321,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             prev_node_computed: HashMap::default(),
             node_layout_style: HashMap::default(),
             prev_layout_style: HashMap::default(),
+            layout_scratch: P::Layout::default(),
             allow_copy_forward: false,
             impure_seen: 0,
             nodes_rebuilt: 0,
@@ -754,6 +755,13 @@ pub struct Headless<
     prev_layout_style: HashMap<NodeIndex, LayoutStyle>,
     /// Whether this rebuild may copy spans forward (false on visual-state
     /// rebuilds: hover/focus/pressed styling must re-resolve).
+    /// R6: the layout engine, retained across frames as scratch.
+    ///
+    /// It is genuinely per-frame — the solved bounds are copied into the node
+    /// arena and the tree discarded — but recreating it meant allocating and
+    /// freeing the whole slotmap every frame. Kept and `clear`ed instead, so
+    /// the capacity survives.
+    layout_scratch: P::Layout,
     allow_copy_forward: bool,
     /// Count of elements this build encountered carrying non-memoizable
     /// per-node work (dyn bindings, custom/canvas content) — spans containing
@@ -3261,8 +3269,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // reallocates once, as before.
         let hint = self.prev_tree.len();
         let mut tree = Tree::with_capacity(hint);
-        // MOD1: the bundle's layout engine, constructed per rebuild.
-        let mut layout = P::Layout::with_capacity(hint);
+        // MOD1: the bundle's layout engine. R6: taken from the retained
+        // scratch and cleared rather than constructed, so its capacity
+        // survives the frame; put back at every exit below.
+        let mut layout = std::mem::take(&mut self.layout_scratch);
+        layout.clear();
         let mut meta = HashMap::with_capacity_and_hasher(hint, Default::default());
         let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::with_capacity(hint);
         let (_root_node, root_lnode) = self.build_node(
@@ -3319,10 +3330,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 self.container_repass = true;
                 self.rebuild_inner();
                 self.container_repass = false;
+                // The re-pass stored its own scratch; this frame's is dead.
                 return;
             }
         }
 
+        self.layout_scratch = layout;
         self.tree = tree;
         self.meta = meta;
         // W1: a disabled node disables its whole subtree. Done as a pass over
