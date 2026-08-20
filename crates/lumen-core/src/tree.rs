@@ -84,21 +84,31 @@ impl Default for Tree {
 impl Tree {
     /// An empty tree with no root.
     pub fn new() -> Tree {
+        Tree::with_capacity(0)
+    }
+
+    /// An empty tree with room for `capacity` nodes.
+    ///
+    /// R4: the arena is rebuilt from empty every frame, so without a hint its
+    /// backing vectors grow by doubling and memmove at each step. The previous
+    /// frame already knows how many nodes there were.
+    pub fn with_capacity(capacity: usize) -> Tree {
+        let c = capacity;
         Tree {
-            generation: Vec::new(),
-            alive: Vec::new(),
+            generation: Vec::with_capacity(c),
+            alive: Vec::with_capacity(c),
             free: Vec::new(),
             live_count: 0,
-            bounds: Vec::new(),
-            transform: Vec::new(),
-            opacity: Vec::new(),
-            clip: Vec::new(),
-            flags: Vec::new(),
-            z: Vec::new(),
-            parent: Vec::new(),
-            first_child: Vec::new(),
-            last_child: Vec::new(),
-            next_sibling: Vec::new(),
+            bounds: Vec::with_capacity(c),
+            transform: Vec::with_capacity(c),
+            opacity: Vec::with_capacity(c),
+            clip: Vec::with_capacity(c),
+            flags: Vec::with_capacity(c),
+            z: Vec::with_capacity(c),
+            parent: Vec::with_capacity(c),
+            first_child: Vec::with_capacity(c),
+            last_child: Vec::with_capacity(c),
+            next_sibling: Vec::with_capacity(c),
             root: NodeIndex::NONE,
         }
     }

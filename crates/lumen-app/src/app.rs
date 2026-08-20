@@ -3252,11 +3252,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             },
         });
 
-        let mut tree = Tree::new();
+        // R3/R4: size every per-frame container from the PREVIOUS frame's node
+        // count. All four are rebuilt from empty each rebuild, so without a
+        // hint each grows by doubling and memmoves at every step — 7.9% of a
+        // 3000-row frame in taffy's slotmap alone, plus 5.6% in the hashbrown
+        // inserts and ~1.1% in the arena (`docs/profile-vs-iced-2026-08-19.md`).
+        // The count is a hint, not a contract: a frame that grows simply
+        // reallocates once, as before.
+        let hint = self.prev_tree.len();
+        let mut tree = Tree::with_capacity(hint);
         // MOD1: the bundle's layout engine, constructed per rebuild.
-        let mut layout = P::Layout::default();
-        let mut meta = HashMap::default();
-        let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::new();
+        let mut layout = P::Layout::with_capacity(hint);
+        let mut meta = HashMap::with_capacity_and_hasher(hint, Default::default());
+        let mut built: Vec<(NodeIndex, LayoutNode)> = Vec::with_capacity(hint);
         let (_root_node, root_lnode) = self.build_node(
             root_el,
             &mut tree,

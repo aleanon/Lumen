@@ -31,6 +31,19 @@ pub use tree::{LayoutNode, LayoutTree};
 /// today's rebuild-everything strategy into the seam. CP5 declined the retained
 /// arena at 4.46%, not permanently.
 pub trait LayoutEngine {
+    /// Construct an engine sized for `capacity` nodes.
+    ///
+    /// R3: the caller knows the previous frame's node count, and a tree built
+    /// from empty pays repeated reallocation to reach it. Defaulted so an
+    /// engine with no notion of capacity is unaffected.
+    fn with_capacity(capacity: usize) -> Self
+    where
+        Self: Default + Sized,
+    {
+        let _ = capacity;
+        Self::default()
+    }
+
     /// Create a childless node.
     fn leaf(&mut self, style: &LayoutStyle) -> LayoutNode;
 
@@ -54,6 +67,9 @@ pub trait LayoutEngine {
 }
 
 impl LayoutEngine for LayoutTree {
+    fn with_capacity(capacity: usize) -> Self {
+        LayoutTree::with_capacity(capacity)
+    }
     fn leaf(&mut self, style: &LayoutStyle) -> LayoutNode {
         LayoutTree::leaf_ref(self, style)
     }

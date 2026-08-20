@@ -6,7 +6,10 @@
 
 use crate::style::LayoutStyle;
 use kurbo::{Point, Rect, Size};
-use std::collections::HashMap;
+// R1/R3: `abs` is keyed on taffy `NodeId`s this crate mints itself and is
+// rebuilt every frame — std's SipHash is the wrong trade here for the same
+// reason it was in lumen-text.
+use lumen_core::fxhash::HashMap;
 use taffy::{AvailableSpace, NodeId, Size as TSize, TaffyTree};
 
 /// An opaque handle to a layout node (hides taffy's `NodeId`, ADR-004).
@@ -53,9 +56,21 @@ impl Default for LayoutTree {
 impl LayoutTree {
     /// An empty layout tree.
     pub fn new() -> LayoutTree {
+        LayoutTree::with_capacity(0)
+    }
+
+    /// An empty layout tree sized for `capacity` nodes.
+    ///
+    /// R3: the tree is rebuilt from empty every frame, so without a hint
+    /// taffy's slotmap grows 0 → N by doubling and memmoves its contents at
+    /// each step. That was **7.9%** of a 3000-row frame — `leaf_ref` →
+    /// `try_insert_with_key` → `RawVec::grow_one` → `realloc` — and it is pure
+    /// churn, since the previous frame already knows how many nodes there
+    /// were. See `docs/profile-vs-iced-2026-08-19.md`.
+    pub fn with_capacity(capacity: usize) -> LayoutTree {
         LayoutTree {
-            taffy: TaffyTree::new(),
-            abs: HashMap::new(),
+            taffy: TaffyTree::with_capacity(capacity),
+            abs: HashMap::with_capacity_and_hasher(capacity, Default::default()),
             last_count: 0,
         }
     }
