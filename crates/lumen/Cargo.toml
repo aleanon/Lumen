@@ -25,7 +25,7 @@ snapshot = ["lumen-widgets/snapshot", "lumen-shell/snapshot"]
 # Flipped because the face is ~14.5 MB of the binary and the ~95% of apps that
 # never render those scripts were paying for it. Measured on hello_android:
 # 22.8 MB -> 7.0 MB. Safe to flip without a deprecation window because every
-# crate here is `publish = false` at 0.0.1 — there is no downstream consumer to
+# crate here is `publish = false` at 0.1.0 — there is no downstream consumer to
 # break, and after 1.0 there would have been.
 pan-unicode = ["lumen-widgets/pan-unicode", "lumen-shell/pan-unicode"]
 # The live-window agent endpoint (JSON-RPC on LUMEN_AGENT_ADDR) — default-off,
