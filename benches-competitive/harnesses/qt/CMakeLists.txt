@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.16)
+project(qt_frame LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_BUILD_TYPE Release)
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+qt_standard_project_setup()
+qt_add_executable(qt_frame frame.cpp)
+target_link_libraries(qt_frame PRIVATE Qt6::Widgets)

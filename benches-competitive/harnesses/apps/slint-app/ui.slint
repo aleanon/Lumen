@@ -1,0 +1,14 @@
+export component MainWindow inherits Window {
+    title: "slint-app";
+    width: 400px;
+    height: 300px;
+    in-out property <int> count: 0;
+    VerticalLayout {
+        Text { text: root.count; }
+        Rectangle {
+            background: #1a73e8;
+            TouchArea { clicked => { root.count += 1; } }
+            Text { text: "Increment"; color: white; }
+        }
+    }
+}

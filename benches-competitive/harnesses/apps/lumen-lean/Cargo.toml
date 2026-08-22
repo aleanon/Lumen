@@ -1,0 +1,11 @@
+[package]
+name = "lumen-lean-app"
+version = "0.1.0"
+edition = "2021"
+# The same app with `desktop-integration` off: no rfd/muda/tray-icon, so no GTK3
+# cluster. `wgpu` stays on, so this isolates the DYNAMIC cost of native dialogs,
+# menus and tray from the GPU stack.
+[dependencies]
+lumen-widgets = { path = "../../../../crates/lumen-widgets" }
+lumen-shell = { path = "../../../../crates/lumen-shell", default-features = false, features = ["wgpu"] }
+lumen-core = { path = "../../../../crates/lumen-core" }

@@ -1652,7 +1652,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "lumen-app"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "accesskit 0.24.1",
  "kurbo 0.13.1",
@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bitflags 2.13.1",
  "kurbo 0.13.1",
@@ -1699,7 +1699,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-layout"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "kurbo 0.13.1",
  "lumen-core",
@@ -1708,7 +1708,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-macros"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1717,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-render"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "kurbo 0.13.1",
  "lumen-core",
@@ -1729,7 +1729,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-style"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "kurbo 0.13.1",
  "lumen-core",
@@ -1740,7 +1740,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-text"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "kurbo 0.13.1",
  "lumen-core",
@@ -1752,7 +1752,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-widgets"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "accesskit 0.24.1",
  "image",

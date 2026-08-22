@@ -1,0 +1,13 @@
+# Whole-app harnesses for the size + idle-RSS axis. One workspace so the three
+# Rust GUI toolkits share a target dir; each app is the same content as the Qt
+# and GTK ones — a window with a label and a button, shown, then idle.
+[workspace]
+resolver = "2"
+members = ["iced-app", "xilem-app", "slint-app", "lumen-app", "lumen-lean"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

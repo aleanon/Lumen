@@ -1,0 +1,8 @@
+[package]
+name = "lumen-counter-app"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+lumen-widgets = { path = "../../../../crates/lumen-widgets" }
+lumen-shell = { path = "../../../../crates/lumen-shell" }
+lumen-core = { path = "../../../../crates/lumen-core" }
