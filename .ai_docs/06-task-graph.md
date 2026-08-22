@@ -438,6 +438,26 @@ Follow-up to F2.2, and a **worked example of getting attribution wrong twice bef
 
 *Not covered:* a node that ellipsizes. The painted string is then a derived truncation rather than the binding's value, and reproducing it in the patch path would mean duplicating that logic — `patchable: false`, always rebuilds.
 
+## F3.6 ☑ Bindings no longer bar a span from the splice path (2026-08-22)
+Step 1 of three, and a **prerequisite, not an optimisation**: `build_node` marked `impure_seen` for any node carrying a `dyn_text` or `dyn_bg`, and `splice_span` refuses an impure span. So a single bound label anywhere in a list made that whole span re-lower on every rebuild — which is exactly why "make all text a binding" (step 2) would have been a large regression rather than a win.
+
+Measured on 3000 rows where **every** row carries a bound label, forced through the rebuild path by a structural change:
+
+| | rebuild cost |
+|---|---:|
+| old `impure` rule — nothing splices | 3065.1 µs |
+| F3.6 — bound spans splice | **869.2 µs** |
+
+**3.5×.** Note the old number is worse than a plain non-memoized rebuild (~1741 µs): the bindings are evaluated *on top of* re-lowering everything. A one-bound-row probe shows none of this — the rule only bit spans that carried a binding — which is why the first measurement of this was thrown away and redone.
+
+**Why the ban existed, and why it no longer needs to.** A spliced span reuses last frame's `meta`, so a binding whose signal moved since then would come back stale. `settle_bindings_for_rebuild` removes the premise: before a rebuild chooses what to splice, every stale binding is brought up to date in `meta` — backgrounds always (paint-only), text when the new string measures the same size (the F3.5 test). When a text refresh *would* move layout, the view caches are dropped so nothing splices and `build_node` re-evaluates everything against fresh layout. Coarse — only the enclosing scopes strictly need invalidating — but it is the rare branch (a size-changing text update landing in the same pump as a structural change) and being coarse there can only be slow, never wrong.
+
+`dyn_classes` stays impure: classes drive the `.lss` cascade, so a change can resize anything in the subtree and there is no cheap "would this cascade differently" check. `Custom`/`Canvas` stay impure because their output is an arbitrary closure.
+
+**Binding records are now carried across a splice**, beside the F2.2 span carry-forward and by the same test: a re-lowered node was allocated a fresh index and its old one freed, so "still alive" is exactly "spliced".
+
+*Ablations* (`tests/bound_text_patch.rs`, 8 tests): removing the settle pass fails 2; removing its size check fails 1; **dropping the binding carry-forward failed nothing** — the suite changed a binding only *before* its span was ever spliced, so losing the record showed up as a label that silently stops updating, with no failing frame at the time. `a_binding_still_updates_after_its_span_has_been_spliced` drives splice-then-change and now fails that ablation. Worth recording as the shape of gap that ablation catches and review does not.
+
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
 - Any public-API signature in `02 §4`/`§8` that won't compile as written beyond a *minimal semantics-preserving* fix.

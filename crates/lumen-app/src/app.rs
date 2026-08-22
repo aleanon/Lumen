@@ -3169,6 +3169,80 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         true
     }
 
+    /// F3.6: settle stale bindings *before* a rebuild decides what to splice.
+    ///
+    /// This is what lets a bound node be spliced at all. A span is only safe to
+    /// splice if its retained `meta` is already what a fresh lowering would
+    /// produce; a binding whose signal moved since the last build breaks that.
+    /// Rather than banning such spans from the splice path — the old `impure`
+    /// rule, which cost a full re-lowering of everything around them — the
+    /// runtime brings `meta` up to date here, and the splice is then sound by
+    /// the same argument as any other node.
+    ///
+    /// Backgrounds are paint-only, so they always settle. Text settles when the
+    /// new string measures the same, exactly as `patch_text_bindings` decides
+    /// it. When it does not, the node's box really is changing and no amount of
+    /// patching helps: the view caches are dropped so nothing splices and every
+    /// binding is re-evaluated by `build_node` against fresh layout.
+    ///
+    /// Dropping *all* the caches is heavier than it needs to be — only the
+    /// scopes enclosing that node have to re-run — but it is the rare branch
+    /// (a size-changing text update landing in the same pump as a structural
+    /// change), and being coarse here cannot be wrong, only slow.
+    fn settle_bindings_for_rebuild(&mut self) {
+        let rt = self.rt.clone();
+        for i in 0..self.bg_bindings.len() {
+            if self.bg_bindings[i].deps.is_current(&rt) {
+                continue;
+            }
+            let (color, reads) = self.bg_bindings[i].dynamic.eval_isolated(&rt);
+            let node = self.bg_bindings[i].node;
+            self.bg_bindings[i].deps = reads;
+            if let Some(m) = self.meta.get_mut(&node) {
+                m.background = Some(color);
+            }
+        }
+        let mut must_relower = false;
+        for i in 0..self.text_bindings.len() {
+            if self.text_bindings[i].deps.is_current(&rt) {
+                continue;
+            }
+            if !self.text_bindings[i].patchable {
+                must_relower = true;
+                continue;
+            }
+            let node = self.text_bindings[i].node;
+            let Some(ts) = self.meta.get(&node).and_then(|m| match &m.content {
+                NodeContent::Text(_, ts) => Some(ts.clone()),
+                _ => None,
+            }) else {
+                must_relower = true;
+                continue;
+            };
+            let (s, reads) = self.text_bindings[i].dynamic.eval_isolated(&rt);
+            let wrap = self.text_bindings[i].wrap;
+            let block = self.text.shaped(&s, &ts, wrap, ts.align);
+            let (w, h) = (block.width().ceil(), block.height().ceil());
+            let b = &self.text_bindings[i];
+            if (b.auto_w && w != b.w) || (b.auto_h && h != b.h) {
+                must_relower = true;
+                continue;
+            }
+            self.text_bindings[i].deps = reads;
+            self.text_bindings[i].w = w;
+            self.text_bindings[i].h = h;
+            if let Some(m) = self.meta.get_mut(&node) {
+                m.label = s.clone();
+                if let NodeContent::Text(t, _) = &mut m.content {
+                    *t = s;
+                }
+            }
+        }
+        if must_relower {
+            self.clear_view_caches();
+        }
+    }
+
     /// Whether any retained text binding's dependencies have changed (F3.5).
     fn text_bindings_stale(&self) -> bool {
         self.text_bindings
@@ -3251,10 +3325,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     }
 
     fn rebuild_inner(&mut self) {
+        // F3.6: bring bound nodes up to date BEFORE deciding what to splice, so
+        // a span carrying a binding is as safe to reuse as any other. Skipped on
+        // the container re-pass: that path resets the arena, so nothing splices
+        // and every binding is re-evaluated by `build_node` regardless.
+        if !self.container_repass {
+            self.settle_bindings_for_rebuild();
+        }
         // F3.4: capture the root build's reads (structural — a change rebuilds).
         // Scope reads propagate into this window; paint-only bindings evaluated
-        // in `build_node` isolate themselves out; text-binding reads are folded
-        // into `structural_reads` there.
+        // in `build_node` isolate themselves out. F3.5: text-binding reads
+        // isolate out too — they patch, and settle above when they cannot.
         let rt = self.rt.clone();
         self.scope_live.borrow_mut().clear();
         self.scope_skipped.borrow_mut().clear();
@@ -3286,8 +3367,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
         self.requests = requests;
         self.structural_reads = root_reads;
-        self.bg_bindings.clear();
-        self.text_bindings.clear();
+        // F3.6: the previous build's binding records are set aside, not
+        // dropped. A spliced span's nodes survive the rebuild (F2.2 retains
+        // their `NodeIndex`), and so must their bindings — otherwise the only
+        // way to keep a bound node correct would be to re-lower it, which is
+        // exactly the `impure` rule this replaces. The carry-forward after the
+        // free walk keeps the records whose nodes are still alive.
+        let prev_bg_bindings = std::mem::take(&mut self.bg_bindings);
+        let prev_text_bindings = std::mem::take(&mut self.text_bindings);
 
         // Dispatch background-work requests this build emitted, on the executor.
         // The runtime owns the executor + the deferred-op channel, so it mints
@@ -3546,6 +3633,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             meta.len(),
             tree.len(),
         );
+
+        // F3.6: carry forward the bindings of nodes that were spliced rather
+        // than re-lowered. A re-lowered node was allocated a fresh index and
+        // its old one freed above, so "still alive" is exactly "spliced" —
+        // the same test the span carry-forward below uses, for the same
+        // reason. A build that re-lowered the node has already pushed a fresh
+        // record for it.
+        for b in prev_bg_bindings {
+            if tree.is_alive(b.node) {
+                self.bg_bindings.push(b);
+            }
+        }
+        for b in prev_text_bindings {
+            if tree.is_alive(b.node) {
+                self.text_bindings.push(b);
+            }
+        }
 
         // F2.2: carry forward the span records of scopes that were never
         // visited this build because an ancestor took the memo-hit path.
@@ -4117,9 +4221,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             .map(|_| self.span_ctx_hash(in_overlay))
             .unwrap_or(lumen_core::identity::ROOT_ID);
         let impure_at = self.impure_seen;
-        if el.dyn_text.is_some()
-            || el.dyn_bg.is_some()
-            || el.dyn_classes.is_some()
+        // F3.6: `dyn_text` and `dyn_bg` used to be listed here, which barred
+        // every span containing one from the splice path. That was the right
+        // rule while a binding could only be refreshed by re-lowering its node:
+        // a spliced span reuses last frame's `meta`, so a binding whose signal
+        // had moved would come back stale.
+        //
+        // `settle_bindings_for_rebuild` removes the premise — a stale binding
+        // is now brought up to date before the build starts, or the caches are
+        // dropped so nothing splices at all. Keeping the ban would mean a
+        // single bound label anywhere in a list makes the whole list re-lower,
+        // which is precisely the cost that made authors avoid bindings.
+        //
+        // `dyn_classes` stays: classes drive the `.lss` cascade, so a change
+        // can resize anything in the subtree, and there is no cheap check for
+        // "would this cascade differently". `Custom`/`Canvas` stay because they
+        // are arbitrary closures whose output cannot be predicted at all.
+        if el.dyn_classes.is_some()
             || matches!(
                 el.content,
                 NodeContent::Custom(..) | NodeContent::Canvas(..)
@@ -4173,10 +4291,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // move layout falls back to a rebuild there.
                 //
                 // Isolating the reads cannot strand a memoized subtree with
-                // stale text: `impure_seen` above already marks any span
-                // containing a `dyn_text` impure, and `splice_span` refuses to
-                // splice an impure span. So a rebuild always re-lowers this
-                // node and re-evaluates this binding.
+                // stale text. F3.5 relied on the `impure` rule above for that;
+                // F3.6 removed it, and the guarantee now comes from
+                // `settle_bindings_for_rebuild`, which refreshes every stale
+                // binding before a rebuild chooses what to splice — and drops
+                // the view caches outright when a refresh would move layout.
                 let (s, reads) = d.eval_isolated(&rt);
                 text_deps = reads.dep_keys(&rt);
                 pending_text = Some((d, reads));

@@ -92,6 +92,45 @@ fn main() {
     .with_renderer(NullRenderer)
     .run_headless(Size::new(400.0, 800.0)), 200);
 
+    // 3b. F3.6: a bound label inside a memoized span, forced through the
+    //     REBUILD path by a structural change. Before F3.6 the binding made
+    //     the span impure, so nothing spliced and this was a full rebuild.
+    {
+        let mut h = App::new(move |cx| {
+            let rows: Signal<usize> = cx.signal("rows", || N);
+            let n: Signal<i64> = cx.signal("n", || 0);
+            let count = rows.get(cx.runtime());
+            let kids: Vec<_> = (0..count).map(|i| {
+                cx.scope(("row", i), move |_cx| {
+                    // EVERY row bound — the shape step 2 would produce if all
+                    // text became a binding. One bound row proves nothing: the
+                    // old `impure` rule only bit the spans that carried a
+                    // binding, so a single one cost a single re-lowered row.
+                    widgets::text(format!("row {i}")).bind_text(bind!(rt => {
+                        let s: Signal<i64> = rt.signal("n", || 0i64);
+                        format!("row {i}: {:04}", s.get(rt) % 10000)
+                    }))
+                })
+            }).collect();
+            widgets::column(kids)
+        })
+        .with_renderer(NullRenderer)
+        .run_headless(Size::new(400.0, 800.0));
+        h.pump();
+        let rows: Signal<usize> = h.runtime().signal("rows", || N);
+        for k in 0..20 { rows.set(h.runtime(), N - (k % 2)); h.pump(); }
+        let mut best = f64::MAX;
+        for k in 0..100 {
+            rows.set(h.runtime(), N - (k % 2));
+            let t = Instant::now();
+            let st = h.pump();
+            let us = t.elapsed().as_secs_f64() * 1e6;
+            if us < best { best = us; }
+            std::hint::black_box(st);
+        }
+        println!("{:<44} {best:>9.1} us", "structural change, ALL rows bound (rebuild)");
+    }
+
     // 4. REBUILD TIER: row 0's TEXT changes, memoized per row (today's bench).
     bench("one row's text, memoized per row (rebuild)", App::new(move |cx| {
         let bump = cx.signal("n", || 0i64).get(cx.runtime());
