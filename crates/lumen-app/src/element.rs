@@ -258,6 +258,10 @@ pub struct Element {
     pub shared: Option<std::rc::Rc<Element>>,
     /// A reactive binding for this node's text content (F3, option B). When set,
     /// the build evaluates it to produce the string; the `text!` macro emits it.
+    ///
+    /// F3.5: a change patches in place — no rebuild, no relayout — whenever the
+    /// new string measures the same size as the old one. When it does not, the
+    /// runtime falls back to a full rebuild, so the box is always right.
     pub dyn_text: Option<Dynamic<String>>,
     /// A reactive binding for this node's background colour (F3). Paint-only, so
     /// a change patches without relayout.
@@ -445,6 +449,13 @@ impl Element {
     /// Bind this node's text content to a reactive closure (F3, option B). The
     /// build re-evaluates it each frame the binding's deps change; prefer the
     /// `text!` macro sugar. Only meaningful on a text element.
+    ///
+    /// F3.5: an update patches in place rather than rebuilding whenever the new
+    /// string measures the same size — roughly 9x cheaper on a large list. An
+    /// axis the author fixed cannot move, so a label with an explicit width, a
+    /// `VirtualList` row, or a paragraph that still wraps to the same number of
+    /// lines always takes the fast path. A change that really would resize the
+    /// box rebuilds, so correctness never depends on the guess.
     pub fn bind_text(mut self, d: Dynamic<String>) -> Self {
         self.dyn_text = Some(d);
         self

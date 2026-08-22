@@ -74,7 +74,25 @@ fn main() {
     .with_renderer(NullRenderer)
     .run_headless(Size::new(400.0, 800.0)), 200);
 
-    // 3. REBUILD TIER: row 0's TEXT changes, memoized per row (today's bench).
+    // 3. PATCH TIER, TEXT (F3.5): row 0's text is a binding whose value keeps
+    //    the same measured size, so the pump patches instead of rebuilding.
+    bench("one row's text, bound + same size (patch)", App::new(move |cx| {
+        let _ = cx.signal("n", || 0i64);
+        let rows: Vec<_> = (0..N).map(|i| {
+            let t = widgets::text(format!("row {i}"));
+            if i == 0 {
+                t.bind_text(bind!(rt => {
+                    let s: Signal<i64> = rt.signal("n", || 0i64);
+                    format!("counter: {:04}", s.get(rt) % 10000)
+                }))
+            } else { t }
+        }).collect();
+        widgets::column(rows)
+    })
+    .with_renderer(NullRenderer)
+    .run_headless(Size::new(400.0, 800.0)), 200);
+
+    // 4. REBUILD TIER: row 0's TEXT changes, memoized per row (today's bench).
     bench("one row's text, memoized per row (rebuild)", App::new(move |cx| {
         let bump = cx.signal("n", || 0i64).get(cx.runtime());
         let rows: Vec<_> = (0..N).map(|i| {

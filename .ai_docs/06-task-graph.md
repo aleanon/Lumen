@@ -414,6 +414,30 @@ Follow-up to F2.2, and a **worked example of getting attribution wrong twice bef
 
 **Method note worth keeping.** Two measurements during this work were nonsense because a user process (`accounts_slice-`, 121–155% CPU) was loading the box — one of them read as a **+38% regression** with a 1.14–1.35 ms interval. The tell was the interval width, not the mean: every honest measurement on this box lands inside ±0.5%. Check `ps` before believing a bench, and A/B against the same commit under the same load rather than against a number recorded earlier.
 
+## F3.5 ☑ Text bindings patch instead of rebuilding (2026-08-22)
+`BoundBg` was the only retained binding class, and `NodeDeps` recorded the rule: "background deps update via a paint-only patch; scope/text via a rebuild". Text was structural because a new string can measure to a new size — **true of some values, not of the binding**. `probe_tiers` priced the two paths on the same 3000-row list and the gap was the whole argument:
+
+| tier | cost |
+|---|---:|
+| idle pump | 0.1 µs |
+| background binding (patch) | 59.1 µs |
+| **text binding, same size (patch, F3.5)** | **93.2 µs** |
+| text change through the scope memo (rebuild) | 832.3 µs |
+
+**8.9×**, and it puts Lumen under iced's 290 µs on this shape.
+
+**How it decides.** `BoundText` retains what the build measured — the wrap width, the ceiled block size, and crucially `auto_w`/`auto_h`: whether the measurement actually *fed* the layout style on that axis. On a change the runtime re-shapes and compares only the axes the measurement owns. Same size ⇒ the node's `LayoutStyle` would come out identical ⇒ no relayout is possible ⇒ patch. Different ⇒ rebuild, which is always correct. The `auto_*` distinction is what makes the fast path fire in practice rather than almost never: an author-fixed width, a `VirtualList` item height, or a paragraph that still wraps to the same lines can never move, so those patch even when the glyphs get wider.
+
+**Two-phase commit.** Every stale binding is evaluated and measured before anything is written, so "one binding would move layout" declines the whole pump cleanly instead of leaving some nodes patched and others stale. `one_layout_moving_binding_forces_the_whole_pump_to_rebuild` pins that.
+
+**Why isolating the reads cannot strand a memoized subtree.** `dyn_text` now uses `eval_isolated`, so its reads no longer enter `structural_reads` — which is exactly what stops them forcing a rebuild. The staleness that would otherwise imply is already prevented upstream: `build_node` increments `impure_seen` for any node carrying a `dyn_text`, and `splice_span` refuses to splice an impure span. So a rebuild always re-lowers the node and re-evaluates the binding. A `debug_assert`-backed fallback re-marks the reads structural if a binding is ever evaluated on a node that never reaches the text sizing block.
+
+**The patch invalidates semantics; the background patch does not and should not.** Text is the node's accessible label as well as its content, so `patch_text_bindings` clears `sem_root` and the elided/JSON caches, and writes `m.label` alongside `m.content` — a patch that updated only one would drift from what a rebuild produces, which is exactly what `assert_view_coherent` compares. Ablating the label write fails 2 of the 4 tests.
+
+*Verified by ablation* (`tests/bound_text_patch.rs`): making the patch always decline fails 2/4; removing the size check fails 2/4; dropping the label write fails 2/4.
+
+*Not covered:* a node that ellipsizes. The painted string is then a derived truncation rather than the binding's value, and reproducing it in the patch path would mean duplicating that logic — `patchable: false`, always rebuilds.
+
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
 - Any public-API signature in `02 §4`/`§8` that won't compile as written beyond a *minimal semantics-preserving* fix.

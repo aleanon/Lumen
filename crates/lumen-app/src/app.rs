@@ -355,6 +355,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             scope_skipped: RefCell::new(crate::fxhash::HashSet::default()),
             tasks_table: RefCell::new(HashMap::default()),
             bg_bindings: Vec::new(),
+            text_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
             elided_cache: RefCell::new(None),
             #[cfg(feature = "snapshot")]
@@ -456,10 +457,48 @@ struct BoundBg {
     deps: lumen_core::state::ReadSet,
 }
 
+/// A retained text binding (F3.5): its node, the binding, the signals it last
+/// read, and everything needed to decide whether re-evaluating it can change
+/// layout.
+///
+/// Text was classified structural because a new string can measure to a new
+/// size. That is true, but it is a property of the *value*, not of the binding:
+/// most text updates keep the box exactly as it was — a label inside a sized
+/// container, a wrapping paragraph that still fills the same number of lines,
+/// a virtual-list row with a fixed item height. Those can patch like a
+/// background does, at ~15x less cost than a rebuild.
+///
+/// So the binding remembers what the build measured, and the patch path
+/// re-measures and compares. Same size ⇒ the node's `LayoutStyle` would come
+/// out identical ⇒ no relayout is possible ⇒ patch. Different size ⇒ fall back
+/// to a rebuild, which is always correct.
+struct BoundText {
+    node: NodeIndex,
+    dynamic: lumen_core::Dynamic<String>,
+    deps: lumen_core::state::ReadSet,
+    /// The wrap width the build measured with — `None` for an unwrapped label.
+    /// Re-measuring with anything else would compare two different questions.
+    wrap: Option<f32>,
+    /// Whether the measurement actually fed the layout style on that axis. An
+    /// axis the author fixed cannot move no matter what the new string
+    /// measures, so it is not compared.
+    auto_w: bool,
+    auto_h: bool,
+    /// The measured block size, ceiled exactly as the sizing code ceils it.
+    w: f32,
+    h: f32,
+    /// False when the node ellipsizes: the painted string is then a *derived*
+    /// truncation, not the binding's value, and reproducing it here would mean
+    /// duplicating that logic. Such a node always rebuilds.
+    patchable: bool,
+}
+
 /// Per-node reactive dependencies, split by source (F4). The union projects to
 /// `SemanticsNode.deps` (F2); the breakdown backs `ui.getDeps` and the reverse
-/// index. `background` deps update via a paint-only patch; `scope`/`text` via a
-/// rebuild (F3.4).
+/// index. `background` deps update via a paint-only patch; `scope` and `class`
+/// via a rebuild. `text` used to be in that second group and is no longer
+/// (F3.5): it patches when the new string measures the same size, and rebuilds
+/// only when the box would actually move.
 #[derive(Default, Clone)]
 struct NodeDeps {
     scope: Vec<String>,
@@ -863,6 +902,8 @@ pub struct Headless<
     /// Retained paint-only prop bindings from the last build (F3.4). A change to
     /// one binding's deps patches its node + repaints, skipping the rebuild.
     bg_bindings: Vec<BoundBg>,
+    /// F3.5: retained text bindings — see [`BoundText`].
+    text_bindings: Vec<BoundText>,
     /// Signals whose change requires a structural rebuild (root + scope + text-
     /// binding reads; paint-only bindings are isolated out). `is_current` false ⇒
     /// rebuild; else a paint-only binding change can be patched (F3.4).
@@ -1124,6 +1165,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             self.rebuild(); // baselines force_rebuild + last_build_gen
         } else if restyle_only {
             // restyle_visual already updated flags/styles/semantics/paint.
+        } else if write_changed && self.text_bindings_stale() {
+            // F3.5: a text binding changed. Patch if the new string measures
+            // the same, else rebuild — `patch_text_bindings` commits nothing
+            // when it declines, so this is a clean fallback rather than a
+            // partially-applied frame.
+            if !self.patch_text_bindings() {
+                self.allow_copy_forward = !visual_changed && !full_rebuild_forced();
+                self.rebuild();
+            } else if self
+                .bg_bindings
+                .iter()
+                .any(|b| !b.deps.is_current(&self.rt))
+            {
+                // A background binding changed in the same pump — fold it in,
+                // rather than leave it for a frame that may never come.
+                self.patch_bg_bindings();
+            }
         } else if write_changed
             && self
                 .bg_bindings
@@ -3036,6 +3094,88 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         true
     }
 
+    /// F3.5: try to satisfy changed **text** bindings without a rebuild.
+    ///
+    /// Returns `false` — caller must rebuild — if any changed binding would
+    /// move layout, or ellipsizes. Nothing is mutated in that case: the check
+    /// runs over every stale binding first and only then applies, so a
+    /// half-patched tree is not a state this can produce.
+    fn patch_text_bindings(&mut self) -> bool {
+        let rt = self.rt.clone();
+        let stale: Vec<usize> = self
+            .text_bindings
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| !b.deps.is_current(&rt))
+            .map(|(i, _)| i)
+            .collect();
+        if stale.is_empty() {
+            return true;
+        }
+        // Phase 1 — evaluate and measure everything, commit nothing.
+        let mut pending: Vec<(usize, String, lumen_core::state::ReadSet, f32, f32)> =
+            Vec::with_capacity(stale.len());
+        for i in stale {
+            if !self.text_bindings[i].patchable {
+                return false;
+            }
+            let node = self.text_bindings[i].node;
+            let (s, reads) = self.text_bindings[i].dynamic.eval_isolated(&rt);
+            let wrap = self.text_bindings[i].wrap;
+            let Some(ts) = self.meta.get(&node).and_then(|m| match &m.content {
+                NodeContent::Text(_, ts) => Some(ts.clone()),
+                _ => None,
+            }) else {
+                return false;
+            };
+            let block = self.text.shaped(&s, &ts, wrap, ts.align);
+            let (w, h) = (block.width().ceil(), block.height().ceil());
+            let b = &self.text_bindings[i];
+            // Only an axis whose size CAME from the measurement can move.
+            if (b.auto_w && w != b.w) || (b.auto_h && h != b.h) {
+                return false;
+            }
+            pending.push((i, s, reads, w, h));
+        }
+        // Phase 2 — commit. Every binding above is layout-neutral, so the
+        // retained layout is still correct and only paint and semantics change.
+        let mut patched: Vec<u32> = Vec::new();
+        for (i, s, reads, w, h) in pending {
+            let node = self.text_bindings[i].node;
+            self.text_bindings[i].deps = reads;
+            self.text_bindings[i].w = w;
+            self.text_bindings[i].h = h;
+            if let Some(m) = self.meta.get_mut(&node) {
+                // The string is the node's content *and* its accessible label,
+                // exactly as `build_node` keeps them (`Element::text` sets
+                // both) — a patched frame that updated only one of the two
+                // would drift from what a rebuild produces, which is precisely
+                // what `assert_view_coherent` compares.
+                m.label = s.clone();
+                if let NodeContent::Text(t, _) = &mut m.content {
+                    *t = s;
+                }
+            }
+            patched.push(node.index());
+        }
+        // The accessible name changed, so the memoized semantics tree is stale.
+        // The background patch below does not need this and does not do it;
+        // text does.
+        *self.sem_root.borrow_mut() = None;
+        self.invalidate_semantics_cache();
+        self.last_damage = self.paint();
+        self.last_build_gen = self.rt.write_gen();
+        self.record_change("patch", || patched);
+        true
+    }
+
+    /// Whether any retained text binding's dependencies have changed (F3.5).
+    fn text_bindings_stale(&self) -> bool {
+        self.text_bindings
+            .iter()
+            .any(|b| !b.deps.is_current(&self.rt))
+    }
+
     fn patch_bg_bindings(&mut self) {
         let rt = self.rt.clone();
         let stale: Vec<usize> = self
@@ -3147,6 +3287,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         self.requests = requests;
         self.structural_reads = root_reads;
         self.bg_bindings.clear();
+        self.text_bindings.clear();
 
         // Dispatch background-work requests this build emitted, on the executor.
         // The runtime owns the executor + the deferred-op channel, so it mints
@@ -4008,6 +4149,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // F3: evaluate reactive prop bindings *before* the content is read for
         // hit-testing/measurement, recording their dependency keys per prop (F4).
         let mut text_deps: Vec<String> = Vec::new();
+        // F3.5: the binding, held until the sizing block below has measured it
+        // — that is where the wrap width and the auto-size flags are known.
+        let mut pending_text: Option<(lumen_core::Dynamic<String>, lumen_core::state::ReadSet)> =
+            None;
         let mut bg_deps: Vec<String> = Vec::new();
         let mut class_deps: Vec<String> = Vec::new();
         if el.dyn_text.is_some() || el.dyn_bg.is_some() || el.dyn_classes.is_some() {
@@ -4021,11 +4166,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 el.classes.extend(classes);
             }
             if let Some(d) = el.dyn_text.clone() {
-                // Text is size-affecting → NON-isolated: its reads are structural
-                // (a change relayouts via a full rebuild).
-                let (s, reads) = d.eval(&rt);
+                // F3.5: ISOLATED, like the background binding. Text used to be
+                // structural on the grounds that a new string can measure to a
+                // new size — true of some values, not of the binding. The
+                // measurement below decides per update, and a change that does
+                // move layout falls back to a rebuild there.
+                //
+                // Isolating the reads cannot strand a memoized subtree with
+                // stale text: `impure_seen` above already marks any span
+                // containing a `dyn_text` impure, and `splice_span` refuses to
+                // splice an impure span. So a rebuild always re-lowers this
+                // node and re-evaluates this binding.
+                let (s, reads) = d.eval_isolated(&rt);
                 text_deps = reads.dep_keys(&rt);
-                self.structural_reads.extend(&reads);
+                pending_text = Some((d, reads));
                 // The string is the node's content *and* its accessible label
                 // (Element::text sets both); keep them in sync.
                 el.label = s.clone();
@@ -4323,7 +4477,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // unwrapped line inside a stretched box — the same shape as
             // `nowrap`. Wrapping still needs a definite `Dim::px` (or a sized
             // container around the label).
-            if style.width == Dim::Auto {
+            // F3.5: capture BEFORE the assignments below overwrite the dims —
+            // an axis the author fixed cannot be moved by a new measurement.
+            let auto_w = style.width == Dim::Auto;
+            let auto_h = style.height == Dim::Auto;
+            if auto_w {
                 style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
             }
             // Same guard, same reason as the width above: an explicit height was
@@ -4339,8 +4497,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // golden across the whole corpus: `Grid`'s doc-shot, where the cells
             // now fill their 32 px rows instead of leaving a pale band between
             // them. That band was the same defect, sitting in a committed image.
-            if style.height == Dim::Auto {
+            if auto_h {
                 style.height = Dim::px(block.height().ceil() + (pt + pb) as f32);
+            }
+            // F3.5: retain the binding with what this build measured, so a
+            // later update can ask "would the box change?" without rebuilding.
+            if let Some((dynamic, deps)) = pending_text.take() {
+                self.text_bindings.push(BoundText {
+                    node,
+                    dynamic,
+                    deps,
+                    wrap,
+                    auto_w,
+                    auto_h,
+                    w: block.width().ceil(),
+                    h: block.height().ceil(),
+                    patchable: ellipsized.is_none(),
+                });
             }
             text_wrap = wrap;
         } else if let NodeContent::Custom(w) = &el.content {
@@ -4365,6 +4538,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             if matches!(style.height, Dim::Auto) {
                 style.height = Dim::px(s.height.max(0.0) as f32);
             }
+        }
+
+        // F3.5 safety net. The binding is only retained by the text sizing
+        // block above, which is reachable because evaluating a `dyn_text`
+        // rewrites `el.content` to `NodeContent::Text` unconditionally. If some
+        // future path ever slips past it, the reads would be isolated AND
+        // unretained — a change nothing would notice. Fall back to treating
+        // them as structural, which is what they were before F3.5.
+        if let Some((_, reads)) = pending_text.take() {
+            debug_assert!(false, "text binding on a node that never measured text");
+            self.structural_reads.extend(&reads);
         }
 
         // Consume the children (move, not clone) and recurse.

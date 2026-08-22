@@ -136,7 +136,13 @@ P.4), `LineChart::element(values, labels)` / `PieChart::element(slices)`,
   `lumen_core::stored_type!(Ty as "tag")` + `register_<trait>::<Ty>("tag")`
   at startup (W.4c) — unregistered tags drop with W0002 on restore.
 - Reactive text/background without a rebuild: `text!(cx, "…{sig}…")` and
-  `bind!` — background binds are paint-only patches (cheapest update).
+  `bind!`. Background binds always patch (cheapest update). **Text binds patch
+  too (F3.5) whenever the new string measures the same size** — the runtime
+  re-measures and falls back to a rebuild only if the box would actually move.
+  An axis the author fixed (`style.width = Dim::px(..)`, a `VirtualList`'s item
+  height, a wrapping paragraph that still fills the same lines) can never move,
+  so those always patch. Measured on a 3000-row list: ~93 µs to patch against
+  ~832 µs to rebuild.
 
 ## Step 5 — app-level modules (all headless-testable)
 
