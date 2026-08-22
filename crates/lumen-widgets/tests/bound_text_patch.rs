@@ -338,3 +338,86 @@ fn a_binding_still_updates_after_its_span_has_been_spliced() {
     assert!(label_of(&h).contains("0006"), "second update lost");
     h.assert_view_coherent();
 }
+
+/// F3.7: the point of `impl Into<Text>`. A binding can be handed straight to a
+/// widget constructor, and it reaches the patch path — no `.bind_text(..)`
+/// call, and no `cx.scope` wrapper, which is the shape that used to force a
+/// rebuild.
+#[test]
+fn a_binding_passed_straight_to_a_constructor_takes_the_patch_path() {
+    let runs = Rc::new(Cell::new(0u32));
+    let r = runs.clone();
+    let mut h = App::new(move |cx: &mut BuildCx| {
+        r.set(r.get() + 1);
+        let n: Signal<i64> = cx.signal("n", || 0);
+        let (a, b) = (n, n);
+        widgets::column(vec![
+            // No `.bind_text` — the binding IS the argument.
+            widgets::text(Dynamic::new(move |rt| format!("{:04}", a.get(rt) % 10000))).id("lbl"),
+            widgets::button(
+                Dynamic::new(move |rt| format!("{:04}", b.get(rt) % 10000)),
+                |_| {},
+            )
+            .id("btn"),
+        ])
+    })
+    .run_headless(Size::new(300.0, 160.0));
+    h.pump();
+    let baseline = runs.get();
+    assert!(label_of(&h).contains("0000"), "initial: {}", label_of(&h));
+
+    let n: Signal<i64> = h.runtime().signal("n", || 0);
+    n.set(h.runtime(), 3);
+    h.pump();
+
+    let json = label_of(&h);
+    assert!(
+        json.contains("0003"),
+        "the constructor binding did not update: {json}"
+    );
+    assert_eq!(
+        runs.get(),
+        baseline,
+        "a constructor-level binding rebuilt instead of patching"
+    );
+    h.assert_view_coherent();
+}
+
+/// `Text::map` keeps a binding reactive through a widget that composes its
+/// label with something else — a radio's marker glyph. Without it the widget
+/// would have to force the value to a `String`, silently dropping back to the
+/// rebuild path.
+#[test]
+fn a_composed_label_stays_reactive() {
+    let runs = Rc::new(Cell::new(0u32));
+    let r = runs.clone();
+    let mut h = App::new(move |cx: &mut BuildCx| {
+        r.set(r.get() + 1);
+        let n: Signal<i64> = cx.signal("n", || 0);
+        widgets::column(vec![widgets::radio(
+            cx,
+            "grp",
+            0,
+            Dynamic::new(move |rt| format!("{:04}", n.get(rt) % 10000)),
+        )])
+    })
+    .run_headless(Size::new(300.0, 160.0));
+    h.pump();
+    let baseline = runs.get();
+
+    let n: Signal<i64> = h.runtime().signal("n", || 0);
+    n.set(h.runtime(), 2);
+    h.pump();
+
+    assert!(
+        label_of(&h).contains("0002"),
+        "the composed label did not update: {}",
+        label_of(&h)
+    );
+    assert_eq!(
+        runs.get(),
+        baseline,
+        "a composed label rebuilt instead of patching — Text::map dropped the binding"
+    );
+    h.assert_view_coherent();
+}

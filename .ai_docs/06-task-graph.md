@@ -458,6 +458,27 @@ Measured on 3000 rows where **every** row carries a bound label, forced through 
 
 *Ablations* (`tests/bound_text_patch.rs`, 8 tests): removing the settle pass fails 2; removing its size check fails 1; **dropping the binding carry-forward failed nothing** — the suite changed a binding only *before* its span was ever spliced, so losing the record showed up as a label that silently stops updating, with no failing frame at the time. `a_binding_still_updates_after_its_span_has_been_spliced` drives splice-then-change and now fails that ablation. Worth recording as the shape of gap that ablation catches and review does not.
 
+## F3.7 ☑ `impl Into<Text>` — the reactive form is now the default one (2026-08-22)
+Steps 2 and 3 of three (step 1 was F3.6). `Prop<T>` had sat in `lumen-core/src/binding.rs` since F3 with **zero call sites** — built for exactly this and never adopted. Every widget that renders author-supplied text now takes `impl Into<Text>`, so a binding is passed straight in rather than reached through `.bind_text(..)` on a bare text element:
+
+```rust
+widgets::text(bind!(rt => format!("{} items", count.get(rt))))
+widgets::button(bind!(rt => label.get(rt)), on_click)
+widgets::radio(cx, "grp", 0, bind!(rt => name.get(rt)))
+```
+
+**Why the conversions are spelled out rather than blanket.** `impl<T: Into<String>> From<T> for Text` cannot coexist with `From<Dynamic<String>>` — Rust's coherence rules forbid negative reasoning, so the compiler cannot be told `Dynamic<String>` will never implement `Into<String>`. Taking the blanket would leave bindings needing a separate entry point, which is the exact ergonomic problem being solved. So `&str`, `String`, `&String`, `Cow<str>`, `Dynamic<String>` and `Prop<String>` are listed individually.
+
+**`Text::map` is what keeps composing widgets on the fast path.** A radio renders `◉ {label}`, a switch its state glyph — without a way to compose *through* a binding those widgets would have to force the value to a `String`, silently dropping back to the rebuild path. `map` wraps a `Dynamic` in a new one and passes a `Static` straight through.
+
+**Blast radius, measured rather than guessed:** 20 constructors in `lumen-widgets` and **25 helper functions across 7 example crates**, each a one-line widening of `impl Into<String>` → `impl Into<Text>`. Source-compatible for direct call sites (`&str`/`String` still convert); a *generic* helper of the author's own must widen its own bound. **Downstream consumers (Mercurium) will need the same one-line change on any `fn helper(s: impl Into<String>)` that forwards to a Lumen text widget.**
+
+Two constructors deliberately keep the string on the parent and put the binding on the child that actually renders it — `chrono-stopwatch`'s pill button and `Card::title` — because the parent uses the label as its accessible name, which is not the thing being painted.
+
+*Ablations* (`tests/bound_text_patch.rs`, 10 tests): making `into_parts` drop the binding fails 2; making `Text::map` drop it fails exactly the composed-label test.
+
+**Step 3 — the guidance.** `.claude/skills/building-apps` and the `text!` re-export doc now say plainly that reading a signal in the view body and interpolating its *value* is the slow form (structural read ⇒ rebuild), and that `bind!`/`text!` is the default. The API change is only worth its blast radius if authors actually write the binding form, which is a documentation problem, not a compiler one.
+
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
 - Any public-API signature in `02 §4`/`§8` that won't compile as written beyond a *minimal semantics-preserving* fix.

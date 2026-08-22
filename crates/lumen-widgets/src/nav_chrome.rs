@@ -329,18 +329,20 @@ pub struct AppBar {
 
 impl AppBar {
     /// A top app bar: a title with optional trailing action elements (≥44px tall).
-    pub fn new(title: impl Into<String>, actions: Vec<Element>) -> AppBar {
+    pub fn new(title: impl Into<crate::Text>, actions: Vec<Element>) -> AppBar {
         let el = {
             let title = title.into();
+            let (title_s, title_dyn) = title.clone().into_parts();
             let mut children = vec![Element {
                 role: Role::Text,
-                label: title.clone(),
+                label: title_s.clone(),
+                dyn_text: title_dyn,
                 style: LayoutStyle {
                     flex_grow: 1.0,
                     ..LayoutStyle::default()
                 },
                 content: crate::NodeContent::Text(
-                    title.clone(),
+                    title_s.clone(),
                     TextStyle {
                         font_size: 20.0,
                         weight: 400.0,
@@ -359,7 +361,7 @@ impl AppBar {
             children.extend(actions);
             Element {
                 role: Role::Group,
-                label: title,
+                label: title_s,
                 background: Some(Color::srgb8(0xff, 0xff, 0xff, 0xff)),
                 style: LayoutStyle {
                     display: Display::Flex,
@@ -382,7 +384,7 @@ impl_common!(AppBar);
 
 /// A top app bar: a title with optional trailing action elements (≥44px tall).
 /// *(Thin shim over [`AppBar`] — the typed form is preferred.)*
-pub fn app_bar(title: impl Into<String>, actions: Vec<Element>) -> Element {
+pub fn app_bar(title: impl Into<crate::Text>, actions: Vec<Element>) -> Element {
     AppBar::new(title, actions).into()
 }
 

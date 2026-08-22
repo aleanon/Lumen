@@ -16,7 +16,7 @@ pub fn main_app() -> App {
 
 /// A body line of wrapped text at a fixed width so long copy flows onto multiple
 /// lines instead of overflowing the card.
-fn line(s: impl Into<String>) -> Element {
+fn line(s: impl Into<lumen_widgets::Text>) -> Element {
     let mut e = widgets::text(s).class("body");
     e.style.width = Dim::px(360.0);
     if let Some(ts) = e.text_style_mut() {
@@ -26,7 +26,7 @@ fn line(s: impl Into<String>) -> Element {
 }
 
 /// A heading line (the page title).
-fn heading(s: impl Into<String>) -> Element {
+fn heading(s: impl Into<lumen_widgets::Text>) -> Element {
     let mut e = widgets::text(s).class("title");
     if let Some(ts) = e.text_style_mut() {
         ts.font_size = 26.0;

@@ -17,7 +17,7 @@ fn tile_bg() -> Color {
     Color::srgb8(0xf3, 0xf5, 0xf9, 0xff)
 }
 
-fn txt(s: impl Into<String>, size: f32, weight: f32) -> Element {
+fn txt(s: impl Into<lumen_widgets::Text>, size: f32, weight: f32) -> Element {
     let mut e = widgets::text(s);
     if let Some(ts) = e.text_style_mut() {
         ts.font_size = size;

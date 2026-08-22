@@ -155,13 +155,19 @@ impl_common!(Avatar);
 
 /// A radio button in the group keyed by `group`; selecting it sets the group to
 /// `value`. Exactly one member of a group is checked.
-pub fn radio(cx: &BuildCx, group: &str, value: usize, label: impl Into<String>) -> Element {
+pub fn radio(cx: &BuildCx, group: &str, value: usize, label: impl Into<crate::Text>) -> Element {
     let selected = cx.signal(group, || 0usize);
     let on = selected.get(cx.runtime()) == value;
     let label = label.into();
+    let marker = if on { "◉" } else { "○" };
+    let (shown, shown_dyn) = label
+        .clone()
+        .map(move |l| format!("{marker} {l}"))
+        .into_parts();
     Element {
         role: Role::Radio,
-        label: label.clone(),
+        label: label.as_static().unwrap_or_default().to_string(),
+        dyn_text: shown_dyn,
         focusable: true,
         actions: vec![Action::Click, Action::Focus],
         states: if on {
@@ -173,10 +179,7 @@ pub fn radio(cx: &BuildCx, group: &str, value: usize, label: impl Into<String>) 
             padding: Edges::all(Dim::px(4.0)),
             ..LayoutStyle::default()
         },
-        content: crate::NodeContent::Text(
-            format!("{} {label}", if on { "◉" } else { "○" }),
-            TextStyle::default(),
-        ),
+        content: crate::NodeContent::Text(shown, TextStyle::default()),
         on_click: Some(Rc::new(move |rt| selected.set(rt, value))),
         ..Element::default()
     }
@@ -412,7 +415,7 @@ pub struct Switch {
 
 impl Switch {
     /// A toggle switch with its own boolean state (`name`).
-    pub fn new(cx: &BuildCx, name: &str, label: impl Into<String>) -> Switch {
+    pub fn new(cx: &BuildCx, name: &str, label: impl Into<crate::Text>) -> Switch {
         let el = {
             let label = label.into();
             let on = cx.signal(name, || false);
@@ -431,9 +434,11 @@ impl Switch {
                 },
                 ..Element::default()
             };
+            let (label_s, label_dyn) = label.clone().into_parts();
             Element {
                 role: Role::Switch,
-                label: label.clone(),
+                label: label_s,
+                dyn_text: label_dyn,
                 focusable: true,
                 actions: vec![Action::Click, Action::Focus],
                 states: vec![if is {
@@ -460,7 +465,7 @@ impl_common!(Switch);
 
 /// A toggle switch with its own boolean state (`name`).
 /// *(Thin shim over [`Switch`] — the typed form is preferred.)*
-pub fn switch(cx: &BuildCx, name: &str, label: impl Into<String>) -> Element {
+pub fn switch(cx: &BuildCx, name: &str, label: impl Into<crate::Text>) -> Element {
     Switch::new(cx, name, label).into()
 }
 

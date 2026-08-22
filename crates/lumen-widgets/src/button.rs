@@ -39,11 +39,12 @@ pub struct Button {
 
 impl Button {
     /// A button labelled `label`.
-    pub fn new(label: impl Into<String>) -> Button {
-        let label = label.into();
+    pub fn new(label: impl Into<crate::Text>) -> Button {
+        let (label, dyn_text) = label.into().into_parts();
         let el = Element {
             role: Role::Button,
             label: label.clone(),
+            dyn_text,
             actions: vec![Action::Click, Action::Focus],
             focusable: true,
             background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),

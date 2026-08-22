@@ -53,7 +53,7 @@ pub struct Accordion {
 impl Accordion {
     /// A collapsed-by-default disclosure titled `title`, its open/closed flag
     /// stored under `name`. Add content with [`Accordion::body`].
-    pub fn new(cx: &BuildCx, name: &str, title: impl Into<String>) -> Accordion {
+    pub fn new(cx: &BuildCx, name: &str, title: impl Into<crate::Text>) -> Accordion {
         let title = title.into();
         let open = cx.signal(name, || false);
         let is_open = open.get(cx.runtime());
@@ -61,9 +61,11 @@ impl Accordion {
         // Header: chevron + title in a row. Clicking it (or Space/Enter when
         // focused, which routes to `on_click`) flips the flag.
         let chevron = Element::text(if is_open { "▼" } else { "▶" });
+        let (title_s, title_dyn) = title.clone().into_parts();
         let header = Element {
             role: Role::Button,
-            label: title.clone(),
+            label: title_s,
+            dyn_text: title_dyn,
             focusable: true,
             actions: vec![
                 Action::Focus,

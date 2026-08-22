@@ -52,7 +52,7 @@ fn tick() -> Element {
 
 impl CheckBox {
     /// A checkbox labelled `label`, state stored under `name`.
-    pub fn new(cx: &BuildCx, name: &str, label: impl Into<String>) -> CheckBox {
+    pub fn new(cx: &BuildCx, name: &str, label: impl Into<crate::Text>) -> CheckBox {
         let label = label.into();
         let checked = cx.signal(name, || false);
         let is = checked.get(cx.runtime());
@@ -76,9 +76,11 @@ impl CheckBox {
             ..Element::default()
         };
 
+        let (label_s, label_dyn) = label.clone().into_parts();
         let el = Element {
             role: Role::Checkbox,
-            label: label.clone(),
+            label: label_s,
+            dyn_text: label_dyn,
             focusable: true,
             actions: vec![Action::Click, Action::Focus],
             states: vec![if is {

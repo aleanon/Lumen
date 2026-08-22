@@ -35,7 +35,7 @@ fn tri(f: &mut Frame, a: Point, b: Point, c: Point, depth: u32, color: Color) {
     tri(f, mid(a, c), mid(b, c), c, depth - 1, color);
 }
 
-fn txt(s: impl Into<String>, size: f32, weight: f32) -> Element {
+fn txt(s: impl Into<lumen_widgets::Text>, size: f32, weight: f32) -> Element {
     let mut e = widgets::text(s);
     if let Some(ts) = e.text_style_mut() {
         ts.font_size = size;

@@ -39,7 +39,7 @@ impl FilePicker {
     pub fn new(
         cx: &BuildCx,
         name: &str,
-        label: impl Into<String>,
+        label: impl Into<crate::Text>,
         filters: impl IntoIterator<Item = impl Into<String>>,
     ) -> FilePicker {
         cx.signal(format!("{name}.path"), String::new);

@@ -71,7 +71,11 @@ pub struct Toast {
 
 impl Toast {
     /// A toast card. `Role::Alert` so agents/screen readers see it announce.
-    pub fn new(kind: ToastKind, title: impl Into<String>, body: impl Into<String>) -> Toast {
+    pub fn new(
+        kind: ToastKind,
+        title: impl Into<crate::Text>,
+        body: impl Into<crate::Text>,
+    ) -> Toast {
         let mut bar = Element::default().class("bar").class(kind.class());
         bar.background = Some(kind.accent());
         bar.style.width = Dim::px(5.0);
@@ -238,7 +242,7 @@ pub struct Chip {
 
 impl Chip {
     /// A pill chip.
-    pub fn new(label: impl Into<String>) -> Chip {
+    pub fn new(label: impl Into<crate::Text>) -> Chip {
         let mut text = widgets::text(label);
         if let Some(ts) = text.text_style_mut() {
             ts.font_size = 12.0;

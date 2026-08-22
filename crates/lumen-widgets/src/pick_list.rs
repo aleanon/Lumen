@@ -53,7 +53,7 @@ fn chevron() -> Element {
     })
 }
 
-fn text(s: impl Into<String>, color: Color) -> Element {
+fn text(s: impl Into<crate::Text>, color: Color) -> Element {
     let mut e = widgets::text(s);
     if let Some(ts) = e.text_style_mut() {
         ts.font_size = 14.0;

@@ -40,7 +40,7 @@ pub fn keyed<T>(
 }
 
 /// Static text.
-pub fn text(s: impl Into<String>) -> Element {
+pub fn text(s: impl Into<crate::Text>) -> Element {
     Element::text(s)
 }
 
@@ -153,14 +153,14 @@ pub fn stack(children: impl Into<Vec<Element>>) -> Element {
 
 /// A push button.
 pub fn button(
-    label: impl Into<String>,
+    label: impl Into<crate::Text>,
     on_click: impl Fn(&lumen_core::Runtime) + 'static,
 ) -> Element {
     Element::button(label).on_click(on_click)
 }
 
 /// A checkbox with its own boolean state (`name`). Click or Space toggles it.
-pub fn checkbox(cx: &BuildCx, name: &str, label: impl Into<String>) -> Element {
+pub fn checkbox(cx: &BuildCx, name: &str, label: impl Into<crate::Text>) -> Element {
     crate::check_box::CheckBox::new(cx, name, label).into()
 }
 

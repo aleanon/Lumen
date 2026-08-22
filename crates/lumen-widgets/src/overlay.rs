@@ -119,7 +119,7 @@ impl Tooltip {
     /// other toolkit, and leaving `target`'s own box untouched.
     ///
     /// `name` keys the hover test, so the target gets a stable id.
-    pub fn new(cx: &BuildCx, name: &str, target: Element, text: impl Into<String>) -> Tooltip {
+    pub fn new(cx: &BuildCx, name: &str, target: Element, text: impl Into<crate::Text>) -> Tooltip {
         let text = text.into();
         let host_id = format!("{name}-tip-host");
         let showing = cx.is_hovered(&host_id);
@@ -128,15 +128,17 @@ impl Tooltip {
         host.id = Some(host_id.clone().into());
         // The tip describes the target, so the target carries the description
         // for assistive tech whether or not the tip is currently painted.
+        let (text_s, text_dyn) = text.clone().into_parts();
         if host.label.is_empty() {
-            host.label = text.clone();
+            host.label = text_s.clone();
         }
 
         let mut children = vec![host];
         if showing {
             let tip = Element {
                 role: Role::Tooltip,
-                label: text.clone(),
+                label: text_s.clone(),
+                dyn_text: text_dyn,
                 overlay: true,
                 background: Some(Color::srgb8(0x20, 0x24, 0x2a, 0xff)),
                 corner_radius: 6.0,
@@ -156,7 +158,7 @@ impl Tooltip {
                     ..LayoutStyle::default()
                 },
                 content: crate::NodeContent::Text(
-                    text,
+                    text_s,
                     TextStyle {
                         font_size: 12.0,
                         weight: 400.0,
@@ -195,7 +197,7 @@ impl_common!(Tooltip);
 
 /// Wrap `target` with a tooltip whose `text` is exposed to assistive tech.
 /// *(Thin shim over [`Tooltip`] — the typed form is preferred.)*
-pub fn tooltip(cx: &BuildCx, name: &str, target: Element, text: impl Into<String>) -> Element {
+pub fn tooltip(cx: &BuildCx, name: &str, target: Element, text: impl Into<crate::Text>) -> Element {
     Tooltip::new(cx, name, target, text).into()
 }
 

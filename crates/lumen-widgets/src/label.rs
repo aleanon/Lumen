@@ -35,12 +35,13 @@ pub struct Label {
 
 impl Label {
     /// A label showing `s`.
-    pub fn new(s: impl Into<String>) -> Label {
-        let s = s.into();
+    pub fn new(s: impl Into<crate::Text>) -> Label {
+        let (s, dyn_text) = s.into().into_parts();
         let el = Element {
             role: Role::Text,
             label: s.clone(),
             content: NodeContent::Text(s, TextStyle::default()),
+            dyn_text,
             ..Element::default()
         };
         Label { el }

@@ -40,7 +40,7 @@ pub fn success() -> Color {
 
 /// A filled pill badge with a white semibold label and its own soft shadow
 /// (toasts, status chips).
-pub fn badge(text: impl Into<String>, bg: Color) -> Element {
+pub fn badge(text: impl Into<crate::Text>, bg: Color) -> Element {
     let mut label = widgets::text(text);
     if let Some(ts) = label.text_style_mut() {
         ts.color = Color::WHITE;
@@ -66,7 +66,7 @@ pub fn badge(text: impl Into<String>, bg: Color) -> Element {
 }
 
 /// Styled text of `size`/`weight`/`color` (helper for the typography below).
-fn styled(s: impl Into<String>, size: f32, weight: f32, color: Color) -> Element {
+fn styled(s: impl Into<crate::Text>, size: f32, weight: f32, color: Color) -> Element {
     let mut el = widgets::text(s);
     if let Some(ts) = el.text_style_mut() {
         ts.font_size = size;
@@ -77,17 +77,17 @@ fn styled(s: impl Into<String>, size: f32, weight: f32, color: Color) -> Element
 }
 
 /// A very large bold display value (e.g. a stopwatch readout).
-pub fn display(s: impl Into<String>) -> Element {
+pub fn display(s: impl Into<crate::Text>) -> Element {
     styled(s, 52.0, 700.0, ink())
 }
 
 /// A bold section heading.
-pub fn heading(s: impl Into<String>) -> Element {
+pub fn heading(s: impl Into<crate::Text>) -> Element {
     styled(s, 22.0, 700.0, ink())
 }
 
 /// Muted caption / secondary text.
-pub fn caption(s: impl Into<String>) -> Element {
+pub fn caption(s: impl Into<crate::Text>) -> Element {
     styled(s, 13.0, 400.0, muted())
 }
 
@@ -194,17 +194,23 @@ pub fn button_row(children: Vec<Element>) -> Element {
 }
 
 /// A filled accent button — generous padding, semibold white label, rounded.
-pub fn accent_button(label: impl Into<String>, on_click: impl Fn(&Runtime) + 'static) -> Element {
+pub fn accent_button(
+    label: impl Into<crate::Text>,
+    on_click: impl Fn(&Runtime) + 'static,
+) -> Element {
     button_styled(label, on_click, accent(), Color::WHITE)
 }
 
 /// A neutral (secondary) button — light surface, ink label.
-pub fn ghost_button(label: impl Into<String>, on_click: impl Fn(&Runtime) + 'static) -> Element {
+pub fn ghost_button(
+    label: impl Into<crate::Text>,
+    on_click: impl Fn(&Runtime) + 'static,
+) -> Element {
     button_styled(label, on_click, Color::srgb8(0xe9, 0xeb, 0xef, 0xff), ink())
 }
 
 fn button_styled(
-    label: impl Into<String>,
+    label: impl Into<crate::Text>,
     on_click: impl Fn(&Runtime) + 'static,
     bg: Color,
     fg: Color,

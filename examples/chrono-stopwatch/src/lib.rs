@@ -339,7 +339,7 @@ fn draw_dial(f: &mut Frame, frac: f64, pal: Pal) {
 
 // --- small helpers ----------------------------------------------------------
 
-fn styled_text(s: impl Into<String>, size: f32, weight: f32, color: Color) -> Element {
+fn styled_text(s: impl Into<lumen_widgets::Text>, size: f32, weight: f32, color: Color) -> Element {
     let mut el = widgets::text(s);
     if let Some(ts) = el.text_style_mut() {
         ts.font_size = size;
@@ -350,17 +350,20 @@ fn styled_text(s: impl Into<String>, size: f32, weight: f32, color: Color) -> El
 }
 
 fn pill(
-    label: impl Into<String>,
+    label: impl Into<lumen_widgets::Text>,
     fill: Color,
     text: Color,
     on_click: impl Fn(&Runtime) + 'static,
 ) -> Element {
     // The label is a centred *child* (a flex item), because the renderer paints
     // a node's own `text` at its box origin (padding doesn't recentre it).
-    let label = label.into();
+    // The binding (if any) belongs to the centred CHILD that actually renders
+    // the text; the button itself only carries the accessible name.
+    let label: lumen_widgets::Text = label.into();
+    let name = label.as_static().unwrap_or_default().to_string();
     Element {
         role: lumen_core::semantics::Role::Button,
-        label: label.clone(),
+        label: name,
         focusable: true,
         actions: vec![
             lumen_core::semantics::Action::Click,

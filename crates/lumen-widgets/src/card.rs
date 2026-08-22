@@ -67,14 +67,14 @@ impl Card {
 
     /// Give the card a heading, rendered above its content and used as the
     /// group's accessible label so the card announces as a unit.
-    pub fn title(mut self, title: impl Into<String>) -> Card {
+    pub fn title(mut self, title: impl Into<crate::Text>) -> Card {
         let title = title.into();
         let mut t = widgets::text(title.clone());
         if let Some(ts) = t.text_style_mut() {
             ts.font_size = 15.0;
             ts.weight = 600.0;
         }
-        self.el.label = title;
+        self.el.label = title.as_static().unwrap_or_default().to_string();
         self.el.children.insert(0, t.class("card-title"));
         self
     }
@@ -129,7 +129,7 @@ impl Badge {
     /// The badge is absolutely positioned, so adding one never changes the
     /// target's layout. Its text is announced as part of the group, so a screen
     /// reader hears "Inbox 3" rather than losing the count.
-    pub fn new(target: Element, label: impl Into<String>) -> Badge {
+    pub fn new(target: Element, label: impl Into<crate::Text>) -> Badge {
         let label = label.into();
         let mut t = widgets::text(label.clone());
         if let Some(ts) = t.text_style_mut() {
@@ -137,9 +137,11 @@ impl Badge {
             ts.weight = 600.0;
             ts.color = Color::WHITE;
         }
+        let (label_s, label_dyn) = label.clone().into_parts();
         let pill = Element {
             role: Role::Text,
-            label: label.clone(),
+            label: label_s,
+            dyn_text: label_dyn,
             background: Some(Color::srgb8(0xd3, 0x2f, 0x2f, 0xff)),
             corner_radius: 999.0,
             style: LayoutStyle {

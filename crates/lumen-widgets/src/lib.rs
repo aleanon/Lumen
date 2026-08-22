@@ -92,7 +92,7 @@ mod text_editing;
 pub use app::{center, App, FrameStats, Headless, ReloadResult};
 #[cfg(feature = "snapshot")]
 pub use app::{AppSnapshot, Checkpoint};
-pub use element::{AbortHandle, BuildCx, Element, Handler, LeafWidget, NodeContent};
+pub use element::{AbortHandle, BuildCx, Element, Handler, LeafWidget, NodeContent, Text};
 /// The data layer: executors + the `Sink` background work pushes results through.
 pub use lumen_core::tasks::{CancelToken, InlineSpawner, ManualSpawner, Sink, Spawner, TaskHandle};
 /// Compile-time handler-currency check (F2): a handler may only capture stable
@@ -123,6 +123,12 @@ pub use lumen_core::tasks::{CancelToken, InlineSpawner, ManualSpawner, Sink, Spa
 pub use lumen_macros::stable_handler;
 /// F3 binding sugar: `text!(cx, "Count: {count}")` → a reactive text element
 /// whose string tracks the interpolated signals. See [`lumen_macros::text`].
+///
+/// Prefer this (or a `bind!` handed to any widget that takes
+/// [`Text`](crate::Text)) over interpolating a signal's *value* into a
+/// `format!` in the view body. A binding updates through the patch path — no
+/// rebuild, no relayout — where a value read in the view is structural and
+/// rebuilds the frame.
 pub use lumen_macros::text;
 /// Re-exported so downstream crates can bound on the renderer backend (e.g.
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.

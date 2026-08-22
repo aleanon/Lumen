@@ -135,14 +135,29 @@ P.4), `LineChart::element(values, labels)` / `PieChart::element(slices)`,
   is storable via `#[lumen_macros::state_registry]` on the trait +
   `lumen_core::stored_type!(Ty as "tag")` + `register_<trait>::<Ty>("tag")`
   at startup (W.4c) — unregistered tags drop with W0002 on restore.
-- Reactive text/background without a rebuild: `text!(cx, "…{sig}…")` and
-  `bind!`. Background binds always patch (cheapest update). **Text binds patch
-  too (F3.5) whenever the new string measures the same size** — the runtime
-  re-measures and falls back to a rebuild only if the box would actually move.
-  An axis the author fixed (`style.width = Dim::px(..)`, a `VirtualList`'s item
-  height, a wrapping paragraph that still fills the same lines) can never move,
-  so those always patch. Measured on a 3000-row list: ~93 µs to patch against
-  ~832 µs to rebuild.
+- **Reactive text is the default — write the binding, not the value.** Every
+  widget that renders author text takes `impl Into<Text>`, so a binding goes
+  straight in:
+
+  ```rust
+  widgets::text(bind!(rt => format!("{} items", count.get(rt))))
+  widgets::button(bind!(rt => label.get(rt)), on_click)
+  text!(cx, "Count: {count}")            // sugar for the same thing
+  ```
+
+  A binding updates through the **patch path**: no rebuild, no relayout, no
+  view closure re-run. Measured on a 3000-row list, changing one row:
+  **~93 µs bound against ~832 µs** for the same change written as a value read
+  inside the view (or inside a `cx.scope`). Backgrounds (`bind_background`)
+  always patch; text patches whenever the new string measures the same size,
+  and falls back to a rebuild only when the box would genuinely move — an axis
+  the author fixed (`style.width = Dim::px(..)`, a `VirtualList` item height, a
+  paragraph that still wraps to the same lines) can never move, so those always
+  patch.
+
+  Reading a signal in the view body and interpolating the *value*
+  (`widgets::text(format!("{}", n.get(cx.runtime())))`) is the slow form: that
+  read is structural, so every change rebuilds. Prefer `bind!`/`text!`.
 
 ## Step 5 — app-level modules (all headless-testable)
 

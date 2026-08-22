@@ -322,6 +322,120 @@ impl Default for Element {
     }
 }
 
+/// A text value an author can hand a widget: a constant, or a reactive binding.
+///
+/// F3.7. Every widget that renders author-supplied text takes `impl Into<Text>`
+/// rather than `impl Into<String>`, so a binding can be passed straight in:
+///
+/// ```ignore
+/// widgets::text("Ready")                                  // constant
+/// widgets::text(bind!(rt => format!("{} items", n.get(rt))))  // reactive
+/// widgets::button(bind!(rt => label.get(rt)), on_click)   // and on a button
+/// ```
+///
+/// A binding updates through the patch path (F3.5) — no rebuild, no relayout —
+/// whenever the new string measures the same size, which is ~9x cheaper than
+/// the rebuild an equivalent `cx.scope` would cost. That is the whole reason
+/// this type exists: before it, the reactive form was reachable only through
+/// `.bind_text(..)` on a bare text element, so every other widget's label was
+/// stuck on the slow path.
+///
+/// **Why the conversions are spelled out one by one.** The obvious
+/// `impl<T: Into<String>> From<T> for Text` cannot coexist with
+/// `From<Dynamic<String>>`: Rust's coherence rules forbid negative reasoning,
+/// so it cannot be told that `Dynamic<String>` will never implement
+/// `Into<String>`. Taking the blanket would mean bindings need a separate entry
+/// point, which is the ergonomic problem this is solving. So the common
+/// conversions are listed explicitly instead, and a *generic* helper of the
+/// author's own — `fn row(s: impl Into<String>)` — becomes
+/// `fn row(s: impl Into<Text>)`.
+pub struct Text(pub lumen_core::Prop<String>);
+
+impl Clone for Text {
+    fn clone(&self) -> Text {
+        Text(self.0.clone())
+    }
+}
+
+impl Text {
+    /// Transform the text, keeping it reactive if it was.
+    ///
+    /// Several widgets render their label composed with something else — a
+    /// radio's `◉`, a switch's state glyph. Without this they would have to
+    /// force the value to a `String`, which throws away the binding and puts
+    /// the widget back on the rebuild path. Mapping a `Dynamic` wraps it, so
+    /// the composed text stays reactive and keeps the caller's dependencies.
+    pub fn map(self, f: impl Fn(String) -> String + 'static) -> Text {
+        match self.0 {
+            lumen_core::Prop::Static(s) => Text(lumen_core::Prop::Static(f(s))),
+            lumen_core::Prop::Dynamic(d) => {
+                Text(lumen_core::Prop::Dynamic(Dynamic::new(move |rt| {
+                    f(d.get(rt))
+                })))
+            }
+        }
+    }
+
+    /// The constant string, or `None` if this is a binding.
+    ///
+    /// For the widgets that need the label a second time — as a semantic name,
+    /// a comparison key, or an `.lss` class — where a binding has no value to
+    /// give until the build evaluates it.
+    pub fn as_static(&self) -> Option<&str> {
+        match &self.0 {
+            lumen_core::Prop::Static(s) => Some(s),
+            lumen_core::Prop::Dynamic(_) => None,
+        }
+    }
+}
+
+impl From<&str> for Text {
+    fn from(s: &str) -> Text {
+        Text(lumen_core::Prop::Static(s.to_string()))
+    }
+}
+impl From<String> for Text {
+    fn from(s: String) -> Text {
+        Text(lumen_core::Prop::Static(s))
+    }
+}
+impl From<&String> for Text {
+    fn from(s: &String) -> Text {
+        Text(lumen_core::Prop::Static(s.clone()))
+    }
+}
+impl From<std::borrow::Cow<'_, str>> for Text {
+    fn from(s: std::borrow::Cow<'_, str>) -> Text {
+        Text(lumen_core::Prop::Static(s.into_owned()))
+    }
+}
+impl From<Dynamic<String>> for Text {
+    fn from(d: Dynamic<String>) -> Text {
+        Text(lumen_core::Prop::Dynamic(d))
+    }
+}
+impl From<lumen_core::Prop<String>> for Text {
+    fn from(p: lumen_core::Prop<String>) -> Text {
+        Text(p)
+    }
+}
+
+impl Text {
+    /// Split into the constant string and the binding, whichever this is.
+    ///
+    /// A binding yields an EMPTY string rather than being evaluated here, which
+    /// is what keeps the constructors runtime-free — `widgets::text(..)` has no
+    /// `cx` to evaluate against. Nothing is lost: `build_node` evaluates every
+    /// `dyn_text` and overwrites both `content` and `label` before the node is
+    /// measured, so the placeholder is never seen.
+    pub fn into_parts(self) -> (String, Option<Dynamic<String>>) {
+        match self.0 {
+            lumen_core::Prop::Static(s) => (s, None),
+            lumen_core::Prop::Dynamic(d) => (String::new(), Some(d)),
+        }
+    }
+}
+
 impl Element {
     /// A flex-row container (pure layout, elided from semantics).
     pub fn row(children: impl Into<Vec<Element>>) -> Element {
@@ -354,22 +468,24 @@ impl Element {
     }
 
     /// Static text.
-    pub fn text(s: impl Into<String>) -> Element {
-        let s = s.into();
+    pub fn text(s: impl Into<Text>) -> Element {
+        let (s, dyn_text) = s.into().into_parts();
         Element {
             role: Role::Text,
             label: s.clone(),
             content: crate::NodeContent::Text(s, TextStyle::default()),
+            dyn_text,
             ..Element::default()
         }
     }
 
     /// A push button with a text label.
-    pub fn button(label: impl Into<String>) -> Element {
-        let label = label.into();
+    pub fn button(label: impl Into<Text>) -> Element {
+        let (label, dyn_text) = label.into().into_parts();
         Element {
             role: Role::Button,
             label: label.clone(),
+            dyn_text,
             actions: vec![Action::Click, Action::Focus],
             focusable: true,
             background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
