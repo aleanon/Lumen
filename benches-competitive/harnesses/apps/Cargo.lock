@@ -4041,6 +4041,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumen-defaulttext-app"
+version = "0.1.0"
+dependencies = [
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-text",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "lumen-layout"
 version = "0.1.0"
 dependencies = [
@@ -4107,6 +4118,17 @@ dependencies = [
  "tray-icon",
  "wgpu 30.0.1",
  "winit",
+]
+
+[[package]]
+name = "lumen-stubtext-app"
+version = "0.1.0"
+dependencies = [
+ "lumen-core",
+ "lumen-layout",
+ "lumen-render",
+ "lumen-text",
+ "lumen-widgets",
 ]
 
 [[package]]
