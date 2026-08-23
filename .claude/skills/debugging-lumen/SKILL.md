@@ -22,6 +22,7 @@ requires a debugger.
 | Content visibly cut off | Real clipping | `ui.getLayout`: `ink` bigger than `bounds` + `"clipped": true`; `ui.lint` → W0104 |
 | Overlapping/zero-size controls | — | `ui.lint` → W0103 overflow, W0105 zero-area interactive |
 | Element "missing" but present in the tree | Unreadable contrast (fg == bg) | `ui.lint` → W0303, which names the measured APCA Lc and both colors |
+| Clicked, and nothing seemed to happen | Handler ran but painted nothing | `ui.lastDamage` → `kind: none` means the handler changed no pixels; a `region` naming your node means it did |
 | **`.lss` rule ignored** | Property outside the applied subset (see styling-lss works table — most render now). `:hover`/`:hovered` are aliases (B.6a), nested `&` rules apply (B.1), and type mismatches reject the sheet with a spanned E0103 (B.7a) — so an ignored rule usually means a parse-only property or a selector that doesn't match | `ui.getStyles {selector}` — is the computed value there (with its source span)? Then the `styling-lss` skill's parse-only list |
 | **Element invisible to tests/agent** | No `role`/`label` (semantically invisible), or elided as a pure-layout node | `ui.getTree {raw: true}` — present in raw but not elided ⇒ add role/label |
 | Selector can't find an obvious node | Dotted id (`#a.b` parses as id+class), or a stale `node-N` index used as a selector (ID1: handles are `nx-<hex>`) | `agent_client.py tree` shows the real ids; use `#dash-cased-id` |

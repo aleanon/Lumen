@@ -356,6 +356,55 @@ fn handle<R: Renderer, E: Spawner>(
             Ok(app.what_depends_on(sig))
         }
         "ui.lastChange" => Ok(app.last_change()),
+        // O1.2: what actually repainted last frame. The runtime has computed
+        // damage every frame since R2 (it drives the shell's idle-skip and the
+        // GPU scissor), and it was reachable from Rust and from the test
+        // tracer but never from the protocol — so "what changed on screen when
+        // I clicked that", the question a human answers by looking, had no
+        // answer here at all.
+        //
+        // Rects alone would force a spatial join the agent has no primitive
+        // for, so the intersecting nodes come with them.
+        "ui.lastDamage" => {
+            let (kind, rect) = match app.last_damage() {
+                lumen_widgets::Damage::None => ("none", None),
+                lumen_widgets::Damage::Region(r) => ("region", Some(r)),
+                lumen_widgets::Damage::Full => ("full", None),
+            };
+            // Only a bounded region has a meaningful node list: `full` means
+            // the whole window repainted, where "which nodes" is every node
+            // and therefore no information.
+            let nodes: Vec<Value> = match rect {
+                Some(r) => {
+                    fn collect(n: &SemanticsNode, r: &kurbo::Rect, out: &mut Vec<Value>) {
+                        let b = n.bounds;
+                        let hit = b.x0 < r.x1 && b.x1 > r.x0 && b.y0 < r.y1 && b.y1 > r.y0;
+                        if hit && !n.elide {
+                            out.push(json!({
+                                "node": n.node.to_wire(),
+                                "id": n.id.as_ref().map(|i| i.as_str()),
+                                "role": n.role.as_str(),
+                                "label": n.label,
+                            }));
+                        }
+                        for c in &n.children {
+                            collect(c, r, out);
+                        }
+                    }
+                    let mut v = Vec::new();
+                    collect(&app.semantics_elided(), &r, &mut v);
+                    v
+                }
+                None => Vec::new(),
+            };
+            Ok(json!({
+                "kind": kind,
+                "rect": rect.map(|r| json!({
+                    "x": r.x0, "y": r.y0, "w": r.width(), "h": r.height()
+                })),
+                "nodes": nodes,
+            }))
+        }
         "ui.getLayout" => {
             let node = resolve(app, sel(params)?)?;
             let b = node.bounds;
@@ -1312,6 +1361,10 @@ pub fn mcp_manifest() -> Value {
             tool(
                 "ui_lastChange",
                 "What the last pump did: idle/patch/rebuild + patched nodes.",
+            ),
+            tool(
+                "ui_lastDamage",
+                "What repainted last frame: the damage rect + the nodes in it.",
             ),
             tool("input_click", "Click the node a selector resolves to."),
             tool(

@@ -140,6 +140,7 @@ are pure functions (`is_loopback_addr`, `auth_ok`) compiled outside the
 | `ui.getDeps` | `{ selector }` | signals the node depends on, per-prop |
 | `ui.whatDependsOn` | `{ signal }` | nodes that would patch/rebuild if the signal changed (no write) |
 | `ui.lastChange` | `{}` | what the last pump did: `idle` / `patch` / `rebuild` + patched nodes |
+| `ui.lastDamage` | `{}` | what **repainted** last frame: `{ kind: none\|region\|full, rect, nodes[] }`. `nodes` is populated for `region` only — under `full` "which nodes" is every node, and therefore no information |
 | `ui.getMenu` | `{}` | the app's `MenuModel`; items carry optional `accel` chords (`"Ctrl+O"`) which the shell matches (P.3c) |
 | `app.systemRequests` | `{}` | queued portable `SystemRequest`s |
 | `ui.getWindows` | `{}` | app-declared `WindowDesc` list; the shell realizes each as a real OS window over the shared store (P.3d). Agent verbs address the MAIN window; per-window addressing is future work |
