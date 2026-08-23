@@ -35,14 +35,25 @@ pub trait RunExt {
     fn run(self, size: Size);
 }
 
-/// MOD7 S1: implemented for an app on ANY [`PlatformConfig`], not just the
-/// shipped bundle. `App` defaults its third parameter, so `App::new(..).run(..)`
-/// still resolves to exactly this impl with `P = DefaultPlatform`.
-impl<P: lumen_widgets::app::PlatformConfig> RunExt
-    for App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner, P>
+/// MOD7 S1/S4: implemented for an app on ANY renderer, executor and
+/// [`PlatformConfig`] — not just the shipped bundle, and not just the default
+/// renderer and executor.
+///
+/// The wider bound is what makes the presets usable. `presets::Desktop` names a
+/// `Box<dyn Renderer>` and a thread pool, so with the original
+/// `App<TinySkia, InlineSpawner, P>` bound a preset app could run headless and
+/// **not** open a window — the same "reachable everywhere except the shell"
+/// defect MOD7 exists to remove, reintroduced one layer up.
+///
+/// The executor is kept; the renderer is not — see [`run_any`].
+impl<
+        R: lumen_render::Renderer,
+        E: lumen_core::tasks::Spawner,
+        P: lumen_widgets::app::PlatformConfig,
+    > RunExt for App<R, E, P>
 {
     fn run(self, size: Size) {
-        run(self, size);
+        run_any(self, size);
     }
 }
 
@@ -124,6 +135,28 @@ pub fn run<P: lumen_widgets::app::PlatformConfig>(
 /// entry point that honours it; `run` now delegates here.
 pub fn run_with<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig>(
     app: App<lumen_render::TinySkia, E, P>,
+    size: Size,
+) {
+    run_any(app, size)
+}
+
+/// Open a window and run `app`, whatever renderer and executor it carries.
+///
+/// **The renderer is replaced.** A live window's backend is chosen at startup —
+/// GPU if an adapter is present, else the CPU reference, with `--wgpu` /
+/// `--tiny-skia` / `LUMEN_RENDERER` overriding — and that choice cannot be
+/// expressed by a type the app picked earlier. So a config's `Renderer` governs
+/// headless runs and is discarded here. Stated rather than left to be
+/// discovered, because silently dropping a caller's type parameter is precisely
+/// the defect MOD7 S0 had to fix.
+///
+/// The executor IS kept, unlike before MOD7 S2.
+pub fn run_any<
+    R: lumen_render::Renderer,
+    E: lumen_core::tasks::Spawner,
+    P: lumen_widgets::app::PlatformConfig,
+>(
+    app: App<R, E, P>,
     size: Size,
 ) {
     let event_loop = EventLoop::<ShellEvent>::with_user_event()

@@ -90,3 +90,23 @@ fn run_with_accepts_a_caller_supplied_executor() {
         kurbo::Size,
     ) = lumen_shell::run_with::<lumen_core::tasks::InlineSpawner, DefaultPlatform>;
 }
+
+/// MOD7 S4 follow-up: a PRESET app must be able to open a window.
+///
+/// `RunExt` was first implemented only for
+/// `App<TinySkia, InlineSpawner, P>`, so `presets::Desktop` — which names a
+/// boxed renderer and a thread pool — could run headless and not windowed.
+/// That is the same "reachable everywhere except the shell" defect MOD7 exists
+/// to remove, reintroduced one layer up, and it was found by trying to write
+/// the one-line app the presets are for rather than by reading the bound.
+#[test]
+fn presets_can_open_a_window() {
+    use lumen_widgets::app::presets::{Balanced, Desktop, Lean};
+    use lumen_widgets::app::ConfiguredApp;
+    fn assert_runnable<T: lumen_shell::RunExt>(_: &T) {}
+    assert_runnable(&ConfiguredApp::<Lean>::with_config(view));
+    assert_runnable(&ConfiguredApp::<Balanced>::with_config(view));
+    assert_runnable(&ConfiguredApp::<Desktop>::with_config(view));
+    // and the plain default still resolves without naming anything
+    assert_runnable(&App::new(view));
+}
