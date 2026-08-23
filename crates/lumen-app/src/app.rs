@@ -201,7 +201,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// builder). The CPU reference renderer is the default; the shell hands in a
     /// GPU backend (constructed post-surface), and a consumer wanting runtime
     /// selection passes a `Box<dyn Renderer>`.
-    pub fn with_renderer<R2: lumen_render::Renderer>(self, renderer: R2) -> App<R2, E> {
+    ///
+    /// MOD7 S0: the return type names `P`. It used to be `App<R2, E>`, which
+    /// defaulted the third parameter — so calling this on an app built with
+    /// [`with_platform`](App::with_platform) silently reverted it to
+    /// `DefaultPlatform`, and the app ran on the shipped text and layout
+    /// engines instead of the chosen ones. It type-errors only if the caller
+    /// annotates the result, which is why nothing caught it; the guard is
+    /// `lumen-widgets/tests/platform_builder.rs`.
+    pub fn with_renderer<R2: lumen_render::Renderer>(self, renderer: R2) -> App<R2, E, P> {
         App {
             _platform: std::marker::PhantomData,
             root: self.root,
@@ -217,7 +225,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// builder). Defaults to the deterministic [`InlineSpawner`](lumen_core::tasks::InlineSpawner);
     /// the shell hands in a real thread-pool / async executor, and a consumer
     /// wanting runtime selection passes a `Box<dyn Spawner>`.
-    pub fn with_executor<E2: lumen_core::tasks::Spawner>(self, executor: E2) -> App<R, E2> {
+    /// MOD7 S0: names `P` for the same reason `with_renderer` does.
+    pub fn with_executor<E2: lumen_core::tasks::Spawner>(self, executor: E2) -> App<R, E2, P> {
         App {
             _platform: std::marker::PhantomData,
             root: self.root,
