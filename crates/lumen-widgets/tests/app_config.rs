@@ -11,8 +11,9 @@
 
 use kurbo::Size;
 use lumen_text::{CachedRun, TextAlign, TextBlockApi, TextEngineApi, TextMetrics, TextStyle};
-use lumen_widgets::app::{AppConfig, ConfiguredApp};
+use lumen_widgets::app::{AppConfig, ConfiguredApp, PlatformConfig, Tuning};
 use lumen_widgets::{widgets, BuildCx, Element};
+use std::cell::RefCell;
 
 const ADV: f32 = 7.0;
 const LINE: f32 = 25.0;
@@ -162,6 +163,110 @@ fn a_config_can_name_a_boxed_renderer() {
     assert!(
         stats.node_count > 0,
         "the boxed-renderer config built nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// MOD7 S3: tuning
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    /// What the runtime handed the engine, so the tests below can assert the
+    /// CONFIG's numbers arrived rather than the shipped defaults.
+    static CAPS_SEEN: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Records what `set_cache_caps` was called with and delegates everything else.
+#[derive(Default)]
+struct SpyEngine(TinyEngine);
+
+impl TextEngineApi for SpyEngine {
+    type Block = TinyBlock;
+    fn register_font(&mut self, b: Vec<u8>) -> Option<String> {
+        self.0.register_font(b)
+    }
+    fn begin_frame(&mut self) {
+        self.0.begin_frame()
+    }
+    fn set_cache_caps(&mut self, shape: usize, run: usize) {
+        CAPS_SEEN.with(|c| c.borrow_mut().push((shape, run)));
+    }
+    fn shaped(&mut self, t: &str, s: &TextStyle, w: Option<f32>, a: TextAlign) -> &TinyBlock {
+        self.0.shaped(t, s, w, a)
+    }
+    fn shaped_run(
+        &mut self,
+        t: &str,
+        b: &TextStyle,
+        w: Option<f32>,
+        a: TextAlign,
+        sc: f32,
+    ) -> &CachedRun {
+        self.0.shaped_run(t, b, w, a, sc)
+    }
+    fn layout(
+        &mut self,
+        t: &str,
+        b: TextStyle,
+        r: &[(std::ops::Range<usize>, TextStyle)],
+        w: Option<f32>,
+        a: TextAlign,
+    ) -> TinyBlock {
+        self.0.layout(t, b, r, w, a)
+    }
+}
+
+struct LeanTuned;
+impl PlatformConfig for LeanTuned {
+    type Layout = lumen_layout::LayoutTree;
+    type Text = SpyEngine;
+    const TUNING: Tuning = Tuning::LEAN;
+}
+
+struct DefaultTuned;
+impl PlatformConfig for DefaultTuned {
+    type Layout = lumen_layout::LayoutTree;
+    type Text = SpyEngine;
+    // TUNING deliberately not named — it must default to the shipped values.
+}
+
+/// The knob has to reach the engine, or it is configuration that configures
+/// nothing — the "interface with one caller and no callee" failure the seam
+/// tests exist to rule out, which is exactly how `Prop<T>` sat unused for a
+/// release.
+#[test]
+fn a_configs_tuning_reaches_the_text_engine() {
+    CAPS_SEEN.with(|c| c.borrow_mut().clear());
+    let mut h = lumen_widgets::App::<_, _, LeanTuned>::with_platform(view)
+        .run_headless(Size::new(300.0, 150.0));
+    h.pump();
+    let seen = CAPS_SEEN.with(|c| c.borrow().clone());
+    assert!(
+        seen.contains(&(Tuning::LEAN.shape_cache_cap, Tuning::LEAN.run_cache_cap)),
+        "the runtime never applied the config's tuning; saw {seen:?}"
+    );
+}
+
+/// A bundle that does not name `TUNING` must keep the shipped values, or S3
+/// silently re-tunes every existing app.
+#[test]
+fn an_untuned_config_keeps_the_shipped_values() {
+    CAPS_SEEN.with(|c| c.borrow_mut().clear());
+    let mut h = lumen_widgets::App::<_, _, DefaultTuned>::with_platform(view)
+        .run_headless(Size::new(300.0, 150.0));
+    h.pump();
+    let seen = CAPS_SEEN.with(|c| c.borrow().clone());
+    assert!(
+        seen.contains(&(
+            Tuning::DEFAULT.shape_cache_cap,
+            Tuning::DEFAULT.run_cache_cap
+        )),
+        "an unnamed TUNING did not default to the shipped values; saw {seen:?}"
+    );
+    assert_ne!(
+        Tuning::DEFAULT,
+        Tuning::LEAN,
+        "the two presets are identical, so neither test above proves anything"
     );
 }
 

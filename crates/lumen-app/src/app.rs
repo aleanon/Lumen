@@ -62,7 +62,64 @@ const OVERLAY_Z: u32 = 1000;
 /// tree per rebuild and one text engine per window; a bundle whose members
 /// could not be constructed without arguments would need a factory method and a
 /// stored instance, which is more machinery than the seam warrants today.
+/// MOD7 S3: the memory-vs-speed knobs, as data rather than as more traits.
+///
+/// These were hardcoded `const`s with no seam at all, which made "tune this app
+/// for low memory" unreachable by any mechanism — a type parameter is the wrong
+/// tool for a number, and a Cargo feature cannot express "a quarter of the
+/// default". Carried on [`PlatformConfig`] so it composes with the bundle
+/// instead of competing with it.
+///
+/// **Only genuinely per-app caches are here.** The glyph bitmap cache is
+/// `thread_local` and shared by every engine on the thread, and the image and
+/// animation caches are process-global statics; a per-app knob for any of them
+/// would read as configuration and behave as a race, so they stay constants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tuning {
+    /// Starting ceiling for the shaped-block cache. Both text caches grow
+    /// adaptively up to a hard cap, so this sets where growth begins.
+    pub shape_cache_cap: usize,
+    /// Starting ceiling for the glyph-run cache.
+    pub run_cache_cap: usize,
+}
+
+impl Tuning {
+    /// Today's shipped values — what every app got before this existed.
+    pub const DEFAULT: Tuning = Tuning {
+        shape_cache_cap: 2048,
+        run_cache_cap: 4096,
+    };
+
+    /// A quarter of [`DEFAULT`](Tuning::DEFAULT): trades re-shaping work for
+    /// resident memory. Sensible for a small or embedded app whose text is a
+    /// handful of labels rather than a document.
+    pub const LEAN: Tuning = Tuning {
+        shape_cache_cap: 512,
+        run_cache_cap: 1024,
+    };
+}
+
+impl Default for Tuning {
+    fn default() -> Tuning {
+        Tuning::DEFAULT
+    }
+}
+
+/// MOD1: the swappable internals a runtime is built on — the layout engine
+/// (MOD2) and the text engine (MOD3) — named together so an app selects a
+/// bundle rather than a list of parameters.
+///
+/// `Default` is required on both because the runtime constructs a fresh layout
+/// tree per rebuild and one text engine per window; a bundle whose members
+/// could not be constructed without arguments would need a factory method and a
+/// stored instance, which is more machinery than the seam warrants today.
+/// [`AppConfig`] takes the other road for renderer and executor, where the
+/// factory buys the `Box<dyn Renderer>` case.
 pub trait PlatformConfig: 'static {
+    /// MOD7 S3: cache ceilings for this bundle. Defaulted, so an existing
+    /// `impl PlatformConfig` keeps the shipped values without naming them.
+    const TUNING: Tuning = Tuning::DEFAULT;
+
     /// The layout engine (MOD2).
     type Layout: lumen_layout::LayoutEngine + Default;
     /// The text engine (MOD3).
@@ -361,6 +418,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // MOD1: the bundle's text engine, not the concrete one. `Default` is
         // the constructor the seam offers (see `PlatformConfig`).
         let mut text = P::Text::default();
+        // MOD7 S3: the bundle's cache ceilings, applied before first use.
+        text.set_cache_caps(P::TUNING.shape_cache_cap, P::TUNING.run_cache_cap);
         for bytes in self.fonts {
             text.register_font(bytes);
         }

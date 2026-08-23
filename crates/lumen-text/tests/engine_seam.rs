@@ -238,3 +238,25 @@ fn wrapping_and_hit_testing_round_trip_through_the_trait() {
     assert!(!block.selection_rects(0, 6).is_empty());
     assert_eq!(block.render(4, 4, Color::BLACK).pixels().len(), 4 * 4 * 4);
 }
+
+/// MOD7 S3: the SHIPPED engine must honour `set_cache_caps`, not just the trait
+/// default.
+///
+/// This exists because the method was first written into `TextEngine`'s
+/// inherent impl rather than its `TextEngineApi` impl. Everything still
+/// compiled, the runtime still called the trait method — and got the no-op
+/// default, so tuning reached nothing. The spy-engine test in
+/// `lumen-widgets/tests/app_config.rs` could not catch it: a spy overrides the
+/// method, so it proves the runtime CALLS it, not that the real engine OBEYS
+/// it. Both tests are needed; neither is sufficient.
+#[test]
+fn the_real_engine_obeys_set_cache_caps() {
+    use lumen_text::{TextEngine, TextEngineApi};
+    let mut e = TextEngine::new();
+    e.set_cache_caps(7, 11);
+    assert_eq!(
+        e.cache_caps(),
+        (7, 11),
+        "TextEngine ignored set_cache_caps — is it on the inherent impl again?"
+    );
+}
