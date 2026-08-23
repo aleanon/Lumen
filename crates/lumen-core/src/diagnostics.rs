@@ -291,6 +291,21 @@ pub mod codes {
     /// Reports the whole-frame fact that no per-node check can: it is not that
     /// some node is wrong, it is that *all* of them are.
     pub const W0114: &str = "W0114";
+    /// An interactive node is almost entirely **covered by something painted
+    /// over it** — it is on screen, sized and enabled, and the user cannot see
+    /// or reach it.
+    ///
+    /// Occlusion was previously checked in exactly one place: `ui.explain`
+    /// with `kind: "click"`, considering only nodes marked `overlay` and only
+    /// the single centre point a synthesized click uses. An ordinary sibling
+    /// raised above its neighbour by `z-index`, or a panel that grew over one,
+    /// was reported by nothing — and `ui.explain` only answers about a node you
+    /// already suspect.
+    ///
+    /// Coverage is measured against the covering node's **clipped** box, not
+    /// its layout box: a large panel that is itself mostly clipped away by an
+    /// ancestor's `overflow: hidden` hides only the part still on screen.
+    pub const W0113: &str = "W0113";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).

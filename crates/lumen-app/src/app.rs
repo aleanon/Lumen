@@ -2111,6 +2111,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         out.extend(self.invisible_findings());
         out.extend(self.offscreen_findings());
         out.extend(self.blank_frame_findings());
+        out.extend(self.occlusion_findings());
         out.extend(self.contrast_findings());
         out
     }
@@ -2147,6 +2148,137 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             n = parent;
         }
         acc
+    }
+
+    /// Fraction of an interactive node's box that must be covered before the
+    /// occlusion check calls it hidden. Partial overlap is routine layout;
+    /// near-total coverage means the control cannot be seen or reached.
+    const OCCLUSION_COVERAGE: f64 = 0.90;
+
+    /// Past this many nodes the occlusion scan is skipped rather than run.
+    /// It is O(interactive x candidates), which is fine for real screens and
+    /// not worth paying on a 10k-node data grid in a debug build.
+    const OCCLUSION_NODE_CEILING: usize = 4000;
+
+    /// W0113: an interactive node covered by something painted over it.
+    ///
+    /// In `lint()` rather than `audit.rs` because it needs paint order and
+    /// per-node style (background alpha, opacity) keyed by `NodeIndex` — the
+    /// same reason W0110 and W0402 live here. A `SemanticsNode` walk can see
+    /// bounds and nothing about what was drawn into them.
+    fn occlusion_findings(&self) -> Vec<lumen_core::Diagnostic> {
+        let order = self.tree.paint_order();
+        if order.len() > Self::OCCLUSION_NODE_CEILING {
+            // Say so. A silent cap reads as "checked everything, found
+            // nothing", which is the one answer this must never give.
+            self.rt.log(
+                "info",
+                format!(
+                    "occlusion check skipped: {} nodes exceeds the {} ceiling",
+                    order.len(),
+                    Self::OCCLUSION_NODE_CEILING
+                ),
+            );
+            return Vec::new();
+        }
+        let viewport = Rect::new(0.0, 0.0, self.size.width, self.size.height);
+        // Painted box of a candidate cover: its own bounds intersected with
+        // every clipping ancestor and the window. Without this a panel that is
+        // itself mostly scrolled away would be counted at full size and
+        // over-claim coverage.
+        let painted_box = |node: NodeIndex| -> Rect {
+            let mut r = self.tree.bounds(node).intersect(viewport);
+            let mut n = node;
+            loop {
+                let parent = self.tree.parent(n);
+                if !parent.is_some() || parent == n {
+                    break;
+                }
+                n = parent;
+                if self.meta.get(&n).is_some_and(|m| m.clip) {
+                    r = r.intersect(self.tree.bounds(n));
+                }
+            }
+            r
+        };
+        let mut out = Vec::new();
+        for (i, node) in order.iter().enumerate() {
+            let Some(m) = self.meta.get(node) else {
+                continue;
+            };
+            if !m.actions.iter().any(|a| matches!(a, Action::Click)) {
+                continue;
+            }
+            let b = self.tree.bounds(*node).intersect(viewport);
+            let area = b.width() * b.height();
+            if area < 1.0 {
+                continue; // W0105 / W0112 own these.
+            }
+            // Only nodes painted AFTER this one can cover it.
+            for later in &order[i + 1..] {
+                let Some(lm) = self.meta.get(later) else {
+                    continue;
+                };
+                // Opaque means: a background with full alpha, and not faded.
+                let bg = lm
+                    .background
+                    .or_else(|| self.node_style.get(later).and_then(|st| st.background));
+                let opaque_bg = bg.is_some_and(|c| c.a >= 0.999);
+                if !opaque_bg || self.effective_opacity(*later) < 0.999 {
+                    continue;
+                }
+                // An ancestor drawing its own background is the node's
+                // backdrop, not something covering it.
+                if self.is_ancestor_of(*later, *node) {
+                    continue;
+                }
+                let cover = painted_box(*later).intersect(b);
+                let covered = (cover.width().max(0.0) * cover.height().max(0.0)) / area;
+                if covered < Self::OCCLUSION_COVERAGE {
+                    continue;
+                }
+                let who =
+                    m.id.as_ref()
+                        .map(|i| format!("`#{}`", i.as_str()))
+                        .unwrap_or_else(|| format!("{:?}", m.label));
+                let by = lm
+                    .id
+                    .as_ref()
+                    .map(|i| format!("`#{}`", i.as_str()))
+                    .unwrap_or_else(|| format!("a {:?}", lm.role));
+                let d = lumen_core::Diagnostic::new(
+                    lumen_core::codes::W0113,
+                    format!(
+                        "{who} is interactive but {:.0}% covered by {by}, which \
+                         paints over it. It is on screen and enabled, and the \
+                         user can neither see nor click it.",
+                        covered * 100.0
+                    ),
+                );
+                let d = match self.handle_for_index(node.index()) {
+                    Some(h) => d.with_target(h.to_wire(), m.id.as_ref()),
+                    None => d,
+                };
+                out.push(d);
+                break; // One finding per hidden node; the first cover explains it.
+            }
+        }
+        out
+    }
+
+    /// Whether `maybe_ancestor` is an ancestor of `node`.
+    fn is_ancestor_of(&self, maybe_ancestor: NodeIndex, node: NodeIndex) -> bool {
+        let mut n = node;
+        loop {
+            let parent = self.tree.parent(n);
+            if !parent.is_some() || parent == n {
+                return false;
+            }
+            n = parent;
+            if n == maybe_ancestor {
+                return true;
+            }
+        }
     }
 
     /// Below this many nodes a frame with no area is not obviously wrong — a
