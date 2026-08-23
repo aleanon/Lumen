@@ -81,10 +81,14 @@ fn view(cx: &mut BuildCx) -> Element {
 }
 
 fn main() {
-    // Headless deliberately: `lumen_shell::run` takes a fully-defaulted `App`,
-    // so a custom `PlatformConfig` has no windowed entry point today. Depending
-    // on lumen-shell at all would re-instantiate the default TextEngine and
-    // pull parley straight back in, which would defeat the measurement.
+    // MOD7 S1: windowed on a custom PlatformConfig. `run` is generic over the
+    // bundle now, so linking lumen-shell no longer forces the default engines
+    // back in — which is the whole point, and what the size below proves.
+    if std::env::var_os("LUMEN_STUBTEXT_WINDOW").is_some() {
+        use lumen_shell::RunExt;
+        App::<_, _, StubPlatform>::with_platform(view).run(Size::new(400.0, 300.0));
+        return;
+    }
     let mut h = App::<_, _, StubPlatform>::with_platform(view)
         .run_headless(Size::new(400.0, 300.0));
     h.pump();

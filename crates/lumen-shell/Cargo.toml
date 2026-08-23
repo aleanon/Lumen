@@ -81,3 +81,12 @@ complex-scripts = ["lumen-widgets/complex-scripts"]
 [target.'cfg(target_os = "linux")'.dependencies]
 # The tray's dedicated gtk thread (winit owns the main loop on Linux).
 gtk = { workspace = true, optional = true }
+
+[dev-dependencies]
+# MOD7 S1: `platform_generic.rs` has to NAME the engine types to build a
+# non-default `PlatformConfig` — that is the whole point of the test. They are
+# already in the graph transitively via lumen-widgets; these make them nameable
+# from the test without widening the shell's own dependencies.
+lumen-layout = { workspace = true }
+lumen-text = { workspace = true }
+kurbo = { workspace = true }

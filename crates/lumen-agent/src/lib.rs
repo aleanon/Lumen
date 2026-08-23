@@ -11,6 +11,7 @@ use kurbo::{Point, Rect};
 use lumen_core::events::{Event, Key, KeyEvent, Modifiers, NamedKey, PointerEvent, TextInputEvent};
 use lumen_core::semantics::{resolve_one, SemanticsNode};
 use lumen_core::Color;
+use lumen_widgets::app::PlatformConfig;
 use lumen_widgets::{center, Headless, Renderer, Spawner};
 use serde_json::{json, Value};
 #[cfg(feature = "ws")]
@@ -19,7 +20,10 @@ use std::net::TcpListener;
 mod base64;
 
 /// Dispatch one JSON-RPC request against `app`, returning the JSON-RPC response.
-pub fn dispatch<R: Renderer, E: Spawner>(app: &mut Headless<R, E>, req: &Value) -> Value {
+pub fn dispatch<R: Renderer, E: Spawner, P: PlatformConfig>(
+    app: &mut Headless<R, E, P>,
+    req: &Value,
+) -> Value {
     let id = req.get("id").cloned().unwrap_or(Value::Null);
     let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
     let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -65,10 +69,10 @@ impl Deadline {
 /// diagnostics, apply `fixer` to each, and repeat until the app is clean or
 /// `max_iters` is reached — the agent's detect → diagnose → fix → verify loop,
 /// with no human in the loop. Returns the number of repair rounds taken.
-pub fn auto_repair<R: Renderer, E: Spawner>(
-    app: &mut Headless<R, E>,
+pub fn auto_repair<R: Renderer, E: Spawner, P: PlatformConfig>(
+    app: &mut Headless<R, E, P>,
     max_iters: usize,
-    mut fixer: impl FnMut(&mut Headless<R, E>, &lumen_core::Diagnostic) -> bool,
+    mut fixer: impl FnMut(&mut Headless<R, E, P>, &lumen_core::Diagnostic) -> bool,
 ) -> usize {
     for round in 0..max_iters {
         app.pump();
@@ -132,9 +136,9 @@ impl Session {
     /// Dispatch a JSON-RPC request, recording replayable steps. `session.*`
     /// methods are handled here; everything else delegates to [`dispatch`] and
     /// successful input methods are recorded.
-    pub fn dispatch<R: Renderer, E: Spawner>(
+    pub fn dispatch<R: Renderer, E: Spawner, P: PlatformConfig>(
         &mut self,
-        app: &mut Headless<R, E>,
+        app: &mut Headless<R, E, P>,
         req: &Value,
     ) -> Value {
         let id = req.get("id").cloned().unwrap_or(Value::Null);
@@ -179,9 +183,9 @@ impl Session {
         }
     }
 
-    fn handle_session<R: Renderer, E: Spawner>(
+    fn handle_session<R: Renderer, E: Spawner, P: PlatformConfig>(
         &mut self,
-        app: &mut Headless<R, E>,
+        app: &mut Headless<R, E, P>,
         method: &str,
         params: &Value,
     ) -> Option<RpcResult> {
@@ -203,9 +207,9 @@ impl Session {
         }
     }
 
-    fn assert_text<R: Renderer, E: Spawner>(
+    fn assert_text<R: Renderer, E: Spawner, P: PlatformConfig>(
         &mut self,
-        app: &mut Headless<R, E>,
+        app: &mut Headless<R, E, P>,
         params: &Value,
     ) -> RpcResult {
         let selector = sel(params)?.to_string();
@@ -227,9 +231,9 @@ impl Session {
         }
     }
 
-    fn assert_state<R: Renderer, E: Spawner>(
+    fn assert_state<R: Renderer, E: Spawner, P: PlatformConfig>(
         &mut self,
-        app: &mut Headless<R, E>,
+        app: &mut Headless<R, E, P>,
         params: &Value,
     ) -> RpcResult {
         let selector = sel(params)?.to_string();
@@ -296,8 +300,8 @@ fn export_test(fn_name: &str, app_expr: &str, header: &str, steps: &[Step]) -> S
     s
 }
 
-fn handle<R: Renderer, E: Spawner>(
-    app: &mut Headless<R, E>,
+fn handle<R: Renderer, E: Spawner, P: PlatformConfig>(
+    app: &mut Headless<R, E, P>,
     method: &str,
     params: &Value,
 ) -> RpcResult {
@@ -1100,8 +1104,8 @@ fn resolve_err_msg(selector: &str, e: &lumen_core::semantics::ResolveError) -> S
     }
 }
 
-fn resolve<R: Renderer, E: Spawner>(
-    app: &Headless<R, E>,
+fn resolve<R: Renderer, E: Spawner, P: PlatformConfig>(
+    app: &Headless<R, E, P>,
     selector: &str,
 ) -> Result<SemanticsNode, (i64, String)> {
     let root = app.semantics_elided();
@@ -1120,8 +1124,8 @@ fn resolve<R: Renderer, E: Spawner>(
 /// fails immediately with the candidates (05 §3 rule). Clock-driven animation
 /// settling is NOT waited on yet (C.1b — the shell owns the wall→virtual
 /// clock; see docs/plan-remediation-2026-07.md).
-fn resolve_action<R: Renderer, E: Spawner>(
-    app: &mut Headless<R, E>,
+fn resolve_action<R: Renderer, E: Spawner, P: PlatformConfig>(
+    app: &mut Headless<R, E, P>,
     params: &Value,
 ) -> Result<SemanticsNode, (i64, String)> {
     let selector = sel(params)?.to_string();
@@ -1338,9 +1342,9 @@ pub fn mcp_manifest() -> Value {
 /// Blocking and single-threaded (the app lives here). Returns when the client
 /// disconnects.
 #[cfg(feature = "ws")]
-pub fn serve_one<R: Renderer, E: Spawner>(
+pub fn serve_one<R: Renderer, E: Spawner, P: PlatformConfig>(
     listener: &TcpListener,
-    app: &mut Headless<R, E>,
+    app: &mut Headless<R, E, P>,
 ) -> std::io::Result<()> {
     serve_one_session(listener, app, &mut Session::new())
 }
@@ -1348,9 +1352,9 @@ pub fn serve_one<R: Renderer, E: Spawner>(
 /// Like [`serve_one`], but records the connection into `session` so it can be
 /// exported as a regression suite (`session.exportTest`).
 #[cfg(feature = "ws")]
-pub fn serve_one_session<R: Renderer, E: Spawner>(
+pub fn serve_one_session<R: Renderer, E: Spawner, P: PlatformConfig>(
     listener: &TcpListener,
-    app: &mut Headless<R, E>,
+    app: &mut Headless<R, E, P>,
     session: &mut Session,
 ) -> std::io::Result<()> {
     let (stream, _) = listener.accept()?;

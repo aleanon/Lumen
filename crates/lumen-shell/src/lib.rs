@@ -35,7 +35,12 @@ pub trait RunExt {
     fn run(self, size: Size);
 }
 
-impl RunExt for App {
+/// MOD7 S1: implemented for an app on ANY [`PlatformConfig`], not just the
+/// shipped bundle. `App` defaults its third parameter, so `App::new(..).run(..)`
+/// still resolves to exactly this impl with `P = DefaultPlatform`.
+impl<P: lumen_widgets::app::PlatformConfig> RunExt
+    for App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner, P>
+{
     fn run(self, size: Size) {
         run(self, size);
     }
@@ -80,8 +85,14 @@ impl From<accesskit_winit::Event> for ShellEvent {
 // is present, else the CPU reference. Both rasterize into the same Rgba8Unorm /
 // sRGB-byte frame, which the presenter blits to the surface.
 type ShellRenderer = Box<dyn lumen_widgets::Renderer>;
-type ShellApp = App<ShellRenderer, lumen_core::tasks::ThreadPoolSpawner>;
-type ShellHeadless = Headless<ShellRenderer, lumen_core::tasks::ThreadPoolSpawner>;
+// MOD7 S1: generic over the platform bundle. These were fixed at
+// `DefaultPlatform`, which is what made every seam headless-only — a windowed
+// app could not select a layout or text engine no matter what it passed to
+// `with_platform`. Defaulted, so every existing `run(app, size)` is unchanged.
+type ShellApp<P = lumen_widgets::app::DefaultPlatform> =
+    App<ShellRenderer, lumen_core::tasks::ThreadPoolSpawner, P>;
+type ShellHeadless<P = lumen_widgets::app::DefaultPlatform> =
+    Headless<ShellRenderer, lumen_core::tasks::ThreadPoolSpawner, P>;
 
 /// Open a window and run `app` at `size`.
 ///
@@ -89,7 +100,10 @@ type ShellHeadless = Headless<ShellRenderer, lumen_core::tasks::ThreadPoolSpawne
 /// accepts newline-delimited JSON-RPC and forwards each request onto the event
 /// loop, so an AI can observe (`ui.screenshot`/`ui.getTree`) and drive
 /// (`input.click`/`type`/…) the **live** window over the agent protocol.
-pub fn run(app: App, size: Size) {
+pub fn run<P: lumen_widgets::app::PlatformConfig>(
+    app: App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner, P>,
+    size: Size,
+) {
     let event_loop = EventLoop::<ShellEvent>::with_user_event()
         .build()
         .expect("event loop");
@@ -343,13 +357,13 @@ fn agent_conn(stream: TcpStream, proxy: EventLoopProxy<ShellEvent>) {
     }
 }
 
-struct Shell {
-    app: Option<ShellApp>,
+struct Shell<P: lumen_widgets::app::PlatformConfig = lumen_widgets::app::DefaultPlatform> {
+    app: Option<ShellApp<P>>,
     /// Event-loop proxy used to build the data-layer waker (so background results
     /// schedule a frame).
     proxy: EventLoopProxy<ShellEvent>,
     size: Size,
-    headless: Option<ShellHeadless>,
+    headless: Option<ShellHeadless<P>>,
     window: Option<Arc<Window>>,
     /// CPU-readback presenter — only used as the fallback when the renderer can't
     /// present directly to the surface (`direct == false`). `None` in direct mode.
@@ -401,7 +415,7 @@ struct Shell {
     /// any injected event schedules a redraw of *every* window (shared
     /// signals may change any of them; an untouched window's pump is a
     /// dirty-checked no-op).
-    secondary: std::collections::HashMap<WindowId, SecondaryWindow>,
+    secondary: std::collections::HashMap<WindowId, SecondaryWindow<P>>,
     /// P.3e: system tray, created lazily on the app's first
     /// `SystemRequest::TrayTooltip` (no tray unless asked for). On Linux it
     /// lives on a dedicated gtk thread (winit owns the main loop) reached by
@@ -432,8 +446,9 @@ struct Shell {
 
 /// P.3d-2: one realized secondary window — its pipeline plus per-window
 /// presentation state (mirrors the main-window fields on [`Shell`]).
-struct SecondaryWindow {
-    headless: ShellHeadless,
+struct SecondaryWindow<P: lumen_widgets::app::PlatformConfig = lumen_widgets::app::DefaultPlatform>
+{
+    headless: ShellHeadless<P>,
     window: Arc<Window>,
     presenter: Option<Presenter>,
     /// Only read when a swapchain exists; without the GPU backend the
@@ -447,7 +462,7 @@ struct SecondaryWindow {
     pending_resize: bool,
 }
 
-impl ApplicationHandler<ShellEvent> for Shell {
+impl<P: lumen_widgets::app::PlatformConfig> ApplicationHandler<ShellEvent> for Shell<P> {
     /// An agent request arrived from the server thread: dispatch it against the
     /// live runtime (same `dispatch` the headless agent uses), present any
     /// resulting frame so the window reflects the action, and reply.
@@ -1045,7 +1060,7 @@ impl ApplicationHandler<ShellEvent> for Shell {
     }
 }
 
-impl Shell {
+impl<P: lumen_widgets::app::PlatformConfig> Shell<P> {
     /// P.3d-2: schedule a frame for every window — an input or state change
     /// anywhere may re-render any window (shared signals); untouched windows
     /// pump as dirty-checked no-ops.
@@ -1392,7 +1407,7 @@ fn spawn_tray(initial: String, model: lumen_widgets::system::MenuModel) -> TrayS
     }
 }
 
-impl Shell {
+impl<P: lumen_widgets::app::PlatformConfig> Shell<P> {
     /// Apply a `TrayTooltip` request: create the tray on first use, then
     /// push the text.
     #[cfg(feature = "desktop-integration")]
@@ -1476,8 +1491,12 @@ fn a11y_enabled_from(lumen_a11y: Option<&str>, no_at_bridge: Option<&str>) -> bo
 /// exact shape the agent's `input.click` and the live pointer produce.
 /// (Focus/scroll actions are documented-unrouted until a headless focus-by-
 /// node API exists; Tab-order focus already works through key events.)
-fn route_at_action<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner>(
-    h: &mut Headless<R, E>,
+fn route_at_action<
+    R: lumen_render::Renderer,
+    E: lumen_core::tasks::Spawner,
+    P: lumen_widgets::app::PlatformConfig,
+>(
+    h: &mut Headless<R, E, P>,
     req: &accesskit::ActionRequest,
 ) {
     fn find_bounds(n: &lumen_core::semantics::SemanticsNode, id: u64) -> Option<kurbo::Rect> {
@@ -2199,8 +2218,12 @@ mod tests {
 /// value for requests that have one (a file path for `OpenFile`); the reply
 /// lands in the request's `reply` signal. Split from the rfd-backed resolver
 /// so the delivery plumbing is unit-testable without a display.
-pub fn fulfill_system_requests<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner>(
-    h: &mut Headless<R, E>,
+pub fn fulfill_system_requests<
+    R: lumen_render::Renderer,
+    E: lumen_core::tasks::Spawner,
+    P: lumen_widgets::app::PlatformConfig,
+>(
+    h: &mut Headless<R, E, P>,
     reqs: Vec<lumen_widgets::system::SystemRequest>,
     mut resolve: impl FnMut(&lumen_widgets::system::SystemRequest) -> Option<String>,
 ) {
