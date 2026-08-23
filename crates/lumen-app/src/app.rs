@@ -69,6 +69,57 @@ pub trait PlatformConfig: 'static {
     type Text: lumen_text::TextEngineApi + Default;
 }
 
+/// MOD7 S2: one name for all four swap axes — renderer, executor, layout and
+/// text — so a consumer writes `ConfiguredApp<MyConfig>` instead of naming
+/// three type parameters.
+///
+/// This is deliberately **additive**. `App<R, E, P>` keeps its three
+/// parameters, because varying one axis (`with_renderer`, the shell's own
+/// `Box<dyn Renderer>`) is a real use and a single fused parameter would force
+/// a whole new config to change one thing. `AppConfig` is the ergonomic entry
+/// point on top; neither replaces the other.
+///
+/// Renderer and executor arrive through **factory functions** rather than a
+/// `Default` bound, which is what lets a config name `Box<dyn Renderer>` — the
+/// shape the shell itself uses, and one that cannot implement `Default`.
+/// [`PlatformConfig`] took the other road (a `Default` bound) because a layout
+/// tree and a text engine are constructed per rebuild and per window, where a
+/// stored factory would be machinery the seam does not warrant.
+pub trait AppConfig: 'static {
+    /// The frame renderer (MOD-R).
+    type Renderer: lumen_render::Renderer;
+    /// The background-work executor.
+    type Executor: lumen_core::tasks::Spawner;
+    /// The layout engine (MOD2).
+    type Layout: lumen_layout::LayoutEngine + Default;
+    /// The text engine (MOD3).
+    type Text: lumen_text::TextEngineApi + Default;
+
+    /// Construct the renderer. Called once per app.
+    fn renderer() -> Self::Renderer;
+    /// Construct the executor. Called once per app.
+    fn executor() -> Self::Executor;
+}
+
+/// The [`PlatformConfig`] half of an [`AppConfig`], so the existing
+/// `App<R, E, P>` machinery can carry a fused config without changing shape.
+pub struct PlatformOf<C>(std::marker::PhantomData<C>);
+
+impl<C: AppConfig> PlatformConfig for PlatformOf<C> {
+    type Layout = C::Layout;
+    type Text = C::Text;
+}
+
+/// An [`App`] fully described by one [`AppConfig`] — the `Runtime<MyConfig>`
+/// shape, spelled as a type alias so the three parameters underneath stay
+/// available.
+pub type ConfiguredApp<C> =
+    App<<C as AppConfig>::Renderer, <C as AppConfig>::Executor, PlatformOf<C>>;
+
+/// A [`Headless`] fully described by one [`AppConfig`].
+pub type ConfiguredHeadless<C> =
+    Headless<<C as AppConfig>::Renderer, <C as AppConfig>::Executor, PlatformOf<C>>;
+
 /// The shipped bundle: taffy layout (ADR-004) + parley/swash text (ADR-005).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DefaultPlatform;
@@ -165,6 +216,40 @@ impl<P: PlatformConfig> App<lumen_render::TinySkia, lumen_core::tasks::InlineSpa
             windows: Vec::new(),
             renderer: lumen_render::TinySkia,
             executor: lumen_core::tasks::InlineSpawner,
+        }
+    }
+}
+
+impl<C: AppConfig> ConfiguredApp<C> {
+    /// MOD7 S2: build an app from one [`AppConfig`] — the `Runtime<MyConfig>`
+    /// entry point.
+    ///
+    /// ```ignore
+    /// struct Lean;
+    /// impl AppConfig for Lean {
+    ///     type Renderer = TinySkia;
+    ///     type Executor = InlineSpawner;
+    ///     type Layout   = LayoutTree;
+    ///     type Text     = MyTinyTextEngine;
+    ///     fn renderer() -> TinySkia { TinySkia }
+    ///     fn executor() -> InlineSpawner { InlineSpawner }
+    /// }
+    /// ConfiguredApp::<Lean>::with_config(view).run(size);
+    /// ```
+    ///
+    /// Named `with_config` rather than made a generic `new` for the reason
+    /// `with_platform` records: a struct's type-parameter defaults do not apply
+    /// to inference of a function's *return*, so generalising `new` would force
+    /// every existing call site to name a config.
+    pub fn with_config(root: impl Fn(&mut BuildCx) -> Element + 'static) -> Self {
+        App {
+            _platform: std::marker::PhantomData,
+            root: Box::new(root),
+            stylesheet: None,
+            fonts: Vec::new(),
+            windows: Vec::new(),
+            renderer: C::renderer(),
+            executor: C::executor(),
         }
     }
 }

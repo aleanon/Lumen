@@ -89,10 +89,12 @@ type ShellRenderer = Box<dyn lumen_widgets::Renderer>;
 // `DefaultPlatform`, which is what made every seam headless-only — a windowed
 // app could not select a layout or text engine no matter what it passed to
 // `with_platform`. Defaulted, so every existing `run(app, size)` is unchanged.
-type ShellApp<P = lumen_widgets::app::DefaultPlatform> =
-    App<ShellRenderer, lumen_core::tasks::ThreadPoolSpawner, P>;
-type ShellHeadless<P = lumen_widgets::app::DefaultPlatform> =
-    Headless<ShellRenderer, lumen_core::tasks::ThreadPoolSpawner, P>;
+type ShellApp<E = lumen_core::tasks::ThreadPoolSpawner, P = lumen_widgets::app::DefaultPlatform> =
+    App<ShellRenderer, E, P>;
+type ShellHeadless<
+    E = lumen_core::tasks::ThreadPoolSpawner,
+    P = lumen_widgets::app::DefaultPlatform,
+> = Headless<ShellRenderer, E, P>;
 
 /// Open a window and run `app` at `size`.
 ///
@@ -102,6 +104,26 @@ type ShellHeadless<P = lumen_widgets::app::DefaultPlatform> =
 /// (`input.click`/`type`/…) the **live** window over the agent protocol.
 pub fn run<P: lumen_widgets::app::PlatformConfig>(
     app: App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner, P>,
+    size: Size,
+) {
+    // Upgrade the default inline executor to a real thread pool for the live
+    // app, so `cx.resource`/`cx.task` run off the UI thread. An app that has
+    // already chosen an executor goes through `run_with` instead and keeps it.
+    run_with(
+        app.with_executor(lumen_core::tasks::ThreadPoolSpawner::default()),
+        size,
+    )
+}
+
+/// MOD7 S2: open a window and run `app` on **the executor it already carries**.
+///
+/// [`run`] upgrades the default `InlineSpawner` to a thread pool, which is the
+/// right default and was previously unconditional — the shell overwrote
+/// whatever the caller had chosen, so a windowed app could not run on tokio or
+/// smol (`lumen-exec`) no matter what it passed to `with_executor`. This is the
+/// entry point that honours it; `run` now delegates here.
+pub fn run_with<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig>(
+    app: App<lumen_render::TinySkia, E, P>,
     size: Size,
 ) {
     let event_loop = EventLoop::<ShellEvent>::with_user_event()
@@ -127,9 +149,6 @@ pub fn run<P: lumen_widgets::app::PlatformConfig>(
             let _ = proxy.send_event(ShellEvent::Menu(ev));
         }));
     }
-    // Upgrade the default inline executor to a real thread pool for the live app,
-    // so `cx.resource`/`cx.task` run off the UI thread.
-    let app = app.with_executor(lumen_core::tasks::ThreadPoolSpawner::default());
     // Choose the rasterization backend. An explicit `--wgpu` / `--tiny-skia` flag
     // or `LUMEN_RENDERER` env wins; otherwise the live window defaults to
     // GPU-with-CPU-fallback (paths, gradients, layers, text sprites rasterized on
@@ -357,13 +376,16 @@ fn agent_conn(stream: TcpStream, proxy: EventLoopProxy<ShellEvent>) {
     }
 }
 
-struct Shell<P: lumen_widgets::app::PlatformConfig = lumen_widgets::app::DefaultPlatform> {
-    app: Option<ShellApp<P>>,
+struct Shell<
+    E: lumen_core::tasks::Spawner = lumen_core::tasks::ThreadPoolSpawner,
+    P: lumen_widgets::app::PlatformConfig = lumen_widgets::app::DefaultPlatform,
+> {
+    app: Option<ShellApp<E, P>>,
     /// Event-loop proxy used to build the data-layer waker (so background results
     /// schedule a frame).
     proxy: EventLoopProxy<ShellEvent>,
     size: Size,
-    headless: Option<ShellHeadless<P>>,
+    headless: Option<ShellHeadless<E, P>>,
     window: Option<Arc<Window>>,
     /// CPU-readback presenter — only used as the fallback when the renderer can't
     /// present directly to the surface (`direct == false`). `None` in direct mode.
@@ -446,9 +468,15 @@ struct Shell<P: lumen_widgets::app::PlatformConfig = lumen_widgets::app::Default
 
 /// P.3d-2: one realized secondary window — its pipeline plus per-window
 /// presentation state (mirrors the main-window fields on [`Shell`]).
+/// MOD7 S2 note: a secondary window keeps the shell's own single-thread pool
+/// rather than the main app's executor. `open_window_with` takes the executor
+/// by value and `Spawner` is not `Clone`, so sharing the caller's would mean
+/// either a `Clone` bound on the seam or an `Arc` indirection on every spawn —
+/// more than a second window warrants. The main window honours the caller's
+/// choice; this one does not, and that is a limitation rather than a design.
 struct SecondaryWindow<P: lumen_widgets::app::PlatformConfig = lumen_widgets::app::DefaultPlatform>
 {
-    headless: ShellHeadless<P>,
+    headless: ShellHeadless<lumen_core::tasks::ThreadPoolSpawner, P>,
     window: Arc<Window>,
     presenter: Option<Presenter>,
     /// Only read when a swapchain exists; without the GPU backend the
@@ -462,7 +490,9 @@ struct SecondaryWindow<P: lumen_widgets::app::PlatformConfig = lumen_widgets::ap
     pending_resize: bool,
 }
 
-impl<P: lumen_widgets::app::PlatformConfig> ApplicationHandler<ShellEvent> for Shell<P> {
+impl<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig>
+    ApplicationHandler<ShellEvent> for Shell<E, P>
+{
     /// An agent request arrived from the server thread: dispatch it against the
     /// live runtime (same `dispatch` the headless agent uses), present any
     /// resulting frame so the window reflects the action, and reply.
@@ -1060,7 +1090,7 @@ impl<P: lumen_widgets::app::PlatformConfig> ApplicationHandler<ShellEvent> for S
     }
 }
 
-impl<P: lumen_widgets::app::PlatformConfig> Shell<P> {
+impl<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig> Shell<E, P> {
     /// P.3d-2: schedule a frame for every window — an input or state change
     /// anywhere may re-render any window (shared signals); untouched windows
     /// pump as dirty-checked no-ops.
@@ -1407,7 +1437,7 @@ fn spawn_tray(initial: String, model: lumen_widgets::system::MenuModel) -> TrayS
     }
 }
 
-impl<P: lumen_widgets::app::PlatformConfig> Shell<P> {
+impl<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig> Shell<E, P> {
     /// Apply a `TrayTooltip` request: create the tray on first use, then
     /// push the text.
     #[cfg(feature = "desktop-integration")]

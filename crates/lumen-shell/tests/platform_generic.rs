@@ -70,3 +70,23 @@ fn a_custom_bundle_survives_into_the_runtime() {
          not produce a laid-out tree"
     );
 }
+
+/// MOD7 S2: `run_with` must accept the app's own executor instead of the shell
+/// overwriting it. Before S2 the shell called
+/// `with_executor(ThreadPoolSpawner::default())` unconditionally, so a windowed
+/// app could not run on tokio or smol (`lumen-exec`) no matter what it chose.
+/// `run` still upgrades the default inline spawner, which is the right default
+/// and is what every existing app relies on.
+#[test]
+fn run_with_accepts_a_caller_supplied_executor() {
+    // Instantiating the generic for a non-default executor is the claim; the
+    // event loop is never entered.
+    let _custom: fn(
+        App<lumen_render::TinySkia, lumen_core::tasks::ThreadPoolSpawner, CustomPlatform>,
+        kurbo::Size,
+    ) = lumen_shell::run_with::<lumen_core::tasks::ThreadPoolSpawner, CustomPlatform>;
+    let _inline: fn(
+        App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner, DefaultPlatform>,
+        kurbo::Size,
+    ) = lumen_shell::run_with::<lumen_core::tasks::InlineSpawner, DefaultPlatform>;
+}
