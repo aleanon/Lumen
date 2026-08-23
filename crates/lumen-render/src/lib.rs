@@ -178,6 +178,16 @@ pub trait Renderer {
 
     /// A short, stable backend name (for diagnostics / the agent).
     fn name(&self) -> &'static str;
+
+    /// Whether this backend is GPU-accelerated.
+    ///
+    /// Default `false`, so a CPU backend needs no boilerplate. The value
+    /// matters because `WgpuFallbackTinySkia` degrades to the CPU renderer
+    /// silently when no adapter answers — an order-of-magnitude performance
+    /// difference with no other observable signal (O1.3 / O2.5).
+    fn is_gpu(&self) -> bool {
+        false
+    }
 }
 
 /// The deterministic CPU reference renderer (tiny-skia, ADR-002) — the default
@@ -293,5 +303,9 @@ impl<R: Renderer + ?Sized> Renderer for Box<R> {
 
     fn name(&self) -> &'static str {
         (**self).name()
+    }
+
+    fn is_gpu(&self) -> bool {
+        (**self).is_gpu()
     }
 }

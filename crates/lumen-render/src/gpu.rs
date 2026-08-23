@@ -534,6 +534,10 @@ impl crate::Renderer for Wgpu {
         full.crop(x, y, w, h)
     }
 
+    fn is_gpu(&self) -> bool {
+        true
+    }
+
     fn take_diagnostics(&mut self) -> Vec<lumen_core::Diagnostic> {
         let mut out = Vec::new();
         if let Some((w, h, cap)) = self.oversize.take() {
@@ -597,6 +601,15 @@ impl WgpuFallbackTinySkia {
 }
 
 impl crate::Renderer for WgpuFallbackTinySkia {
+    /// Reports what this wrapper *actually selected*, not what it hoped for.
+    /// `Wgpu::new()` returns `None` when no adapter answers on either
+    /// `PRIMARY` or `SECONDARY`, and every method below then takes the CPU arm
+    /// silently — so this is the only observable difference between a GPU
+    /// session and a CPU one.
+    fn is_gpu(&self) -> bool {
+        self.main.is_some()
+    }
+
     fn render_frame(
         &mut self,
         list: &DisplayList,

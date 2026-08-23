@@ -441,6 +441,17 @@ pub trait TextEngineApi {
     /// [`TextEngine::begin_frame`] for why it must not be called when idle.
     fn begin_frame(&mut self);
 
+    /// Cache occupancy and current soft caps:
+    /// `(shape_len, shape_cap, run_len, run_cap)`.
+    ///
+    /// Diagnostic only (O1.3 / O5.2). `len` repeatedly approaching `cap` is the
+    /// leading indicator of the sweep-thrash regime, which `sweep`'s own doc
+    /// measures at a 2.2x frame-time penalty — an engine with no cache reports
+    /// zeroes and is never in that regime.
+    fn cache_stats(&self) -> (usize, usize, usize, usize) {
+        (0, 0, 0, 0)
+    }
+
     /// Register a font, returning its family name.
     fn register_font(&mut self, bytes: Vec<u8>) -> Option<String>;
 
@@ -550,6 +561,14 @@ impl TextEngineApi for TextEngine {
 
     fn begin_frame(&mut self) {
         TextEngine::begin_frame(self)
+    }
+    fn cache_stats(&self) -> (usize, usize, usize, usize) {
+        (
+            self.shape_cache.len(),
+            self.shape_cap,
+            self.run_cache.len(),
+            self.run_cap,
+        )
     }
     fn register_font(&mut self, bytes: Vec<u8>) -> Option<String> {
         TextEngine::register_font(self, bytes)

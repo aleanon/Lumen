@@ -662,7 +662,16 @@ fn handle<R: Renderer, E: Spawner>(
         }
         "app.perf" => {
             // C.2: real values from the runtime's rolling painted-frame times.
-            let (p50, p95, frames) = app.perf_stats();
+            // O1.3: plus the counters that decide *why* a frame was slow, and
+            // the session facts that answer "what am I even running on".
+            //
+            // Every counter here is CUMULATIVE for the life of the runtime.
+            // The per-frame variants on `FrameStats` cannot serve an agent:
+            // they are zeroed at the top of every pump, and `ui.waitSettled`
+            // loops until the UI is quiescent, so it necessarily ends on idle
+            // pumps — by the time `app.perf` is read they would always be 0.
+            // Bracket an interaction with two reads and subtract.
+            let p = app.perf_report();
             // D9: a REAL total (the elided tree, recursively) — the old
             // value was just the root's direct-child count.
             fn count_nodes(n: &SemanticsNode) -> usize {
@@ -670,10 +679,36 @@ fn handle<R: Renderer, E: Spawner>(
             }
             let node_count = count_nodes(&app.semantics_elided());
             Ok(json!({
-                "frame_ms_p50": p50,
-                "frame_ms_p95": p95,
-                "frames_rendered": frames,
+                "frame_ms_p50": p.frame_ms_p50,
+                "frame_ms_p95": p.frame_ms_p95,
+                // All-time, not windowed: the percentiles are computed over the
+                // last 120 painted frames, so a single 300 ms stall is gone
+                // from them within two seconds of scrolling — while still
+                // being the thing the user actually felt.
+                "frame_ms_max": p.frame_ms_max,
+                "frames_rendered": p.frames_rendered,
+                "frames_over_budget": p.frames_over_budget,
+                "frame_budget_ms": p.frame_budget_ms,
                 "node_count": node_count,
+                // Retained-pipeline effectiveness: a copy rate near zero
+                // against a large rebuild count means memoization is not
+                // paying, which is invisible from frame times alone.
+                "nodes_rebuilt_total": p.nodes_rebuilt_total,
+                "nodes_copied_total": p.nodes_copied_total,
+                "style_memo_hits": p.style_memo_hits,
+                "style_memo_misses": p.style_memo_misses,
+                // `len` repeatedly at `cap` is the text-thrash leading
+                // indicator (`sweep` measures the regime at 2.2x frame time).
+                "shape_cache_len": p.shape_cache_len,
+                "shape_cache_cap": p.shape_cache_cap,
+                "run_cache_len": p.run_cache_len,
+                "run_cache_cap": p.run_cache_cap,
+                // Session facts. These must be QUERYABLE rather than only
+                // logged: `take_diagnostics()` clears on read, so a one-shot
+                // startup warning is drained by the first painted frame and an
+                // agent attaching later could never recover it.
+                "renderer": p.renderer,
+                "is_gpu": p.is_gpu,
             }))
         }
         "app.logs" => {

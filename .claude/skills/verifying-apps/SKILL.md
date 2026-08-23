@@ -171,8 +171,16 @@ The ones you'll actually use:
 - **Dotted ids are unselectable.** `#faq.returns` parses as id `faq` +
   class `returns`. Ids must be `[a-z0-9-]`. If `tree` shows a dotted id,
   that's an app bug — fix the id, don't work around it.
-- **`app.perf` is real since C.2**: `{frame_ms_p50, frame_ms_p95,
-  frames_rendered, node_count}` over the last ≤120 painted frames.
+- **`app.perf` is real since C.2**, and complete since O1.3:
+  `{frame_ms_p50, frame_ms_p95, frames_rendered, node_count}` over the last
+  ≤120 painted frames, plus `frame_ms_max` (**all-time** — a 300 ms stall
+  vanishes from a rolling p95 within two seconds of scrolling while still
+  being the thing the user felt), `frames_over_budget`/`frame_budget_ms`,
+  `nodes_rebuilt_total`/`nodes_copied_total`, `style_memo_hits`/`misses`,
+  `shape_cache_len`/`cap`, `run_cache_len`/`cap`, and `renderer`/`is_gpu`.
+  **Every counter is cumulative** — read `app.perf`, act, read it again,
+  subtract. Do NOT expect per-frame values: `ui.waitSettled` pumps until
+  quiescent, so it ends on idle pumps.
   `app.logs {since?}` returns the diagnostic ring (handler
   `rt.log(level, msg)` entries, E0701 panics, stylesheet rejections) —
   page with `since` = last seq + 1.

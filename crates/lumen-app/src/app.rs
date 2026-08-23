@@ -78,6 +78,61 @@ impl PlatformConfig for DefaultPlatform {
     type Text = TextEngine;
 }
 
+/// O1.3: the per-frame budget a painted frame is measured against — one 60 Hz
+/// vsync interval. Frames past it are counted (`frames_over_budget`) so an
+/// agent can see jank that rolling percentiles hide.
+///
+/// A fixed 60 Hz rather than the display's actual rate: this is a diagnostic
+/// yardstick, not a scheduling deadline, and it must mean the same thing across
+/// machines for a reported number to be comparable.
+pub const FRAME_BUDGET_MS: f32 = 1000.0 / 60.0;
+
+/// O1.3: the performance surface behind `app.perf`.
+///
+/// **Counters are cumulative for the life of the runtime**, not per-frame.
+/// Bracket an interaction with two reads and subtract. The per-frame variants
+/// live on [`FrameStats`], which `pump` returns — they cannot serve the agent,
+/// because `ui.waitSettled` ends on idle pumps that zero them.
+#[derive(Clone, Copy, Debug)]
+pub struct PerfReport {
+    /// Median painted-frame time (ms) over the last 120 painted frames.
+    pub frame_ms_p50: f64,
+    /// 95th-percentile painted-frame time (ms) over the same window.
+    pub frame_ms_p95: f64,
+    /// Worst painted frame (ms) since start — **all-time, not windowed**, so a
+    /// single stall stays visible after the percentiles have forgotten it.
+    pub frame_ms_max: f64,
+    /// Painted frames since start.
+    pub frames_rendered: u64,
+    /// Painted frames that exceeded [`FRAME_BUDGET_MS`], since start.
+    pub frames_over_budget: u64,
+    /// The budget the count above is measured against (ms).
+    pub frame_budget_ms: f64,
+    /// Nodes rebuilt from scratch, since start.
+    pub nodes_rebuilt_total: u64,
+    /// Nodes copied forward by the retained pipeline, since start. A copy rate
+    /// near zero against a large rebuild count means memoization is not paying.
+    pub nodes_copied_total: u64,
+    /// Style-memo hits since start.
+    pub style_memo_hits: u64,
+    /// Style-memo misses since start.
+    pub style_memo_misses: u64,
+    /// Shaped-text cache occupancy and its current (retargeted) soft cap.
+    /// `len` approaching `cap` repeatedly is the text-thrash leading indicator.
+    pub shape_cache_len: usize,
+    /// Current soft cap of the shaped-text cache.
+    pub shape_cache_cap: usize,
+    /// Glyph-run cache occupancy.
+    pub run_cache_len: usize,
+    /// Current soft cap of the glyph-run cache.
+    pub run_cache_cap: usize,
+    /// Active renderer's name — one field that answers "why is this slow".
+    pub renderer: &'static str,
+    /// Whether that renderer is GPU-backed. A silent CPU fallback is an
+    /// order-of-magnitude difference an agent cannot otherwise detect.
+    pub is_gpu: bool,
+}
+
 /// Statistics for one rendered frame.
 #[derive(Clone, Copy, Debug)]
 pub struct FrameStats {
@@ -321,6 +376,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             impure_seen: 0,
             nodes_rebuilt: 0,
             nodes_copied: 0,
+            nodes_rebuilt_total: 0,
+            nodes_copied_total: 0,
             style_memo: HashMap::default(),
             style_memo_hits: 0,
             style_memo_misses: 0,
@@ -337,6 +394,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             hidden_count: 0,
             disabled_count: 0,
             frame_ms: std::collections::VecDeque::new(),
+            frame_ms_max: 0.0,
+            frames_over_budget: 0,
             frames_rendered: 0,
             menu: crate::system::MenuModel::default(),
             menu_rev: 0,
@@ -800,6 +859,17 @@ pub struct Headless<
     impure_seen: u32,
     nodes_rebuilt: u32,
     nodes_copied: u32,
+    /// O1.3: lifetime totals, distinct from the per-pump counters above.
+    ///
+    /// The per-pump values are reset at the top of EVERY pump, and the
+    /// recommended agent sequence (interact → `ui.waitSettled` → `app.perf`)
+    /// necessarily ends on idle pumps — `waitSettled` loops until the UI is
+    /// quiescent — so by the time `app.perf` is read they are always 0/0.
+    /// Cumulative counters are readable by bracketing an interaction with two
+    /// reads and subtracting, which is the pattern `style_memo_hits`/`misses`
+    /// already forced; now the whole response is consistent about it.
+    nodes_rebuilt_total: u64,
+    nodes_copied_total: u64,
     /// A.5b: memoized style resolution — (node desc + ancestor context) →
     /// resolved pair. Most nodes share a handful of keys, so a rebuild does
     /// O(distinct keys) cascades instead of O(nodes). Cleared with the view
@@ -846,6 +916,12 @@ pub struct Headless<
     /// painted frames — the agent's `app.perf`. Diagnostic only (never feeds
     /// rendering); not recorded on wasm (no `Instant`).
     frame_ms: std::collections::VecDeque<f32>,
+    /// O1.3: the worst painted frame since start, and how many blew the
+    /// budget. A rolling p95 of 6 ms with one 300 ms stall reads healthy and
+    /// feels broken — the percentiles are computed over a 120-frame window, so
+    /// a single stall is gone from them within two seconds of scrolling.
+    frame_ms_max: f32,
+    frames_over_budget: u64,
     /// C.2: total painted frames since launch.
     frames_rendered: u64,
     input: InputQueue,
@@ -1217,6 +1293,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
             self.frame_ms.push_back(ms);
             self.frames_rendered += 1;
+            self.frame_ms_max = self.frame_ms_max.max(ms);
+            if ms > FRAME_BUDGET_MS {
+                self.frames_over_budget += 1;
+            }
         }
         stats
     }
@@ -1429,6 +1509,38 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// A.5b introspection: cumulative style-resolution memo `(hits, misses)`
     /// — most nodes share a handful of (desc, ancestors) keys, so hits should
     /// dwarf misses on any real UI.
+    /// O1.3: everything `app.perf` reports, in one read.
+    ///
+    /// Deliberately a struct rather than more tuple-returning accessors:
+    /// `perf_stats` already returns an unlabelled `(f64, f64, u64)`, and the
+    /// surface is about to carry a dozen numbers whose meanings are easy to
+    /// transpose.
+    pub fn perf_report(&self) -> PerfReport {
+        let (p50, p95, frames) = self.perf_stats();
+        let (memo_hits, memo_misses) = self.style_memo_stats();
+        let (shape_len, shape_cap, run_len, run_cap) = self.text.cache_stats();
+        PerfReport {
+            frame_ms_p50: p50,
+            frame_ms_p95: p95,
+            frame_ms_max: self.frame_ms_max as f64,
+            frames_rendered: frames,
+            frames_over_budget: self.frames_over_budget,
+            frame_budget_ms: FRAME_BUDGET_MS as f64,
+            nodes_rebuilt_total: self.nodes_rebuilt_total,
+            nodes_copied_total: self.nodes_copied_total,
+            style_memo_hits: memo_hits,
+            style_memo_misses: memo_misses,
+            shape_cache_len: shape_len,
+            shape_cache_cap: shape_cap,
+            run_cache_len: run_len,
+            run_cache_cap: run_cap,
+            renderer: self.renderer.name(),
+            is_gpu: self.renderer.is_gpu(),
+        }
+    }
+
+    /// A.5b: style-memo `(hits, misses)`, cumulative for the life of the
+    /// runtime. Surfaced through [`Headless::perf_report`] / `app.perf`.
     pub fn style_memo_stats(&self) -> (u64, u64) {
         (self.style_memo_hits, self.style_memo_misses)
     }
@@ -3986,6 +4098,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             },
         );
         self.nodes_copied += span.count;
+        self.nodes_copied_total += span.count as u64;
         Some((root, lnode))
     }
 
@@ -4313,6 +4426,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             self.impure_seen += 1;
         }
         self.nodes_rebuilt += 1;
+        self.nodes_rebuilt_total += 1;
         // F2.2: the tree is retained, so the previous frame's root is still
         // present while this one is being built — `insert_root` would assert.
         // The new node is created detached and claims the root afterwards; the
