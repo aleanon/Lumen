@@ -428,6 +428,16 @@ fn handle<R: Renderer, E: Spawner>(
                     "content_height": tm.content_height,
                 });
             }
+            // O2.1: effective opacity (own x every enclosing layer's). Only
+            // reported when it is not fully opaque, so the common case adds no
+            // noise. A node with real bounds and ~0 here is invisible on screen
+            // while looking perfectly healthy in `ui.getTree` — the tree
+            // carries no colour or opacity at all.
+            if let Some(o) = app.node_opacity(sel(params)?) {
+                if o < 0.999 {
+                    out["opacity"] = json!(o);
+                }
+            }
             // Reactive dependencies if this node is a `cx.scope` root (F2): the
             // signals whose change re-runs this subtree.
             if let Some(deps) = &node.deps {

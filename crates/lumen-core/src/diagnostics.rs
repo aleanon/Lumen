@@ -231,6 +231,24 @@ pub mod codes {
     /// headless tests, because the CPU renderer has no texture-dimension
     /// concept.
     pub const W0110: &str = "W0110";
+    /// A node is laid out with real area and is **effectively transparent** —
+    /// its own opacity multiplied by every enclosing layer's is ~0 — while
+    /// still occupying space, answering hit-tests and appearing in the
+    /// semantic tree.
+    ///
+    /// The agent-blind twin of `visibility: hidden`, which the runtime handles
+    /// properly: a hidden node loses its flags and leaves paint *and*
+    /// semantics, so the tree matches what the user sees. `opacity: 0` reaches
+    /// the same user-visible outcome through a path with none of that, and
+    /// before this code nothing reported it — `SemanticsNode` carries no
+    /// opacity or colour at all, so the tree looked perfectly healthy.
+    ///
+    /// Only fires for nodes that claim to be *for* something (interactive, or
+    /// carrying a label); a decorative fade is not a defect. Nodes with a
+    /// running opacity animation are exempt — a fade-in passing through zero is
+    /// normal, while a fade that *stopped* there is caught by the
+    /// stuck-animation check instead.
+    pub const W0111: &str = "W0111";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).

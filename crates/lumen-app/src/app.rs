@@ -2100,7 +2100,141 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // A LEGIBILITY floor, not a design opinion: `ContrastLevel` keeps the
         // graded tiers for callers grading a palette. Below `LEGIBILITY_FLOOR`
         // the text is invisible, which is a defect on any design.
+        out.extend(self.invisible_findings());
         out.extend(self.contrast_findings());
+        out
+    }
+
+    /// O2.1: a node's **effective** opacity — its own multiplied by every
+    /// enclosing layer's.
+    ///
+    /// This value does not exist anywhere else in the runtime. Paint emits
+    /// nested `DrawCmd::PushLayer { opacity }` and lets the backend composite
+    /// them, so the multiplicative result is an emergent property of drawing,
+    /// never a number that is stored. `node_style[n].opacity` is only the
+    /// node's *own* post-blend value — a label at `opacity: 1` inside a group
+    /// at `opacity: 0` is completely invisible and reports 1.0 there.
+    ///
+    /// Overlay roots reset the product to 1.0: a sheet or popup paints anchored
+    /// to the window rather than under its structural parent, so it does not
+    /// inherit a faded ancestor's alpha. Without this an overlay above a
+    /// dimmed page would report itself as invisible while being the one thing
+    /// on screen the user can actually see.
+    fn effective_opacity(&self, node: NodeIndex) -> f32 {
+        let mut acc = 1.0f32;
+        let mut n = node;
+        loop {
+            if let Some(o) = self.node_style.get(&n).and_then(|s| s.opacity) {
+                acc *= o.clamp(0.0, 1.0);
+            }
+            if self.meta.get(&n).is_some_and(|m| m.overlay) {
+                break;
+            }
+            let parent = self.tree.parent(n);
+            if !parent.is_some() || parent == n {
+                break;
+            }
+            n = parent;
+        }
+        acc
+    }
+
+    /// O2.1: the effective opacity of the node a `selector` resolves to, or
+    /// `None` if it doesn't resolve to exactly one node.
+    ///
+    /// Surfaced through `ui.getLayout` beside `ink` and `text_metrics` — the
+    /// other per-node visual facts that are deliberately absent from the tree,
+    /// which stays lean and carries structure.
+    pub fn node_opacity(&self, selector: &str) -> Option<f64> {
+        let root = self.semantics_elided();
+        let id = lumen_core::semantics::resolve_one(&root, selector).ok()?;
+        let node = self.node_for_handle(id)?;
+        Some(self.effective_opacity(node) as f64)
+    }
+
+    /// Effective opacity below which a node is invisible rather than merely
+    /// faint. Not 0.0: an interrupted fade that stopped at 0.004 is as
+    /// invisible as one that stopped at 0.0, and `f32` arithmetic over a chain
+    /// of layer multiplications will not land on exactly zero.
+    const INVISIBLE_OPACITY: f32 = 0.01;
+
+    /// W0111 findings for the current frame (see [`Headless::lint`]).
+    ///
+    /// Lives here rather than in `audit.rs` for the same reason W0110 and
+    /// W0402 do: it needs style data keyed by `NodeIndex`, and a
+    /// `SemanticsNode` walk cannot see it.
+    fn invisible_findings(&self) -> Vec<lumen_core::Diagnostic> {
+        let mut out = Vec::new();
+        for (node, m) in self.meta.iter() {
+            // Decorative fades must stay quiet, or the check gets ignored. Only
+            // a node that claims to be *for* something is worth reporting:
+            // it is interactive, or it carries a name a user is meant to read.
+            let interactive = m.actions.iter().any(|a| matches!(a, Action::Click));
+            if !interactive && m.label.trim().is_empty() {
+                continue;
+            }
+            let b = self.tree.bounds(*node);
+            if b.width() < 0.5 || b.height() < 0.5 {
+                continue; // W0105's business, and it says it better.
+            }
+            // A fade-in passing through zero on its first frame is not a
+            // defect. A fade that *stopped* at zero is — and O3.3's
+            // stuck-animation check is what catches that one.
+            if let Some(id) = &m.id {
+                if self.prop_anims.contains_key(&(id.clone(), "opacity"))
+                    || self.key_anims.contains_key(id)
+                {
+                    continue;
+                }
+            }
+            let eff = self.effective_opacity(*node);
+            if eff > Self::INVISIBLE_OPACITY {
+                continue;
+            }
+            let own = self
+                .node_style
+                .get(node)
+                .and_then(|s| s.opacity)
+                .unwrap_or(1.0);
+            let who =
+                m.id.as_ref()
+                    .map(|i| format!("`#{}`", i.as_str()))
+                    .unwrap_or_else(|| {
+                        if m.label.trim().is_empty() {
+                            format!("a {:?}", m.role)
+                        } else {
+                            format!("{:?}", m.label)
+                        }
+                    });
+            // Naming the inherited case explicitly: "my opacity is 1, why is
+            // this firing" is the first thing the author will ask.
+            let cause = if own > Self::INVISIBLE_OPACITY {
+                format!(
+                    " — its own opacity is {own:.2}, but an enclosing group \
+                     multiplies it to {eff:.3}"
+                )
+            } else {
+                String::new()
+            };
+            let d = lumen_core::Diagnostic::new(
+                lumen_core::codes::W0111,
+                format!(
+                    "{who} is laid out {:.0}×{:.0} and fully transparent \
+                     (effective opacity {eff:.3}){cause}. It occupies space and \
+                     answers the semantic tree, but nothing of it is on screen.",
+                    b.width(),
+                    b.height()
+                ),
+            );
+            let d = match self.handle_for_index(node.index()) {
+                Some(h) => d.with_target(h.to_wire(), m.id.as_ref()),
+                None => d,
+            };
+            out.push(d);
+        }
+        // `self.meta` is a HashMap, so iteration order is unspecified —
+        // without this the finding order would churn between runs.
+        out.sort_by(|a, b| a.message.cmp(&b.message));
         out
     }
 
