@@ -27,14 +27,17 @@ fn overflow(n: &SemanticsNode, out: &mut Vec<Diagnostic>, in_scroll: bool) {
         // the window, not their structural parent — escaping it is by design.
         if !in_scroll && !c.overlay && (b.x1 > p.x1 + 0.5 || b.y1 > p.y1 + 0.5) {
             let who = c.id.as_ref().map(|i| i.as_str()).unwrap_or(&c.label);
-            out.push(Diagnostic::new(
-                codes::W0103,
-                format!(
-                    "`{who}` overflows its parent ({:.0}×{:.0} past the edge)",
-                    (b.x1 - p.x1).max(0.0),
-                    (b.y1 - p.y1).max(0.0)
-                ),
-            ));
+            out.push(
+                Diagnostic::new(
+                    codes::W0103,
+                    format!(
+                        "`{who}` overflows its parent ({:.0}×{:.0} past the edge)",
+                        (b.x1 - p.x1).max(0.0),
+                        (b.y1 - p.y1).max(0.0)
+                    ),
+                )
+                .with_target(c.node.to_wire(), c.id.as_ref()),
+            );
         }
         overflow(c, out, in_scroll);
     }
@@ -61,10 +64,13 @@ fn clipping(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
         let over = (ink.y1 - b.y1).max(b.y0 - ink.y0);
         if over > 0.5 {
             let who = n.id.as_ref().map(|i| i.as_str()).unwrap_or(&n.label);
-            out.push(Diagnostic::new(
-                codes::W0104,
-                format!("`{who}` content is clipped ({over:.0} px of ink above/below its box)"),
-            ));
+            out.push(
+                Diagnostic::new(
+                    codes::W0104,
+                    format!("`{who}` content is clipped ({over:.0} px of ink above/below its box)"),
+                )
+                .with_target(n.node.to_wire(), n.id.as_ref()),
+            );
         }
     }
     for c in &n.children {
@@ -85,14 +91,17 @@ fn zero_size(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
     let interactive = n.actions.iter().any(|a| matches!(a, Action::Click));
     if interactive && (n.bounds.width() < 0.5 || n.bounds.height() < 0.5) {
         let who = n.id.as_ref().map(|i| i.as_str()).unwrap_or(&n.label);
-        out.push(Diagnostic::new(
-            codes::W0105,
-            format!(
-                "`{who}` is interactive but has zero area ({:.0}×{:.0})",
-                n.bounds.width(),
-                n.bounds.height()
-            ),
-        ));
+        out.push(
+            Diagnostic::new(
+                codes::W0105,
+                format!(
+                    "`{who}` is interactive but has zero area ({:.0}×{:.0})",
+                    n.bounds.width(),
+                    n.bounds.height()
+                ),
+            )
+            .with_target(n.node.to_wire(), n.id.as_ref()),
+        );
     }
     for c in &n.children {
         zero_size(c, out);
@@ -138,15 +147,21 @@ fn check_unnamed_focusable(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
         && n.label.trim().is_empty()
         && n.value.as_deref().unwrap_or("").trim().is_empty()
     {
-        out.push(Diagnostic::new(
-            codes::W0301,
-            format!(
-                "focusable {} leaf ({}) has no label or value — name it \
-                 so a11y and selectors can reach it",
-                n.role.as_str(),
-                n.node
-            ),
-        ));
+        // No author id by definition (an unnamed node is the finding), so the
+        // path-derived handle is the ONLY identity this can carry — which is
+        // exactly why `handle` had to exist separately from `node`.
+        out.push(
+            Diagnostic::new(
+                codes::W0301,
+                format!(
+                    "focusable {} leaf ({}) has no label or value — name it \
+                     so a11y and selectors can reach it",
+                    n.role.as_str(),
+                    n.node
+                ),
+            )
+            .with_handle(n.node.to_wire()),
+        );
     }
     for c in &n.children {
         check_unnamed_focusable(c, out);
@@ -207,15 +222,18 @@ fn check_unvirtualized_list(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
                 n.id.as_ref()
                     .map(|i| format!("`{}`", i.as_str()))
                     .unwrap_or_else(|| "a scroll container".to_string());
-            out.push(Diagnostic::new(
-                codes::W0108,
-                format!(
-                    "{who} lays out {count} nodes; every one is built \
+            out.push(
+                Diagnostic::new(
+                    codes::W0108,
+                    format!(
+                        "{who} lays out {count} nodes; every one is built \
                  and laid out on every frame. `VirtualList` materializes only \
                  the visible window (flat in item count) — consider it past \
                  ~{VIRTUALIZE_HINT_THRESHOLD} items."
-                ),
-            ));
+                    ),
+                )
+                .with_target(n.node.to_wire(), n.id.as_ref()),
+            );
         }
     }
     for c in &n.children {

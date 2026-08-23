@@ -47,9 +47,29 @@ pub struct Diagnostic {
     /// Source location, when the diagnostic refers to author text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub span: Option<SourceSpan>,
-    /// The node this diagnostic concerns, when applicable.
+    /// The node this diagnostic concerns, when applicable — the **author's**
+    /// `#id`, so it is `None` for any node the author did not name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node: Option<StableId>,
+    /// The agent handle (`"nx-<hex>"`) of the node this diagnostic concerns.
+    ///
+    /// Distinct from [`node`](Self::node) and **not redundant with it**: that
+    /// field is the author's id and is absent on any unnamed node, while the
+    /// handle is path-derived and therefore always available for a
+    /// node-anchored finding. It is what makes two findings of the same code on
+    /// different nodes distinguishable — by a consumer, and by the ambient
+    /// audit's deduplication.
+    ///
+    /// Before this existed, every emitter embedded the offending node only as
+    /// free text inside `message`, so recovering it meant guessing at a
+    /// per-check formatting convention that nothing enforced.
+    ///
+    /// `Box<str>` rather than `String`: a handle is written once and never
+    /// mutated, and the 8 bytes saved keep `Diagnostic` under the 128-byte
+    /// line where `clippy::result_large_err` fires — it is returned by value
+    /// in the `Err` arm of two public `Result` signatures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<Box<str>>,
 }
 
 impl Diagnostic {
@@ -73,6 +93,7 @@ impl Diagnostic {
             message: message.into(),
             span: None,
             node: None,
+            handle: None,
         }
     }
 
@@ -82,10 +103,33 @@ impl Diagnostic {
         self
     }
 
-    /// Attach the node this diagnostic concerns (builder style).
+    /// Attach the author's `#id` for the node this diagnostic concerns
+    /// (builder style). Prefer [`with_target`](Self::with_target), which fills
+    /// in the always-available handle too.
     pub fn with_node(mut self, node: StableId) -> Self {
         self.node = Some(node);
         self
+    }
+
+    /// Attach the agent handle (`"nx-<hex>"`) of the node this diagnostic
+    /// concerns (builder style).
+    pub fn with_handle(mut self, handle: impl Into<Box<str>>) -> Self {
+        self.handle = Some(handle.into());
+        self
+    }
+
+    /// Anchor this diagnostic to a node: its always-available agent `handle`
+    /// and, when the author named it, its `#id`.
+    ///
+    /// The one-call form exists so an emitter cannot accidentally attach only
+    /// the optional half — which is what every emitter effectively did before
+    /// `handle` existed.
+    pub fn with_target(self, handle: impl Into<Box<str>>, id: Option<&StableId>) -> Self {
+        let d = self.with_handle(handle);
+        match id {
+            Some(i) => d.with_node(i.clone()),
+            None => d,
+        }
     }
 }
 
@@ -94,6 +138,15 @@ impl std::fmt::Display for Diagnostic {
         write!(f, "{}: {}", self.code, self.message)?;
         if let Some(span) = &self.span {
             write!(f, " ({}:{}:{})", span.file, span.line, span.col)?;
+        }
+        // The node anchor is part of the finding, not decoration: without it a
+        // reader of the rendered string cannot tell two same-code findings
+        // apart. Prefer the author's id (actionable as a selector, and what the
+        // author will recognise), fall back to the handle.
+        match (&self.node, &self.handle) {
+            (Some(id), _) => write!(f, " [#{}]", id.as_str())?,
+            (None, Some(h)) => write!(f, " [{h}]")?,
+            (None, None) => {}
         }
         Ok(())
     }

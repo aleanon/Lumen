@@ -1939,7 +1939,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     m.id.as_ref()
                         .map(|i| format!("`#{}`", i.as_str()))
                         .unwrap_or_else(|| "an element".to_string());
-                out.push(lumen_core::Diagnostic::new(
+                let d = lumen_core::Diagnostic::new(
                     lumen_core::codes::W0110,
                     format!(
                         "{who} is {:.0}x{:.0} px with a shadow whose sprite is \
@@ -1949,23 +1949,38 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                         b.width(),
                         b.height()
                     ),
-                ));
+                );
+                let d = match self.handle_for_index(node.index()) {
+                    Some(h) => d.with_target(h.to_wire(), m.id.as_ref()),
+                    None => d,
+                };
+                out.push(d);
             }
         }
         // T.4 tofu: any text node whose shaped block contains `.notdef`
         // glyphs (chars no registered face covers). Shaping hits the cache,
         // so this is a cheap walk on an already-rendered tree.
-        let texts: Vec<(String, lumen_text::TextStyle, Option<f32>)> = self
+        // Carry the node identity through the collect: without it a tofu
+        // finding named the offending *string* but not which element drew it,
+        // so two labels with the same missing glyph were indistinguishable.
+        type TofuTarget = (
+            NodeIndex,
+            Option<StableId>,
+            String,
+            lumen_text::TextStyle,
+            Option<f32>,
+        );
+        let texts: Vec<TofuTarget> = self
             .meta
-            .values()
-            .filter_map(|m| match &m.content {
+            .iter()
+            .filter_map(|(node, m)| match &m.content {
                 NodeContent::Text(t, ts) if !t.is_empty() => {
-                    Some((t.clone(), ts.clone(), m.wrap_width))
+                    Some((*node, m.id.clone(), t.clone(), ts.clone(), m.wrap_width))
                 }
                 _ => None,
             })
             .collect();
-        for (t, ts, wrap) in texts {
+        for (node, id, t, ts, wrap) in texts {
             // `shaped`, NOT `layout`. `layout` bypasses the cache entirely —
             // it is the uncached primitive `shaped_by_key` calls on a miss — so
             // this loop used to re-shape every text node in the tree from
@@ -1976,12 +1991,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // entry for the current frame and this is an O(1) hit.
             let missing = self.text.shaped(&t, &ts, wrap, ts.align).missing_glyphs();
             if missing > 0 {
-                out.push(lumen_core::Diagnostic::new(
+                let d = lumen_core::Diagnostic::new(
                     lumen_core::diagnostics::codes::W0402,
                     format!(
                         "tofu: {missing} glyph(s) in {t:?} not covered by any                          registered font — register a wider face                          (`App::font(bytes)`) or enable `pan-unicode`"
                     ),
-                ));
+                );
+                let d = match self.handle_for_index(node.index()) {
+                    Some(h) => d.with_target(h.to_wire(), id.as_ref()),
+                    None => d,
+                };
+                out.push(d);
             }
         }
         // W0303: text that cannot be read at all. `contrast_report` already
@@ -2025,15 +2045,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     .map(|l| format!("{l:?}"))
                     .or_else(|| t.node.clone().map(|n| format!("`{n}`")))
                     .unwrap_or_else(|| "text".to_string());
-                // NOTE: `Diagnostic.node` is a `StableId` (the *author's* id),
-                // while `TargetContrast.node` is the agent wire handle
-                // (`nx-<hex>`) — different identities, and there is no
-                // `NodeHandle::from_wire` to convert. Coercing one into the
-                // other would put a lie in a typed field, so the handle goes
-                // in the message (where it is directly usable as a selector)
-                // and structured node identity is left to O0.1b, which fixes
-                // it across all emitters at once rather than one at a time.
-                lumen_core::Diagnostic::new(
+                // O0.1b resolved the identity mismatch this originally worked
+                // around: `Diagnostic.node` is the author's `StableId` and
+                // `TargetContrast.node` is the agent wire handle, so the
+                // handle now goes in `Diagnostic.handle`, which exists for
+                // exactly this — an always-available, path-derived anchor.
+                let d = lumen_core::Diagnostic::new(
                     lumen_core::codes::W0303,
                     format!(
                         "{who}{} is unreadable: APCA Lc {:.1} against its \
@@ -2049,7 +2066,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                         t.background,
                         Self::LEGIBILITY_FLOOR
                     ),
-                )
+                );
+                match &t.node {
+                    Some(h) => d.with_handle(h.clone()),
+                    None => d,
+                }
             })
             .collect()
     }
@@ -2725,10 +2746,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     }
                 };
                 if missing {
-                    out.push(lumen_core::Diagnostic::new(
+                    let d = lumen_core::Diagnostic::new(
                         lumen_core::codes::W0106,
                         format!("`{who}` declares action `{a:?}` but implements no handler for it"),
-                    ));
+                    );
+                    let d = match self.handle_for_index(node.index()) {
+                        Some(h) => d.with_target(h.to_wire(), m.id.as_ref()),
+                        None => d,
+                    };
+                    out.push(d);
                 }
             }
         }

@@ -1,5 +1,13 @@
 # Lumen diagnostic registry
 
+Every node-anchored diagnostic must carry its node. Use
+`Diagnostic::with_target(handle, id)` — `handle` (path-derived, always
+available) is what makes two findings of the same code distinguishable, and
+`node` (the author's `#id`) rides along when the author named the element.
+`with_handle` alone is correct where there is no author id by definition, as in
+`W0301`. A finding about *several* nodes at once (`W0001`) legitimately anchors
+to neither.
+
 Diagnostic codes are **stable API** (ADR-019): agents pattern-match on them.
 Never reuse or renumber a code. `E####` = error, `W####` = warning. Each code
 has exactly one `pub const` in `lumen_core::codes`.

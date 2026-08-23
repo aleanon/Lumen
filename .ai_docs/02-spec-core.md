@@ -315,7 +315,7 @@ impl Headless {
 ```
 
 ## 9. Diagnostics
-All warnings/errors are `Diagnostic { code: &'static str, severity, message, span: Option<SourceSpan>, node: Option<StableId> }`, serialized to JSON on the agent protocol and printed human-readably on stderr. Codes are stable API: `E####` errors, `W####` warnings; maintain a registry table in `lumen-core/diagnostics.md`. Initial assignments: W0001 duplicate StableId, W0002 dropped state field, E0101 .lss parse error, E0102 unknown style property (with did-you-mean), W0103 layout overflow, E0201 shader compile error, W0301 missing semantics on focusable leaf.
+All warnings/errors are `Diagnostic { code: &'static str, severity, message, span: Option<SourceSpan>, node: Option<StableId>, handle: Option<Box<str>> }` (`node` is the **author's** `#id` and is absent on unnamed nodes; `handle` is the path-derived agent handle and is present for every node-anchored finding — it is what distinguishes two findings of the same code), serialized to JSON on the agent protocol and printed human-readably on stderr. Codes are stable API: `E####` errors, `W####` warnings; maintain a registry table in `lumen-core/diagnostics.md`. Initial assignments: W0001 duplicate StableId, W0002 dropped state field, E0101 .lss parse error, E0102 unknown style property (with did-you-mean), W0103 layout overflow, E0201 shader compile error, W0301 missing semantics on focusable leaf.
 
 *Status:* every registered code is emitted — W0002, E0101, E0102, E0103
 (type mismatches, B.7a), E0104, W0103/W0104/W0105 + **W0001**
