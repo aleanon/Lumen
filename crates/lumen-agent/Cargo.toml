@@ -17,7 +17,7 @@ lumen-style = { workspace = true }
 # 15.5 MB pan-Unicode face) for every platform shell that depends on the agent
 # bridge — even when the consumer, the shell, and the shared shell core had all
 # already been switched to defaults-off.
-lumen-widgets = { path = "../lumen-widgets", default-features = false, features = ["snapshot"] }
+lumen-widgets = { path = "../lumen-widgets", default-features = false, features = ["snapshot", "dev-observability"] }
 kurbo = { workspace = true }
 serde_json = { workspace = true }
 # Sync WebSocket so the non-Send app stays on the serving thread (ADR-003,

@@ -18,8 +18,11 @@ repository.workspace = true
 publish = false
 
 [features]
-default = ["wgpu", "snapshot", "complex-scripts"]
+default = ["wgpu", "snapshot", "complex-scripts", "dev-observability"]
 wgpu = ["lumen-render/wgpu"]
+# O0.1: see lumen-core. Forwarded so the primitives and the audit are gated
+# together -- O0.2's types live in lumen-core, O0.3's loop lives here.
+dev-observability = ["lumen-core/dev-observability"]
 snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot"]
 pan-unicode = ["lumen-text/pan-unicode"]
 complex-scripts = ["lumen-text/complex-scripts"]

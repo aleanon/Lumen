@@ -393,6 +393,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             container_repass: false,
             hidden_count: 0,
             disabled_count: 0,
+            #[cfg(feature = "dev-observability")]
+            audit_diff: lumen_core::observe::FrameDiff::new(),
+            #[cfg(feature = "dev-observability")]
+            sem_gen: std::cell::Cell::new(0),
+            #[cfg(feature = "dev-observability")]
+            last_audit_gen: u64::MAX,
             frame_ms: std::collections::VecDeque::new(),
             frame_ms_max: 0.0,
             frames_over_budget: 0,
@@ -915,6 +921,16 @@ pub struct Headless<
     /// C.2: rolling per-painted-frame pump durations in ms (cap 120) + total
     /// painted frames — the agent's `app.perf`. Diagnostic only (never feeds
     /// rendering); not recorded on wasm (no `Instant`).
+    /// O0.3: previous painted frame's lint-finding keys, for the ambient audit.
+    /// Present only where the audit is compiled in.
+    #[cfg(feature = "dev-observability")]
+    audit_diff: lumen_core::observe::FrameDiff<String>,
+    /// O0.3: bumped whenever the semantic tree is replaced; compared against
+    /// `last_audit_gen` to decide whether the ambient audit has work to do.
+    #[cfg(feature = "dev-observability")]
+    sem_gen: std::cell::Cell<u64>,
+    #[cfg(feature = "dev-observability")]
+    last_audit_gen: u64,
     frame_ms: std::collections::VecDeque<f32>,
     /// O1.3: the worst painted frame since start, and how many blew the
     /// budget. A rolling p95 of 6 ms with one 300 ms stall reads healthy and
@@ -1298,7 +1314,77 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 self.frames_over_budget += 1;
             }
         }
+        // Painted frames, plus any pump whose tree changed since the last
+        // audit. `painted` alone is NOT sufficient: `set_stylesheet` and
+        // friends rebuild outside `pump`, so the pump that follows a hot
+        // stylesheet edit is idle — and that is exactly the moment a developer
+        // most wants to hear about a new finding.
+        #[cfg(feature = "dev-observability")]
+        if stats.painted || self.sem_gen.get() != self.last_audit_gen {
+            self.ambient_audit();
+        }
         stats
+    }
+
+    /// O0.3: push newly-appeared lint findings into the log ring.
+    ///
+    /// This is the bridge that turns the whole lint surface from *pull* into
+    /// *push*. `ui.lint` is interrogative — it answers well, but only if the
+    /// caller already suspects something and asks. A human looking at a window
+    /// gets the same information ambiently and without a hypothesis, and an
+    /// agent driving that window had no equivalent. Running the audit each
+    /// painted frame and logging the *changes* is that equivalent, and it costs
+    /// nothing per new check: every lint that exists today and every one added
+    /// later becomes push-mode for free.
+    ///
+    /// Three properties this must have, each learned the hard way:
+    ///
+    /// * **Painted frames only.** An idle pump changes nothing, so re-linting
+    ///   it is pure waste.
+    /// * **Edge-triggered per finding.** The ring holds 1000 entries; a
+    ///   held finding re-logged every frame would flush it in seconds. The
+    ///   diff reports a key the frame it appears and stays quiet while it
+    ///   persists — and reports it again if it is fixed and reintroduced.
+    /// * **Keyed on `(code, node)`, not on the message.** Messages carry
+    ///   measured values ("12×0 past the edge") that jitter during an
+    ///   animation, which would defeat deduplication entirely. The node comes
+    ///   from `Diagnostic.handle` (O0.1b) — path-derived and always present,
+    ///   unlike `node`, which is the author's optional `#id`.
+    #[cfg(feature = "dev-observability")]
+    fn ambient_audit(&mut self) {
+        self.last_audit_gen = self.sem_gen.get();
+        let findings = self.lint();
+        // Key, then look the finding back up: `FrameDiff` owns the key set, and
+        // cloning whole diagnostics into it would keep every message string
+        // alive for a frame longer than needed.
+        let keyed: Vec<(String, usize)> = findings
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                let anchor = d
+                    .handle
+                    .as_deref()
+                    .or_else(|| d.node.as_ref().map(|n| n.as_str()))
+                    .unwrap_or("-");
+                (format!("{}:{}", d.code, anchor), i)
+            })
+            .collect();
+        let index: std::collections::HashMap<&str, usize> =
+            keyed.iter().map(|(k, i)| (k.as_str(), *i)).collect();
+        let fresh = self
+            .audit_diff
+            .newly_present(keyed.iter().map(|(k, _)| k.clone()));
+        for key in fresh {
+            let Some(&i) = index.get(key.as_str()) else {
+                continue;
+            };
+            let d = &findings[i];
+            let level = match d.severity {
+                lumen_core::Severity::Error => "error",
+                lumen_core::Severity::Warning => "warn",
+            };
+            self.rt.log(level, d.to_string());
+        }
     }
 
     /// C.4b: invoke a named app command registered by the last build
@@ -2296,6 +2382,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
 
     /// Drop the memoized elided tree — call wherever `sem_root` is reassigned.
     fn invalidate_semantics_cache(&self) {
+        // O0.3: the semantic tree is what every lint finding derives from, so
+        // its generation is exactly the signal for "the findings may have
+        // changed". Bumped here rather than in `pump` because the tree is also
+        // replaced OUTSIDE a pump — `set_stylesheet`, `set_theme` and
+        // `resize` all rebuild directly — and those are precisely the edits a
+        // developer makes while an agent is watching.
+        #[cfg(feature = "dev-observability")]
+        self.sem_gen.set(self.sem_gen.get() + 1);
         self.elided_cache.borrow_mut().take();
         #[cfg(feature = "snapshot")]
         {

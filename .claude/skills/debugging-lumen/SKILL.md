@@ -44,30 +44,35 @@ Run against the live window (`just run-agent <name>` +
    panic, W0401 i18n…) — then **`app.logs`** (C.2): the runtime's ring of
    handler `rt.log` entries, contained panics, and stylesheet rejections
    (survives after a diagnostic clears; page with `since`).
-2. **`ui.lint`** — layout/contrast audits (W0103/W0104/W0105, W0303 unreadable
-   text contrast).
-3. **`agent_client.py tree`** — one line per node: role, id, label,
+2. **`app.logs`** — in a dev build the ambient audit *pushes* new lint
+   findings here as they appear, so read it FIRST: the defect may already
+   have announced itself, with its node, before you form a hypothesis.
+   Each finding is logged once when it appears and again if it is fixed
+   and reintroduced.
+3. **`ui.lint`** — the same findings on demand (layout/contrast audits:
+   W0103/W0104/W0105, W0303 unreadable text contrast).
+4. **`agent_client.py tree`** — one line per node: role, id, label,
    states, actions, bounds. Most "invisible/unclickable/wrong place" bugs
    are obvious here.
-4. **`ui.getLayout {selector}`** — box vs ink vs clipped; text metrics.
-4b. **`ui.explain {selector}`** — start here when something silently did
+5. **`ui.getLayout {selector}`** — box vs ink vs clipped; text metrics.
+5b. **`ui.explain {selector}`** — start here when something silently did
    nothing. `kind: "click"` names why a click was a no-op (disabled, no Click
    action, occluded by an overlay, zero-size); `kind: "style", property: "x"`
    says whether `x` is parse-only (never renders), unknown, or simply not
    matched on this node; `kind: "layout"` gives size provenance. Branch on
    `reasons[].code`. No reasons = nothing observable is wrong.
-5. **Reactive triple** — `ui.getDeps` (what it reads),
+6. **Reactive triple** — `ui.getDeps` (what it reads),
    `ui.whatDependsOn {signal}` (what a write should touch), act, then
    `ui.lastChange` (what actually happened: idle/patch/rebuild + nodes).
    Mismatch between prediction and result localizes the bug to either the
    dependency graph or the write site.
-6. **Element zoom** — `agent_client.py screenshot /tmp/z.png --selector
+7. **Element zoom** — `agent_client.py screenshot /tmp/z.png --selector
    '#thing' --scale 4` draws box (blue) + ink (red) outlines around the
    suspect at 4×.
-7. **Traces** — headless runs write
+8. **Traces** — headless runs write
    `target/lumen-traces/<test>.trace.jsonl`: inputs, rebuild scopes,
    damage rects, tree snapshots; failures embed screenshot+tree.
-8. **Coherence oracle** — `h.assert_view_coherent()` in a headless repro:
+9. **Coherence oracle** — `h.assert_view_coherent()` in a headless repro:
    if incremental ≠ rebuild-fresh, it's a memoization/invalidation bug in
    the framework path, not your app.
 

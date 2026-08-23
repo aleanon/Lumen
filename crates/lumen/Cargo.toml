@@ -12,7 +12,10 @@ publish = false
 # facade's ShaderWidget re-export. (Web/mobile drop wgpu via target-gating in
 # lumen-render regardless; the CPU-only renderer build is `lumen-render
 # --no-default-features`.)
-default = ["wgpu", "snapshot", "desktop-integration", "complex-scripts"]
+default = ["wgpu", "snapshot", "desktop-integration", "complex-scripts", "dev-observability"]
+# O0.1: per-frame ambient audit (see lumen-core). Default-on for `cargo run`;
+# a `--no-default-features` release build drops it entirely.
+dev-observability = ["lumen-widgets/dev-observability"]
 wgpu = ["lumen-widgets/wgpu", "lumen-render/wgpu", "lumen-shell/wgpu"]
 # The serializable/introspectable surfaces (AppSnapshot, get_styles, agent
 # JSON) — default-on; the lean shipped profile drops it (02 §4 doctrine).

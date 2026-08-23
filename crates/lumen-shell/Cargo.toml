@@ -64,7 +64,12 @@ agent = ["dep:lumen-agent", "dep:serde_json", "lumen-widgets/snapshot"]
 # corresponding SystemRequests then report unsupported instead of silently
 # doing nothing, so an app can detect the difference.
 desktop-integration = ["dep:rfd", "dep:muda", "dep:tray-icon", "dep:gtk"]
-default = ["desktop-integration", "wgpu", "complex-scripts"]
+default = ["desktop-integration", "wgpu", "complex-scripts", "dev-observability"]
+# O0.1: the per-frame ambient audit. `lumen-widgets` is pulled with
+# default-features = false here, so this MUST be forwarded explicitly -- a
+# default feature does not survive that, which is the same trap the `snapshot`
+# comment in lumen-agent documents.
+dev-observability = ["lumen-widgets/dev-observability"]
 # Forwarded tiers (T.4): consumers (the facade) decide; nothing default here
 # so the lean profile can drop them.
 #

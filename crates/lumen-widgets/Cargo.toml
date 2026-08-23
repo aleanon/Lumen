@@ -16,7 +16,10 @@ publish = false
 # `--no-default-features --features wgpu` and drops `serde_json` app-wide.
 # `pan-unicode` (LN2: default-OFF): the full 15 MB embedded face (CJK/RTL/Indic);
 # lean builds embed the ~350 KB Latin+symbols subset (T.4).
-default = ["wgpu", "snapshot", "codecs", "complex-scripts"]
+default = ["wgpu", "snapshot", "codecs", "complex-scripts", "dev-observability"]
+# O0.1: the per-frame ambient audit (see lumen-core). Default-on so `cargo run`
+# has it and a `--no-default-features` release build does not.
+dev-observability = ["lumen-app/dev-observability"]
 # ADR-M1: jpeg/gif/webp decode (`asset::decode`/`asset::animation`). Off in
 # the lean profile — PNG always works via tiny-skia.
 codecs = ["dep:image"]

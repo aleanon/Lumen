@@ -15,8 +15,19 @@ publish = false
 # `State` bound relaxes to `'static`, per-value JSON goes away, and `serde_json`
 # leaves the dependency tree. `snapshot` is the canonical superset built in CI;
 # lean is the optimized subset that ships.
-default = ["snapshot"]
+default = ["snapshot", "dev-observability"]
 snapshot = ["dep:serde_json"]
+# O0.1: the per-frame ambient audit and the occlusion scan — the only two
+# observability paths expensive enough to need a gate. Everything else in the
+# O phase is a latched boolean or a one-shot line, the same cost as the
+# always-on `atlas_overflow` latch in the GPU backend, and ships ungated.
+#
+# Deliberately NOT tied to `snapshot`: these checks are pure Rust over
+# already-computed layout and paint state and need no `serde_json`. (An earlier
+# draft justified the split by "a lean build with an agent attached", which is
+# not a real configuration -- lumen-agent hard-requires lumen-widgets/snapshot
+# and the decision log states "a lean build implies no agent".)
+dev-observability = []
 
 [dependencies]
 kurbo = { workspace = true }
