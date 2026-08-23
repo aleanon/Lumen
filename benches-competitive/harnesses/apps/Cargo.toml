@@ -3,7 +3,7 @@
 # and GTK ones — a window with a label and a button, shown, then idle.
 [workspace]
 resolver = "2"
-members = ["iced-app", "xilem-app", "slint-app", "lumen-app", "lumen-lean", "lumen-nodict"]
+members = ["iced-app", "xilem-app", "slint-app", "lumen-app", "lumen-lean", "lumen-nodict", "lumen-stubtext", "lumen-defaulttext"]
 
 [profile.release]
 opt-level = 3
