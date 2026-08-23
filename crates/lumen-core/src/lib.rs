@@ -18,6 +18,7 @@ pub mod fxhash;
 pub mod geometry;
 pub mod gesture;
 pub mod identity;
+pub mod observe;
 /// `#[state_registry]` runtime support (02 §4): stored trait objects.
 #[cfg(feature = "snapshot")]
 pub mod registry;
