@@ -64,7 +64,7 @@ agent = ["dep:lumen-agent", "dep:serde_json", "lumen-widgets/snapshot"]
 # corresponding SystemRequests then report unsupported instead of silently
 # doing nothing, so an app can detect the difference.
 desktop-integration = ["dep:rfd", "dep:muda", "dep:tray-icon", "dep:gtk"]
-default = ["desktop-integration", "wgpu"]
+default = ["desktop-integration", "wgpu", "complex-scripts"]
 # Forwarded tiers (T.4): consumers (the facade) decide; nothing default here
 # so the lean profile can drop them.
 #
@@ -76,6 +76,7 @@ default = ["desktop-integration", "wgpu"]
 wgpu = ["dep:wgpu", "lumen-render/wgpu", "lumen-widgets/wgpu"]
 snapshot = ["lumen-widgets/snapshot"]
 pan-unicode = ["lumen-widgets/pan-unicode"]
+complex-scripts = ["lumen-widgets/complex-scripts"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The tray's dedicated gtk thread (winit owns the main loop on Linux).

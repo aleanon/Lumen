@@ -181,7 +181,11 @@ The ones you'll actually use:
   remaining uncovered glyph as **W0402** with the offending text. The lean
   (`--no-default-features`) build embeds a Latin+symbols subset — wider
   scripts are W0402 there until the app registers a face
-  (`App::font(bytes)`) or enables `pan-unicode`. Still true: verify
+  (`App::font(bytes)`) or enables `pan-unicode`. A lean build also drops
+  `complex-scripts`, so registering a Thai/Lao/Khmer/Burmese face at runtime
+  gives you glyphs but **no line breaking** for them — such text overflows its
+  wrap width instead of wrapping. Re-enable `lumen/complex-scripts` if you need
+  it (3.62 MB). CJK is unaffected either way. Still true: verify
   *behaviour* from the tree and *layout* from pixels — but iconography can
   now be asserted from pixels, and a W0402-clean lint means no boxes.
 - **Record→export works live since C.3**: the shell routes through a

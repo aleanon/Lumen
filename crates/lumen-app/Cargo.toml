@@ -18,10 +18,11 @@ repository.workspace = true
 publish = false
 
 [features]
-default = ["wgpu", "snapshot"]
+default = ["wgpu", "snapshot", "complex-scripts"]
 wgpu = ["lumen-render/wgpu"]
 snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot"]
 pan-unicode = ["lumen-text/pan-unicode"]
+complex-scripts = ["lumen-text/complex-scripts"]
 
 [dependencies]
 lumen-core = { workspace = true }

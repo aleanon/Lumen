@@ -1,0 +1,11 @@
+[package]
+name = "lumen-nodict-app"
+version = "0.1.0"
+edition = "2021"
+# The lean app again, with `complex-scripts` dropped: no ICU dictionary, so no
+# Thai/Lao/Khmer/Burmese line breaking and no CJK word-granularity selection.
+# Cargo has no "default minus one" syntax, so the other defaults are re-listed.
+[dependencies]
+lumen-widgets = { path = "../../../../crates/lumen-widgets", default-features = false, features = ["wgpu", "snapshot", "codecs"] }
+lumen-shell = { path = "../../../../crates/lumen-shell", default-features = false, features = ["wgpu"] }
+lumen-core = { path = "../../../../crates/lumen-core" }

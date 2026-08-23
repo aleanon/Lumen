@@ -76,22 +76,40 @@ The full workspace test suite passes with the feature off.
 word-granularity cursor movement and double-click selection in CJK and Thai
 degrade even where line breaking does not.
 
-## Recommendation
+## Resolution — implemented 2026-08-23
 
-Make it the app's choice instead of the framework's. Today every Lumen binary
-pays 3.62 MB for Thai/Lao/Khmer/Burmese line breaking and CJK word selection,
-including apps that ship the Latin-only font and could not render those scripts
-if they wanted to.
+`complex-scripts` is now a `lumen-text` feature, forwarded through every
+consumer (`lumen-app`, `lumen-widgets`, `lumen-shell`, `lumen-agent`, the
+facade and the four platform shells) exactly the way `pan-unicode` already was,
+and **present in each of their `default` sets** — so a full build is byte-for-
+byte what it was.
 
-A `complex-scripts` feature on `lumen-text`, forwarded through the facade and
-**on by default**, keeps current behaviour for everyone and lets a lean or
-embedded target turn it off for a **23% smaller binary** (15.9 → 12.3 MB
-measured). That pairs naturally with the existing `pan-unicode` split, which
-already makes exactly this trade for the font: an app that has opted out of
-CJK *glyphs* has no use for a CJK *dictionary*.
+| build | before | after |
+|---|---:|---:|
+| `hello` (default) | 7.7 MB | 7.7 MB |
+| `hello` (pan-unicode) | 22.2 MB | 22.2 MB |
+| **lean-app** | 6.9 MB | **3.3 MB** |
+| **win-app** (what a user ships) | 14.0 MB | **10.4 MB** |
+| **nogpu-app** | 10.9 MB | **7.3 MB** |
 
-Untouched by this: the ICU error on stderr should be silenced or downgraded if
-the feature is turned off, or every Thai/Japanese string logs twice.
+The lean profiles were not opted out by hand: they already pass
+`default-features = false`, so making the dictionary a default rather than a
+hardcoded parley feature dropped it from all three at once. **The shipped
+windowed profile lost 3.6 MB and the scaffolded lean app halved.**
+
+That is coherent rather than a regression, and for the same reason the split
+was proposed: those profiles embed only the Latin+symbols face, so they could
+not draw a Thai glyph even with perfect Thai line breaking. An app that
+registers a wider face at runtime with `App::font(bytes)` and needs the
+segmentation turns the feature back on.
+
+Size-gate ceilings were re-tightened (lean 8 → 5 MB, windowed 16 → 12, no-GPU
+13 → 9) so the saving cannot be given back silently.
+
+**The stderr concern was wrong and needed no fix.** `icu_provider` aliases its
+`warn` to `eprintln` only under `debug_assertions`; with the feature off a
+release binary is silent, verified by running one. Debug builds do print, which
+is developer-visible and harmless.
 
 ## Reproducing
 

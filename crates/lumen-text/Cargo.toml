@@ -31,6 +31,14 @@ swash = { workspace = true }
 # with `App::font(bytes)` when a lean app needs wider coverage.
 default = []
 pan-unicode = []
+# The ICU dictionary segmenter (`cjdict`). Costs **3.62 MB** — 69% of Lumen's
+# binary-size gap against iced — and buys Thai/Lao/Khmer/Burmese line breaking
+# plus word-granularity cursor movement and double-click selection in CJK.
+#
+# It does NOT affect CJK line WRAPPING, which is identical without it
+# (`cargo run -p lumen-text --example cjk_probe --features pan-unicode`).
+# Default-on through every consumer, so nothing changes unless an app opts out.
+complex-scripts = ["parley/complex-scripts"]
 
 [dev-dependencies]
 # Editor serde round-trip test (matches the Signal<T> JSON storage format).

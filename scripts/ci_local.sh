@@ -143,6 +143,17 @@ _leg_lean_inner() {
     cargo check -q -p "$crate" --no-default-features || return 1
     echo "OK (lib)"
   done
+
+  # LN3: `complex-scripts` is a 3.62 MB decision, and its OFF branch is
+  # otherwise unreachable in CI — `cargo test --workspace` unifies features, so
+  # lumen-widgets' default turns the dictionary back on for every other leg.
+  # Run the pin in BOTH states: the Thai case asserts opposite outcomes, so
+  # this is the only place that can catch the feature being quietly dropped
+  # from the defaults, or quietly made unconditional again.
+  printf '  %-18s ' "complex-scripts"
+  cargo test -q -p lumen-text --test complex_scripts || return 1
+  cargo test -q -p lumen-text --test complex_scripts --features complex-scripts || return 1
+  echo "OK (both feature states)"
 }
 
 leg_executors() {

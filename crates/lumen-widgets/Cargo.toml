@@ -16,13 +16,14 @@ publish = false
 # `--no-default-features --features wgpu` and drops `serde_json` app-wide.
 # `pan-unicode` (LN2: default-OFF): the full 15 MB embedded face (CJK/RTL/Indic);
 # lean builds embed the ~350 KB Latin+symbols subset (T.4).
-default = ["wgpu", "snapshot", "codecs"]
+default = ["wgpu", "snapshot", "codecs", "complex-scripts"]
 # ADR-M1: jpeg/gif/webp decode (`asset::decode`/`asset::animation`). Off in
 # the lean profile — PNG always works via tiny-skia.
 codecs = ["dep:image"]
 wgpu = ["lumen-render/wgpu", "lumen-app/wgpu"]
 snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot", "lumen-app/snapshot"]
 pan-unicode = ["lumen-text/pan-unicode", "lumen-app/pan-unicode"]
+complex-scripts = ["lumen-text/complex-scripts", "lumen-app/complex-scripts"]
 
 [dependencies]
 # ADR-M1: optional raster codecs (jpeg/gif/webp), pure-Rust decoders.

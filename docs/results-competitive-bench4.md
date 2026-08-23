@@ -115,12 +115,22 @@ almost nothing else.
 | Qt6 (C++) | 18 KB | 70.1 MB | 45 |
 | iced | 10.7 MB | 0.2 MB | 1 |
 | Xilem | 10.8 MB | 0.2 MB | 1 |
+| **Lumen — no ICU dictionary** | **12.3 MB** | **0.2 MB** | **1** |
 | Slint | 14.8 MB | 2.0 MB | 9 |
 | **Lumen — lean** | **15.9 MB** | **0.2 MB** | **1** |
 | **Lumen — default** | **16.2 MB** | **28.0 MB** | **66** |
 
 Lumen's default build is the heaviest total here. The executable is comparable
 to Slint's and ~50% above iced's; the 28 MB is GTK3, and it is optional.
+
+**Update, 2026-08-23 (LN3).** The executable gap was investigated after this
+round: **69% of it is a single 3.62 MB blob**, ICU4X's `cjdict` dictionary,
+reached through parley's `complex-scripts`. It is now an opt-out feature
+(`docs/binary-size-2026-08-22.md`), which adds the 12.3 MB row above and takes
+the *shipped* windowed profile — the one the size gate builds, at
+`opt-level = "z"` — from **14.0 MB to 10.4 MB**, below Slint and within 1.6 MB
+of Xilem. The two rows measured in this round are unchanged, because both use
+`lumen-widgets`' default features and so still carry the dictionary.
 
 ### Idle RSS after first frame
 

@@ -28,12 +28,13 @@ serde_json = { workspace = true }
 tungstenite = { workspace = true, optional = true }
 
 [features]
-default = ["ws"]
+default = ["ws", "complex-scripts"]
 # Forwarded tier (GX3), so a lean platform shell can actually reach lean.
 # NOTE `snapshot` is NOT forwardable: the agent bridge IS the JSON surface
 # (`semantics_json`, `get_styles`), so lumen-widgets/snapshot is a hard
 # requirement here rather than a tier — it is requested unconditionally above.
 pan-unicode = ["lumen-widgets/pan-unicode"]
+complex-scripts = ["lumen-widgets/complex-scripts"]
 # The native WebSocket serving loop (serve_one/serve_one_session).
 ws = ["dep:tungstenite"]
 

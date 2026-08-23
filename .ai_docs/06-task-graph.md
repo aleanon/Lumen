@@ -479,6 +479,29 @@ Two constructors deliberately keep the string on the parent and put the binding 
 
 **Step 3 — the guidance.** `.claude/skills/building-apps` and the `text!` re-export doc now say plainly that reading a signal in the view body and interpolating its *value* is the slow form (structural read ⇒ rebuild), and that `bind!`/`text!` is the default. The API change is only worth its blast radius if authors actually write the binding form, which is a documentation problem, not a compiler one.
 
+## LN3 ☑ The ICU dictionary becomes opt-out — shipped profile −3.6 MB (2026-08-23)
+`docs/binary-size-2026-08-22.md`. BENCH4 left "Lumen's executable is ~50% above iced's" as an observation; the investigation found **69% of the 5.3 MB gap was a single 3.62 MB blob** — ICU4X's `cjdict`, reached through parley's `complex-scripts`, which the workspace manifest had hardcoded.
+
+**The manifest's justification was wrong on both counts.** It read: *"without it parley panics (\"no segmentation model for language: ja\") on CJK"*. Measured (`lumen-text/examples/cjk_probe.rs`, wrapping at 160 px): it does not panic — ICU records a data error and the segmenter falls back — and **ja/zh wrap identically with and without it**, because CJK has break opportunities between most characters. What the dictionary actually buys is **Thai** (222.8 px unwrapped → 127.6 px wrapped), and by the same mechanism Lao/Khmer/Burmese, plus word-granularity cursor movement and double-click selection in CJK.
+
+*Landed:* `complex-scripts` on `lumen-text`, forwarded through `lumen-app`, `lumen-widgets`, `lumen-shell`, `lumen-agent`, the facade and all four platform shells — the same chain `pan-unicode` already used — and added to every one of their `default` sets, so a full build is unchanged.
+
+| build | before | after |
+|---|---:|---:|
+| `hello` (default) | 7.7 MB | 7.7 MB |
+| `hello` (pan-unicode) | 22.2 MB | 22.2 MB |
+| lean-app | 6.9 MB | **3.3 MB** |
+| win-app — what a user ships | 14.0 MB | **10.4 MB** |
+| nogpu-app | 10.9 MB | **7.3 MB** |
+
+**The lean profiles were not opted out by hand.** They already pass `default-features = false`, so converting a hardcoded parley feature into a default dropped it from all three at once — the scaffolded lean app halved, and ADR-CFG1's **<5 MB target is met for the first time (3.3 MB)**. Coherent rather than a regression: those profiles embed only the Latin+symbols face and could not draw a Thai glyph with or without the segmenter. An app that registers a wider face at runtime turns the feature back on.
+
+Size-gate ceilings re-tightened so the saving cannot be given back silently: lean 8 → 5 MB, windowed 16 → 12, no-GPU 13 → 9.
+
+*The stderr concern raised in the investigation was wrong and needed no fix.* `icu_provider` aliases its `warn` to `eprintln` only under `debug_assertions`; a release binary with the feature off is silent, verified by running one.
+
+*Guarded by* `crates/lumen-text/tests/complex_scripts.rs`, which asserts **opposite outcomes per feature state** — Thai must wrap with it and must overflow without it — so neither reinstating the hardcoded dependency nor quietly dropping the feature from the defaults can pass. Ablating the forwarding fails it.
+
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
 - Any public-API signature in `02 §4`/`§8` that won't compile as written beyond a *minimal semantics-preserving* fix.

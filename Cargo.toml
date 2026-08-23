@@ -123,15 +123,21 @@ lumen = { path = "crates/lumen" }
 # whitelisted runtime deps (ADR-003) — added to crates as tasks need them
 kurbo = "0.13"
 taffy = "0.13"
-# `complex-scripts` bundles the ICU dictionary line-break models (CJK/Thai/…);
-# without it parley panics ("no segmentation model for language: ja") on CJK.
+# `complex-scripts` — the ICU dictionary line-break models — is NOT enabled
+# here any more; it is `lumen-text/complex-scripts`, default-on through the
+# consumer chain, so a lean target can drop it. It is 3.62 MB of the binary,
+# the single largest item in it (`docs/binary-size-2026-08-22.md`).
+#
+# The comment this replaces claimed parley "panics (\"no segmentation model for
+# language: ja\") on CJK" without it. Measured, it does neither: ICU logs to
+# stderr and continues, and ja/zh wrap IDENTICALLY — CJK breaks between most
+# characters with no dictionary at all. What the dictionary actually buys is
+# Thai/Lao/Khmer/Burmese line breaking and CJK word-granularity selection.
+#
 # `default-features = false` still drops fontique's `system` font-enumeration
 # backend — Lumen only ever uses the bundled font (ADR-005, `system_fonts:
 # false`), which also keeps the text stack wasm32-buildable.
-parley = { version = "0.11", default-features = false, features = [
-    "std",
-    "complex-scripts",
-] }
+parley = { version = "0.11", default-features = false, features = ["std"] }
 swash = "0.2"
 wgpu = "30"
 lyon = "1.0"

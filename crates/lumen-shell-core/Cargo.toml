@@ -17,8 +17,9 @@ publish = false
 # Forwarded tiers. Default preserves the previous behaviour exactly, so no
 # existing consumer changes; `--no-default-features` is what lets a platform
 # shell (notably wasm, where size is a distribution constraint) go lean.
-default = ["snapshot"]
+default = ["snapshot", "complex-scripts"]
 pan-unicode = ["lumen/pan-unicode"]
+complex-scripts = ["lumen/complex-scripts"]
 snapshot = ["lumen/snapshot"]
 
 [dependencies]

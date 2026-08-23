@@ -90,11 +90,15 @@ Every reload emits a structured result event (tier, status, components swapped, 
   **The CPU presentation backend landed 2026-08-08** (ADR-003 amendment,
   softbuffer): `--no-default-features` on `lumen-shell` now drops wgpu entirely
   and presents through a software surface, which is what CFG1's "no-GPU"
-  profile asked for. **<5 MB is still not met at 11.0 MB**, but the reason has
-  changed from structural to ordinary: the remaining bulk is the framework
-  itself, not the GPU stack, so it needs a dependency diet rather than a new
-  capability. The largest single lever remains the font (`pan-unicode`: 15 MB
-  face → ~355 KB subset).
+  profile asked for. **<5 MB is now met by the scaffolded lean app at 3.3 MB**;
+  the no-GPU windowed profile is 7.3 MB. Both dropped 3.62 MB on 2026-08-23
+  when the ICU dictionary segmenter became `complex-scripts`, a default-on
+  feature the lean profiles (which already pass `default-features = false`)
+  stop pulling — see `docs/binary-size-2026-08-22.md`. Two levers remain, both
+  opt-out rather than structural: the font (`pan-unicode`: 15 MB face → ~355 KB
+  subset) and that dictionary (3.62 MB, Thai/Lao/Khmer/Burmese line breaking
+  and CJK word-granularity selection — **not** CJK line wrapping, which needs
+  no dictionary).
 
 ## 9a. Swappable internals — the seams (MOD-series)
 
