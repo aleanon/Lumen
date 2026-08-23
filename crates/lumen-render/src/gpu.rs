@@ -63,6 +63,10 @@ pub struct Wgpu {
     /// drawn. Distinct from `atlas_overflow` (pages exhausted), which recovers
     /// by repacking and must stay silent or it would fire every busy frame.
     atlas_too_big: std::cell::Cell<Option<(u32, u32)>>,
+    /// O2.5: whether the backend advisory (W0115) has already been handed out.
+    /// A standing condition, not an event — reported once, then queryable
+    /// forever through `app.perf`'s session facts.
+    reported_backend: std::cell::Cell<bool>,
     /// R6.3: the root target from the previous frame, and whether its contents
     /// can be trusted. Held separately from the pool because "first free target
     /// of this size" is not necessarily the one holding last frame's pixels once
@@ -538,8 +542,45 @@ impl crate::Renderer for Wgpu {
         true
     }
 
+    fn backend(&self) -> &'static str {
+        match self.adapter_backend {
+            wgpu::Backend::Vulkan => "Vulkan",
+            wgpu::Backend::Metal => "Metal",
+            wgpu::Backend::Dx12 => "Dx12",
+            wgpu::Backend::Gl => "Gl",
+            wgpu::Backend::BrowserWebGpu => "WebGpu",
+            _ => "unknown",
+        }
+    }
+
+    fn backend_has_known_defects(&self) -> bool {
+        self.adapter_is_gl()
+    }
+
     fn take_diagnostics(&mut self) -> Vec<lumen_core::Diagnostic> {
         let mut out = Vec::new();
+        // O2.5: GL is only selected when no PRIMARY backend answers, and on it
+        // `textureSample` of the gradient ramp returns zeros — every gradient
+        // in the frame renders as nothing, with no validation error. Silent
+        // before this: nothing to read, a correct semantic tree, and a
+        // screenshot that only looks wrong if you already know better.
+        //
+        // Once per renderer. It is a standing condition rather than an event,
+        // so it also lives in `app.perf`'s session facts, where an agent that
+        // attached after the first painted frame can still find it.
+        if !self.reported_backend.replace(true) && self.adapter_is_gl() {
+            out.push(lumen_core::Diagnostic::new(
+                lumen_core::codes::W0115,
+                format!(
+                    "the GPU backend is OpenGL (adapter {:?}). Gradients render \
+                     as NOTHING on this path — a known driver defect, with no \
+                     validation error — so a gradient that is correct on your \
+                     machine may be missing on a user's. GL is chosen only when \
+                     no Vulkan/Metal/DX12 adapter answers.",
+                    self.adapter_name
+                ),
+            ));
+        }
         if let Some((w, h, cap)) = self.oversize.take() {
             out.push(lumen_core::Diagnostic::new(
                 lumen_core::codes::W0110,
@@ -601,6 +642,19 @@ impl WgpuFallbackTinySkia {
 }
 
 impl crate::Renderer for WgpuFallbackTinySkia {
+    fn backend(&self) -> &'static str {
+        match &self.main {
+            Some(g) => g.backend(),
+            None => "cpu",
+        }
+    }
+
+    fn backend_has_known_defects(&self) -> bool {
+        self.main
+            .as_ref()
+            .is_some_and(crate::Renderer::backend_has_known_defects)
+    }
+
     /// Reports what this wrapper *actually selected*, not what it hoped for.
     /// `Wgpu::new()` returns `None` when no adapter answers on either
     /// `PRIMARY` or `SECONDARY`, and every method below then takes the CPU arm
@@ -1221,6 +1275,7 @@ impl Wgpu {
             oversize: std::cell::Cell::new(None),
             uploaded_texels: std::cell::Cell::new(0),
             atlas_too_big: std::cell::Cell::new(None),
+            reported_backend: std::cell::Cell::new(false),
             retained_root: std::cell::RefCell::new(None),
             max_dim,
             adapter_name,

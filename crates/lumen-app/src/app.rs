@@ -131,6 +131,12 @@ pub struct PerfReport {
     /// Whether that renderer is GPU-backed. A silent CPU fallback is an
     /// order-of-magnitude difference an agent cannot otherwise detect.
     pub is_gpu: bool,
+    /// The graphics backend in use (`"Vulkan"`, `"Gl"`, `"cpu"`, …).
+    pub backend: &'static str,
+    /// Whether that backend is known to render some content wrongly (today:
+    /// GL silently drops every gradient). Queryable rather than log-only,
+    /// because the W0115 advisory is drained by the first painted frame.
+    pub backend_has_known_defects: bool,
 }
 
 /// Statistics for one rendered frame.
@@ -1622,6 +1628,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             run_cache_cap: run_cap,
             renderer: self.renderer.name(),
             is_gpu: self.renderer.is_gpu(),
+            backend: self.renderer.backend(),
+            backend_has_known_defects: self.renderer.backend_has_known_defects(),
         }
     }
 

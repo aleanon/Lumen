@@ -179,6 +179,23 @@ pub trait Renderer {
     /// A short, stable backend name (for diagnostics / the agent).
     fn name(&self) -> &'static str;
 
+    /// The graphics backend actually in use (`"Vulkan"`, `"Metal"`, `"Gl"`,
+    /// `"cpu"`, …), and whether it has a known rendering defect.
+    ///
+    /// **Session facts, not events.** `take_diagnostics` clears on read, so the
+    /// one-shot W0115 advisory is drained by the first painted frame and an
+    /// agent attaching later could never recover it. These stay queryable
+    /// through `app.perf` for the life of the session.
+    fn backend(&self) -> &'static str {
+        "cpu"
+    }
+
+    /// Whether the active backend is known to render some content incorrectly.
+    /// See [`codes::W0115`](lumen_core::codes::W0115).
+    fn backend_has_known_defects(&self) -> bool {
+        false
+    }
+
     /// Whether this backend is GPU-accelerated.
     ///
     /// Default `false`, so a CPU backend needs no boilerplate. The value
@@ -307,5 +324,13 @@ impl<R: Renderer + ?Sized> Renderer for Box<R> {
 
     fn is_gpu(&self) -> bool {
         (**self).is_gpu()
+    }
+
+    fn backend(&self) -> &'static str {
+        (**self).backend()
+    }
+
+    fn backend_has_known_defects(&self) -> bool {
+        (**self).backend_has_known_defects()
     }
 }

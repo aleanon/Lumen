@@ -319,7 +319,7 @@ All warnings/errors are `Diagnostic { code: &'static str, severity, message, spa
 
 *Status:* every registered code is emitted — W0002, E0101, E0102, E0103
 (type mismatches, B.7a), E0104, W0103/W0104/W0105 + **W0001**
-(duplicate StableId, W.4a) + **W0301** (unnamed focusable leaf, W.4a), **W0303** (text contrast below the legibility floor, measured with APCA against the composited backdrop), **W0111** (node with real area but effectively transparent — own × inherited opacity ≈ 0), **W0112** (node laid out entirely outside the window viewport), **W0402** (tofu — glyphs uncovered by any registered font, T.4), **E0701**/**E0702** (contained / uncontained panic — error boundary + crash hook, E.3) via
+(duplicate StableId, W.4a) + **W0301** (unnamed focusable leaf, W.4a), **W0303** (text contrast below the legibility floor, measured with APCA against the composited backdrop), **W0111** (node with real area but effectively transparent — own × inherited opacity ≈ 0), **W0112** (node laid out entirely outside the window viewport), **W0115** (active renderer backend has a known rendering defect — GL silently drops every gradient), **W0402** (tofu — glyphs uncovered by any registered font, T.4), **E0701**/**E0702** (contained / uncontained panic — error boundary + crash hook, E.3) via
 the audit lint, E0201, W0401 (i18n missing key), E0701 (contained panic).
 The defined-but-dead bucket from the 2026-07 audit is empty.
 

@@ -719,6 +719,12 @@ fn handle<R: Renderer, E: Spawner>(
                 // agent attaching later could never recover it.
                 "renderer": p.renderer,
                 "is_gpu": p.is_gpu,
+                "backend": p.backend,
+                // O2.5: the GL path drops every gradient with no validation
+                // error. The W0115 advisory is drained by the first painted
+                // frame, so the standing fact has to live somewhere an agent
+                // can ask for it at any time.
+                "backend_has_known_defects": p.backend_has_known_defects,
             }))
         }
         "app.logs" => {

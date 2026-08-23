@@ -97,3 +97,28 @@ fn memo_counters_are_exposed_at_all() {
         assert!(p[k].as_u64().is_some(), "{k} must be reported: {p}");
     }
 }
+
+/// O2.5: the backend is a *standing* fact, so it must be queryable at any time.
+/// The W0115 advisory that explains its consequence is drained by the first
+/// painted frame (`take_diagnostics` clears on read), so an agent attaching
+/// later could never recover it from the log ring — the exact
+/// hypothesis-required failure this phase exists to remove.
+#[test]
+fn the_backend_and_its_known_defects_are_queryable_at_any_time() {
+    let mut h = App::new(build).run_headless(Size::new(300.0, 200.0));
+    // Long after the first painted frame, and after the ring would have rolled.
+    for _ in 0..40 {
+        h.pump();
+    }
+    let p = call(&mut h, "app.perf", json!({}))["result"].clone();
+    assert_eq!(
+        p["backend"].as_str(),
+        Some("cpu"),
+        "the headless default is TinySkia: {p}"
+    );
+    assert_eq!(
+        p["backend_has_known_defects"].as_bool(),
+        Some(false),
+        "the CPU reference backend is the golden contract: {p}"
+    );
+}

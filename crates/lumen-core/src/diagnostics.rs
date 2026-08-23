@@ -262,6 +262,20 @@ pub mod codes {
     /// a scroll container is for. Use the container's `ScrollInfo`
     /// (`x`/`y`/`max_x`/`max_y`) to reason about those.
     pub const W0112: &str = "W0112";
+    /// The active renderer backend has a **known rendering defect**, so what is
+    /// on screen may not be what the display list says.
+    ///
+    /// Today this is one case: wgpu selected the OpenGL backend, where
+    /// `textureSample` of the gradient ramp returns zeros — **every gradient in
+    /// the frame renders as nothing, with no validation error**. GL is only
+    /// chosen when no PRIMARY backend (Vulkan/Metal/DX12) answers, so this is
+    /// hardware- and driver-dependent: the same scene is correct on Vulkan for
+    /// both NVIDIA and lavapipe.
+    ///
+    /// The defect class an agent cannot otherwise see. There is no error to
+    /// read, the semantic tree is entirely correct, and a screenshot is only
+    /// wrong if you already know what it should have looked like.
+    pub const W0115: &str = "W0115";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).
