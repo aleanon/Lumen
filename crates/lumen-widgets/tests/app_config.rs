@@ -285,3 +285,57 @@ fn a_configured_app_still_takes_builder_calls() {
         b.width()
     );
 }
+
+// ---------------------------------------------------------------------------
+// MOD7 S4: presets
+// ---------------------------------------------------------------------------
+
+use lumen_widgets::app::presets::{Balanced, Desktop, Lean, LeanPlatform};
+use lumen_widgets::app::DefaultPlatform;
+
+/// Each preset has to actually build and run — one that only type-checks is a
+/// nicer way to write a config nobody can use.
+#[test]
+fn every_preset_builds_and_runs() {
+    let mut a = ConfiguredApp::<Lean>::with_config(view).run_headless(Size::new(300.0, 150.0));
+    let mut b = ConfiguredApp::<Balanced>::with_config(view).run_headless(Size::new(300.0, 150.0));
+    let mut c = ConfiguredApp::<Desktop>::with_config(view).run_headless(Size::new(300.0, 150.0));
+    for (name, stats) in [
+        ("Lean", a.pump()),
+        ("Balanced", b.pump()),
+        ("Desktop", c.pump()),
+    ] {
+        assert!(stats.node_count > 0, "preset {name} built nothing");
+    }
+}
+
+/// `Lean` must differ from the others in the way it advertises, or the three
+/// names are decoration.
+#[test]
+fn lean_is_actually_leaner() {
+    assert_eq!(
+        <LeanPlatform as PlatformConfig>::TUNING,
+        Tuning::LEAN,
+        "the Lean preset does not carry lean tuning"
+    );
+    assert_eq!(
+        <DefaultPlatform as PlatformConfig>::TUNING,
+        Tuning::DEFAULT,
+        "the default bundle stopped carrying the shipped tuning"
+    );
+}
+
+/// Presets trade memory and threads, not correctness. If one changed layout it
+/// would be a different framework rather than a different configuration.
+#[test]
+fn presets_agree_on_layout() {
+    let mut a = ConfiguredApp::<Lean>::with_config(view).run_headless(Size::new(300.0, 150.0));
+    let mut b = ConfiguredApp::<Desktop>::with_config(view).run_headless(Size::new(300.0, 150.0));
+    a.pump();
+    b.pump();
+    assert_eq!(
+        a.node_bounds_by_id("lbl"),
+        b.node_bounds_by_id("lbl"),
+        "two presets laid the same view out differently"
+    );
+}

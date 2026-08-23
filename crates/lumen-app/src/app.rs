@@ -186,6 +186,86 @@ impl PlatformConfig for DefaultPlatform {
     type Text = TextEngine;
 }
 
+/// MOD7 S4: the shipped presets, so the common cases are one word and a custom
+/// [`AppConfig`] is the escape hatch rather than the entry fee.
+///
+/// All three use the shipped engines — they differ in the choices *around*
+/// them, which is what an app actually picks between. Swapping an engine is a
+/// custom config, because there is no second implementation to name.
+///
+/// ```ignore
+/// ConfiguredApp::<Desktop>::with_config(view).run(size);
+/// ```
+pub mod presets {
+    use super::{AppConfig, PlatformConfig, Tuning};
+    use crate::app::{DefaultPlatform, LayoutTree, TextEngine};
+
+    /// Smallest resident footprint: the CPU reference renderer, no background
+    /// threads, and quartered text caches. The inline executor runs
+    /// `cx.task`/`cx.resource` work on the caller's thread, so this is for
+    /// apps that do little or none — it is also the deterministic one, which
+    /// is why the test harnesses use its shape.
+    pub struct Lean;
+
+    /// The shipped defaults, named: CPU reference renderer, a small thread
+    /// pool, default caches. What `App::new` has always given you.
+    pub struct Balanced;
+
+    /// A desktop app: GPU-capable boxed renderer chosen at startup, a
+    /// four-worker pool, default caches. The renderer is boxed because the
+    /// shell picks GPU-or-CPU by adapter presence, which no static type can
+    /// express.
+    pub struct Desktop;
+
+    /// The bundle all three share; `Lean` overrides only its tuning.
+    pub struct LeanPlatform;
+
+    impl PlatformConfig for LeanPlatform {
+        type Layout = LayoutTree;
+        type Text = TextEngine;
+        const TUNING: Tuning = Tuning::LEAN;
+    }
+
+    impl AppConfig for Lean {
+        type Renderer = lumen_render::TinySkia;
+        type Executor = lumen_core::tasks::InlineSpawner;
+        type Layout = <LeanPlatform as PlatformConfig>::Layout;
+        type Text = <LeanPlatform as PlatformConfig>::Text;
+        fn renderer() -> Self::Renderer {
+            lumen_render::TinySkia
+        }
+        fn executor() -> Self::Executor {
+            lumen_core::tasks::InlineSpawner
+        }
+    }
+
+    impl AppConfig for Balanced {
+        type Renderer = lumen_render::TinySkia;
+        type Executor = lumen_core::tasks::ThreadPoolSpawner;
+        type Layout = <DefaultPlatform as PlatformConfig>::Layout;
+        type Text = <DefaultPlatform as PlatformConfig>::Text;
+        fn renderer() -> Self::Renderer {
+            lumen_render::TinySkia
+        }
+        fn executor() -> Self::Executor {
+            lumen_core::tasks::ThreadPoolSpawner::new(2)
+        }
+    }
+
+    impl AppConfig for Desktop {
+        type Renderer = Box<dyn lumen_render::Renderer>;
+        type Executor = lumen_core::tasks::ThreadPoolSpawner;
+        type Layout = <DefaultPlatform as PlatformConfig>::Layout;
+        type Text = <DefaultPlatform as PlatformConfig>::Text;
+        fn renderer() -> Self::Renderer {
+            Box::new(lumen_render::TinySkia)
+        }
+        fn executor() -> Self::Executor {
+            lumen_core::tasks::ThreadPoolSpawner::new(4)
+        }
+    }
+}
+
 /// Statistics for one rendered frame.
 #[derive(Clone, Copy, Debug)]
 pub struct FrameStats {
