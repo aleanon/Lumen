@@ -141,6 +141,20 @@ defaults do not apply to inference of a function's *return*, so generalising
 runtime registration (`register_property`), not a type swap, so there is nothing
 for an associated type to name.
 
+**The seams are reachable headless only — see `docs/plan-mod7-reachable-seams.md`
+(2026-08-24).** Auditing them by trying to *use* one found three defects: (1)
+`App::with_renderer`/`with_executor` are typed `-> App<R2, E>`, dropping the
+platform parameter, so a custom `PlatformConfig` silently reverts to
+`DefaultPlatform` the moment either is called; (2) `lumen_shell::run` takes a
+fully-defaulted `App` and `ShellApp` pins renderer and executor, so no windowed
+app can select any of the four axes; (3) the memory-vs-speed knobs (glyph,
+shape and run cache caps, image/animation caps, thread count) are hardcoded
+consts belonging to no seam. The prize is measured rather than assumed —
+swapping `PlatformConfig::Text` alone is **6.04 MB** of binary
+(`harnesses/apps/lumen-{stub,default}text`), larger than LN3's feature split,
+because LTO drops parley, swash, skrifa, harfrust, the ICU tables and the
+embedded fonts once nothing instantiates the default engine.
+
 **The state store is deliberately NOT swappable — seven axes, not eight.**
 Keeping `ui.getDeps`' exact attribution out of a third party's hands forces the
 values and the attribution into separate maps, i.e. two lookups where there is
