@@ -1885,7 +1885,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// Structured diagnostics for the current frame (e.g. `W0103` layout
     /// overflow). Lets an agent detect and fix layout bugs by code.
     pub fn diagnostics(&self) -> Vec<lumen_core::Diagnostic> {
-        let mut diags = crate::audit::lint(&self.semantics_doc().root);
+        // `sem_root()` is a memoized `Rc` — `semantics_doc()` deep-clones the
+        // whole tree (a String/Vec allocation per node) purely to hand out a
+        // reference the audits then only read.
+        let mut diags = crate::audit::lint(&self.sem_root());
         if let Some(d) = &self.build_panic {
             diags.push(d.clone());
         }
@@ -1897,7 +1900,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// Unlike goldens, catches first-time layout/render defects; usable in tests
     /// and via the agent (`ui.lint`).
     pub fn lint(&mut self) -> Vec<lumen_core::Diagnostic> {
-        let mut out = crate::audit::lint(&self.semantics_doc().root);
+        // See `diagnostics()`: borrow the memoized root, don't clone the tree.
+        let mut out = crate::audit::lint(&self.sem_root());
         // What the renderer actually clamped this frame (W0110). The CPU
         // backend returns nothing; only a GPU one has limits to hit.
         out.extend(self.renderer.take_diagnostics());
@@ -1962,10 +1966,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             })
             .collect();
         for (t, ts, wrap) in texts {
-            let missing = self
-                .text
-                .layout(&t, ts.clone(), &[], wrap, ts.align)
-                .missing_glyphs();
+            // `shaped`, NOT `layout`. `layout` bypasses the cache entirely —
+            // it is the uncached primitive `shaped_by_key` calls on a miss — so
+            // this loop used to re-shape every text node in the tree from
+            // scratch on every `lint()`, under a comment claiming the
+            // opposite ("Shaping hits the cache, so this is a cheap walk").
+            // `ShapeKey` hashes exactly (text, style, wrap, align), which is
+            // what we hold here, so build/paint have already populated this
+            // entry for the current frame and this is an O(1) hit.
+            let missing = self.text.shaped(&t, &ts, wrap, ts.align).missing_glyphs();
             if missing > 0 {
                 out.push(lumen_core::Diagnostic::new(
                     lumen_core::diagnostics::codes::W0402,
