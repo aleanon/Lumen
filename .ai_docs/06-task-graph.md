@@ -502,6 +502,23 @@ Size-gate ceilings re-tightened so the saving cannot be given back silently: lea
 
 *Guarded by* `crates/lumen-text/tests/complex_scripts.rs`, which asserts **opposite outcomes per feature state** — Thai must wrap with it and must overflow without it — so neither reinstating the hardcoded dependency nor quietly dropping the feature from the defaults can pass. Ablating the forwarding fails it.
 
+## O ◐ Agent observability — what the agent cannot see of a running app (2026-08-24)
+`docs/plan-agent-observability.md` (rev 2, after three expert reviews); evidence in `docs/review-agent-observability-2026-08.md`.
+
+**Premise.** Lumen's agent surface is strong but *interrogative* — `ui.explain`, `ui.getStyles`, `ui.probe` answer well only if you already suspect a node and can name it. Human sight is ambient, push, and hypothesis-free. The phase adds a per-frame dev-build audit that volunteers what a human notices, written into the existing `Runtime::log` ring.
+
+- [x] **O1.1 ☑ Contrast reaches `ui.lint` (W0303).** `analyze_contrast` + `contrast_report()` were fully implemented, tested, and had **no caller on the lint path** — so white-on-white text was undetectable while `03 §ui.lint` had claimed contrast coverage since before it existed. A **legibility** floor (|Lc| < 15), not a design opinion: `ContrastLevel::Fail` starts at 45 and would fire on legitimate secondary text. *Guarded by* `crates/lumen-widgets/tests/contrast_lint.rs`, which pins all three regimes — invisible fires, readable does not, and mid-grey-on-white (poor design, legitimate output) does not.
+- [ ] O1.2 `ui.lastDamage` — `last_damage()` is computed every frame; the string `damage` does not appear in `lumen-agent` at all.
+- [ ] O1.3 `app.perf` completion + session facts. Blocked on making `nodes_rebuilt`/`nodes_copied` cumulative: they are zeroed at the top of every pump and `ui.waitSettled` ends on idle pumps, so the recommended sequence reads 0/0.
+- [ ] O0.3a `lint()` cost — it calls the **uncached** `TextEngine::layout()` (under a comment claiming the opposite), re-shaping every text node per call, and deep-clones the tree via `semantics_doc()`.
+- [ ] O0.1 / **O0.1b** / O0.2 / O0.3 foundations. O0.1b is blocking: `.with_node()` has zero call sites tree-wide, so `Diagnostic.node` is always `None` and the ambient audit's dedup key would collapse every finding of a code onto one slot.
+- [ ] O2 blank-screen family (W0111 opacity, W0112 off-screen + the W0103 left/top edge bug, W0113 occlusion, W0114 blank frame, W0115 GL-gradient advisory).
+- [ ] O3 painted-vs-tree (W0403 truncation, applied-vs-computed styles, `ui.animations`).
+- [ ] O4 causality (handled-but-no-damage, written-but-idle, task lifecycle, `LogEntry` gains `code`/`node`/`frame`). **O4.3 dropped** — its rationale was falsified: `lumen-agent` hard-requires `lumen-widgets/snapshot` and `07 §3` states "a lean build implies no agent", so the configuration it existed to fix cannot exist.
+- [ ] O5 felt jank (text-cache regime change, shell `eprintln!` → ring).
+
+*Out of scope, recorded:* a frozen pump loop. Everything here instruments content **inside** a running frame; if the loop stalls, the JSON-RPC call hangs too, so no self-report from inside is possible. Needs an out-of-band watchdog.
+
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
 - Any public-API signature in `02 §4`/`§8` that won't compile as written beyond a *minimal semantics-preserving* fix.

@@ -21,6 +21,7 @@ requires a debugger.
 | **Layout wrong, state right** | Text node given explicit `height` (ignored — text sizes to glyphs, from `.lss` too), or a `.lss` layout property outside the working seven (per-side/flex-*/grid/… are parse-only until Phase B) | `ui.getLayout {selector}` bounds vs expectation; check the property against 04 §10 / the `styling-lss` skill |
 | Content visibly cut off | Real clipping | `ui.getLayout`: `ink` bigger than `bounds` + `"clipped": true`; `ui.lint` → W0104 |
 | Overlapping/zero-size controls | — | `ui.lint` → W0103 overflow, W0105 zero-area interactive |
+| Element "missing" but present in the tree | Unreadable contrast (fg == bg) | `ui.lint` → W0303, which names the measured APCA Lc and both colors |
 | **`.lss` rule ignored** | Property outside the applied subset (see styling-lss works table — most render now). `:hover`/`:hovered` are aliases (B.6a), nested `&` rules apply (B.1), and type mismatches reject the sheet with a spanned E0103 (B.7a) — so an ignored rule usually means a parse-only property or a selector that doesn't match | `ui.getStyles {selector}` — is the computed value there (with its source span)? Then the `styling-lss` skill's parse-only list |
 | **Element invisible to tests/agent** | No `role`/`label` (semantically invisible), or elided as a pure-layout node | `ui.getTree {raw: true}` — present in raw but not elided ⇒ add role/label |
 | Selector can't find an obvious node | Dotted id (`#a.b` parses as id+class), or a stale `node-N` index used as a selector (ID1: handles are `nx-<hex>`) | `agent_client.py tree` shows the real ids; use `#dash-cased-id` |
@@ -42,7 +43,8 @@ Run against the live window (`just run-agent <name>` +
    panic, W0401 i18n…) — then **`app.logs`** (C.2): the runtime's ring of
    handler `rt.log` entries, contained panics, and stylesheet rejections
    (survives after a diagnostic clears; page with `since`).
-2. **`ui.lint`** — layout/contrast audits (W0103/W0104/W0105 + WCAG).
+2. **`ui.lint`** — layout/contrast audits (W0103/W0104/W0105, W0303 unreadable
+   text contrast).
 3. **`agent_client.py tree`** — one line per node: role, id, label,
    states, actions, bounds. Most "invisible/unclickable/wrong place" bugs
    are obvious here.
@@ -73,7 +75,8 @@ Run against the live window (`just run-agent <name>` +
 E0101, E0102 (did-you-mean), **E0103** (style type mismatch — rejects the
 sheet), E0104, W0002 (state evolution), and via `ui.lint`/
 `app.diagnostics`: W0103 overflow, W0104 ink-clipping, W0105 zero-area
-interactive, **W0001** duplicate StableId, **W0301** unnamed focusable
+interactive, **W0303** unreadable text contrast, **W0001** duplicate
+StableId, **W0301** unnamed focusable
 leaf; plus E0201 (shader), W0401 (i18n), E0701 (contained panic). A clean
 lint now really means clean.
 

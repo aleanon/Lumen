@@ -25,6 +25,7 @@ same commit. Codes are assigned by `02-spec-core.md §9` and `04-spec-lss-stylin
 | W0110 | warning  | Element needs a sprite past the portable texture limit; the renderer downscales or clamps it (oversize shadow/asset/frame) | 02 §9 |
 | E0201 | error    | Shader compile error                                  | 02 §9       |
 | W0301 | warning  | Missing semantics on a focusable leaf (no label/value)| 02 §9, 03 §1|
+| W0303 | warning  | Text contrast below the legibility floor, measured with APCA against the composited backdrop (WCAG 1.4.3) | 02 §9, 03 §1|
 | W0302 | warning  | Deprecated `node-<index>` agent handle accepted; use `nx-<hex>` (ID2 alias window) | 03 §1, §2 |
 | W0401 | warning  | Missing translation for a message key in the active locale (T5.3) | 02 §9 |
 | W0402 | warning  | Tofu — shaped text contains `.notdef` glyphs no registered font covers (T.4) | 02 §9 |
@@ -39,7 +40,7 @@ proposed `W0105` for parse-only `.lss` properties collided with the live
 zero-area-node code):
 
 - `W01xx` layout/render: next free is **W0111**
-- `W03xx` semantics: next free is **W0303**
+- `W03xx` semantics: next free is **W0304**
 - `W04xx` i18n/text: next free is **W0403**
 - `E01xx` styling: next free is **E0105**
 - `E07xx` panics: next free is **E0703**

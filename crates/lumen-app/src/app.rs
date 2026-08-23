@@ -1863,7 +1863,74 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 ));
             }
         }
+        // W0303: text that cannot be read at all. `contrast_report` already
+        // measures APCA against the *composited* backdrop and binds each
+        // finding to an agent handle; it simply had no caller on this path,
+        // so the defect an agent most obviously cannot see (white on white)
+        // was the one it could not report. `.ai_docs/03 §ui.lint` has claimed
+        // this coverage since before it existed.
+        //
+        // A LEGIBILITY floor, not a design opinion: `ContrastLevel` keeps the
+        // graded tiers for callers grading a palette. Below `LEGIBILITY_FLOOR`
+        // the text is invisible, which is a defect on any design.
+        out.extend(self.contrast_findings());
         out
+    }
+
+    /// APCA lightness contrast below which text is unreadable rather than
+    /// merely low-contrast. `ContrastLevel::Fail` starts at 45 — far too eager
+    /// for a hard diagnostic, since plenty of legitimate secondary text lives
+    /// in the 30s. This is the "you cannot see it" line.
+    const LEGIBILITY_FLOOR: f64 = 15.0;
+
+    /// W0303 findings for the current frame (see [`Headless::lint`]).
+    ///
+    /// Split out rather than inlined because it is the one lint check that
+    /// needs a *display list* — `resolve_backdrop` composites the fill stack
+    /// under each glyph run — so it is markedly more expensive than the
+    /// semantics walks, and the per-frame ambient audit needs to be able to
+    /// schedule it separately.
+    fn contrast_findings(&mut self) -> Vec<lumen_core::Diagnostic> {
+        let report = self.contrast_report();
+        report
+            .targets
+            .iter()
+            .filter(|t| t.apca_lc.abs() < Self::LEGIBILITY_FLOOR)
+            .map(|t| {
+                let who = t
+                    .label
+                    .as_deref()
+                    .filter(|l| !l.trim().is_empty())
+                    .map(|l| format!("{l:?}"))
+                    .or_else(|| t.node.clone().map(|n| format!("`{n}`")))
+                    .unwrap_or_else(|| "text".to_string());
+                // NOTE: `Diagnostic.node` is a `StableId` (the *author's* id),
+                // while `TargetContrast.node` is the agent wire handle
+                // (`nx-<hex>`) — different identities, and there is no
+                // `NodeHandle::from_wire` to convert. Coercing one into the
+                // other would put a lie in a typed field, so the handle goes
+                // in the message (where it is directly usable as a selector)
+                // and structured node identity is left to O0.1b, which fixes
+                // it across all emitters at once rather than one at a time.
+                lumen_core::Diagnostic::new(
+                    lumen_core::codes::W0303,
+                    format!(
+                        "{who}{} is unreadable: APCA Lc {:.1} against its \
+                         composited backdrop (foreground {}, background {}). \
+                         Below |Lc| {:.0} text is invisible rather than merely \
+                         low-contrast.",
+                        t.node
+                            .as_deref()
+                            .map(|n| format!(" ({n})"))
+                            .unwrap_or_default(),
+                        t.apca_lc,
+                        t.foreground,
+                        t.background,
+                        Self::LEGIBILITY_FLOOR
+                    ),
+                )
+            })
+            .collect()
     }
 
     // --- desktop system integration (T5.2) ---------------------------------

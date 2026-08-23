@@ -138,7 +138,7 @@ The ones you'll actually use:
 | `ui.getTree {raw?}` | roles/labels/bounds/states/actions/ids |
 | `ui.getLayout {selector}` | bounds + **ink** + `clipped` + text metrics |
 | `ui.screenshot {}` / `{selector, scale}` | full frame / zoomed element crop with box+ink overlay |
-| `ui.lint` / `app.diagnostics` | overflow W0103, clip W0104, zero-area W0105, contrast |
+| `ui.lint` / `app.diagnostics` | overflow W0103, clip W0104, zero-area W0105, contrast W0303 |
 | `ui.getDeps` / `ui.whatDependsOn` / `ui.lastChange` | *why* did it update — predict, act, confirm idle/patch/rebuild |
 | `input.click/hover/type/key/scroll {selector,…}` | click takes `button`/`count` (double-click); type takes `clear: true` (full editors); scroll takes `dx`+`dy` (C.4a) |
 | `state.get {key?}` / `ui.getTree {selector}` / `ui.screenshot {max_width}` | store snapshot; subtree-only reply; downscaled frame for vision budgets (C.4a) |

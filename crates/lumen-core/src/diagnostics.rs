@@ -182,6 +182,21 @@ pub mod codes {
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).
     pub const W0301: &str = "W0301";
+    /// Text whose APCA contrast against its **composited** backdrop is below
+    /// the legibility floor — the text is effectively invisible to a reader
+    /// (WCAG 1.4.3 territory, measured with APCA rather than the WCAG 2.x
+    /// ratio; see `lumen_render::analysis`).
+    ///
+    /// Deliberately a *legibility* floor, not a design opinion: the finer
+    /// tiers (`ContrastLevel::BodyText`/`LargeText`/`NonText`) stay available
+    /// to callers who want to grade a palette. This code fires only when the
+    /// text cannot be read at all, which is the case an agent cannot see and
+    /// a human sees instantly.
+    ///
+    /// Limitation, inherited from `resolve_backdrop`: only solid fills
+    /// contribute to the composited background. Text over a gradient or an
+    /// image is not assessed rather than assessed wrongly.
+    pub const W0303: &str = "W0303";
     /// A deprecated `node-<index>` agent handle was accepted (ID2 alias
     /// window). The id space moved to `nx-<hex>` because arena slot indices
     /// are re-minted every rebuild, so persisting the arena makes them
