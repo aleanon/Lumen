@@ -3,6 +3,44 @@
 *Build plan, 2026-08-23. Companion to `review-agent-observability-2026-08.md`,
 which is the evidence; this file is the work.*
 
+> **Revision 2 (2026-08-23), after three expert reviews** (architecture, Rust
+> feasibility, observability design). Every finding below was re-verified
+> against source before being accepted. Material changes:
+>
+> - **New O0.1b (blocking).** `.with_node()` has **zero call sites** in the
+>   tree — every check embeds node identity in free text — so O0.3's dedup key
+>   degenerated to `(code, None)` and would have swallowed every finding after
+>   the first per code. Retrofitting it is now a prerequisite.
+> - **O0.3's dedup redesigned** as a per-frame presence diff. The original
+>   monotonic seen-set was cleared on `rebuild_fresh()`, which `pump()` never
+>   calls (it calls `rebuild()`), so an ordinary fix-then-re-break cycle would
+>   never re-report — contradicting O0.3's own acceptance test.
+> - **New O0.3a.** O0.3's real bottleneck is not the tree walk: `lint()` calls
+>   `TextEngine::layout()`, which is **uncached**, re-shaping every text node
+>   from scratch; and `semantics_doc()` deep-clones the whole tree. Fixing both
+>   is a bigger win than the frame-cadence throttle originally proposed, and
+>   the throttle may prove unnecessary.
+> - **O4.3's rationale was falsified and the task is dropped.** `lumen-agent`
+>   hard-requires `lumen-widgets/snapshot`, and the decision log states the
+>   doctrine outright: *"a lean build implies no agent."* The build
+>   configuration O4.3 existed to fix cannot exist.
+> - **O2.1 and O3.1 gain a blocker the plan had missed**:
+>   `crates/lumen-core/schema/semantics-2.json` is `additionalProperties: false`
+>   at every level and is enforced by a test. New fields reject, not warn.
+> - **O2.1 and O2.3 are re-costed.** Effective opacity does not exist as data
+>   (paint uses nested `PushLayer`, not a scalar product), and occlusion cannot
+>   live in `audit.rs`. Both need real new code, not wiring.
+> - **O4.2's trigger was wrong** — it would have fired on every task/resource-
+>   keyed signal, making false positives the first thing the audit ever logs.
+> - Feature gate narrowed, `LogEntry` gains structure, session facts get a
+>   queryable home, thresholds recalibrated, two tasks split, one false
+>   dependency edge removed.
+>
+> Reviews also confirmed as sound and unchanged: the lint/log split itself, the
+> diagnostic-code allocations, the `Option<f32>`/omit-when-`None` encoding
+> idiom, O0.2's primitives, O5.3's mechanism, and every "already built, no
+> caller" citation in O1.
+
 **Goal.** An agent helping someone develop a Lumen app should learn, without a
 screenshot and without a hypothesis, the things a human learns by glancing at
 the window: the screen is blank, that label is cut off, those panels overlap,
@@ -61,7 +99,20 @@ Everything else depends on these three. Land them first, in one commit each.
 in this plan.
 
 **Files.** `crates/lumen-app/Cargo.toml`, `crates/lumen-core/Cargo.toml`,
-`crates/lumen-widgets/Cargo.toml`, `crates/lumen/Cargo.toml`.
+`crates/lumen-widgets/Cargo.toml`, `crates/lumen/Cargo.toml`,
+**`crates/lumen-render/Cargo.toml`**.
+
+**Scope correction (rev 2): gate only what is actually expensive.** The
+precedent this plan keeps citing — `atlas_overflow` / `atlas_too_big`
+(`gpu.rs:65,101`, set at `:2203,2210`) — is a plain always-on `Cell<bool>`,
+not gated on anything, because a latched boolean is cheap enough to ship.
+O2.5, O4.4, O4.5, O5.2 and O5.3 are all the same shape. **Only O0.3's
+per-frame audit and O2.3's occlusion scan need the gate.** Narrowing it this
+way also sidesteps a trap: `lumen-render` is the one internal crate the
+workspace does *not* opt out of default features for (`Cargo.toml:105` — no
+`default-features = false`, which is why `lumen-app/Cargo.toml:34` needs a
+direct path dep), so gating O2.5's code would require forwarding the feature
+through that block too.
 
 **Approach.**
 
@@ -82,6 +133,44 @@ in this plan.
 zero observability code linked; `cargo build` links it. A test asserts the
 codes exist and that severities agree with their leading letter.
 
+### O0.1b — Retrofit `.with_node()` onto every emitter ★ blocking
+
+**Goal.** Give diagnostics a machine-readable node identity, so dedup and the
+agent can both use one.
+
+**Why this is blocking.** `Diagnostic` has a structured `node: Option<StableId>`
+and a `.with_node()` builder (`diagnostics.rs:40-52`) — and
+`grep -rn "with_node(" crates/` returns **zero call sites**. All ~17
+`Diagnostic::new` sites embed the offending node only as free text
+(`` format!("`{who}` overflows its parent…") ``). Two consequences:
+
+1. O0.3's dedup key degenerates to `(code, None)` for every node-anchored
+   finding. After the first overflow is logged, **no other overflow anywhere in
+   the app is ever logged again** — which is precisely the multi-node case
+   (a list of cards all slightly off-screen, a form with three unlabelled
+   fields) that makes the ambient audit worth building.
+2. Even with dedup fixed, the *consumer* still cannot recover the node: it must
+   regex the code out of the message prefix and then guess identity from
+   whatever backtick-quoted string each check's author happened to embed — an
+   unenforced per-check convention, not a contract.
+
+**Files.** `crates/lumen-app/src/audit.rs` (all six checks),
+`crates/lumen-app/src/app.rs` (`lint`'s W0110 and W0402 loops, `audit_actions`),
+`crates/lumen-widgets/src/i18n.rs` (W0401), `crates/lumen-style/src/parser.rs`
+(W0107/W0109 — span-anchored, node may stay `None`).
+
+**Approach.** Call `.with_node(id)` wherever the check already computes `who`.
+Note the coverage limit and decide it explicitly: `Diagnostic.node` is a
+`StableId`, which is `Option` on the node — an anonymous node (no author `#id`,
+common in generated lists) still yields `None` and re-collapses the dedup slot.
+**Either** widen `Diagnostic.node` to carry the always-present path-derived
+`NodeHandle` (`semantics.rs:377`), **or** have O0.3 key on `NodeHandle` obtained
+from the tree rather than on `Diagnostic.node`. The second is less invasive and
+is what O0.3 below assumes.
+
+**Acceptance.** Two nodes overflowing in one frame produce two distinct
+diagnostics with distinct `node` fields, and `ui.lint` serializes both.
+
 ### O0.2 — Latch and rate-limit primitives
 
 **Goal.** "Log this once per regime, not once per frame" written once.
@@ -96,12 +185,15 @@ and without a shared primitive each one will re-invent it slightly differently.
 
 - `Latch` — `set(bool) -> bool`, returning `true` only on a `false → true`
   transition. For "entered a degraded regime".
-- `SeenSet` — a `HashSet` of finding keys; `insert_new()` returns only keys not
-  seen before. This is what O0.3 uses to diff lint findings frame over frame,
-  and what makes "the same W0111 on the same node" quiet after the first frame.
-- `Throttle` — first N occurrences then every Nth, keyed by call site. For
-  per-frame anomalies that are legitimately recurrent (`Present::Skipped`
-  during a resize drag).
+- `FrameDiff` (**renamed from `SeenSet` in rev 2**) — holds the previous pass's
+  key set; `newly_present(current) -> impl Iterator` returns keys absent last
+  pass, then stores `current`. A true edge-trigger per key, with no
+  invalidation hooks to get wrong. See O0.3 for why the monotonic
+  "ever-seen + occasional clear" shape was rejected.
+- `Throttle` — first N occurrences then every Nth, keyed by an **explicit
+  caller-supplied key** (not `#[track_caller]`, whose `Location` is not a
+  stable dedup identity). For per-frame anomalies that are legitimately
+  recurrent (`Present::Skipped` during a resize drag).
 
 Precedent in tree to follow rather than reinvent: the `Cell`-latched
 `atlas_overflow` / `atlas_too_big` pair (`gpu.rs:2197`) and
@@ -123,37 +215,88 @@ sees.
 **Files.** `crates/lumen-app/src/app.rs` (`pump`, ~`:1200`, after the branch
 resolves and before `FrameStats` is built).
 
-**Approach.**
+**Approach (revised in rev 2).**
 
 ```
-if cfg!(dev-observability) && frame_painted {
-    for d in self.lint() {
-        if seen.insert_new(key(&d)) {           // O0.2
-            self.rt.log(level_of(d.severity), format!("{d}"));
-        }
+if audit_enabled && stats.painted {
+    let current = self.lint().into_iter()
+        .map(|d| (key_of(&d), d))          // key = (code, NodeHandle)
+        .collect::<HashMap<_, _>>();
+    for k in frame_diff.newly_present(current.keys()) {
+        self.rt.log(level_of(current[k].severity), format!("{}", current[k]));
     }
 }
 ```
 
-- **Only on painted frames.** An idle pump changes nothing, so re-linting it is
-  pure waste; `stats.painted` is already computed at `app.rs:1207`.
-- **Key on `(code, node, message)`**, not on the `Diagnostic` — the message
-  carries measured values (`"overflows its parent (12×0 past the edge)"`) that
-  jitter during an animation and would defeat deduplication if hashed whole.
-  Key on code + node id, and log the message.
-- **Clear the `SeenSet` on `rebuild_fresh()`** (`app.rs:2754`) and on stylesheet
-  /theme change, so a fixed problem that returns is reported again.
-- **Guard the cost.** `lint()` walks the tree and, in the tofu path
-  (`app.rs:1846-1868`), re-lays out every text node. Measure before/after on
-  `benches-competitive`; if a debug frame regresses more than ~2×, split the
-  expensive checks behind an every-Nth-frame cadence rather than dropping them.
+- **Per-frame presence diff, not a monotonic seen-set.** The original draft
+  kept an ever-seen table cleared on `rebuild_fresh()` and stylesheet/theme
+  change. That is wrong: `pump()` calls `self.rebuild()` (`app.rs:1165`,
+  `:1175`) and **never** `rebuild_fresh()` (which appears only at `:2858`,
+  inside `assert_view_coherent`). So an ordinary fix-via-state / re-break-via-
+  state cycle — the dominant dev-session pattern — would never re-report, which
+  contradicts this task's own acceptance test. A presence diff needs no
+  invalidation policy at all and reports genuine regressions correctly.
+- **Key on `(code, NodeHandle)`.** The first draft said `(code, node, message)`
+  in one sentence and `(code, node)` in the next; the latter is right. Messages
+  carry measured values (`"overflows its parent (12×0 past the edge)"`) that
+  jitter during an animation and would defeat dedup if hashed. Take the handle
+  from the tree (always present, `semantics.rs:377`) rather than from
+  `Diagnostic.node` (a `StableId`, absent on anonymous nodes) — see O0.1b.
+- **Only on painted frames.** `stats.painted` is already computed
+  (`app.rs:~1205`); an idle pump changes nothing, so re-linting it is waste.
+- **Borrow situation is clear.** `pump(&mut self)` already holds exclusive
+  access; `lint(&mut self)` is a sequential, not nested, borrow at the site
+  between the quiescence `debug_assert!` and the `FrameStats` construction.
+  `Runtime::log` writes to `logs: Rc<RefCell<…>>`, disjoint from the reactive
+  `inner`, so logging cannot retrigger the quiescence assertion.
+- **Cost: fix O0.3a first, then measure.** The frame-cadence throttle
+  originally proposed here targets the wrong bottleneck and may be unnecessary
+  once O0.3a lands. Keep it in reserve, not in the first commit.
 
-**Acceptance.** A headless test: build an app with an overflowing child, pump
-twice, assert `app.logs` contains exactly **one** `W0103` entry. Fix the
-overflow, pump, re-break it, assert a second entry appears.
+**Acceptance.** Build an app with an overflowing child, pump twice, assert
+`app.logs` holds exactly **one** `W0103`. Fix the overflow *by writing a
+signal*, pump, re-break it the same way, assert a second entry appears — the
+state-driven path, not `rebuild_fresh()`. Separately: two nodes overflowing in
+one frame produce **two** entries (the O0.1b regression test).
 
-**Risk.** This is the one task in the plan that can plausibly slow a debug
-session. Land it with the measurement in the commit message.
+### O0.3a — Stop `lint()` re-shaping the world ★
+
+**Goal.** Make the ambient audit affordable by fixing two pre-existing costs it
+turns hot.
+
+**Why.** `lint()`'s tofu loop calls `self.text.layout(...)` (`app.rs:1855`)
+under a comment claiming *"Shaping hits the cache, so this is a cheap walk."*
+**That comment is wrong.** `TextEngine::layout()` (`lumen-text/src/lib.rs:852`)
+performs a full parley shape with no cache lookup and no insert;
+`shaped_by_key()` (`:756`) is the cached path, and it calls `layout()` only on
+a miss. So `lint()` re-shapes **every text node in the tree from scratch** on
+every call. On a 200-label screen that is 200 full re-shapes — far above the
+cost of the six `SemanticsNode` walks in `audit.rs`.
+
+Second, independent waste: `lint()` gets its root from `self.semantics_doc()`
+(`app.rs:1788`), and `semantics_doc()` does `(*self.sem_root()).clone()`
+(`app.rs:2129`) — a full deep clone of the tree (a `String`/`Vec` allocation
+per node) purely to hand out a reference. `sem_root()` is already a memoized
+`Rc<SemanticsNode>`.
+
+**Approach.**
+
+- Swap the tofu loop to `self.text.shaped(&t, ts, wrap, ts.align)`. `ShapeKey`
+  (`lumen-text/src/lib.rs:300`) hashes exactly the fields the loop already
+  holds, so this becomes an O(1) hit whenever build/paint shaped the same text
+  this frame or last — which is essentially always.
+- Pass `&self.sem_root()` to `audit::lint` instead of `&self.semantics_doc().root`.
+  Same fix applies to `diagnostics()` (`app.rs:1774`).
+- Correct the misleading comment while there.
+
+**Both are wins independent of this plan** — `ui.lint` is faster for existing
+pull-mode callers too. Land before O0.3 and measure on `benches-competitive`.
+
+**Acceptance.** A bench showing `lint()` cost on a 200-label screen before and
+after; the number goes in the commit message. Existing lint tests unchanged.
+
+**Risk.** Still the one task that can plausibly slow a debug session, but O0.3a
+removes the dominant term. Land with the measurement in the commit message.
 
 ---
 
@@ -220,7 +363,7 @@ working.
 
 | Field | Source | Why |
 |---|---|---|
-| `nodes_rebuilt`, `nodes_copied` | `FrameStats`, `app.rs:1209` | copy rate ≈ 0 ⇒ memoization is off |
+| `nodes_rebuilt`, `nodes_copied` | `FrameStats`, `app.rs:1209` — **must become cumulative first, see below** | copy rate ≈ 0 ⇒ memoization is off |
 | `style_memo_hits`, `style_memo_misses` | `style_memo_stats()`, `app.rs:1432` — **public accessor, zero callers** | A.5b restyle effectiveness |
 | `frame_ms_max`, `frames_over_budget` | the 120-entry `frame_ms` deque, `app.rs:1213` | p95 of 6 ms with one 300 ms stall reads healthy and feels broken |
 | `renderer`, `is_gpu`, `backend` | `is_gpu()`, `gpu.rs:594` — also caller-less | one field answers "why is this slow" |
@@ -228,8 +371,34 @@ working.
 
 `frame_ms_max` and `frames_over_budget` are free — the deque already holds them.
 
-**Acceptance.** Schema test on the response; a test that a memoized rebuild
-reports `nodes_copied > 0` and a forced full rebuild reports `nodes_copied == 0`.
+**Blocker found in review: `nodes_rebuilt`/`nodes_copied` are dead on arrival.**
+They are zeroed unconditionally at the top of *every* pump (`app.rs:1062-1063`),
+and `ui.waitSettled` (`lumen-agent:642`) loops pumping until quiescent — so it
+necessarily ends on idle pumps that zero them before the agent reads
+`app.perf`. The recommended sequence (interact → `waitSettled` → `app.perf`)
+would report `0/0` almost regardless of what happened. Make them **cumulative**,
+matching `style_memo_hits`/`misses` (`app.rs:808`), which are already
+life-of-runtime counters. That also makes the response internally consistent:
+every counter is bracketed by two reads and subtracted, rather than half
+gauges and half counters in one flat object.
+
+**Session facts (rev 2).** Standing conditions must be queryable, not only
+ring-pushed. `Renderer::take_diagnostics()` *clears* on read
+(`lumen-render/src/lib.rs:175`), so O2.5's one-shot W0115 is drained by the
+first painted frame's `lint()` and is gone forever — an agent attaching later
+gets it from neither `ui.lint` nor (past 1000 entries) the ring, and would have
+to already know the GL-gradient defect exists to infer it. That is the exact
+hypothesis-required failure this plan exists to remove. Add to `app.perf` (or a
+small `app.sessionFacts`): `renderer`, `backend`, `is_gpu`, plus standing
+degradations — `gradients_unsupported` (GL), `present_mode` after any
+permanent direct→readback flip, and the text-cache regime state. The ring stays
+the right primitive for *events*; it is the wrong one for anything a
+late-attaching agent must be able to ask for.
+
+**Acceptance.** Schema test on the response; a memoized rebuild bracketed by
+two `app.perf` reads shows `nodes_copied` increasing, a forced full rebuild
+shows it flat. An agent connecting after 1500 log entries can still read the
+backend and the GL-gradient flag.
 
 ---
 
@@ -243,8 +412,17 @@ healthy, so `ui.getTree` actively misleads.
 **Goal.** A node faded to nothing stops reporting itself as fine.
 
 **Files.** `crates/lumen-core/src/semantics.rs` (`SemanticsNode`, `:371`),
+**`crates/lumen-core/schema/semantics-2.json`**,
 `crates/lumen-app/src/app.rs` (`build_semantics_at`, `:5700`; `NodeMeta`, `:590`),
 `crates/lumen-app/src/audit.rs` (new check).
+
+**Schema blocker (rev 2).** `crates/lumen-core/schema/semantics-2.json` sets
+`"additionalProperties": false` at every level and is enforced by
+`document_validates_against_schema` (`semantics/tests.rs:101`). A new field does
+not warn — it **rejects**. The schema file must change in the same commit. Per
+`SCHEMA`'s own doc comment ("a version that moves while the shape stays
+identical is a lie"), an additive optional field does not warrant a version
+bump, but it does warrant the schema row.
 
 **Approach.**
 
@@ -253,8 +431,21 @@ healthy, so `ui.getTree` actively misleads.
   keeping the serialized tree unchanged for the common case).
 - Store the **effective** opacity — the node's own multiplied by enclosing layer
   opacity — not the declared one. A node at `opacity: 1` inside a group at
-  `opacity: 0` is equally invisible. The cascade resolves opacity at
-  `app.rs:1399`; the layer product is what paint uses.
+  `opacity: 0` is equally invisible.
+- **This value does not exist today and must be invented (rev 2).** The first
+  draft implied it was already computed. It is not: paint emits nested
+  `DrawCmd::PushLayer { opacity }` (`app.rs:4890-4938`) and the multiplicative
+  result is an emergent property of backend compositing — no scalar product is
+  ever stored. `node_style.opacity` (written at `app.rs:1400`, inserted at
+  `:4494`) is the node's *own* post-blend opacity only. Thread an
+  `inherited: f32` parameter through `build_semantics_at`, which has exactly two
+  call sites (`app.rs:5689` entry, `:5762` recursion): start at `1.0`, multiply
+  by the node's own at each level, pass the product down. ~15-20 lines, ~1 day
+  with tests — budgeted work, not wiring.
+- **Reset the accumulator to `1.0` on overlay roots.** `build_semantics_at`
+  walks the *structural* tree, but an overlay (sheet, popup) paints anchored to
+  the window, not under its structural ancestor — so it must not inherit a
+  faded parent's opacity. Exactly the kind of thing that ships wrong silently.
 - W0111 fires when effective opacity `≤ 0.01` **and** the node has non-zero area
   **and** it is interactive or labelled. Decorative fades must stay quiet or the
   check will be ignored.
@@ -274,24 +465,27 @@ node oscillating in and out of the tree would churn identity every frame.
 
 **Acceptance.** `#a { opacity: 0 }` on a button ⇒ W0111 and `opacity: 0.0` in
 the tree. Mid-transition ⇒ no finding. Inside an `opacity: 0` group ⇒ finding
-on the child too.
+on the child too. An overlay inside a faded parent ⇒ **no** finding. The schema
+test still passes.
 
-### O2.2 — Off-screen detection (W0112) and the W0103 edge bug
+### O2.2a / O2.2b — Off-screen detection (W0112) and the W0103 edge bug
 
 **Goal.** "It exists, it is laid out, and no part of it is on screen."
 
 **Files.** `crates/lumen-app/src/audit.rs` (`check_overflow`, `:26`; new check).
 
-**Approach.** Two separable pieces; land them together since they are the same
-function.
+**Approach. Split into two commits (rev 2)** — they share a function but have
+opposite risk profiles: one is a compatibility-breaking bugfix that will churn
+goldens, the other is a net-new advisory check. Independent review, independent
+revert.
 
-1. **Fix `check_overflow`.** It tests `b.x1 > p.x1 + 0.5 || b.y1 > p.y1 + 0.5`
+**O2.2a — fix `check_overflow`.** It tests `b.x1 > p.x1 + 0.5 || b.y1 > p.y1 + 0.5`
    — right and bottom edges only. A node at `x = -400` is entirely off the left
    of its parent and raises nothing. Add `b.x0 < p.x0 - 0.5 || b.y0 < p.y0 - 0.5`.
    *This changes existing behaviour*: previously-silent apps will start
    reporting W0103. Expect golden/test churn and treat new findings as real
    until proven otherwise.
-2. **Add W0112.** A node with a label or a `Click` action whose bounds intersect
+**O2.2b — add W0112.** A node with a label or a `Click` action whose bounds intersect
    the **window rect** by zero area. Distinct from W0103, which is parent-
    relative: a node can sit correctly inside a parent that is itself off-screen.
    Exempt overlay roots (they anchor to the window by design, `audit.rs:27`) and
@@ -313,8 +507,15 @@ a scrolled list ⇒ neither.
 
 **Goal.** An opaque sibling covering a control is reported.
 
-**Files.** `crates/lumen-app/src/audit.rs` (new check), reusing paint order from
-`crates/lumen-app/src/app.rs` (`build_display_list`, `:4770` — `tree.paint_order()`).
+**Files.** `crates/lumen-app/src/app.rs` (`lint`) — **not `audit.rs`
+(corrected in rev 2)**. `audit.rs` is a pure `&SemanticsNode -> Vec<Diagnostic>`
+module: every function there takes only a semantics reference. Occlusion needs
+"is the covering node opaque", which means `node_style` background alpha and
+opacity keyed by `NodeIndex` — data `SemanticsNode` does not carry even after
+O2.1. This is the same reasoning the codebase already applies to the W0110
+shadow check and the W0402 tofu check, both of which live in `lint()` for
+exactly this reason. Paint order comes from `tree.paint_order()`
+(`lumen-core/src/tree.rs:389`, already computed per frame at `app.rs:4779`).
 
 **Approach.** `collect_overlays_at` (`lumen-agent/src/lib.rs:1200`) is the only
 occlusion check today, and it is narrow by construction: only inside
@@ -327,10 +528,15 @@ opaque card that grew over its neighbour is reported by nothing.
   (background alpha 1, no transparency, and after O2.1 effective opacity 1).
 - Threshold at ≥90% area coverage. Partial overlap is routine layout; near-total
   coverage means the control cannot be reached.
-- **Cost:** naive is O(n²). Bound it by testing only interactive nodes (a small
-  subset) against later siblings whose bounds intersect, and skip entirely past
-  a node-count ceiling. Log the skip — a silent cap reads as "covered
-  everything".
+- **Cost:** naive is O(n²). Bound to O(k·n) by testing only interactive nodes
+  (`k`, typically tens) against later-in-paint-order nodes with intersecting
+  bounds, and skip entirely past a node-count ceiling. Log the skip — a silent
+  cap reads as "covered everything".
+- **Clip correctness (rev 2).** `tree.bounds(node)` is the layout box, not the
+  *visible* box. A covering node that is itself mostly clipped by an ancestor
+  `overflow: hidden` would be counted at full area, producing a false
+  "≥90% covered". Intersect each candidate against its own clip ancestry — at
+  minimum against the window rect — before computing coverage.
 
 **Acceptance.** Two overlapping cards, the later opaque ⇒ W0113 on the earlier
 button. Later card at `opacity: 0.5` ⇒ no finding. `ui.explain` unchanged.
@@ -402,7 +608,8 @@ The agent is not blind here; it is confidently wrong, which is worse.
 
 **Files.** `crates/lumen-app/src/app.rs` (`NodeMeta.display_text`, `:635`;
 `build_semantics_at`, `:5700`), `crates/lumen-core/src/semantics.rs`
-(`TextMetrics`, `:347`).
+(`TextMetrics`, `:347`), **`crates/lumen-core/schema/semantics-2.json`** (same
+`additionalProperties: false` blocker as O2.1).
 
 **Approach.** This is nearly free, because the signal is already stored.
 `NodeMeta.display_text: Option<String>` (`app.rs:635`) holds *"the truncated
@@ -418,8 +625,14 @@ That reasoning is correct and this task does not reverse it. It adds the
 
 - Add `painted_text: Option<String>` to the node (or `truncated: bool` +
   `painted_text` on `TextMetrics`). Populate from `display_text`.
-- W0403 at `info`/`warning` severity — truncation is often intentional, so this
-  is advisory. The value is that it becomes *knowable*, not that it is wrong.
+- **Severity, decided (rev 2):** W0403 is `Severity::Warning` and rings as
+  `warn`. `Diagnostic::new` infers severity from the code's leading letter
+  (`diagnostics.rs:66-70`), so a `W` code *cannot* be `info` — the earlier
+  "info/warning, advisory" phrasing asserted something the type system forbids.
+  Rather than special-case `level_of` for one code (which would make ring level
+  and diagnostic severity diverge for no principled reason), accept `warn` and
+  drop the "advisory" framing. Truncation being often intentional is an
+  argument about *tone in the message*, not about severity.
 - Same treatment for the horizontal-clip case: `W0104` (`audit.rs:56`)
   deliberately ignores horizontal ink overhang (`audit.rs:60`) to avoid flagging
   ordinary side bearings — correct, and it means a horizontally cut-off line
@@ -477,9 +690,16 @@ caught a frame in flight.
 - `ui.animations` → `[{ node, property, progress, remaining_ms }]`, from the
   `PropAnim` table (`app.rs:986-1010`, which already has `progress()` and
   `done()`).
-- **Log (warn, latched):** an animation still running past a generous ceiling
-  (10 s). This is the "stuck spinner" signal, and it is also the escape hatch
-  for O2.1's transition exemption — a fade stuck at zero is caught here.
+- **Log (warn, latched) — but not on duration alone (rev 2).** An
+  `animation: … infinite` spinner is *working as declared* for any duration, and
+  warning on "past 10 s" would co-fire with O4.4's "resource pending past 10 s"
+  on the single most common slow-but-healthy case: a spinner backing a real
+  fetch. Two redundant warnings for a non-bug is the alert-fatigue failure this
+  plan must avoid. Instead warn only when a **finite** animation (fixed duration
+  × iteration count) exceeds its own declared total — a definite defect,
+  self-calibrating, no magic constant. Let O4.4 own "this is taking too long".
+  A fade stuck at zero (O2.1's exemption escape hatch) is finite, so it is still
+  caught.
 
 **Acceptance.** During a 300 ms transition, `ui.animations` is non-empty with
 `0 < progress < 1`; after `ui.waitSettled`, empty. An `animation: spin infinite`
@@ -528,31 +748,63 @@ Click a working button ⇒ none.
 of the five branches ran. A pump where `write_changed` is true and the frame
 took the idle branch is the bug; today it is discarded.
 
-Log at `warn`, naming **which predicate vetoed the rebuild**, and name the
-signals via `dependents_of` (`app.rs:3771`). "State changed but the UI is stale"
-is the top entry in the `debugging-lumen` skill and currently has no
-machine-readable trace at all.
+**Trigger corrected (rev 2).** The first draft would have fired on *any* write
+with no view dependents — but `dependents_of` (`app.rs:3771`) scans only
+`m.deps.{scope,text,background,class}`, i.e. **view** bindings. Task and
+resource dependencies live entirely separately in `lumen-app/src/tasks.rs` and
+never register in `m.deps`. So a signal used purely to key a `resource` — the
+canonical `lumen-data-async` pattern — has zero view dependents by design, and
+the audit would have warned on every such write. Making false positives the
+first thing the ambient audit ever logs in an async-heavy app would destroy
+trust in the channel on day one.
 
-**Acceptance.** A signal written from outside any view (no dependents) ⇒ one
-warn naming it. A normal state change ⇒ none.
+The real target is narrower: **`write_changed`, `dependents_of` is non-empty (a
+view genuinely depends on this signal), and the pump still took the idle or
+patch-only branch.** That is the read-tracking-missed-a-dependency bug, not
+"nobody is listening".
 
-### O4.3 — Decouple `record_change` from `snapshot`
+Log at `warn`, naming which predicate vetoed the rebuild and which signals.
+"State changed but the UI is stale" is the top entry in the `debugging-lumen`
+skill and currently has no machine-readable trace at all.
 
-**Goal.** The change feed survives the lean build.
+**Note:** `dependents_of` is itself `#[cfg(feature = "snapshot")]`, so this task
+inherits that gate regardless of O0.1's policy. Either lift the `cfg` (the
+function is pure Rust over `self.meta` and needs no `serde_json`) or document
+the dependency.
 
-**Files.** `crates/lumen-app/src/app.rs` (`record_change`, `:2074`;
-`last_change`, `:4092`).
+**Acceptance.** A signal with a live view dependent, written such that the pump
+goes idle ⇒ one warn naming it. A signal keying only a `resource` ⇒ **none**. A
+normal state change that rebuilds ⇒ none.
 
-**Approach.** `record_change` is `#[cfg(feature = "snapshot")]` and becomes
-`let _ = (kind, nodes)` otherwise. `snapshot` is on by default so this is
-usually live — but a `--no-default-features` build (the documented lean profile)
-loses `ui.lastChange` precisely where the agent has fewest alternatives.
-Re-gate on `dev-observability` (O0.1). The `nodes` payload needs
-`handle_for_index`, which does not require `serde_json`; only the JSON
-*serialization* in `last_change` does.
+### O4.3 — ~~Decouple `record_change` from `snapshot`~~ **DROPPED (rev 2)**
 
-**Acceptance.** `cargo test -p lumen-app --no-default-features --features dev-observability`
-exercises `last_change`.
+**The rationale was falsified.** This task argued that a `--no-default-features`
+build loses `ui.lastChange` "precisely where the agent has fewest
+alternatives" — i.e. lean build *with an agent attached*. That configuration
+cannot exist:
+
+- `crates/lumen-agent/Cargo.toml:20` requires
+  `lumen-widgets = { …, features = ["snapshot"] }` unconditionally, with the
+  comment *"the agent bridge IS the JSON surface … so lumen-widgets/snapshot is
+  a hard requirement here rather than a tier."*
+- `lumen-shell`'s `agent` feature independently re-forces it.
+- `.ai_docs/07-decision-log.md:411` (2026-07-02) states the doctrine outright:
+  **"a lean build implies no agent."**
+
+Cargo feature unification means any binary linking `lumen-agent` has `snapshot`
+on for the whole graph. Decoupling `record_change` buys nothing.
+
+**What survives.** If a motivation remains, it is a different and narrower one:
+making `last_change` exercisable from a headless Rust test that links no
+`lumen-agent`. That is a testing-ergonomics task, not an observability one, and
+belongs in `backlog.md` rather than here.
+
+**Carried forward from this task's reasoning:** the general instinct in O0.1
+that `dev-observability` should not ride on `snapshot` is still right — but for
+the correct reason (these checks are pure Rust over already-computed layout and
+paint state, with no intrinsic need for `serde_json`), not for the falsified
+lean-plus-agent scenario. O4.2's note about `dependents_of` shows the coupling
+must be audited per helper, not assumed away wholesale.
 
 ### O4.4 — Task lifecycle
 
@@ -567,8 +819,11 @@ exercises `last_change`.
   resource cell for the view to render; if the view doesn't render errors
   (common early on), the failure is invisible. Mirror it into the ring
   regardless.
-- **warn — a resource pending past a threshold** (10 s). A human watches a
-  spinner and concludes something is wrong in seconds.
+- **warn — a resource pending past a threshold.** Raised from 10 s to **30 s**
+  in rev 2, or better, made relative to that resource key's own recent
+  completion times. Dev-time IO (cold-start APIs, large payloads) routinely
+  exceeds 10 s while working correctly, and this is the signal O3.3 now defers
+  to for "taking too long" — so it must not cry wolf.
 - **warn — the same task key superseded N times in a short window.** A dep that
   changes every frame cancels and respawns forever (`:202`, `:361`); the app
   looks like it is loading and never will be.
@@ -579,6 +834,36 @@ exercises `last_change`.
 **Acceptance.** A resource whose fetcher returns `Err` ⇒ a ring entry even with
 no error UI. A resource keyed on a per-frame-changing dep ⇒ one supersession
 warning, not one per frame.
+
+### O4.6 — Give `LogEntry` the structure it throws away
+
+**Goal.** Stop making the agent regex its own telemetry.
+
+**Files.** `crates/lumen-core/src/state.rs` (`LogEntry`, `:462`),
+`crates/lumen-agent/src/lib.rs` (`app.logs`, `:630`).
+
+**Approach.** `LogEntry` is `{ seq, level, message }`. O0.3's bridge flattens a
+`Diagnostic` — which has structured `code` and `node` — into
+`format!("{d}")`, and `Diagnostic::fmt` (`diagnostics.rs:92-99`) prints the code
+textually but **never prints `node` at all**. So even with O0.1b landed, the
+node identity that makes a finding actionable is destroyed on the way into the
+ring, and the consumer must prefix-parse the code back out and guess the node
+from whatever backtick-quoted string the check's author chose.
+
+`LogEntry` is new and unshipped — no compatibility constraint. Add:
+
+- `code: Option<&'static str>` — populated for diagnostic-sourced entries.
+- `node: Option<String>` — the handle's wire form.
+- `frame: u64` — the `frames_rendered` counter (`app.rs:850`), so an agent can
+  group entries by the pump that produced them without doing seq arithmetic.
+  This is the cheapest available answer to "which of these lines came from the
+  click I just made".
+
+Free-text causal entries from O4/O5 leave `code`/`node` as `None` by design —
+that is the lint/log split working, not a gap.
+
+**Acceptance.** `app.logs` returns `code` and `node` for a W0103 entry; an
+agent can filter by node without string parsing.
 
 ### O4.5 — Deferred results land visibly
 
@@ -632,9 +917,20 @@ condition) additionally asserts exactly one warning.
 
 **Files.** `crates/lumen-shell/src/lib.rs` (~20 `eprintln!` sites).
 
-**Approach.** Under `just run-agent` the agent reads a socket; stderr goes to
-the developer's terminal. Keep the `eprintln!` (the human wants it too) and
-**additionally** log to the ring:
+**Split into four commits (rev 2)** along subsystem lines — renderer/present,
+reload, window/tray, notifications. These ~19 sites share no code path and fail
+independently; one commit per subsystem keeps review and revert clean, per
+`AGENT.md`'s per-task commit rule.
+
+**Mechanism.** `Shell` owns `Headless` and `Headless::runtime()` is a real
+accessor; `Runtime` is `Rc`-backed and `log(&self, …)` takes `&self`, so most
+sites can call `h.runtime().log(...)` beside the existing `eprintln!`. Keep the
+`eprintln!` — the human wants it too.
+
+**One site cannot be done in place:** `:131` (`renderer = {}`) fires on the
+pre-`Headless` `App` builder, which holds no `Runtime` (it is created only when
+`App` becomes `Headless`). Move that emission to just after `Headless` is
+constructed and read `is_gpu()`/`name()` there.
 
 | Site | Fact | Level |
 |---|---|---|
@@ -680,47 +976,91 @@ a trailing pass. Listed once here; each task above inherits it.
 # Ordering and dependencies
 
 ```
-O0.1 feature ─┬─ O0.2 latches ─┬─ O0.3 ambient audit ★
-              │                │
-              │                └─ everything in O2/O3 becomes push
-              │
-              └─ O1.1 contrast ─┐
-                 O1.2 damage    ├─ independent, ship first
-                 O1.3 app.perf ─┘
+O0.1  feature (narrowed to O0.3 + O2.3)
+O0.1b with_node retrofit ──┐   BLOCKING for O0.3
+O0.2  primitives ──────────┤
+O0.3a lint() cost fixes ───┴─> O0.3 ambient audit ★
+                                  │
+                                  └─ everything in O2/O3 becomes push
 
-O2.1 opacity ──> O2.3 occlusion (needs effective opacity to judge "opaque")
-O2.1 opacity ──> O3.3 animations (stuck-fade exemption)
-O1.2 damage  ──> O4.1 handled-but-no-damage
+O1.1 contrast ─┐
+O1.2 damage    ├─ independent of everything; ship first
+O1.3 app.perf ─┘   (O1.3 must fix the counter-reset bug, and carries session facts)
+
+O2.1 opacity ──> O2.3 occlusion   (needs effective opacity to judge "opaque")
+O2.1 opacity ──> O3.3 animations  (stuck-fade exemption)
+O0.1b        ──> O4.6 LogEntry    (node field is worthless if never populated)
 ```
+
+**Removed in rev 2:** the edge `O1.2 damage ──> O4.1`. O4.1 reads the internal
+`self.last_damage` field directly — same crate, same struct. O1.2 only adds the
+*wire exposure* of that field, which O4.1 never goes through.
 
 **Suggested sequence.**
 
-1. **O1.1–O1.3** first. No new concepts, three already-tested capabilities that
-   currently have no caller, and O1.1 fixes a false statement in the spec.
-   Immediately useful even if the rest of the plan stalls.
-2. **O0.1–O0.3** next. O0.3 is the multiplier; land it before writing new
-   checks, so each new check is push-mode from birth.
-3. **O2** — the blank-screen family, in order (O2.1 gates O2.3).
-4. **O4.1/O4.2** — highest debugging value per line in the whole plan, and they
-   need only O1.2.
-5. **O3, O4.3–O4.5, O5** — in any order.
+1. **O1.1–O1.3** first. Three already-tested capabilities with no callers, and
+   O1.1 corrects a false statement in the spec. Useful even if the rest stalls.
+   (Note O0.3's framing slightly overstates that pull-mode lint is "worth
+   nothing" without the bridge — these three are worth shipping on their own.)
+2. **O0.3a** next — a standalone perf fix that benefits existing `ui.lint`
+   callers regardless of whether the rest of this plan proceeds.
+3. **O0.1, O0.1b, O0.2, then O0.3.** O0.1b is blocking; do not start O0.3
+   without it.
+4. **O2** — the blank-screen family (O2.1 gates O2.3; O2.2a before O2.2b).
+5. **O4.1/O4.2/O4.6** — highest debugging value per line in the plan.
+6. **O3, O4.4, O4.5, O5** — in any order.
 
 # Risks
 
-- **O0.3 is the only real perf risk.** `lint()` re-lays out every text node in
-  its tofu path (`app.rs:1846`). Measure on `benches-competitive` and land the
-  number in the commit message; fall back to an every-Nth-frame cadence for the
-  expensive checks if a debug frame regresses more than ~2×.
-- **O2.2 changes existing behaviour.** Fixing the W0103 edge test will surface
-  findings in apps that are silent today, including the example crates. Treat
-  each as real until proven otherwise; budget for golden churn.
-- **O2.3 is O(n²) if written naively.** Bound it, and `log()` the bound when it
-  trips — a silent cap reads as "covered everything" when it didn't.
-- **Ring pressure.** 1000 entries (`state.rs:507`). Every site in this plan is
-  edge-triggered for that reason; a single unconditional per-frame line defeats
-  the whole mechanism. O0.2 exists so nobody has to remember.
-- **Two of these findings are corrections to earlier claims**, kept explicit so
-  the record stays honest: `get_styles` returns the *computed cascade* result,
-  not the raw declaration (O3.2 is narrower than first stated), and `ScrollInfo`
-  already carries `max_x`/`max_y`, so "content below the fold" was never a gap
-  (O2.2).
+- **O0.3 remains the only real perf risk**, but O0.3a removes the dominant
+  term (uncached re-shaping, not the tree walk). Measure on
+  `benches-competitive` and land the number in the commit message. Keep the
+  every-Nth-frame cadence in reserve; it may prove unnecessary.
+- **O2.2a changes existing behaviour.** Fixing the W0103 edge test surfaces
+  findings in apps silent today, including the example crates. Treat each as
+  real until proven otherwise; budget for golden churn. Split from O2.2b so the
+  churn is isolated.
+- **O2.3 needs both a complexity bound and a clip-intersection fix.** Bound it,
+  and `log()` the bound when it trips.
+- **Schema rejection, not warning.** O2.1 and O3.1 both touch
+  `semantics-2.json`, which is `additionalProperties: false` and test-enforced.
+- **Ring pressure.** 1000 entries. Every site is edge-triggered for that reason;
+  a single unconditional per-frame line defeats the mechanism. O0.2 exists so
+  nobody has to remember.
+- **Ambiguous `None`.** With O0.1's gate, `opacity: None` on the wire means
+  "opaque, checked" in a dev build and "not measured" in a release one. Add a
+  `dev_observability: bool` to `agent.protocol` (`lumen-agent:316`), which
+  already exists as the capability-negotiation surface, so a client can tell
+  which regime produced a given `None`.
+
+# Explicitly out of scope
+
+**A frozen pump loop.** Every task here instruments content *inside* a running
+frame. If the loop itself stalls or deadlocks, a human sees it instantly (no
+cursor feedback, the OS marks the window unresponsive) and the agent sees
+nothing distinguishable from "slow" — worse, the JSON-RPC call hangs too, so no
+self-report from inside the app is possible. This needs an out-of-band
+watchdog/heartbeat, structurally different from everything in O0–O5. Record in
+`backlog.md`; do not attempt here.
+
+**Also out of scope, deliberately:** time-window/interaction-scoping APIs,
+sampling configuration, metrics-store abstractions. Those solve a
+distributed-systems problem this single-process, single-consumer design does
+not have. O4.6's `frame` field is the cheap correlation primitive instead.
+
+# Corrections carried in this plan
+
+Kept explicit so the record stays honest — each was a claim in an earlier
+revision that source review falsified:
+
+- `get_styles` returns the **computed cascade** result, not the raw
+  declaration; O3.2 is narrower than first stated.
+- `ScrollInfo` already carries `max_x`/`max_y`, so "content below the fold" was
+  never a gap.
+- **Effective opacity does not exist as data** — paint uses nested `PushLayer`,
+  not a scalar product (O2.1 must build it).
+- **`lint()` does not hit the shape cache**, contrary to its own in-code
+  comment (O0.3a).
+- **The lean-build-plus-agent scenario cannot exist** (O4.3, dropped).
+- **`.with_node()` has zero call sites**, so `Diagnostic.node` is always `None`
+  (O0.1b).
