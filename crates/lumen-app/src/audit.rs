@@ -25,16 +25,34 @@ fn overflow(n: &SemanticsNode, out: &mut Vec<Diagnostic>, in_scroll: bool) {
         let p = n.bounds;
         // Overlay roots (sheets, popups) paint above the flow and anchor to
         // the window, not their structural parent — escaping it is by design.
-        if !in_scroll && !c.overlay && (b.x1 > p.x1 + 0.5 || b.y1 > p.y1 + 0.5) {
+        // All FOUR edges. Until O2.2a this tested only `x1`/`y1`, so a child
+        // at `x: -400` sat entirely off the left of its parent and raised
+        // nothing at all — the direction a human notices fastest, because the
+        // content is simply missing rather than merely cut off.
+        let past_right = b.x1 - p.x1;
+        let past_bottom = b.y1 - p.y1;
+        let past_left = p.x0 - b.x0;
+        let past_top = p.y0 - b.y0;
+        let worst = past_right.max(past_bottom).max(past_left).max(past_top);
+        if !in_scroll && !c.overlay && worst > 0.5 {
             let who = c.id.as_ref().map(|i| i.as_str()).unwrap_or(&c.label);
+            // Name the edge: "12px past the edge" on a node that is off the
+            // LEFT sends the author looking at the wrong side of the box.
+            let mut edges: Vec<String> = Vec::new();
+            for (px, name) in [
+                (past_left, "left"),
+                (past_top, "top"),
+                (past_right, "right"),
+                (past_bottom, "bottom"),
+            ] {
+                if px > 0.5 {
+                    edges.push(format!("{px:.0} past the {name}"));
+                }
+            }
             out.push(
                 Diagnostic::new(
                     codes::W0103,
-                    format!(
-                        "`{who}` overflows its parent ({:.0}×{:.0} past the edge)",
-                        (b.x1 - p.x1).max(0.0),
-                        (b.y1 - p.y1).max(0.0)
-                    ),
+                    format!("`{who}` overflows its parent ({})", edges.join(", ")),
                 )
                 .with_target(c.node.to_wire(), c.id.as_ref()),
             );

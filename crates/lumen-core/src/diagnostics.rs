@@ -249,6 +249,19 @@ pub mod codes {
     /// normal, while a fade that *stopped* there is caught by the
     /// stuck-animation check instead.
     pub const W0111: &str = "W0111";
+    /// A node is laid out entirely **outside the window** — no part of its box
+    /// intersects the viewport, so nothing of it can be on screen.
+    ///
+    /// Distinct from [`W0103`], which is parent-relative: a node can sit
+    /// correctly inside a parent that is itself off-canvas, and W0103 sees
+    /// nothing wrong with either. Nothing checked the viewport at all before
+    /// this, so "it is laid out, and none of it is on screen" — a half-second
+    /// human observation — had no machine-readable form.
+    ///
+    /// Nodes inside a scroll container are exempt: scrolled out of view is what
+    /// a scroll container is for. Use the container's `ScrollInfo`
+    /// (`x`/`y`/`max_x`/`max_y`) to reason about those.
+    pub const W0112: &str = "W0112";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).

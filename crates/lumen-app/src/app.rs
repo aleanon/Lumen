@@ -2101,6 +2101,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // graded tiers for callers grading a palette. Below `LEGIBILITY_FLOOR`
         // the text is invisible, which is a defect on any design.
         out.extend(self.invisible_findings());
+        out.extend(self.offscreen_findings());
         out.extend(self.contrast_findings());
         out
     }
@@ -2137,6 +2138,84 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             n = parent;
         }
         acc
+    }
+
+    /// W0112 findings: nodes laid out entirely outside the window.
+    ///
+    /// Nothing checked the viewport before this. `check_overflow` is
+    /// parent-relative, so a node sitting correctly inside a parent that is
+    /// itself off-canvas satisfies it — and the root's own escape from the
+    /// window was never examined at all.
+    ///
+    /// In `lint()` rather than `audit.rs` because the window rect is runtime
+    /// state, not something a `SemanticsNode` walk can see.
+    fn offscreen_findings(&self) -> Vec<lumen_core::Diagnostic> {
+        let viewport = Rect::new(0.0, 0.0, self.size.width, self.size.height);
+        let mut out = Vec::new();
+        for (node, m) in self.meta.iter() {
+            // Same "claims to be for something" filter as W0111: a decorative
+            // spacer parked off-canvas is not a defect worth interrupting for.
+            let interactive = m.actions.iter().any(|a| matches!(a, Action::Click));
+            if !interactive && m.label.trim().is_empty() {
+                continue;
+            }
+            let b = self.tree.bounds(*node);
+            if b.width() < 0.5 || b.height() < 0.5 {
+                continue; // W0105 covers zero-area, and more precisely.
+            }
+            // Scrolled out of view is what a scroll container is FOR. The
+            // container's own `ScrollInfo` is how to reason about those.
+            if self.is_in_scroll(*node) {
+                continue;
+            }
+            let overlaps = b.x0 < viewport.x1
+                && b.x1 > viewport.x0
+                && b.y0 < viewport.y1
+                && b.y1 > viewport.y0;
+            if overlaps {
+                continue;
+            }
+            let who =
+                m.id.as_ref()
+                    .map(|i| format!("`#{}`", i.as_str()))
+                    .unwrap_or_else(|| format!("{:?}", m.label));
+            let d = lumen_core::Diagnostic::new(
+                lumen_core::codes::W0112,
+                format!(
+                    "{who} is laid out at ({:.0}, {:.0}) {:.0}×{:.0}, entirely \
+                     outside the {:.0}×{:.0} window. It is built, laid out and \
+                     in the semantic tree, and no part of it is on screen.",
+                    b.x0,
+                    b.y0,
+                    b.width(),
+                    b.height(),
+                    self.size.width,
+                    self.size.height
+                ),
+            );
+            let d = match self.handle_for_index(node.index()) {
+                Some(h) => d.with_target(h.to_wire(), m.id.as_ref()),
+                None => d,
+            };
+            out.push(d);
+        }
+        out.sort_by(|a, b| a.message.cmp(&b.message));
+        out
+    }
+
+    /// Whether `node` sits inside a scroll container (itself included).
+    fn is_in_scroll(&self, node: NodeIndex) -> bool {
+        let mut n = node;
+        loop {
+            if self.meta.get(&n).is_some_and(|m| m.scroll.is_some()) {
+                return true;
+            }
+            let parent = self.tree.parent(n);
+            if !parent.is_some() || parent == n {
+                return false;
+            }
+            n = parent;
+        }
     }
 
     /// O2.1: the effective opacity of the node a `selector` resolves to, or
