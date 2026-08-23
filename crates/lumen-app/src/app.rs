@@ -2110,6 +2110,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // the text is invisible, which is a defect on any design.
         out.extend(self.invisible_findings());
         out.extend(self.offscreen_findings());
+        out.extend(self.blank_frame_findings());
         out.extend(self.contrast_findings());
         out
     }
@@ -2146,6 +2147,54 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             n = parent;
         }
         acc
+    }
+
+    /// Below this many nodes a frame with no area is not obviously wrong — a
+    /// splash screen or a deliberately empty state is a legitimate design.
+    const BLANK_FRAME_MIN_NODES: usize = 3;
+
+    /// W0114: the whole frame paints nothing.
+    ///
+    /// A *whole-frame* fact, which is exactly why no per-node check finds it.
+    /// Every individual zero-area node is defensible — `W0105` deliberately
+    /// fires only on interactive ones, because a decorative spacer with no size
+    /// is not a defect — so a screen where *everything* collapsed passes every
+    /// per-node lint while showing the user an empty window.
+    ///
+    /// Deliberately narrow: "no node has any area" rather than "almost the whole
+    /// frame is one colour". The pixel test needs a rendered frame and a sampling
+    /// policy, and it would fire on legitimate single-colour designs. This
+    /// version needs neither and has no false positives. It does not catch a
+    /// frame that paints only background-coloured content — for text, that is
+    /// `W0303`'s job, which measures contrast against the composited backdrop.
+    fn blank_frame_findings(&self) -> Vec<lumen_core::Diagnostic> {
+        fn walk(
+            n: &lumen_core::semantics::SemanticsNode,
+            total: &mut usize,
+            with_area: &mut usize,
+        ) {
+            *total += 1;
+            if n.bounds.width() >= 0.5 && n.bounds.height() >= 0.5 {
+                *with_area += 1;
+            }
+            for c in &n.children {
+                walk(c, total, with_area);
+            }
+        }
+        let (mut total, mut with_area) = (0usize, 0usize);
+        walk(&self.sem_root(), &mut total, &mut with_area);
+        if total < Self::BLANK_FRAME_MIN_NODES || with_area > 0 {
+            return Vec::new();
+        }
+        vec![lumen_core::Diagnostic::new(
+            lumen_core::codes::W0114,
+            format!(
+                "the frame is blank: {total} nodes are built and in the semantic \
+                 tree, and not one of them was laid out with any area, so the \
+                 window shows only its background. Usually a container that \
+                 collapsed to zero size, or a root that produced no content."
+            ),
+        )]
     }
 
     /// W0112 findings: nodes laid out entirely outside the window.

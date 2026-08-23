@@ -276,6 +276,21 @@ pub mod codes {
     /// read, the semantic tree is entirely correct, and a screenshot is only
     /// wrong if you already know what it should have looked like.
     pub const W0115: &str = "W0115";
+    /// The frame paints **nothing**: the tree has real content, and not one
+    /// node of it was laid out with any area, so the window shows only its
+    /// background.
+    ///
+    /// The most common early-development outcome — a layout mistake collapses
+    /// everything to zero size, a root signal is empty, or an error boundary
+    /// caught a panic and kept the last (empty) frame. A human sees a blank
+    /// window in the first second. Nothing reported it: the semantic tree is
+    /// fully populated, so `ui.getTree` looks entirely healthy, and every
+    /// per-node lint stays quiet because a *decorative* zero-area node is not
+    /// itself a defect (`W0105` fires only on interactive ones).
+    ///
+    /// Reports the whole-frame fact that no per-node check can: it is not that
+    /// some node is wrong, it is that *all* of them are.
+    pub const W0114: &str = "W0114";
     /// Shader compile error.
     pub const E0201: &str = "E0201";
     /// Missing semantics on a focusable leaf (no label or value).

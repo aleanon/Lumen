@@ -33,6 +33,7 @@ same commit. Codes are assigned by `02-spec-core.md §9` and `04-spec-lss-stylin
 | W0110 | warning  | Element needs a sprite past the portable texture limit; the renderer downscales or clamps it (oversize shadow/asset/frame) | 02 §9 |
 | W0111 | warning  | Node has real area but is effectively transparent (own × inherited opacity ≈ 0) — occupies space and answers the tree, but nothing is on screen | 02 §9 |
 | W0112 | warning  | Node is laid out entirely outside the window viewport (parent-relative overflow is W0103) | 02 §9 |
+| W0114 | warning  | Frame paints nothing — the tree has content but no node has any area (blank window) | 02 §9 |
 | W0115 | warning  | Active renderer backend has a known rendering defect (GL: gradients render as nothing, silently) | 02 §9 |
 | E0201 | error    | Shader compile error                                  | 02 §9       |
 | W0301 | warning  | Missing semantics on a focusable leaf (no label/value)| 02 §9, 03 §1|
