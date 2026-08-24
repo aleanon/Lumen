@@ -5,7 +5,7 @@
 //! related content. `Badge` is the small count/dot overlaid on another widget
 //! (unread messages, cart items).
 
-use crate::widget::impl_common;
+use crate::widget::{impl_common, impl_widget, Common, Widget};
 use crate::{widgets, Element};
 use lumen_core::semantics::{Action, Role};
 use lumen_core::Color;
@@ -40,17 +40,91 @@ use std::rc::Rc;
 /// `doc_shot` re-renders it every test run and fails if the render drifts from
 /// that committed image, so the picture is always current.
 pub struct Card {
-    el: Element,
+    children: Vec<Element>,
+    /// A heading, rendered above the content and reused as the group's
+    /// accessible label.
+    title: Option<crate::Text>,
+    /// Set when the whole card is activatable (a tappable list card).
+    on_press: Option<crate::Handler>,
+    /// Flat: keep the padding and radius, drop the shadow.
+    flat: bool,
+    common: Common,
 }
 
 impl Card {
     /// A card wrapping `children` in a column.
     pub fn new(children: impl Into<Vec<Element>>) -> Card {
-        let el = Element {
-            role: Role::Group,
+        Card {
+            children: children.into(),
+            title: None,
+            on_press: None,
+            flat: false,
+            common: Common::default(),
+        }
+    }
+
+    /// Give the card a heading, rendered above its content and used as the
+    /// group's accessible label so the card announces as a unit.
+    pub fn title(mut self, title: impl Into<crate::Text>) -> Card {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Make the whole card activatable (a tappable list card).
+    pub fn on_press(mut self, f: impl Fn(&lumen_core::state::Runtime) + 'static) -> Card {
+        self.on_press = Some(Rc::new(f));
+        self
+    }
+
+    /// Flatten the card: keep the padding and radius, drop the shadow.
+    pub fn flat(mut self) -> Card {
+        self.flat = true;
+        self
+    }
+}
+
+impl Widget for Card {
+    fn build(self) -> Element {
+        let Card {
+            mut children,
+            title,
+            on_press,
+            flat,
+            common,
+        } = self;
+
+        // The heading is prepended here rather than in `.title()`, so it stays
+        // first even when `.children()`-style edits follow it in the chain.
+        let mut label = String::new();
+        if let Some(title) = title {
+            label = title.as_static().unwrap_or_default().to_string();
+            let mut t = widgets::text(title);
+            if let Some(ts) = t.text_style_mut() {
+                ts.font_size = 15.0;
+                ts.weight = 600.0;
+            }
+            children.insert(0, t.class("card-title"));
+        }
+
+        let activatable = on_press.is_some();
+        let mut el = Element {
+            role: if activatable { Role::Button } else { Role::Group },
+            label,
+            focusable: activatable,
+            actions: if activatable {
+                vec![Action::Click, Action::Focus]
+            } else {
+                Vec::new()
+            },
+            on_click: on_press,
             background: Some(Color::srgb8(0xff, 0xff, 0xff, 0xff)),
             corner_radius: 12.0,
-            shadow: Some(crate::element::Shadow::soft()),
+            shadow: if flat {
+                None
+            } else {
+                Some(crate::element::Shadow::soft())
+            },
+            classes: vec!["card".to_string()],
             style: LayoutStyle {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
@@ -58,44 +132,15 @@ impl Card {
                 padding: Edges::all(Dim::px(16.0)),
                 ..LayoutStyle::default()
             },
-            children: children.into(),
+            children,
             ..Element::default()
-        }
-        .class("card");
-        Card { el }
-    }
-
-    /// Give the card a heading, rendered above its content and used as the
-    /// group's accessible label so the card announces as a unit.
-    pub fn title(mut self, title: impl Into<crate::Text>) -> Card {
-        let title = title.into();
-        let mut t = widgets::text(title.clone());
-        if let Some(ts) = t.text_style_mut() {
-            ts.font_size = 15.0;
-            ts.weight = 600.0;
-        }
-        self.el.label = title.as_static().unwrap_or_default().to_string();
-        self.el.children.insert(0, t.class("card-title"));
-        self
-    }
-
-    /// Make the whole card activatable (a tappable list card).
-    pub fn on_press(mut self, f: impl Fn(&lumen_core::state::Runtime) + 'static) -> Card {
-        self.el.role = Role::Button;
-        self.el.focusable = true;
-        self.el.actions = vec![Action::Click, Action::Focus];
-        self.el.on_click = Some(Rc::new(f));
-        self
-    }
-
-    /// Flatten the card: keep the padding and radius, drop the shadow.
-    pub fn flat(mut self) -> Card {
-        self.el.shadow = None;
-        self
+        };
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Card);
+impl_widget!(Card);
 
 /// A small count or dot overlaid on the top-right of another widget.
 ///

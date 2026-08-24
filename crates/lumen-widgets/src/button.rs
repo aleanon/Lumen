@@ -1,8 +1,8 @@
 //! [`Button`] — a push button. Its `Element` is built inside [`Button::new`].
 
 use crate::element::NodeContent;
-use crate::widget::impl_common;
-use crate::Element;
+use crate::widget::{impl_widget, Common, Widget};
+use crate::{Element, Handler};
 use lumen_core::semantics::{Action, Role};
 use lumen_core::state::Runtime;
 use lumen_core::Color;
@@ -34,14 +34,97 @@ use lumen_text::TextStyle;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Button {
-    el: Element,
+    /// The label, kept as `Text` so a reactive binding survives to `build`.
+    label: crate::Text,
+    /// The press handler, already `Rc`-wrapped (one allocation either way).
+    on_press: Option<Handler>,
+    /// Which of the two emphases to paint.
+    emphasis: Emphasis,
+    /// A label colour that overrides the emphasis's own.
+    text_color: Option<Color>,
+    common: Common,
+}
+
+/// A button's visual weight. Held as a one-byte tag rather than as a background
+/// colour already written into a node, so `.ghost()` after `.primary()` costs a
+/// tag write instead of overwriting a fill (and a `TextStyle` lookup) that was
+/// only just set.
+#[derive(Clone, Copy, PartialEq)]
+enum Emphasis {
+    /// Accent fill, white label — the default.
+    Primary,
+    /// Quiet grey fill, dark label.
+    Ghost,
+}
+
+impl Emphasis {
+    /// `(fill, label)` for this emphasis.
+    fn colors(self) -> (Color, Color) {
+        match self {
+            Emphasis::Primary => (
+                Color::srgb8(0x1a, 0x73, 0xe8, 0xff),
+                Color::WHITE,
+            ),
+            Emphasis::Ghost => (
+                Color::srgb8(0xe9, 0xeb, 0xef, 0xff),
+                Color::srgb8(0x1f, 0x23, 0x29, 0xff),
+            ),
+        }
+    }
 }
 
 impl Button {
     /// A button labelled `label`.
     pub fn new(label: impl Into<crate::Text>) -> Button {
-        let (label, dyn_text) = label.into().into_parts();
-        let el = Element {
+        Button {
+            label: label.into(),
+            on_press: None,
+            emphasis: Emphasis::Primary,
+            text_color: None,
+            common: Common::default(),
+        }
+    }
+
+    /// Run `f` when the button is pressed.
+    pub fn on_press(mut self, f: impl Fn(&Runtime) + 'static) -> Button {
+        self.on_press = Some(std::rc::Rc::new(f));
+        self
+    }
+
+    /// Accent (primary) emphasis — the default, but explicit reads clearly.
+    pub fn primary(mut self) -> Button {
+        self.emphasis = Emphasis::Primary;
+        self
+    }
+
+    /// Set the label colour (independent of `primary`/`ghost`).
+    ///
+    /// Order-independent now: it is applied over the emphasis at build time, so
+    /// `.text_color(c).ghost()` and `.ghost().text_color(c)` agree.
+    pub fn text_color(mut self, c: Color) -> Button {
+        self.text_color = Some(c);
+        self
+    }
+
+    /// Quiet (ghost) emphasis.
+    pub fn ghost(mut self) -> Button {
+        self.emphasis = Emphasis::Ghost;
+        self
+    }
+}
+
+impl Widget for Button {
+    fn build(self) -> Element {
+        let Button {
+            label,
+            on_press,
+            emphasis,
+            text_color,
+            common,
+        } = self;
+        let (label, dyn_text) = label.into_parts();
+        let (fill, ink) = emphasis.colors();
+        let mut el = Element {
             role: Role::Button,
             label: label.clone(),
             dyn_text,
@@ -50,8 +133,9 @@ impl Button {
             // A hand over anything clickable: the affordance users read
             // without thinking.
             cursor: Some(lumen_core::CursorShape::Pointer),
-            background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
+            background: Some(fill),
             corner_radius: 8.0,
+            on_click: on_press,
             style: LayoutStyle {
                 padding: Edges {
                     left: Dim::px(16.0),
@@ -66,7 +150,7 @@ impl Button {
                 TextStyle {
                     font_size: 15.0,
                     weight: 600.0,
-                    color: Color::WHITE,
+                    color: text_color.unwrap_or(ink),
                     line_height: None,
                     letter_spacing: 0.0,
                     family: None,
@@ -78,42 +162,9 @@ impl Button {
             ),
             ..Element::default()
         };
-        Button { el }
-    }
-
-    /// Run `f` when the button is pressed.
-    pub fn on_press(mut self, f: impl Fn(&Runtime) + 'static) -> Button {
-        self.el = self.el.on_click(f);
-        self
-    }
-
-    /// Accent (primary) emphasis — the default, but explicit reads clearly.
-    pub fn primary(mut self) -> Button {
-        self.el.background = Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff));
-        if let Some(ts) = self.el.text_style_mut() {
-            ts.color = Color::WHITE;
-            ts.weight = 600.0;
-        }
-        self
-    }
-
-    /// Set the label colour (independent of `primary`/`ghost`).
-    pub fn text_color(mut self, c: Color) -> Button {
-        if let Some(ts) = self.el.text_style_mut() {
-            ts.color = c;
-        }
-        self
-    }
-
-    /// Quiet (ghost) emphasis.
-    pub fn ghost(mut self) -> Button {
-        self.el.background = Some(Color::srgb8(0xe9, 0xeb, 0xef, 0xff));
-        if let Some(ts) = self.el.text_style_mut() {
-            ts.color = Color::srgb8(0x1f, 0x23, 0x29, 0xff);
-            ts.weight = 600.0;
-        }
-        self
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Button);
+impl_widget!(Button);

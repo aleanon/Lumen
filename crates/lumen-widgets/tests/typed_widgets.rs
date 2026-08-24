@@ -118,7 +118,7 @@ fn into_element_lowers_each_widget() {
     let c = Container::new(vec![Label::new("a").into()])
         .row()
         .padding(4.0);
-    assert_eq!(c.element().children.len(), 1);
+    assert_eq!(c.into_element().children.len(), 1);
     assert_eq!(Element::from(ProgressBar::new(0.5)).role, Role::Progress);
     assert_eq!(Element::from(Rule::horizontal()).role, Role::Generic);
     assert_eq!(Element::from(Space::new()).role, Role::Generic);

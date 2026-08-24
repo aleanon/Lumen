@@ -1,7 +1,7 @@
 //! [`ProgressBar`] — a determinate progress indicator. Its `Element` (track +
 //! fill) is built inside [`ProgressBar::new`].
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Element};
 use lumen_core::semantics::Role;
 use lumen_core::Color;
@@ -29,40 +29,37 @@ use lumen_layout::{Dim, LayoutStyle};
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct ProgressBar {
-    el: Element,
+    /// Determinate fraction, or the resolved sweep of an indeterminate bar.
+    ///
+    /// The indeterminate geometry is computed in `indeterminate()`, not here:
+    /// it reads the animation clock, and that read is a *tracked* dependency —
+    /// deferring it to `build` would move the dependency edge.
+    mode: Mode,
+    width: f32,
+    height: f32,
+    fill_color: Option<Color>,
+    common: Common,
+}
+
+/// What the bar is showing.
+#[derive(Clone, Copy)]
+enum Mode {
+    /// A known fraction of completion, clamped to `0.0..=1.0`.
+    Determinate(f64),
+    /// An unknown duration: a short segment at `left`, `width` wide.
+    Indeterminate { left: f32, width: f32 },
 }
 
 impl ProgressBar {
     /// A progress bar at `fraction` of completion (clamped to `0.0..=1.0`).
     pub fn new(fraction: f64) -> ProgressBar {
-        let frac = fraction.clamp(0.0, 1.0);
-        let fill = Element {
-            role: Role::Generic,
-            elide_semantics: true,
-            background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
-            corner_radius: 5.0,
-            style: LayoutStyle {
-                width: Dim::pct(frac as f32),
-                height: Dim::pct(1.0),
-                ..LayoutStyle::default()
-            },
-            ..Element::default()
+        ProgressBar {
+            mode: Mode::Determinate(fraction.clamp(0.0, 1.0)),
+            width: 200.0,
+            height: 10.0,
+            fill_color: None,
+            common: Common::default(),
         }
-        .part("fill");
-        let el = Element {
-            role: Role::Progress,
-            value: Some(format!("{:.0}%", frac * 100.0)),
-            background: Some(Color::srgb8(0xe3, 0xe6, 0xeb, 0xff)),
-            corner_radius: 5.0,
-            style: LayoutStyle {
-                width: Dim::px(200.0),
-                height: Dim::px(10.0),
-                ..LayoutStyle::default()
-            },
-            children: vec![fill],
-            ..Element::default()
-        };
-        ProgressBar { el }
     }
 
     /// An **indeterminate** bar: work is happening but its duration is unknown.
@@ -87,12 +84,52 @@ impl ProgressBar {
         } else {
             (left, SEGMENT.min(1.0 - left))
         };
-        let fill = Element {
-            role: Role::Generic,
-            elide_semantics: true,
-            background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
-            corner_radius: 5.0,
-            style: LayoutStyle {
+        ProgressBar {
+            mode: Mode::Indeterminate { left, width },
+            width: 200.0,
+            height: 10.0,
+            fill_color: None,
+            common: Common::default(),
+        }
+    }
+
+    /// Set the track width in px (default 200).
+    pub fn width(mut self, px: f32) -> ProgressBar {
+        self.width = px;
+        self
+    }
+
+    /// Set the bar height/thickness in px (default 10).
+    pub fn height(mut self, px: f32) -> ProgressBar {
+        self.height = px;
+        self
+    }
+
+    /// Recolour the filled portion.
+    pub fn fill_color(mut self, c: Color) -> ProgressBar {
+        self.fill_color = Some(c);
+        self
+    }
+}
+
+impl Widget for ProgressBar {
+    fn build(self) -> Element {
+        let ProgressBar {
+            mode,
+            width,
+            height,
+            fill_color,
+            common,
+        } = self;
+        let ink = fill_color.unwrap_or(Color::srgb8(0x1a, 0x73, 0xe8, 0xff));
+
+        let fill_style = match mode {
+            Mode::Determinate(frac) => LayoutStyle {
+                width: Dim::pct(frac as f32),
+                height: Dim::pct(1.0),
+                ..LayoutStyle::default()
+            },
+            Mode::Indeterminate { left, width } => LayoutStyle {
                 position: lumen_layout::Position::Absolute,
                 inset: lumen_layout::Edges {
                     left: Dim::pct(left),
@@ -102,46 +139,45 @@ impl ProgressBar {
                 height: Dim::pct(1.0),
                 ..LayoutStyle::default()
             },
+        };
+        let fill = Element {
+            role: Role::Generic,
+            elide_semantics: true,
+            background: Some(ink),
+            corner_radius: 5.0,
+            style: fill_style,
             ..Element::default()
         }
         .part("fill");
-        let el = Element {
+
+        let mut el = Element {
             role: Role::Progress,
-            // No value: an indeterminate bar must not claim a percentage.
-            states: vec![lumen_core::semantics::State::Busy],
+            value: match mode {
+                Mode::Determinate(frac) => Some(format!("{:.0}%", frac * 100.0)),
+                // No value: an indeterminate bar must not claim a percentage.
+                Mode::Indeterminate { .. } => None,
+            },
+            states: match mode {
+                Mode::Determinate(_) => Vec::new(),
+                Mode::Indeterminate { .. } => vec![lumen_core::semantics::State::Busy],
+            },
             background: Some(Color::srgb8(0xe3, 0xe6, 0xeb, 0xff)),
             corner_radius: 5.0,
             style: LayoutStyle {
-                position: lumen_layout::Position::Relative,
-                width: Dim::px(200.0),
-                height: Dim::px(10.0),
+                position: match mode {
+                    Mode::Determinate(_) => LayoutStyle::default().position,
+                    Mode::Indeterminate { .. } => lumen_layout::Position::Relative,
+                },
+                width: Dim::px(width),
+                height: Dim::px(height),
                 ..LayoutStyle::default()
             },
             children: vec![fill],
             ..Element::default()
         };
-        ProgressBar { el }
-    }
-
-    /// Set the track width in px (default 200).
-    pub fn width(mut self, px: f32) -> ProgressBar {
-        self.el.style.width = Dim::px(px);
-        self
-    }
-
-    /// Set the bar height/thickness in px (default 10).
-    pub fn height(mut self, px: f32) -> ProgressBar {
-        self.el.style.height = Dim::px(px);
-        self
-    }
-
-    /// Recolour the filled portion.
-    pub fn fill_color(mut self, c: Color) -> ProgressBar {
-        if let Some(fill) = self.el.children.first_mut() {
-            fill.background = Some(c);
-        }
-        self
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(ProgressBar);
+impl_widget!(ProgressBar);

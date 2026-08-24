@@ -4,7 +4,7 @@
 //! (SD2: regrouped out of the milestone-named `widgets_m*`/`misc_w2` modules,
 //! which recorded WHEN a widget was written rather than what it is.)
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::Element;
 use lumen_core::semantics::Role;
 use lumen_core::Color;
@@ -45,7 +45,10 @@ use lumen_layout::{
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct AlignBox {
-    el: Element,
+    child: Element,
+    align: LAlign,
+    justify: LAlign,
+    common: Common,
 }
 
 impl AlignBox {
@@ -56,7 +59,24 @@ impl AlignBox {
 
     /// Explicit cross-axis (`align`) and main-axis (`justify`) placement.
     pub fn new(child: Element, align: LAlign, justify: LAlign) -> AlignBox {
-        let el = Element {
+        AlignBox {
+            child,
+            align,
+            justify,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for AlignBox {
+    fn build(self) -> Element {
+        let AlignBox {
+            child,
+            align,
+            justify,
+            common,
+        } = self;
+        let mut el = Element {
             role: Role::Generic,
             style: LayoutStyle {
                 display: Display::Flex,
@@ -69,11 +89,12 @@ impl AlignBox {
             children: vec![child],
             ..Element::default()
         };
-        AlignBox { el }
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(AlignBox);
+impl_widget!(AlignBox);
 
 /// A CSS grid with `columns` equal-fraction columns.
 pub fn grid(columns: usize, children: Vec<Element>) -> Element {
@@ -114,32 +135,42 @@ pub fn grid(columns: usize, children: Vec<Element>) -> Element {
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Wrap {
-    el: Element,
+    children: Vec<Element>,
+    common: Common,
 }
 
 impl Wrap {
     /// A flex row that wraps onto new lines.
     pub fn new(children: Vec<Element>) -> Wrap {
-        let el = {
-            Element {
-                role: Role::Group,
-                style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Dim::px(4.0),
-                    row_gap: Dim::px(4.0),
-                    ..LayoutStyle::default()
-                },
-                children,
-                ..Element::default()
-            }
-        };
-        Wrap { el }
+        Wrap {
+            children,
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(Wrap);
+impl Widget for Wrap {
+    fn build(self) -> Element {
+        let Wrap { children, common } = self;
+        let mut el = Element {
+            role: Role::Group,
+            style: LayoutStyle {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Dim::px(4.0),
+                row_gap: Dim::px(4.0),
+                ..LayoutStyle::default()
+            },
+            children,
+            ..Element::default()
+        };
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(Wrap);
 
 /// A flex row that wraps onto new lines.
 /// *(Thin shim over [`Wrap`] — the typed form is preferred.)*

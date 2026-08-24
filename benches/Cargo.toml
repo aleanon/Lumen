@@ -44,3 +44,9 @@ harness = false
 [[bench]]
 name = "buildscale"
 harness = false
+
+# WT-EXP: the typed-widget-layer cost, isolated. Paired with the
+# `widgetprobe` binary (allocations, sizes, RSS).
+[[bench]]
+name = "widgetcost"
+harness = false

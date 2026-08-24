@@ -1,7 +1,7 @@
 //! [`CheckBox`] — a self-stateful boolean toggle with a label. Its `Element` is
 //! built inside [`CheckBox::new`]; the state lives in a signal keyed by `name`.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element};
 use lumen_core::semantics::{Action, Role, State as SemState};
 use lumen_core::Color;
@@ -34,7 +34,19 @@ const BOX: f64 = 20.0;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct CheckBox {
-    el: Element,
+    label: crate::Text,
+    /// The signal's *current* value, read at construction.
+    ///
+    /// The read has to stay eager — it is a tracked dependency, and moving it
+    /// into `build` would move the dependency edge with it. What is deferred is
+    /// the two-`Element` subtree the eager version allocated on the spot.
+    checked: bool,
+    /// The handle the click handler toggles. `Signal` is `Copy` (ADR-021), so
+    /// keeping it is eight bytes, not a captured closure.
+    signal: lumen_core::state::Signal<bool>,
+    /// Label colour override.
+    color: Option<Color>,
+    common: Common,
 }
 
 /// A white checkmark drawn to fill the box (shown when checked).
@@ -53,12 +65,35 @@ fn tick() -> Element {
 impl CheckBox {
     /// A checkbox labelled `label`, state stored under `name`.
     pub fn new(cx: &BuildCx, name: &str, label: impl Into<crate::Text>) -> CheckBox {
-        let label = label.into();
-        let checked = cx.signal(name, || false);
-        let is = checked.get(cx.runtime());
+        let signal = cx.signal(name, || false);
+        CheckBox {
+            label: label.into(),
+            checked: signal.get(cx.runtime()),
+            signal,
+            color: None,
+            common: Common::default(),
+        }
+    }
+
+    /// Set the label text colour (e.g. to match a dark theme).
+    pub fn color(mut self, c: Color) -> CheckBox {
+        self.color = Some(c);
+        self
+    }
+}
+
+impl Widget for CheckBox {
+    fn build(self) -> Element {
+        let CheckBox {
+            label,
+            checked,
+            signal,
+            color,
+            common,
+        } = self;
 
         let boxel = Element {
-            background: Some(if is {
+            background: Some(if checked {
                 Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
             } else {
                 Color::srgb8(0xe6, 0xe9, 0xef, 0xff)
@@ -72,18 +107,25 @@ impl CheckBox {
                 justify_content: Some(Align::Center),
                 ..LayoutStyle::default()
             },
-            children: if is { vec![tick()] } else { vec![] },
+            children: if checked { vec![tick()] } else { vec![] },
             ..Element::default()
         };
 
         let (label_s, label_dyn) = label.clone().into_parts();
-        let el = Element {
+        let mut text = Element::text(label);
+        if let Some(c) = color {
+            if let Some(ts) = text.text_style_mut() {
+                ts.color = c;
+            }
+        }
+
+        let mut el = Element {
             role: Role::Checkbox,
             label: label_s,
             dyn_text: label_dyn,
             focusable: true,
             actions: vec![Action::Click, Action::Focus],
-            states: vec![if is {
+            states: vec![if checked {
                 SemState::Checked
             } else {
                 SemState::Unchecked
@@ -95,20 +137,13 @@ impl CheckBox {
                 column_gap: Dim::px(8.0),
                 ..LayoutStyle::default()
             },
-            on_click: Some(Rc::new(move |rt| checked.update(rt, |c| *c = !*c))),
-            children: vec![boxel, Element::text(label)],
+            on_click: Some(Rc::new(move |rt| signal.update(rt, |c| *c = !*c))),
+            children: vec![boxel, text],
             ..Element::default()
         };
-        CheckBox { el }
-    }
-
-    /// Set the label text colour (e.g. to match a dark theme).
-    pub fn color(mut self, c: Color) -> CheckBox {
-        if let Some(ts) = self.el.children.last_mut().and_then(|e| e.text_style_mut()) {
-            ts.color = c;
-        }
-        self
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(CheckBox);
+impl_widget!(CheckBox);

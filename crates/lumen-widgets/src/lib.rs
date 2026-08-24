@@ -58,7 +58,9 @@ pub mod text_input;
 pub mod theme;
 pub mod undo;
 pub mod wcag;
-mod widget;
+/// The [`Widget`] trait: a typed widget is data, lowered to an `Element` on
+/// demand. See the module docs for why the previous eager model was replaced.
+pub mod widget;
 // ShaderWidget needs the wgpu GPU backend (`wgpu` feature), which is not built on
 // wasm; on the web, shaders are a WebGPU presenter concern.
 #[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
@@ -94,6 +96,9 @@ pub use app::{center, App, FrameStats, Headless, ReloadResult};
 #[cfg(feature = "snapshot")]
 pub use app::{AppSnapshot, Checkpoint};
 pub use element::{AbortHandle, BuildCx, Element, Handler, LeafWidget, NodeContent, Text};
+/// The typed-widget trait (`Widget::build`) and the universal-modifier record
+/// every widget embeds.
+pub use widget::{Common, Widget};
 /// The data layer: executors + the `Sink` background work pushes results through.
 pub use lumen_core::tasks::{CancelToken, InlineSpawner, ManualSpawner, Sink, Spawner, TaskHandle};
 /// Compile-time handler-currency check (F2): a handler may only capture stable

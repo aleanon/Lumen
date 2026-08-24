@@ -3,7 +3,7 @@
 //! library. Colors are built in (per kind) so the widgets work with no
 //! stylesheet; the classes stay on the elements for `.lss` overrides.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_common, impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element};
 use lumen_core::semantics::{Action, Role, State as SemState};
 use lumen_core::Color;
@@ -237,19 +237,105 @@ impl_common!(Spinner);
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Chip {
-    el: Element,
+    label: crate::Text,
+    /// `(on, handler)` when the chip is selectable.
+    selected: Option<(bool, Rc<dyn Fn(&lumen_core::state::Runtime)>)>,
+    /// A leading glyph.
+    icon: Option<String>,
+    /// A trailing remove (×) affordance.
+    on_remove: Option<Rc<dyn Fn(&lumen_core::state::Runtime)>>,
+    common: Common,
 }
 
 impl Chip {
     /// A pill chip.
     pub fn new(label: impl Into<crate::Text>) -> Chip {
+        Chip {
+            label: label.into(),
+            selected: None,
+            icon: None,
+            on_remove: None,
+            common: Common::default(),
+        }
+    }
+
+    /// Make the chip selectable, reporting `Selected` while on and calling `f`
+    /// when toggled — Material's *filter* and *choice* chips.
+    ///
+    /// Selection is visual **and** semantic, so the agent and assistive tech can
+    /// tell which filters are active.
+    pub fn selected(mut self, on: bool, f: impl Fn(&lumen_core::state::Runtime) + 'static) -> Self {
+        self.selected = Some((on, Rc::new(f)));
+        self
+    }
+
+    /// Add a leading icon (Material's *input* chip with an avatar/icon).
+    pub fn icon(mut self, glyph: &str) -> Self {
+        self.icon = Some(glyph.to_string());
+        self
+    }
+
+    /// Add a remove (×) affordance calling `f` when clicked.
+    pub fn on_remove(mut self, f: impl Fn(&lumen_core::state::Runtime) + 'static) -> Self {
+        self.on_remove = Some(Rc::new(f));
+        self
+    }
+}
+
+impl Widget for Chip {
+    fn build(self) -> Element {
+        let Chip {
+            label,
+            selected,
+            icon,
+            on_remove,
+            common,
+        } = self;
+        let on = matches!(selected, Some((true, _)));
+
         let mut text = widgets::text(label);
         if let Some(ts) = text.text_style_mut() {
             ts.font_size = 12.0;
-            ts.color = Color::srgb8(0x1c, 0x22, 0x30, 0xff);
+            // Selection recolours *the label*, by name. The eager version
+            // recoloured `children.first_mut()`, which was the icon whenever
+            // `.icon()` ran before `.selected()` — an order dependency that
+            // cannot arise once the children are assembled in one place.
+            ts.color = if on {
+                Color::srgb8(0x0b, 0x47, 0xa1, 0xff)
+            } else {
+                Color::srgb8(0x1c, 0x22, 0x30, 0xff)
+            };
         }
-        let mut row = widgets::row(vec![text]).class("chip");
-        row.background = Some(Color::srgb8(0xed, 0xf0, 0xf4, 0xff));
+
+        let mut children = Vec::with_capacity(
+            1 + usize::from(icon.is_some()) + usize::from(on_remove.is_some()),
+        );
+        if let Some(glyph) = icon {
+            let mut ic: Element = crate::Icon::new(&glyph).into();
+            ic.style.width = Dim::px(14.0);
+            ic.style.height = Dim::px(14.0);
+            children.push(ic);
+        }
+        children.push(text);
+        if let Some(f) = on_remove {
+            let mut x = widgets::text("×");
+            if let Some(ts) = x.text_style_mut() {
+                ts.font_size = 13.0;
+                ts.color = Color::srgb8(0x6b, 0x72, 0x80, 0xff);
+            }
+            x.role = Role::Button;
+            x.label = "remove".to_string();
+            x.focusable = true;
+            x.on_click = Some(f);
+            children.push(x);
+        }
+
+        let mut row = widgets::row(children).class("chip");
+        row.background = Some(if on {
+            Color::srgb8(0xd7, 0xe6, 0xff, 0xff)
+        } else {
+            Color::srgb8(0xed, 0xf0, 0xf4, 0xff)
+        });
         row.corner_radius = 999.0;
         row.style.align_items = Some(Align::Center);
         row.style.column_gap = Dim::px(6.0);
@@ -259,60 +345,23 @@ impl Chip {
             top: Dim::px(4.0),
             bottom: Dim::px(4.0),
         };
-        Chip { el: row }
-    }
-
-    /// Make the chip selectable, reporting `Selected` while on and calling `f`
-    /// when toggled — Material's *filter* and *choice* chips.
-    ///
-    /// Selection is visual **and** semantic, so the agent and assistive tech can
-    /// tell which filters are active.
-    pub fn selected(mut self, on: bool, f: impl Fn(&lumen_core::state::Runtime) + 'static) -> Self {
-        self.el.role = Role::Button;
-        self.el.focusable = true;
-        // Built from `widgets::row`, which marks itself structural and would
-        // splice the node — and its id — out of the semantic tree. A selectable
-        // chip IS the control, so it has to be addressable.
-        self.el.elide_semantics = false;
-        self.el.actions = vec![Action::Click, Action::Focus];
-        // `Selected` or nothing — the closed state vocabulary has no
-        // `Unselected`, and the rest of the widget set uses the same convention.
-        self.el.states = if on { vec![SemState::Selected] } else { vec![] };
-        self.el.on_click = Some(Rc::new(f));
-        if on {
-            self.el.background = Some(Color::srgb8(0xd7, 0xe6, 0xff, 0xff));
-            if let Some(t) = self.el.children.first_mut() {
-                if let Some(ts) = t.text_style_mut() {
-                    ts.color = Color::srgb8(0x0b, 0x47, 0xa1, 0xff);
-                }
-            }
+        if let Some((on, f)) = selected {
+            row.role = Role::Button;
+            row.focusable = true;
+            // Built from `widgets::row`, which marks itself structural and would
+            // splice the node — and its id — out of the semantic tree. A
+            // selectable chip IS the control, so it has to be addressable.
+            row.elide_semantics = false;
+            row.actions = vec![Action::Click, Action::Focus];
+            // `Selected` or nothing — the closed state vocabulary has no
+            // `Unselected`, and the rest of the widget set uses the same
+            // convention.
+            row.states = if on { vec![SemState::Selected] } else { vec![] };
+            row.on_click = Some(f);
         }
-        self
-    }
-
-    /// Add a leading icon (Material's *input* chip with an avatar/icon).
-    pub fn icon(mut self, glyph: &str) -> Self {
-        let mut ic: Element = crate::Icon::new(glyph).into();
-        ic.style.width = Dim::px(14.0);
-        ic.style.height = Dim::px(14.0);
-        self.el.children.insert(0, ic);
-        self
-    }
-
-    /// Add a remove (×) affordance calling `f` when clicked.
-    pub fn on_remove(mut self, f: impl Fn(&lumen_core::state::Runtime) + 'static) -> Self {
-        let mut x = widgets::text("×");
-        if let Some(ts) = x.text_style_mut() {
-            ts.font_size = 13.0;
-            ts.color = Color::srgb8(0x6b, 0x72, 0x80, 0xff);
-        }
-        x.role = Role::Button;
-        x.label = "remove".to_string();
-        x.focusable = true;
-        x.on_click = Some(Rc::new(f));
-        self.el.children.push(x);
-        self
+        common.apply(&mut row);
+        row
     }
 }
 
-impl_common!(Chip);
+impl_widget!(Chip);
