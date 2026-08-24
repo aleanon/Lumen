@@ -182,6 +182,15 @@ planned (B.5). Test both themes: `TestApp::with_options(size, theme)`.
 
 ## Diagnostics reality
 
+- **CSS names Lumen spells differently** are the commonest first-run
+  error, and they are *errors* — the sheet is rejected atomically, so
+  nothing in it applies and the previous one stays live. `E0102` now names
+  the replacement: `left`/`top`/`right`/`bottom` → `inset-left`/`-top`/
+  `-right`/`-bottom`, `box-shadow` → `shadow`, `mix-blend-mode` →
+  `blend-mode`, `background-color` → `background`. **Read
+  `set_stylesheet`'s return value** (or `app.logs`, which carries
+  "stylesheet rejected") — a sheet that silently "did nothing" was usually
+  rejected whole, and the reason is sitting in the value you discarded.
 - `E0101` parse error + `E0102` unknown property (with did-you-mean) +
   `E0104` unknown token — all fire, with file/line/col spans.
 - **`E0103` fires since B.7a**: `opacity: red`, `background: 12px`,

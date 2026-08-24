@@ -529,7 +529,12 @@ impl Parser {
         if !KNOWN_PROPERTIES.contains(&property.as_str())
             && !crate::registry::is_registered(&property)
         {
-            let hint = did_you_mean(&property, KNOWN_PROPERTIES);
+            // A CSS name Lumen spells differently is checked first: these are
+            // not near-misses, they are different names for the same thing, so
+            // the distance metric below structurally cannot find them
+            // (`left` → `inset-left` is distance 6).
+            let hint = crate::properties::css_alias(&property)
+                .or_else(|| did_you_mean(&property, KNOWN_PROPERTIES));
             let msg = match hint {
                 Some(h) => format!("unknown property `{property}`; did you mean `{h}`?"),
                 None => format!("unknown property `{property}`"),

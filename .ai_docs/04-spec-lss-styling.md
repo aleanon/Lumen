@@ -108,7 +108,9 @@ widget defaults stay hardcoded on the elements.
 Every `.lss` property has exactly one corresponding typed setter; the macro test `style_parity!` asserts the sets stay equal (part of M1 DoD).
 
 ## 9. Error behavior
-Unknown property → `E0102` with Levenshtein did-you-mean; type mismatch → `E0103` with expected type; unknown token → `E0104`. All include file/line/col span. A stylesheet with errors is rejected atomically (old one stays live).
+Unknown property → `E0102` with did-you-mean; type mismatch → `E0103` with expected type; unknown token → `E0104`.
+
+The suggestion is two-stage. A **CSS name Lumen spells differently** is matched by an explicit table (`properties::CSS_ALIASES`); everything else falls through to Levenshtein ≤ 2. The table is not an optimization — the distance metric *structurally cannot* find these, because they are not near-misses but different names for the same thing (`left` → `inset-left` is distance 6, `background-color` → `background` is 6, `box-shadow` → `shadow` is 4), and raising the threshold would make nearly every property match nearly every other. Covered today: `left`/`top`/`right`/`bottom` → `inset-*`, `box-shadow` → `shadow`, `mix-blend-mode` → `blend-mode`, `background-color` → `background`. These remain **errors**, not accepted aliases: `inset(-…)` deliberately regularizes the four-sided pattern CSS is itself inconsistent about (`padding`/`padding-left`, `margin`/`margin-left`, `inset`/`inset-left`), and accepting both spellings would double the surface `KNOWN_PROPERTIES`/`APPLIED_PROPERTIES`/`W0107`/`W0109` each track. All include file/line/col span. A stylesheet with errors is rejected atomically (old one stays live).
 
 *Status:* E0101/E0102 (did-you-mean)/E0104 + atomic reject + spans are
 implemented. **E0103 fires since B.7a** for type mismatches on the applied

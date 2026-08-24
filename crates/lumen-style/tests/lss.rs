@@ -245,3 +245,62 @@ fn cascade_table() {
     let r = resolve(&sources, &node);
     assert_eq!(r["color"].origin, Origin::App);
 }
+
+/// E0102's did-you-mean must reach the CSS names Lumen spells differently.
+///
+/// `did_you_mean` matches on Levenshtein distance ≤ 2, which handles a typo and
+/// **cannot** handle a systematic rename: `left` → `inset-left` is distance 6.
+/// So the four property names a CSS author types most reflexively — plus
+/// `box-shadow`, `mix-blend-mode` and `background-color` — got no suggestion at
+/// all. Raising the threshold is not the fix; at distance 6 nearly every
+/// property matches nearly every other.
+#[test]
+fn css_spellings_are_suggested_by_name_not_by_distance() {
+    for (css, lumen) in [
+        ("left", "inset-left"),
+        ("top", "inset-top"),
+        ("right", "inset-right"),
+        ("bottom", "inset-bottom"),
+        ("box-shadow", "shadow"),
+        ("mix-blend-mode", "blend-mode"),
+        ("background-color", "background"),
+    ] {
+        let src = format!("button {{ {css}: 1px; }}");
+        let (_, diags) = lumen_style::parse("t.lss", &src);
+        let d = diags
+            .iter()
+            .find(|d| d.code == "E0102")
+            .unwrap_or_else(|| panic!("`{css}` must still be rejected: {diags:?}"));
+        assert!(
+            d.message.contains(&format!("did you mean `{lumen}`")),
+            "`{css}` must point at `{lumen}`, not just say it is unknown: {}",
+            d.message
+        );
+    }
+}
+
+/// The alias table must not swallow ordinary typos — those are still the
+/// distance metric's job.
+#[test]
+fn ordinary_typos_still_use_the_distance_metric() {
+    let (_, diags) = lumen_style::parse("t.lss", "button { widht: 10px; }");
+    let d = diags.iter().find(|d| d.code == "E0102").expect("E0102");
+    assert!(
+        d.message.contains("did you mean `width`"),
+        "a one-character typo still resolves by distance: {}",
+        d.message
+    );
+}
+
+/// A name that is neither a CSS alias nor near anything must still be reported,
+/// without a misleading suggestion.
+#[test]
+fn a_wholly_unknown_property_gets_no_suggestion() {
+    let (_, diags) = lumen_style::parse("t.lss", "button { zzzzzzzz: 1px; }");
+    let d = diags.iter().find(|d| d.code == "E0102").expect("E0102");
+    assert!(
+        !d.message.contains("did you mean"),
+        "guessing here would be worse than not guessing: {}",
+        d.message
+    );
+}
