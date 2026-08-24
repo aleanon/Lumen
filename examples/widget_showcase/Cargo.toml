@@ -1,0 +1,31 @@
+[package]
+name = "widget_showcase"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "widget_showcase"
+path = "src/lib.rs"
+
+[[bin]]
+name = "widget_showcase"
+path = "src/main.rs"
+
+[[example]]
+name = "widget_showcase-win"
+path = "examples/win.rs"
+
+[dependencies]
+lumen-core = { workspace = true }
+lumen-render = { workspace = true }
+lumen-widgets = { workspace = true }
+lumen-layout = { workspace = true }
+lumen-text = { workspace = true }
+kurbo = { workspace = true }
+
+[dev-dependencies]
+lumen-shell = { workspace = true }

@@ -213,7 +213,10 @@ rule if you changed framework behavior.
 
 - `examples/counter` (minimal), `examples/todos` (CRUD+persistence),
   `examples/settings` (multi-screen), `examples/data` (resources),
-  `examples/typed_form` (forms), `examples/widget_gallery` (everything).
+  `examples/typed_form` (forms), `examples/widget_gallery` (everything on
+  one scrolling page), `examples/widget_showcase` (every built-in widget,
+  one at a time behind a dropdown — the fastest way to see what a widget
+  looks like seeded with real data, and how to construct it).
 - `.ai_docs/02-spec-core.md` (amended to the shipped model), 04 §10.
 - Skills: `styling-lss`, `verifying-apps`, `writing-widgets` (for new
   widgets), `debugging-lumen`.

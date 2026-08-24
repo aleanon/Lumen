@@ -46,6 +46,7 @@ members = [
     "examples/datagrid",
     "examples/todos",
     "examples/widget_gallery",
+    "examples/widget_showcase",
     "examples/catalog",
     "examples/data",
     "examples/glass",
