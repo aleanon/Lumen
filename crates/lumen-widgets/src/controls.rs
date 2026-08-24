@@ -456,7 +456,7 @@ impl Switch {
                 } else {
                     Color::srgb8(0xcc, 0xcc, 0xcc, 0xff)
                 }),
-                corner_radius: TRACK_H as f64 / 2.0,
+                corner_radius: TRACK_H / 2.0,
                 style: LayoutStyle {
                     position: Position::Relative,
                     width: Dim::px(TRACK_W as f32),

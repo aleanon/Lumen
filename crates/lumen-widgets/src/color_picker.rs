@@ -354,13 +354,15 @@ impl ColorPicker {
                 ts.font_size = 12.0;
                 ts.color = Color::srgb8(0x4b, 0x53, 0x60, 0xff);
             }
-            let mut swatch = Element::default();
-            swatch.background = Some(chosen);
-            swatch.border = Some(lumen_render::Border {
-                width: 1.0,
-                color: Color::srgb8(0xd8, 0xdd, 0xe3, 0xff),
-            });
-            swatch.corner_radius = 4.0;
+            let mut swatch = Element {
+                background: Some(chosen),
+                border: Some(lumen_render::Border {
+                    width: 1.0,
+                    color: Color::srgb8(0xd8, 0xdd, 0xe3, 0xff),
+                }),
+                corner_radius: 4.0,
+                ..Element::default()
+            };
             swatch.style.width = Dim::px(20.0);
             swatch.style.height = Dim::px(20.0);
             let mut readout = widgets::row(vec![swatch, hex_label]);
