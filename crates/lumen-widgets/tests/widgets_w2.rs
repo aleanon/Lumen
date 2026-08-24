@@ -60,17 +60,29 @@ fn color_picker_selects_a_preset() {
     h.pump();
 
     let root = h.semantics_doc().root.elided();
-    let trig = find_label(&root, "color #1a73e8").expect("trigger labelled");
+    let trig = find_label(&root, "color #1a73e8ff").expect("trigger labelled");
     click_at(&mut h, center(trig));
     let root = h.semantics_doc().root.elided();
-    let cell = find_label(&root, "#d32f2f").expect("palette open");
+    let cell = find_label(&root, "#d32f2fff").expect("palette open");
     click_at(&mut h, center(cell));
 
+    // The hex carries alpha now (`#rrggbbaa`), because the panel can set it.
     let v: Signal<String> = h.runtime().signal("accent", String::new);
-    assert_eq!(v.get(h.runtime()), "#d32f2f");
+    assert_eq!(v.get(h.runtime()), "#d32f2fff");
+
+    // A preset seeds the plane/hue/alpha controls and leaves the panel open —
+    // it is a starting point you then tune, not a terminal choice. (Closing on
+    // a preset was the old palette-only behaviour, where there was nothing left
+    // to tune.)
+    let root = h.semantics_doc().root.elided();
     assert!(
-        find_label(&h.semantics_doc().root.elided(), "#188a42").is_none(),
-        "panel closed after pick"
+        find_label(&root, "#188a42ff").is_some(),
+        "the panel stays open so the choice can be refined"
+    );
+    let hue: Signal<f64> = h.runtime().signal("accent.h", || -1.0);
+    assert!(
+        (hue.get(h.runtime()) - 0.0).abs() < 0.01,
+        "the preset seeded the hue control (red is hue 0)"
     );
     h.assert_view_coherent();
 }

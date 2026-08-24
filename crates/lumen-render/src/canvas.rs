@@ -176,6 +176,41 @@ impl Frame {
         });
     }
 
+    /// Fill a rectangle with a **vertical** two-color linear gradient.
+    ///
+    /// The counterpart of [`linear_gradient_rect`](Self::linear_gradient_rect).
+    /// Both exist because the gradient's endpoints live in the same space as
+    /// the rect and must go through the frame's transform with it — building
+    /// the `Brush` by hand outside the frame silently places the axis in
+    /// untransformed coordinates, where `SpreadMode::Pad` then floods the shape
+    /// with the last stop.
+    pub fn vertical_gradient_rect(&mut self, rect: Rect, a: Color, b: Color) {
+        use crate::display_list::{GradientStop, SpreadMode};
+        let p0 = self.transform * Point::new(rect.x0, rect.y0);
+        let p1 = self.transform * Point::new(rect.x1, rect.y1);
+        let r = Rect::from_points(p0, p1);
+        self.cmds.push(DrawCmd::Rect {
+            rect: r,
+            brush: Brush::LinearGradient {
+                start: Point::new(r.x0, r.y0),
+                end: Point::new(r.x0, r.y1),
+                stops: vec![
+                    GradientStop {
+                        offset: 0.0,
+                        color: a,
+                    },
+                    GradientStop {
+                        offset: 1.0,
+                        color: b,
+                    },
+                ],
+                spread: SpreadMode::Pad,
+            },
+            radii: CornerRadii::all(0.0),
+            border: None,
+        });
+    }
+
     /// Draw a single line of text with its `opts.anchor_*` point at `pos`. The
     /// frame can't shape glyphs itself, so this records a [`FrameText`] intent
     /// that the widget runtime rasterizes against its text stack (`into_parts`).

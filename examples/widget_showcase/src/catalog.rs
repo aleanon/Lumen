@@ -1206,10 +1206,49 @@ fn d_tree(cx: &mut BuildCx) -> Element {
 }
 
 fn d_pagination(cx: &mut BuildCx) -> Element {
-    cx.signal("pg.page", || 3i64);
+    const PER_PAGE: usize = 4;
+    const PAGES: i64 = 5;
+    cx.signal("pg.page", || 2i64);
+    // A pager with nothing to page through shows only that the number changes.
+    // This one actually slices a list, which is the whole point of the widget.
+    let page = cx.signal("pg.page", || 1i64).get(cx.runtime()).max(1) as usize;
+    let rows: Vec<Element> = (0..PER_PAGE)
+        .map(|i| {
+            let n = (page - 1) * PER_PAGE + i;
+            let (name, region, pop) = CITIES[n % CITIES.len()];
+            let mut r: Element = Container::new(vec![
+                Label::new(format!("{:02}", n + 1))
+                    .size(12.0)
+                    .color(muted())
+                    .into(),
+                Label::new(format!("{name}, {region}"))
+                    .size(13.0)
+                    .color(ink())
+                    .into(),
+                Space::new().into(),
+                Label::new(format!("{pop}"))
+                    .size(13.0)
+                    .color(accent())
+                    .into(),
+            ])
+            .row()
+            .gap(12.0)
+            .align(Align::Center)
+            .padding(8.0)
+            .into();
+            r.style.width = Dim::pct(1.0);
+            if i % 2 == 0 {
+                r.background = Some(tint());
+            }
+            r
+        })
+        .collect();
+    let mut list: Element = Container::new(rows).column().gap(2.0).into();
+    list.style.width = Dim::px(380.0);
     stack(vec![
-        Pagination::new(cx, "pg", 12).into(),
-        note("Twelve pages of results; the current page is app state."),
+        list,
+        Pagination::new(cx, "pg", PAGES).into(),
+        note("Five pages of four cities each — the page number slices the list."),
     ])
 }
 
@@ -1295,36 +1334,58 @@ fn d_progress_bar(cx: &mut BuildCx) -> Element {
     .into()
 }
 
-fn d_canvas(_cx: &mut BuildCx) -> Element {
+fn d_canvas(cx: &mut BuildCx) -> Element {
     use kurbo::{Point, Rect};
     use lumen_render::Brush;
-    let canvas = Canvas::new(420.0, 220.0, |f, size| {
+
+    // Live controls, so the canvas is something you *drive* rather than a
+    // static picture that happens to be drawn in code.
+    cx.signal("canvas-speed", || 1.0f64);
+    cx.signal("canvas-waves", || 3.0f64);
+    let speed = cx.signal("canvas-speed", || 1.0f64).get(cx.runtime());
+    let waves = cx.signal("canvas-waves", || 3.0f64).get(cx.runtime());
+
+    // `animate()` asks for a frame every tick; `now_ms()` is the virtual clock,
+    // so the same code is deterministic under a headless test.
+    cx.animate();
+    let t = cx.now_ms() / 1000.0 * speed;
+
+    let canvas = Canvas::new(440.0, 200.0, move |f, size| {
         f.fill_rect(
             Rect::new(0.0, 0.0, size.width, size.height),
             Brush::Solid(Color::srgb8(0x10, 0x18, 0x2c, 0xff)),
         );
-        // A sine wave plotted column by column, plus three dots riding it.
         let mid = size.height * 0.5;
-        let wave = |x: f64| {
-            mid + (x / size.width * std::f64::consts::TAU * 2.0).sin() * size.height * 0.28
+        let wave = |x: f64, phase: f64| {
+            mid + ((x / size.width * std::f64::consts::TAU * waves) + phase).sin()
+                * size.height
+                * 0.3
         };
-        for i in 0..(size.width as i32) {
-            let x = i as f64;
-            let y = wave(x);
-            f.fill_rect(
-                Rect::new(x, y - 1.5, x + 2.0, y + 1.5),
-                Brush::Solid(accent()),
-            );
-        }
-        for (i, c) in [green(), amber(), red()].into_iter().enumerate() {
-            let x = size.width * (0.25 + 0.25 * i as f64);
-            f.fill_circle(Point::new(x, wave(x)), 9.0, c);
+        // Three phase-shifted traces, plotted column by column.
+        for (k, c) in [accent(), green(), amber()].into_iter().enumerate() {
+            let phase = t + k as f64 * 0.7;
+            for i in 0..(size.width as i32) {
+                let x = i as f64;
+                let y = wave(x, phase);
+                f.fill_rect(Rect::new(x, y - 1.2, x + 2.0, y + 1.2), Brush::Solid(c));
+            }
+            let head = (t * 60.0 * speed) % size.width;
+            f.fill_circle(Point::new(head, wave(head, phase)), 7.0, c);
         }
     });
-    stack(vec![
+
+    Container::new(vec![
         canvas.into(),
-        note("Immediate mode: `draw` paints into a Frame sized to the widget, every frame."),
+        note("Speed"),
+        Slider::new(cx, "canvas-speed", 0.0, 3.0).step(0.25).id("canvas-speed").into(),
+        note("Waves"),
+        Slider::new(cx, "canvas-waves", 1.0, 6.0).step(1.0).id("canvas-waves").into(),
+        note("Immediate mode: `draw` paints into a Frame every frame; cx.animate() keeps them coming."),
     ])
+    .column()
+    .gap(8.0)
+    .align(Align::Center)
+    .into()
 }
 
 // -------------------------------------------------------------- navigation ---
@@ -1408,22 +1469,31 @@ fn d_navigation_rail(cx: &mut BuildCx) -> Element {
 }
 
 fn d_pull_to_refresh(cx: &mut BuildCx) -> Element {
-    let ticks = cx.signal("ptr-ticks", || 0i64);
-    let rows: Vec<Element> = (0..10)
-        .map(|i| note(format!("Feed item {}", i + 1)))
+    let ticks = cx.signal("ptr.ticks", || 0i64);
+    let refreshing = cx.signal("ptr.feed.refreshing", || false);
+    let n = ticks.get(cx.runtime());
+    // The feed grows on each refresh, so the gesture has a visible result. The
+    // widget leaves `{name}.refreshing` for the app to clear — that flag is how
+    // it knows the work is still in flight, and never clearing it is why the
+    // busy state used to stick on forever.
+    let rows: Vec<Element> = (0..8)
+        .map(|i| note(format!("Feed item {}", n * 8 + 8 - i)))
         .collect();
     let mut p: Element = PullToRefresh::new(
         cx,
-        "ptr-feed",
+        "ptr.feed",
         60.0,
-        move |rt| ticks.update(rt, |n| *n += 1),
+        move |rt| {
+            ticks.update(rt, |k| *k += 1);
+            refreshing.set(rt, false);
+        },
         rows,
     )
     .into();
     p.style.width = Dim::px(420.0);
     stack(vec![
         framed(p, 450.0, 270.0),
-        note("Drag the list down past the top edge to fire on_refresh."),
+        note("Scroll UP past the top of the list (or pull down on a touch screen) to refresh."),
     ])
 }
 
@@ -1690,7 +1760,7 @@ fn s_rail(rt: &Runtime) -> String {
     )
 }
 fn s_pagination(rt: &Runtime) -> String {
-    format!("page {} of 12", rt.signal("pg.page", || 1i64).get(rt))
+    format!("page {} of 5", rt.signal("pg.page", || 1i64).get(rt))
 }
 fn s_ptr(rt: &Runtime) -> String {
     format!(
@@ -1959,7 +2029,7 @@ static INPUT: &[Entry] = &[
         "color-picker",
         Top,
         d_color_picker,
-        "A swatch that opens a preset palette.",
+        "A full editor: SV plane, hue bar, alpha bar, presets.",
         s_color
     ),
     entry!(
@@ -2110,7 +2180,7 @@ static DATA: &[Entry] = &[
         "pagination",
         Center,
         d_pagination,
-        "Page through a result set.",
+        "Page through a result set — the page number slices the list.",
         s_pagination
     ),
 ];
@@ -2149,7 +2219,7 @@ static VISUAL: &[Entry] = &[
         "canvas",
         Center,
         d_canvas,
-        "Immediate-mode drawing into a Frame."
+        "A 60 fps animation you can drive with the sliders."
     ),
 ];
 
@@ -2191,7 +2261,7 @@ static NAV: &[Entry] = &[
         "pull-to-refresh",
         Center,
         d_pull_to_refresh,
-        "Drag past the top to refresh.",
+        "Scroll up past the top to refresh; the feed grows.",
         s_ptr
     ),
 ];

@@ -189,7 +189,7 @@ fn stateful_demos_seed_their_signals() {
         ("PickList", "city = Trondheim"),
         ("DatePicker", "2026-08-24"),
         ("TimePicker", "14:45"),
-        ("Pagination", "page 3 of 12"),
+        ("Pagination", "page 2 of 5"),
         ("ColorPicker", "brand = #18a05c"),
     ] {
         select(&mut a, widget);
