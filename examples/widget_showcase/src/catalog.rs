@@ -688,7 +688,7 @@ fn d_find_replace(cx: &mut BuildCx) -> Element {
 fn d_color_picker(cx: &mut BuildCx) -> Element {
     cx.signal("cp-brand", || "#18a05c".to_string());
     stack(vec![
-        note("Click the swatch to open the preset palette; the choice lands as a hex string."),
+        note("Click the swatch: drag in the plane for saturation and value, the bars for hue and alpha."),
         ColorPicker::new(cx, "cp-brand").id("cp-brand").into(),
     ])
 }
