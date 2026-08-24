@@ -1,5 +1,21 @@
 # MOD7 — make the seams reachable (2026-08-24)
 
+> **Status: implemented.** S0–S4 landed; S5 declined with reasons in
+> `docs/mod7-s5-builder-decision.md`. Outcome, measured on the same two
+> binaries the plan opens with, now both **windowed**:
+> **lumen-lean-app 15.96 MB → lumen-stubtext-app 10.09 MB, a 5.87 MB saving
+> available to an app that opens a window.** Before MOD7 that number was
+> headless-only.
+>
+> Two corrections to this document, kept rather than edited away:
+> * **S1's acceptance criterion was wrong when written.** It said the stub
+>   binary "stays under 3 MB", which took the 1.41 MB headless figure and
+>   forgot that linking the shell adds ~8.7 MB whatever text engine is chosen.
+>   10.09 MB against a 15.96 MB baseline is the same claim, stated honestly.
+> * **S1 also promised to honour a caller-supplied executor.** That moved to
+>   S2, which folds `E` into the config anyway — doing it twice would have been
+>   work S2 immediately undid. It landed there as `run_with`.
+
 Lumen already has seven swap axes and they are real: each has a second
 implementation, and `platform_config.rs` proves the bundle is consulted rather
 than merely declared. This plan is not about adding seams. **It is about the

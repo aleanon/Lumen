@@ -141,8 +141,17 @@ defaults do not apply to inference of a function's *return*, so generalising
 runtime registration (`register_property`), not a type swap, so there is nothing
 for an associated type to name.
 
-**The seams are reachable headless only — see `docs/plan-mod7-reachable-seams.md`
-(2026-08-24).** Auditing them by trying to *use* one found three defects: (1)
+**MOD7 (2026-08-24) made the seams reachable from a windowed app; before it
+they were headless-only.** `lumen_shell::run`/`RunExt`/`Shell` are generic over
+`PlatformConfig`; `run_with` honours a caller-supplied executor; `AppConfig` +
+`ConfiguredApp<C>` name all four axes at once; `PlatformConfig::TUNING` carries
+the per-app cache ceilings; and `presets::{Lean, Balanced, Desktop}` cover the
+common cases. Measured on two windowed binaries differing only in
+`PlatformConfig::Text`: **15.96 MB → 10.09 MB**. A further configuration
+builder was evaluated and **declined** (`docs/mod7-s5-builder-decision.md`) —
+it cannot remove the type declaration that is the only remaining cost, and the
+value-shaped alternative would put the text engine behind a trait object,
+spending the 5.87 MB on syntax. What follows is the audit that prompted it: (1)
 `App::with_renderer`/`with_executor` are typed `-> App<R2, E>`, dropping the
 platform parameter, so a custom `PlatformConfig` silently reverts to
 `DefaultPlatform` the moment either is called; (2) `lumen_shell::run` takes a

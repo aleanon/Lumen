@@ -12,7 +12,7 @@ publish = false
 # facade's ShaderWidget re-export. (Web/mobile drop wgpu via target-gating in
 # lumen-render regardless; the CPU-only renderer build is `lumen-render
 # --no-default-features`.)
-default = ["wgpu", "snapshot", "desktop-integration", "complex-scripts", "dev-observability"]
+default = ["wgpu", "snapshot", "desktop-integration", "complex-scripts", "dev-observability", "accessibility"]
 # O0.1: per-frame ambient audit (see lumen-core). Default-on for `cargo run`;
 # a `--no-default-features` release build drops it entirely.
 dev-observability = ["lumen-widgets/dev-observability"]
@@ -32,6 +32,7 @@ snapshot = ["lumen-widgets/snapshot", "lumen-shell/snapshot"]
 # break, and after 1.0 there would have been.
 pan-unicode = ["lumen-widgets/pan-unicode", "lumen-shell/pan-unicode"]
 complex-scripts = ["lumen-widgets/complex-scripts", "lumen-shell/complex-scripts"]
+accessibility = ["lumen-widgets/accessibility", "lumen-shell/accessibility"]
 # The live-window agent endpoint (JSON-RPC on LUMEN_AGENT_ADDR) — default-off,
 # forwarded to the desktop shell. Scaffolded apps use it via `just run-agent`.
 agent = ["lumen-shell/agent"]

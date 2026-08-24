@@ -6,9 +6,14 @@ edition = "2021"
 # for an engine that does not use parley, does the LINKER drop parley, the
 # embedded fonts and the ICU dictionary? Same app and features as
 # `lumen-lean-app` in every other respect, so the delta is the swap alone.
+#
+# MOD7 S1 acceptance: this is now WINDOWED. Before S1 it could not be — the
+# shell took a fully-defaulted `App`, so linking lumen-shell at all
+# re-instantiated the default TextEngine and pulled parley straight back in.
 [dependencies]
 lumen-widgets = { path = "../../../../crates/lumen-widgets" }
 lumen-core = { path = "../../../../crates/lumen-core" }
+lumen-shell = { path = "../../../../crates/lumen-shell", default-features = false, features = ["wgpu"] }
 lumen-text = { path = "../../../../crates/lumen-text" }
 lumen-layout = { path = "../../../../crates/lumen-layout" }
 lumen-render = { path = "../../../../crates/lumen-render" }

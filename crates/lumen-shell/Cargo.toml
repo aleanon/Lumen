@@ -36,8 +36,8 @@ muda = { workspace = true, optional = true }
 # P.4: platform assistive-tech bridge — the semantic tree (already built for
 # tests/agent) published to AT-SPI/UIA/NSAccessibility; AT actions come back
 # through the event loop and route into the same input queue.
-accesskit = { workspace = true }
-accesskit_winit = { workspace = true }
+accesskit = { workspace = true, optional = true }
+accesskit_winit = { workspace = true, optional = true }
 # P.3e: system tray (lazy — created on the first TrayTooltip request).
 tray-icon = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
@@ -64,7 +64,7 @@ agent = ["dep:lumen-agent", "dep:serde_json", "lumen-widgets/snapshot"]
 # corresponding SystemRequests then report unsupported instead of silently
 # doing nothing, so an app can detect the difference.
 desktop-integration = ["dep:rfd", "dep:muda", "dep:tray-icon", "dep:gtk"]
-default = ["desktop-integration", "wgpu", "complex-scripts", "dev-observability"]
+default = ["desktop-integration", "wgpu", "complex-scripts", "dev-observability", "accessibility"]
 # O0.1: the per-frame ambient audit. `lumen-widgets` is pulled with
 # default-features = false here, so this MUST be forwarded explicitly -- a
 # default feature does not survive that, which is the same trap the `snapshot`
@@ -82,7 +82,19 @@ wgpu = ["dep:wgpu", "lumen-render/wgpu", "lumen-widgets/wgpu"]
 snapshot = ["lumen-widgets/snapshot"]
 pan-unicode = ["lumen-widgets/pan-unicode"]
 complex-scripts = ["lumen-widgets/complex-scripts"]
+# A11Y1: the OS accessibility bridge. Default ON; see lumen-widgets for what
+# this does and does not gate.
+accessibility = ["dep:accesskit", "dep:accesskit_winit", "lumen-widgets/accessibility"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The tray's dedicated gtk thread (winit owns the main loop on Linux).
 gtk = { workspace = true, optional = true }
+
+[dev-dependencies]
+# MOD7 S1: `platform_generic.rs` has to NAME the engine types to build a
+# non-default `PlatformConfig` — that is the whole point of the test. They are
+# already in the graph transitively via lumen-widgets; these make them nameable
+# from the test without widening the shell's own dependencies.
+lumen-layout = { workspace = true }
+lumen-text = { workspace = true }
+kurbo = { workspace = true }

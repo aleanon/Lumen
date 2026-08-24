@@ -457,6 +457,18 @@ pub struct CachedRun {
 /// (the alternative — inferring frames from call patterns — is exactly the bug
 /// the epoch policy replaced). An engine with no cache implements it empty.
 pub trait TextEngineApi {
+    /// MOD7 S3: set the shape- and run-cache ceilings for this engine.
+    ///
+    /// Defaulted to a no-op, so an engine with no caches (a measuring-only
+    /// backend) is unaffected. The runtime calls this once with the config's
+    /// `TUNING` before the engine is used.
+    ///
+    /// Only the caches that are genuinely PER-ENGINE are tunable here. The
+    /// glyph bitmap cache is `thread_local` and shared by every engine on the
+    /// thread, so it stays a compile-time constant — a per-app knob for it
+    /// would read as configuration and behave as a race.
+    fn set_cache_caps(&mut self, _shape: usize, _run: usize) {}
+
     /// The shaped block this engine produces.
     type Block: TextBlockApi;
 
@@ -591,6 +603,14 @@ pub trait TextBlockApi {
 }
 
 impl TextEngineApi for TextEngine {
+    /// MOD7 S3: adopt the config's cache ceilings. Both caches grow adaptively
+    /// up to their hard caps, so this sets the STARTING ceiling rather than a
+    /// fixed size; a lean config lowers where the growth begins.
+    fn set_cache_caps(&mut self, shape: usize, run: usize) {
+        self.shape_cap = shape.max(1);
+        self.run_cap = run.max(1);
+    }
+
     type Block = TextBlock;
 
     fn begin_frame(&mut self) {
@@ -724,6 +744,13 @@ impl Default for TextEngine {
 }
 
 impl TextEngine {
+    /// The current shape- and run-cache ceilings. Introspection for MOD7 S3's
+    /// guard, which has to observe that the shipped engine actually adopted
+    /// what the config asked for.
+    pub fn cache_caps(&self) -> (usize, usize) {
+        (self.shape_cap, self.run_cap)
+    }
+
     /// Build an engine with only the bundled font registered (no system fonts).
     pub fn new() -> TextEngine {
         let mut collection =

@@ -15,9 +15,10 @@ name = "lumen_shell_ios"
 # `--no-default-features` is what makes a lean build of this platform reachable.
 # `snapshot` is load-bearing here beyond size: the session preserves state
 # across a rotate via the snapshot handoff.
-default = ["snapshot", "complex-scripts"]
+default = ["snapshot", "complex-scripts", "accessibility"]
 pan-unicode = ["lumen/pan-unicode", "lumen-shell-core/pan-unicode"]
 complex-scripts = ["lumen/complex-scripts", "lumen-shell-core/complex-scripts"]
+accessibility = ["lumen/accessibility", "lumen-shell-core/accessibility"]
 snapshot = ["lumen/snapshot", "lumen-shell-core/snapshot"]
 
 [dependencies]

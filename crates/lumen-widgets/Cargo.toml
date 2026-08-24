@@ -16,7 +16,7 @@ publish = false
 # `--no-default-features --features wgpu` and drops `serde_json` app-wide.
 # `pan-unicode` (LN2: default-OFF): the full 15 MB embedded face (CJK/RTL/Indic);
 # lean builds embed the ~350 KB Latin+symbols subset (T.4).
-default = ["wgpu", "snapshot", "codecs", "complex-scripts", "dev-observability"]
+default = ["wgpu", "snapshot", "codecs", "complex-scripts", "dev-observability", "accessibility"]
 # O0.1: the per-frame ambient audit (see lumen-core). Default-on so `cargo run`
 # has it and a `--no-default-features` release build does not.
 dev-observability = ["lumen-app/dev-observability"]
@@ -27,6 +27,15 @@ wgpu = ["lumen-render/wgpu", "lumen-app/wgpu"]
 snapshot = ["dep:serde_json", "lumen-core/snapshot", "lumen-style/snapshot", "lumen-app/snapshot"]
 pan-unicode = ["lumen-text/pan-unicode", "lumen-app/pan-unicode"]
 complex-scripts = ["lumen-text/complex-scripts", "lumen-app/complex-scripts"]
+# A11Y1: publish the semantics tree to the OS accessibility layer (AccessKit —
+# AT-SPI/D-Bus on Linux, UIA on Windows). Default ON.
+#
+# This gates the PUBLISHER, not the tree. `SemanticsNode` is Lumen's
+# observability contract — the agent protocol, `ui.lint`, `lumen-test` and the
+# golden ladder all read it — so it is never gated and never optional. Turning
+# this off removes the OS bridge and its D-Bus stack, and changes nothing a
+# test or the agent can see.
+accessibility = ["dep:accesskit"]
 
 [dependencies]
 # ADR-M1: optional raster codecs (jpeg/gif/webp), pure-Rust decoders.
@@ -48,4 +57,4 @@ lumen-style = { workspace = true }
 kurbo = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, optional = true }
-accesskit = { workspace = true }
+accesskit = { workspace = true, optional = true }

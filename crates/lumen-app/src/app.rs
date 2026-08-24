@@ -62,12 +62,120 @@ const OVERLAY_Z: u32 = 1000;
 /// tree per rebuild and one text engine per window; a bundle whose members
 /// could not be constructed without arguments would need a factory method and a
 /// stored instance, which is more machinery than the seam warrants today.
+/// MOD7 S3: the memory-vs-speed knobs, as data rather than as more traits.
+///
+/// These were hardcoded `const`s with no seam at all, which made "tune this app
+/// for low memory" unreachable by any mechanism — a type parameter is the wrong
+/// tool for a number, and a Cargo feature cannot express "a quarter of the
+/// default". Carried on [`PlatformConfig`] so it composes with the bundle
+/// instead of competing with it.
+///
+/// **Only genuinely per-app caches are here.** The glyph bitmap cache is
+/// `thread_local` and shared by every engine on the thread, and the image and
+/// animation caches are process-global statics; a per-app knob for any of them
+/// would read as configuration and behave as a race, so they stay constants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tuning {
+    /// Starting ceiling for the shaped-block cache. Both text caches grow
+    /// adaptively up to a hard cap, so this sets where growth begins.
+    pub shape_cache_cap: usize,
+    /// Starting ceiling for the glyph-run cache.
+    pub run_cache_cap: usize,
+}
+
+impl Tuning {
+    /// Today's shipped values — what every app got before this existed.
+    pub const DEFAULT: Tuning = Tuning {
+        shape_cache_cap: 2048,
+        run_cache_cap: 4096,
+    };
+
+    /// A quarter of [`DEFAULT`](Tuning::DEFAULT): trades re-shaping work for
+    /// resident memory. Sensible for a small or embedded app whose text is a
+    /// handful of labels rather than a document.
+    pub const LEAN: Tuning = Tuning {
+        shape_cache_cap: 512,
+        run_cache_cap: 1024,
+    };
+}
+
+impl Default for Tuning {
+    fn default() -> Tuning {
+        Tuning::DEFAULT
+    }
+}
+
+/// MOD1: the swappable internals a runtime is built on — the layout engine
+/// (MOD2) and the text engine (MOD3) — named together so an app selects a
+/// bundle rather than a list of parameters.
+///
+/// `Default` is required on both because the runtime constructs a fresh layout
+/// tree per rebuild and one text engine per window; a bundle whose members
+/// could not be constructed without arguments would need a factory method and a
+/// stored instance, which is more machinery than the seam warrants today.
+/// [`AppConfig`] takes the other road for renderer and executor, where the
+/// factory buys the `Box<dyn Renderer>` case.
 pub trait PlatformConfig: 'static {
+    /// MOD7 S3: cache ceilings for this bundle. Defaulted, so an existing
+    /// `impl PlatformConfig` keeps the shipped values without naming them.
+    const TUNING: Tuning = Tuning::DEFAULT;
+
     /// The layout engine (MOD2).
     type Layout: lumen_layout::LayoutEngine + Default;
     /// The text engine (MOD3).
     type Text: lumen_text::TextEngineApi + Default;
 }
+
+/// MOD7 S2: one name for all four swap axes — renderer, executor, layout and
+/// text — so a consumer writes `ConfiguredApp<MyConfig>` instead of naming
+/// three type parameters.
+///
+/// This is deliberately **additive**. `App<R, E, P>` keeps its three
+/// parameters, because varying one axis (`with_renderer`, the shell's own
+/// `Box<dyn Renderer>`) is a real use and a single fused parameter would force
+/// a whole new config to change one thing. `AppConfig` is the ergonomic entry
+/// point on top; neither replaces the other.
+///
+/// Renderer and executor arrive through **factory functions** rather than a
+/// `Default` bound, which is what lets a config name `Box<dyn Renderer>` — the
+/// shape the shell itself uses, and one that cannot implement `Default`.
+/// [`PlatformConfig`] took the other road (a `Default` bound) because a layout
+/// tree and a text engine are constructed per rebuild and per window, where a
+/// stored factory would be machinery the seam does not warrant.
+pub trait AppConfig: 'static {
+    /// The frame renderer (MOD-R).
+    type Renderer: lumen_render::Renderer;
+    /// The background-work executor.
+    type Executor: lumen_core::tasks::Spawner;
+    /// The layout engine (MOD2).
+    type Layout: lumen_layout::LayoutEngine + Default;
+    /// The text engine (MOD3).
+    type Text: lumen_text::TextEngineApi + Default;
+
+    /// Construct the renderer. Called once per app.
+    fn renderer() -> Self::Renderer;
+    /// Construct the executor. Called once per app.
+    fn executor() -> Self::Executor;
+}
+
+/// The [`PlatformConfig`] half of an [`AppConfig`], so the existing
+/// `App<R, E, P>` machinery can carry a fused config without changing shape.
+pub struct PlatformOf<C>(std::marker::PhantomData<C>);
+
+impl<C: AppConfig> PlatformConfig for PlatformOf<C> {
+    type Layout = C::Layout;
+    type Text = C::Text;
+}
+
+/// An [`App`] fully described by one [`AppConfig`] — the `Runtime<MyConfig>`
+/// shape, spelled as a type alias so the three parameters underneath stay
+/// available.
+pub type ConfiguredApp<C> =
+    App<<C as AppConfig>::Renderer, <C as AppConfig>::Executor, PlatformOf<C>>;
+
+/// A [`Headless`] fully described by one [`AppConfig`].
+pub type ConfiguredHeadless<C> =
+    Headless<<C as AppConfig>::Renderer, <C as AppConfig>::Executor, PlatformOf<C>>;
 
 /// The shipped bundle: taffy layout (ADR-004) + parley/swash text (ADR-005).
 #[derive(Clone, Copy, Debug, Default)]
@@ -76,6 +184,86 @@ pub struct DefaultPlatform;
 impl PlatformConfig for DefaultPlatform {
     type Layout = LayoutTree;
     type Text = TextEngine;
+}
+
+/// MOD7 S4: the shipped presets, so the common cases are one word and a custom
+/// [`AppConfig`] is the escape hatch rather than the entry fee.
+///
+/// All three use the shipped engines — they differ in the choices *around*
+/// them, which is what an app actually picks between. Swapping an engine is a
+/// custom config, because there is no second implementation to name.
+///
+/// ```ignore
+/// ConfiguredApp::<Desktop>::with_config(view).run(size);
+/// ```
+pub mod presets {
+    use super::{AppConfig, PlatformConfig, Tuning};
+    use crate::app::{DefaultPlatform, LayoutTree, TextEngine};
+
+    /// Smallest resident footprint: the CPU reference renderer, no background
+    /// threads, and quartered text caches. The inline executor runs
+    /// `cx.task`/`cx.resource` work on the caller's thread, so this is for
+    /// apps that do little or none — it is also the deterministic one, which
+    /// is why the test harnesses use its shape.
+    pub struct Lean;
+
+    /// The shipped defaults, named: CPU reference renderer, a small thread
+    /// pool, default caches. What `App::new` has always given you.
+    pub struct Balanced;
+
+    /// A desktop app: GPU-capable boxed renderer chosen at startup, a
+    /// four-worker pool, default caches. The renderer is boxed because the
+    /// shell picks GPU-or-CPU by adapter presence, which no static type can
+    /// express.
+    pub struct Desktop;
+
+    /// The bundle all three share; `Lean` overrides only its tuning.
+    pub struct LeanPlatform;
+
+    impl PlatformConfig for LeanPlatform {
+        type Layout = LayoutTree;
+        type Text = TextEngine;
+        const TUNING: Tuning = Tuning::LEAN;
+    }
+
+    impl AppConfig for Lean {
+        type Renderer = lumen_render::TinySkia;
+        type Executor = lumen_core::tasks::InlineSpawner;
+        type Layout = <LeanPlatform as PlatformConfig>::Layout;
+        type Text = <LeanPlatform as PlatformConfig>::Text;
+        fn renderer() -> Self::Renderer {
+            lumen_render::TinySkia
+        }
+        fn executor() -> Self::Executor {
+            lumen_core::tasks::InlineSpawner
+        }
+    }
+
+    impl AppConfig for Balanced {
+        type Renderer = lumen_render::TinySkia;
+        type Executor = lumen_core::tasks::ThreadPoolSpawner;
+        type Layout = <DefaultPlatform as PlatformConfig>::Layout;
+        type Text = <DefaultPlatform as PlatformConfig>::Text;
+        fn renderer() -> Self::Renderer {
+            lumen_render::TinySkia
+        }
+        fn executor() -> Self::Executor {
+            lumen_core::tasks::ThreadPoolSpawner::new(2)
+        }
+    }
+
+    impl AppConfig for Desktop {
+        type Renderer = Box<dyn lumen_render::Renderer>;
+        type Executor = lumen_core::tasks::ThreadPoolSpawner;
+        type Layout = <DefaultPlatform as PlatformConfig>::Layout;
+        type Text = <DefaultPlatform as PlatformConfig>::Text;
+        fn renderer() -> Self::Renderer {
+            Box::new(lumen_render::TinySkia)
+        }
+        fn executor() -> Self::Executor {
+            lumen_core::tasks::ThreadPoolSpawner::new(4)
+        }
+    }
 }
 
 /// O1.3: the per-frame budget a painted frame is measured against — one 60 Hz
@@ -250,6 +438,40 @@ impl<P: PlatformConfig> App<lumen_render::TinySkia, lumen_core::tasks::InlineSpa
     }
 }
 
+impl<C: AppConfig> ConfiguredApp<C> {
+    /// MOD7 S2: build an app from one [`AppConfig`] — the `Runtime<MyConfig>`
+    /// entry point.
+    ///
+    /// ```ignore
+    /// struct Lean;
+    /// impl AppConfig for Lean {
+    ///     type Renderer = TinySkia;
+    ///     type Executor = InlineSpawner;
+    ///     type Layout   = LayoutTree;
+    ///     type Text     = MyTinyTextEngine;
+    ///     fn renderer() -> TinySkia { TinySkia }
+    ///     fn executor() -> InlineSpawner { InlineSpawner }
+    /// }
+    /// ConfiguredApp::<Lean>::with_config(view).run(size);
+    /// ```
+    ///
+    /// Named `with_config` rather than made a generic `new` for the reason
+    /// `with_platform` records: a struct's type-parameter defaults do not apply
+    /// to inference of a function's *return*, so generalising `new` would force
+    /// every existing call site to name a config.
+    pub fn with_config(root: impl Fn(&mut BuildCx) -> Element + 'static) -> Self {
+        App {
+            _platform: std::marker::PhantomData,
+            root: Box::new(root),
+            stylesheet: None,
+            fonts: Vec::new(),
+            windows: Vec::new(),
+            renderer: C::renderer(),
+            executor: C::executor(),
+        }
+    }
+}
+
 impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig> App<R, E, P> {
     /// Attach a stylesheet (parsed in M1; stored for now).
     pub fn stylesheet(mut self, lss: &str) -> Self {
@@ -282,7 +504,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// builder). The CPU reference renderer is the default; the shell hands in a
     /// GPU backend (constructed post-surface), and a consumer wanting runtime
     /// selection passes a `Box<dyn Renderer>`.
-    pub fn with_renderer<R2: lumen_render::Renderer>(self, renderer: R2) -> App<R2, E> {
+    ///
+    /// MOD7 S0: the return type names `P`. It used to be `App<R2, E>`, which
+    /// defaulted the third parameter — so calling this on an app built with
+    /// [`with_platform`](App::with_platform) silently reverted it to
+    /// `DefaultPlatform`, and the app ran on the shipped text and layout
+    /// engines instead of the chosen ones. It type-errors only if the caller
+    /// annotates the result, which is why nothing caught it; the guard is
+    /// `lumen-widgets/tests/platform_builder.rs`.
+    pub fn with_renderer<R2: lumen_render::Renderer>(self, renderer: R2) -> App<R2, E, P> {
         App {
             _platform: std::marker::PhantomData,
             root: self.root,
@@ -298,7 +528,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// builder). Defaults to the deterministic [`InlineSpawner`](lumen_core::tasks::InlineSpawner);
     /// the shell hands in a real thread-pool / async executor, and a consumer
     /// wanting runtime selection passes a `Box<dyn Spawner>`.
-    pub fn with_executor<E2: lumen_core::tasks::Spawner>(self, executor: E2) -> App<R, E2> {
+    /// MOD7 S0: names `P` for the same reason `with_renderer` does.
+    pub fn with_executor<E2: lumen_core::tasks::Spawner>(self, executor: E2) -> App<R, E2, P> {
         App {
             _platform: std::marker::PhantomData,
             root: self.root,
@@ -348,6 +579,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // MOD1: the bundle's text engine, not the concrete one. `Default` is
         // the constructor the seam offers (see `PlatformConfig`).
         let mut text = P::Text::default();
+        // MOD7 S3: the bundle's cache ceilings, applied before first use.
+        text.set_cache_caps(P::TUNING.shape_cache_cap, P::TUNING.run_cache_cap);
         for bytes in self.fonts {
             text.register_font(bytes);
         }

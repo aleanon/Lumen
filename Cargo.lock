@@ -2927,7 +2927,6 @@ dependencies = [
 name = "lumen-app"
 version = "0.1.0"
 dependencies = [
- "accesskit",
  "kurbo",
  "lumen-core",
  "lumen-layout",
@@ -3033,7 +3032,9 @@ dependencies = [
  "kurbo",
  "lumen-agent",
  "lumen-core",
+ "lumen-layout",
  "lumen-render",
+ "lumen-text",
  "lumen-widgets",
  "muda",
  "notify",

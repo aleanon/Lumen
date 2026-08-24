@@ -14,9 +14,10 @@ name = "lumen_shell_web"
 # Forwarded tiers. Default matches the previous behaviour exactly (the facade's
 # own defaults minus the desktop-only ones), so existing consumers are
 # unchanged; `--no-default-features` is what makes a lean wasm build reachable.
-default = ["snapshot", "complex-scripts"]
+default = ["snapshot", "complex-scripts", "accessibility"]
 pan-unicode = ["lumen/pan-unicode", "lumen-shell-core/pan-unicode", "lumen-agent/pan-unicode"]
 complex-scripts = ["lumen/complex-scripts", "lumen-shell-core/complex-scripts", "lumen-agent/complex-scripts"]
+accessibility = ["lumen/accessibility", "lumen-shell-core/accessibility", "lumen-agent/accessibility"]
 snapshot = ["lumen/snapshot", "lumen-shell-core/snapshot"]
 
 [dependencies]
