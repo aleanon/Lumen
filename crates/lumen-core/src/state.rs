@@ -615,6 +615,25 @@ impl Runtime {
     /// A monotonic counter bumped on every value write (signal `set`, or a memo
     /// whose value changed). The runtime compares it across frames to skip a
     /// rebuild when nothing changed since the last one.
+    /// O4.2: the readable keys of every signal written since `gen`.
+    ///
+    /// Cold path only — a diagnostic asking "which signals changed", answered
+    /// from the per-slot `version` the reactive graph already maintains for
+    /// fine-grained memoization. Never called on a frame that rebuilt.
+    pub fn keys_written_since(&self, gen: u64) -> Vec<String> {
+        let inner = self.inner.borrow();
+        let mut out: Vec<String> = inner
+            .slots
+            .iter()
+            .filter(|(_, slot)| slot.version > gen)
+            .filter_map(|(id, _)| inner.id_to_key.get(id.0 as usize).cloned())
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// The global write generation: bumped on every value write, so a caller
+    /// can tell "something changed since I last looked" in O(1).
     pub fn write_gen(&self) -> u64 {
         self.inner.borrow().write_gen
     }

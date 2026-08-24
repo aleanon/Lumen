@@ -1311,6 +1311,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // Nothing changed — keep the retained frame, report no damage.
             self.last_damage = Damage::None;
             self.record_change("idle", Vec::new);
+            // O4.2: "I changed state and the UI is stale" is the top entry in
+            // the debugging-lumen skill and had no machine-readable trace at
+            // all — `pump` computes every predicate involved and discards them.
+            //
+            // The trigger is deliberately NARROW. Warning on any write with no
+            // view dependents would fire on every signal that keys a
+            // `resource` — task deps live in `lumen-app/src/tasks.rs` and never
+            // register in `m.deps`, so the canonical async pattern has zero
+            // view dependents BY DESIGN. Making false positives the first thing
+            // the audit ever logs in an async app would destroy trust in the
+            // channel on day one. So: a view genuinely depends on this signal,
+            // AND the frame still went idle. That is the
+            // read-tracking-missed-a-dependency bug, not "nobody is listening".
+            #[cfg(all(feature = "dev-observability", feature = "snapshot"))]
+            if write_changed {
+                self.warn_stale_writes();
+            }
         }
         // F0 fixpoint contract: a settled pump leaves the reactive graph
         // quiescent. Writes flush synchronously, so after dispatch + build
@@ -1352,6 +1369,27 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             self.ambient_audit();
         }
         stats
+    }
+
+    /// O4.2: report a signal write that a view depends on and that produced no
+    /// frame. See the call site in `pump` for why the condition is this narrow.
+    #[cfg(all(feature = "dev-observability", feature = "snapshot"))]
+    fn warn_stale_writes(&self) {
+        for key in self.rt.keys_written_since(self.last_build_gen) {
+            let deps = self.dependents_of(&key);
+            if deps.is_empty() {
+                continue; // a task/resource key, or genuinely unread — not stale.
+            }
+            self.rt.log(
+                "warn",
+                format!(
+                    "signal `{key}` was written and the frame went idle, but \
+                     {} node(s) read it. The view should have updated — this is \
+                     a missed read-dependency, not a no-op write.",
+                    deps.len()
+                ),
+            );
+        }
     }
 
     /// O0.3: push newly-appeared lint findings into the log ring.
@@ -3175,6 +3213,37 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
                 if let Some(node) = caret_hit {
                     self.place_caret(node, pe.pos, false);
+                }
+                // O4.1: a press that reached the root without finding a single
+                // handler. `input.click` reports `{"ok": true}` whenever the
+                // SELECTOR resolved, regardless of whether anything was hit, so
+                // "I clicked it and nothing happened, and the tool said ok" had
+                // no trace anywhere. The routing walk already computes this and
+                // was throwing it away.
+                //
+                // Deliberately not a change to `input.click`'s return shape:
+                // agents and exported tests depend on it. The information goes
+                // to the ring instead.
+                #[cfg(feature = "dev-observability")]
+                if !did_focus && !did_click && !did_drag && caret_hit.is_none() {
+                    let target = self
+                        .tree
+                        .hit_test(pe.pos)
+                        .and_then(|t| self.meta.get(&t))
+                        .map(|m| match &m.id {
+                            Some(i) => format!("`#{}`", i.as_str()),
+                            None => format!("a {:?}", m.role),
+                        })
+                        .unwrap_or_else(|| "nothing".to_string());
+                    self.rt.log(
+                        "warn",
+                        format!(
+                            "pointer press at ({:.0}, {:.0}) hit {target} and \
+                             bubbled to the root without reaching any click, \
+                             focus or drag handler — nothing will happen",
+                            pe.pos.x, pe.pos.y
+                        ),
+                    );
                 }
                 // Light dismiss: any element with an `on_dismiss` whose bounds do
                 // not contain the press is dismissed (click-away for dropdowns/
