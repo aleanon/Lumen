@@ -133,19 +133,26 @@ fn picking_a_row_swaps_the_stage_and_beats_it_to_the_click() {
     assert!(has_id(&a, "btn-primary"), "the default demo is Button");
 
     click(&mut a, "widget-picker");
-    let row = rect_id(&a.semantics_doc().root, "opt-tooltip").expect("no #opt-tooltip");
+    // A row far enough down the panel to sit over the stage, but still inside
+    // the scrolling viewport — a clipped row would take no click at all.
+    let row = rect_id(&a.semantics_doc().root, "opt-avatar").expect("no #opt-avatar");
+    let panel = rect_id(&a.semantics_doc().root, "picker-panel").expect("no #picker-panel");
     assert!(
         row.y0 > 116.0,
         "the row must overlap the stage for this to test anything (y0 = {})",
         row.y0
     );
+    assert!(
+        row.y1 < panel.y1,
+        "the row must be inside the panel's viewport (row {row:?}, panel {panel:?})"
+    );
 
-    click(&mut a, "opt-tooltip");
+    click(&mut a, "opt-avatar");
     assert!(!has_id(&a, "picker-panel"), "picking closes the panel");
     assert!(!has_id(&a, "btn-primary"), "the Button demo is gone");
     assert!(
-        a.semantics_json().to_string().contains("Hover me"),
-        "the Tooltip demo is on the stage"
+        a.semantics_json().to_string().contains("Ada Lovelace"),
+        "the Avatar demo is on the stage"
     );
 }
 

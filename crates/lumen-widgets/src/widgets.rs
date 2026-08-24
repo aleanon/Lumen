@@ -184,6 +184,10 @@ pub fn scroll(
     let max_y = (content_h - viewport_h).max(0.0);
     let mut inner = Element::column(children);
     inner.style.margin.top = Dim::px(-(y as f32));
+    // See `Scrollable::new`: the viewport's `align_items: Stretch` would clamp
+    // this column to the viewport height and flex-shrink its rows.
+    inner.style.align_self = Some(lumen_layout::Align::Start);
+    inner.style.flex_shrink = 0.0;
     Element {
         role: Role::ScrollArea,
         scroll: Some(ScrollInfo {

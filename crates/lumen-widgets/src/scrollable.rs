@@ -6,7 +6,7 @@ use crate::widget::impl_common;
 use crate::{BuildCx, Element};
 use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role, ScrollInfo};
-use lumen_layout::{Dim, Edges, LayoutStyle, Position};
+use lumen_layout::{Align, Dim, Edges, LayoutStyle, Position};
 use std::rc::Rc;
 
 /// A clipping viewport that scrolls its content vertically with the wheel.
@@ -56,6 +56,18 @@ impl Scrollable {
         inner.style.margin.top = Dim::px(-(y as f32));
         // Fill the viewport width so rows can right-align (flex_grow) within it.
         inner.style.width = Dim::pct(1.0);
+        // …but NOT the viewport height. The viewport is a flex container, and
+        // its default `align_items: Stretch` was clamping this column to the
+        // viewport's cross size — so a column of 30 px rows taller than the
+        // viewport had its rows flex-shrunk to fit, and they grew back toward
+        // 30 px as scrolling pushed `margin-top` negative and the box longer.
+        // Rows visibly changed height while you scrolled. `align_self: Start`
+        // lets the column size to its content, which is what a scroll surface
+        // is for.
+        inner.style.align_self = Some(Align::Start);
+        // A scroll surface never shrinks its content to fit — that is the whole
+        // premise of scrolling.
+        inner.style.flex_shrink = 0.0;
         // Leave the overlay scrollbar its own lane. `inner` is in flow, so
         // padding narrows its stretched children — no plane needed here.
         if max_y > 0.5 {
@@ -107,7 +119,7 @@ impl Scrollable {
                 };
                 offset.update(rt, |o| *o = (*o + step).clamp(0.0, max_y));
             })),
-            children: match overlay_scrollbar(viewport_h, y, max_y, offset) {
+            children: match overlay_scrollbar(name, viewport_h, y, max_y, offset) {
                 Some(bar) => vec![inner, bar],
                 None => vec![inner],
             },
@@ -176,7 +188,27 @@ pub(crate) fn gutter_plane(children: Vec<Element>) -> Element {
     }
 }
 
+/// A stable id for the scroll surface named `name`, safe to use as a selector.
+///
+/// Ids are `[a-z0-9-]` (a dot would parse as id+class and be unselectable), and
+/// scroll-state names are author-chosen — `grid.sheet` is a legal signal key —
+/// so anything else folds to a dash.
+fn bar_id(name: &str) -> String {
+    let slug: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("{slug}-scrollbar")
+}
+
 pub(crate) fn overlay_scrollbar(
+    name: &str,
     viewport_h: f64,
     y: f64,
     max_y: f64,
@@ -219,6 +251,13 @@ pub(crate) fn overlay_scrollbar(
         // precise if this proves confusing to a screen reader.
         role: Role::Slider,
         label: "Scrollbar".to_string(),
+        // A drag is re-resolved by stable id across rebuilds, falling back to
+        // the raw node index only when there is no id — and scrolling rebuilds
+        // on every frame of the drag. The bar was the one draggable control
+        // with no id, so its grab rode on an index that the rebuild was free to
+        // renumber. It is also the only way an agent or a test can address the
+        // bar at all.
+        id: Some(bar_id(name).into()),
         background: Some(lumen_core::Color::srgb8(0x00, 0x00, 0x00, 0x14)),
         style: LayoutStyle {
             position: Position::Absolute,

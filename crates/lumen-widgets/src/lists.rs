@@ -193,7 +193,7 @@ fn place(mut el: Element, i: usize, y: f64, item_height: f64) -> Element {
 }
 
 /// Assemble the viewport around already-placed rows.
-fn viewport(w: &Window, viewport_h: f64, children: Vec<Element>) -> Element {
+fn viewport(name: &str, w: &Window, viewport_h: f64, children: Vec<Element>) -> Element {
     let (offset, y, max_y) = (w.offset, w.y, w.max_y);
     Element {
         role: Role::List,
@@ -218,7 +218,7 @@ fn viewport(w: &Window, viewport_h: f64, children: Vec<Element>) -> Element {
         on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
             offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
         })),
-        children: match crate::scrollable::overlay_scrollbar(viewport_h, y, max_y, offset) {
+        children: match crate::scrollable::overlay_scrollbar(name, viewport_h, y, max_y, offset) {
             Some(bar) => vec![crate::scrollable::gutter_plane(children), bar],
             None => children,
         },
@@ -248,7 +248,7 @@ impl VirtualList {
             .map(|i| place(render(i), i, w.y, item_height))
             .collect();
         VirtualList {
-            el: viewport(&w, viewport_h, children),
+            el: viewport(name, &w, viewport_h, children),
         }
     }
 
@@ -313,7 +313,7 @@ impl VirtualList {
             })
             .collect();
         VirtualList {
-            el: viewport(&w, viewport_h, children),
+            el: viewport(name, &w, viewport_h, children),
         }
     }
 }
@@ -461,7 +461,9 @@ impl DataGrid {
                 on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
                     offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
                 })),
-                children: match crate::scrollable::overlay_scrollbar(viewport_h, y, max_y, offset) {
+                children: match crate::scrollable::overlay_scrollbar(
+                    name, viewport_h, y, max_y, offset,
+                ) {
                     Some(bar) => vec![crate::scrollable::gutter_plane(rows), bar],
                     None => rows,
                 },
