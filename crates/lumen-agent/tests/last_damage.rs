@@ -68,8 +68,45 @@ fn a_click_reports_damage_naming_the_node_that_changed() {
     );
 }
 
+/// The live-shell case, and the reason this reports the last PAINTING damage
+/// rather than the last pump's. Under a real shell the winit loop pumps
+/// continuously, so an idle frame lands between the action and the query.
+///
+/// Found by driving an actual window, not by this suite: a click that
+/// demonstrably repainted (`frames_rendered` 0 → 1, and the label changed
+/// "0" → "1") reported `kind: none`. Headless never reproduced it, because
+/// nothing pumps between the action and the question.
 #[test]
-fn an_idle_pump_reports_no_damage() {
+fn damage_survives_an_intervening_idle_pump() {
+    let mut h = App::new(build).run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    call(&mut h, "input.click", json!({ "selector": "#bump" }));
+    // Exactly what a live event loop does between the click and the question.
+    h.pump();
+    h.pump();
+
+    let dmg = call(&mut h, "ui.lastDamage", json!({}));
+    assert_eq!(
+        dmg["result"]["kind"].as_str(),
+        Some("region"),
+        "an idle pump must not erase what the click repainted: {dmg}"
+    );
+    assert!(
+        dmg["result"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["id"].as_str() == Some("readout")),
+        "...and it still names the node: {dmg}"
+    );
+    assert!(
+        dmg["result"]["frame"].as_u64().unwrap() > 0,
+        "the frame number is what tells a caller this is not stale: {dmg}"
+    );
+}
+
+#[test]
+fn nothing_painted_yet_reports_no_damage() {
     let mut h = App::new(build).run_headless(Size::new(300.0, 200.0));
     h.pump();
     h.pump(); // nothing changed
@@ -78,7 +115,7 @@ fn an_idle_pump_reports_no_damage() {
     assert_eq!(
         dmg["result"]["kind"].as_str(),
         Some("none"),
-        "an idle pump keeps the retained frame: {dmg}"
+        "no paint has happened yet: {dmg}"
     );
     assert!(
         dmg["result"]["rect"].is_null(),

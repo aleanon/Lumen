@@ -425,6 +425,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             sem_gen: std::cell::Cell::new(0),
             #[cfg(feature = "dev-observability")]
             last_audit_gen: u64::MAX,
+            last_paint_damage: (Damage::None, 0),
             frame_ms: std::collections::VecDeque::new(),
             frame_ms_max: 0.0,
             frames_over_budget: 0,
@@ -957,6 +958,9 @@ pub struct Headless<
     sem_gen: std::cell::Cell<u64>,
     #[cfg(feature = "dev-observability")]
     last_audit_gen: u64,
+    /// O1.2: the last damage that actually painted, with its frame number.
+    /// `last_damage` is per-pump and an idle frame clears it.
+    last_paint_damage: (Damage, u64),
     frame_ms: std::collections::VecDeque<f32>,
     /// O1.3: the worst painted frame since start, and how many blew the
     /// budget. A rolling p95 of 6 ms with one 300 ms stall reads healthy and
@@ -1359,6 +1363,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             nodes_rebuilt: self.nodes_rebuilt,
             nodes_copied: self.nodes_copied,
         };
+        if stats.painted {
+            self.last_paint_damage = (stats.damage, self.frames_rendered + 1);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if stats.painted {
             let ms = pump_t0.elapsed().as_secs_f32() * 1000.0;
@@ -1936,6 +1943,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// The damage applied by the most recent paint (R2).
     pub fn last_damage(&self) -> Damage {
         self.last_damage
+    }
+
+    /// The most recent damage that actually **painted**, and the frame number
+    /// it painted on.
+    ///
+    /// Distinct from [`last_damage`](Self::last_damage), which is per-pump and
+    /// resets to `None` on every idle frame. That distinction does not matter
+    /// headless, where nothing pumps between an action and the query — but
+    /// under a live shell the winit loop pumps continuously, so by the time an
+    /// agent asks "what did my click repaint" the answer has already been
+    /// overwritten by an idle frame. Found exactly that way: a click that
+    /// demonstrably painted (`frames_rendered` 0 → 1) reported `kind: none`.
+    ///
+    /// The frame number lets a caller tell a fresh answer from a stale one.
+    pub fn last_paint_damage(&self) -> (Damage, u64) {
+        self.last_paint_damage
     }
 
     /// Capture a tier-3 [`AppSnapshot`] (reactive store + focus) for a later
@@ -6669,6 +6692,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// The active renderer backend's name (e.g. `"cpu"`).
     pub fn renderer_name(&self) -> &'static str {
         self.renderer.name()
+    }
+
+    /// Whether the active renderer is GPU-backed (O2.5 session fact).
+    pub fn is_gpu(&self) -> bool {
+        self.renderer.is_gpu()
+    }
+
+    /// The active graphics backend (`"Vulkan"`, `"Gl"`, `"cpu"`, …).
+    pub fn backend(&self) -> &'static str {
+        self.renderer.backend()
     }
 
     /// Shared reference to the background-work executor `E`. Lets a test reach a

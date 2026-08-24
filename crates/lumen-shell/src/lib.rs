@@ -156,6 +156,8 @@ pub fn run(app: App, size: Size) {
         ime_active: false,
         last_frame: Instant::now(),
         pending_resize: false,
+        #[cfg(feature = "wgpu")]
+        skipped_presents: 0,
         #[cfg(feature = "agent")]
         agent_session: lumen_agent::Session::new(),
     };
@@ -423,6 +425,10 @@ struct Shell {
     /// event storm into a single `RedrawRequested`, where we apply the resize and
     /// present exactly once — one GPU render per displayed frame, not per event.
     pending_resize: bool,
+    /// O5.3: how many presents have been skipped this session. Only the
+    /// direct-to-surface path can skip, so this exists only where that does.
+    #[cfg(feature = "wgpu")]
+    skipped_presents: u64,
     /// C.3: agent requests route through a recording [`lumen_agent::Session`],
     /// so `session.assertText`/`assertState`/`exportTest` work against the
     /// **live** window — explore live, commit the exported regression test.
@@ -613,13 +619,27 @@ impl ApplicationHandler<ShellEvent> for Shell {
         } else {
             Presenter::new(window.clone())
         };
-        eprintln!(
-            "lumen: present = {}",
-            if self.direct {
-                "direct-to-surface"
-            } else {
-                "cpu-readback"
-            }
+        let mode = if self.direct {
+            "direct-to-surface"
+        } else {
+            "cpu-readback"
+        };
+        eprintln!("lumen: present = {mode}");
+        // O5.3: also into the ring. Under `just run-agent` the agent reads a
+        // socket; stderr goes to the developer's terminal, so every fact below
+        // was invisible to the thing that most needs it.
+        //
+        // The renderer identity is emitted HERE rather than beside its own
+        // `eprintln!` at shell startup: that site runs on the pre-`Headless`
+        // `App` builder, which owns no `Runtime` yet.
+        headless.runtime().log(
+            "info",
+            format!(
+                "renderer = {} (gpu: {}, backend: {}), present = {mode}",
+                headless.renderer_name(),
+                headless.is_gpu(),
+                headless.backend()
+            ),
         );
         // Wake the loop when a background task pushes a result, so it gets applied
         // and presented (the data-layer waker).
@@ -939,6 +959,22 @@ impl ApplicationHandler<ShellEvent> for Shell {
                                 // error we could catch.
                                 Present::Skipped => {
                                     self.force_present = true;
+                                    // Routine during a resize drag, a stopped
+                                    // window in bulk. Throttled so the drag
+                                    // stays quiet and a sustained run does not.
+                                    self.skipped_presents += 1;
+                                    if self.skipped_presents.is_multiple_of(60) {
+                                        h.runtime().log(
+                                            "warn",
+                                            format!(
+                                                "{} presents skipped since start — \
+                                                 routine during a resize drag, but \
+                                                 a sustained run means the window \
+                                                 has stopped updating",
+                                                self.skipped_presents
+                                            ),
+                                        );
+                                    }
                                     if let Some(w) = &self.window {
                                         w.request_redraw();
                                     }
@@ -952,6 +988,16 @@ impl ApplicationHandler<ShellEvent> for Shell {
                                 Present::Unavailable => {
                                     self.direct = false;
                                     self.presenter = self.window.clone().and_then(Presenter::new);
+                                    // A PERMANENT per-frame readback for the
+                                    // rest of the session — the single largest
+                                    // silent perf change the shell can make.
+                                    h.runtime().log(
+                                        "warn",
+                                        "present degraded to cpu-readback for the \
+                                         rest of this session: no usable surface \
+                                         for this device. Every frame now pays a \
+                                         GPU→CPU readback.",
+                                    );
                                     eprintln!(
                                         "lumen: present = cpu-readback (no usable \
                                          surface for this device; falling back)"
@@ -1074,6 +1120,10 @@ impl Shell {
             lumen_core::tasks::ThreadPoolSpawner::new(1),
         ) else {
             eprintln!("lumen: window '{}' has no declaration", d.id);
+            main.runtime().log(
+                "warn",
+                format!("window `{}` was requested but has no declaration", d.id),
+            );
             return;
         };
         let attrs = Window::default_attributes()
@@ -1083,6 +1133,8 @@ impl Shell {
             Ok(w) => Arc::new(w),
             Err(e) => {
                 eprintln!("lumen: window '{}': {e}", d.id);
+                main.runtime()
+                    .log("warn", format!("window `{}` failed to open: {e}", d.id));
                 return;
             }
         };

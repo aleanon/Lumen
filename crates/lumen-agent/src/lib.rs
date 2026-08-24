@@ -391,7 +391,13 @@ fn handle<R: Renderer, E: Spawner>(
         // Rects alone would force a spatial join the agent has no primitive
         // for, so the intersecting nodes come with them.
         "ui.lastDamage" => {
-            let (kind, rect) = match app.last_damage() {
+            // The last damage that PAINTED, not the last pump's. Under a live
+            // shell the winit loop pumps continuously, so an idle frame
+            // overwrites `last_damage` between the action and this call — a
+            // click that demonstrably repainted reported `kind: none`. `frame`
+            // lets a caller tell a fresh answer from a stale one.
+            let (damage, frame) = app.last_paint_damage();
+            let (kind, rect) = match damage {
                 lumen_widgets::Damage::None => ("none", None),
                 lumen_widgets::Damage::Region(r) => ("region", Some(r)),
                 lumen_widgets::Damage::Full => ("full", None),
@@ -428,6 +434,7 @@ fn handle<R: Renderer, E: Spawner>(
                     "x": r.x0, "y": r.y0, "w": r.width(), "h": r.height()
                 })),
                 "nodes": nodes,
+                "frame": frame,
             }))
         }
         "ui.getLayout" => {
