@@ -64,6 +64,17 @@ impl Select {
                 on_click: Some(Rc::new(move |rt| {
                     idx.update(rt, |x| *x = (*x + 1) % n.max(1))
                 })),
+                // W2: `SetValue` was advertised but unimplemented, so the agent
+                // and assistive tech could only *cycle* the select one click at
+                // a time. Setting the value by option text selects it directly.
+                on_set_value: Some(Rc::new({
+                    let opts: Vec<String> = options.iter().map(|o| o.to_string()).collect();
+                    move |rt: &Runtime, v: &str| {
+                        if let Some(k) = opts.iter().position(|o| o == v) {
+                            idx.set(rt, k);
+                        }
+                    }
+                })),
                 ..Element::default()
             }
         };

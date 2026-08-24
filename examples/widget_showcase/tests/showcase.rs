@@ -66,7 +66,7 @@ fn select(a: &mut Headless, name: &str) {
 /// Each is something a caller cannot fix from the outside, and each is a true
 /// positive worth keeping visible — hence the list rather than a blanket
 /// `allow`. Every other code, on every other widget, must come back clean.
-fn known_framework_finding(widget: &str, code: &str, node: Option<&str>) -> bool {
+fn known_framework_finding(widget: &str, code: &str) -> bool {
     match code {
         // `Badge` pins its pill at `top: -9, right: -14` of its own wrapper.
         // Overhanging the target's corner *is* the widget, and insets resolve
@@ -79,27 +79,6 @@ fn known_framework_finding(widget: &str, code: &str, node: Option<&str>) -> bool
         // and as white-on-page-background text (W0303), while `VirtualList`,
         // `DataGrid` and `Scrollable`, which all publish `scroll`, are exempt.
         "W0103" | "W0303" if widget == "Grid" => true,
-        // The inert states clear a widget's behaviour but not its advertised
-        // actions: `.disabled(true)` drops the FOCUSABLE flag while
-        // `Action::Focus` stays; `.read_only(true)` drops the edit handler
-        // while `Action::SetValue` stays.
-        "W0106" if matches!(node, Some("btn-disabled" | "cb-locked" | "ti-ro")) => true,
-        // The rich-text editors and `Select` advertise `SetValue` but route
-        // edits through handlers the action audit does not recognise.
-        "W0106"
-            if matches!(
-                node,
-                Some("rte-doc" | "fr-doc" | "fr-bar-find" | "fr-bar-replace" | "sel-size")
-            ) =>
-        {
-            true
-        }
-        // A `Tree` leaf inherits the row's `Click` action without the toggle
-        // handler that only parent rows get.
-        "W0106" if widget == "Tree" => true,
-        // `FindReplaceBar` builds its Find and Replace inputs empty and passes
-        // them no placeholder, so neither has an accessible name.
-        "W0301" if widget == "FindReplaceBar" => true,
         _ => false,
     }
 }
@@ -116,8 +95,7 @@ fn every_widget_renders_and_is_lint_clean() {
             entry.name
         );
         for d in a.lint() {
-            let node = d.node.as_ref().map(|n| n.as_str());
-            if !known_framework_finding(entry.name, d.code, node) {
+            if !known_framework_finding(entry.name, d.code) {
                 bad.push(format!("{}: [{}] {}", entry.name, d.code, d.message));
             }
         }

@@ -61,8 +61,13 @@ impl TextField {
             label: text.clone(),
             value: Some(text.clone()),
             actions: vec![Action::Focus, Action::SetValue],
-            background: Some(Color::srgb8(0xf2, 0xf2, 0xf2, 0xff)),
+            background: Some(Color::srgb8(0xf7, 0xf8, 0xfa, 0xff)),
             corner_radius: 6.0,
+            // Matches `TextInput`: a filled box with no edge reads as a label.
+            border: Some(lumen_render::Border {
+                width: 1.0,
+                color: Color::srgb8(0xc9, 0xd0, 0xdb, 0xff),
+            }),
             style: LayoutStyle {
                 padding: Edges::all(Dim::px(8.0)),
                 min_width: Dim::px(220.0),

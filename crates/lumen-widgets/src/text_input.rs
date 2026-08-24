@@ -71,8 +71,15 @@ impl TextInput {
             label: text.clone(),
             value: Some(text.clone()),
             actions: vec![Action::Focus, Action::SetValue],
-            background: Some(Color::srgb8(0xf2, 0xf2, 0xf2, 0xff)),
+            background: Some(Color::srgb8(0xf7, 0xf8, 0xfa, 0xff)),
             corner_radius: 6.0,
+            // A filled box with no edge reads as a label, not a field — you
+            // cannot see where it starts or ends against a light page. The
+            // hairline is what says "you may type here".
+            border: Some(lumen_render::Border {
+                width: 1.0,
+                color: Color::srgb8(0xc9, 0xd0, 0xdb, 0xff),
+            }),
             style: LayoutStyle {
                 padding: Edges::all(Dim::px(8.0)),
                 min_width: Dim::px(140.0),
@@ -214,6 +221,11 @@ impl TextInput {
             self.el.on_key = Some(Rc::new(move |rt, ke| {
                 edit_key_readonly(rt, ke, editor);
             }));
+            // Stop advertising the action that was just removed — the list is a
+            // contract the agent and assistive tech read (W0106).
+            self.el
+                .actions
+                .retain(|a| *a != lumen_core::semantics::Action::SetValue);
             self.el.states.push(lumen_core::semantics::State::Readonly);
         }
         self
@@ -292,24 +304,44 @@ fn sync_mirror(rt: &Runtime, editor: Signal<TextEditor>, mirror: Signal<String>)
     mirror.set(rt, text);
 }
 
-/// Apply one `KeyDown` to the editor signal: navigation (arrows/Home/End, with
-/// Shift extending the selection), deletion (Backspace/Delete), clipboard
-/// (Ctrl/Cmd+C/X/V), select-all (Ctrl/Cmd+A), undo/redo (Ctrl/Cmd+Z/Y), and —
-/// when `multiline` — Enter inserts a newline. Plain character input arrives
-/// separately via `on_text`. Vertical nav (Up/Down) is handled app-side (it
-/// needs layout geometry). Keeps the string mirror in sync.
+/// The editing key map, shared by every text widget in the framework.
+///
+/// | keys | effect |
+/// |---|---|
+/// | ←/→ | caret by one grapheme |
+/// | Ctrl/Cmd+←/→ | caret by one **word** |
+/// | Home / End | start / end of the **line** (of the buffer, single-line) |
+/// | Ctrl/Cmd+Home / End | start / end of the buffer |
+/// | Backspace / Delete | one grapheme, or the selection |
+/// | Ctrl/Cmd+Backspace / Delete | one **word**, or the selection |
+/// | Ctrl/Cmd+A | select all |
+/// | Ctrl/Cmd+L | select the current **line** |
+/// | Ctrl/Cmd+C / X / V | copy / cut / paste |
+/// | Ctrl/Cmd+Z / Y | undo / redo |
+/// | Shift + any motion | extends the selection instead of collapsing it |
+/// | Enter (multiline) | inserts a newline |
+///
+/// Plain character input arrives separately through `on_text`; a chord never
+/// produces text, because the shell drops `text` while Ctrl/Cmd is down.
+/// Vertical nav (Up/Down) is handled app-side — it needs layout geometry.
+/// Keeps the string mirror in sync.
 /// The read-only key subset: caret movement, selection and copy — everything
-/// that reads, nothing that writes.
+/// in the map above that reads, nothing that writes.
 pub(crate) fn edit_key_readonly(rt: &Runtime, ke: &KeyEvent, editor: Signal<TextEditor>) {
     let ctrl = ke.modifiers.contains(Modifiers::CTRL) || ke.modifiers.contains(Modifiers::META);
     let shift = ke.modifiers.contains(Modifiers::SHIFT);
     match &ke.key {
+        Key::Named(NamedKey::ArrowLeft) if ctrl => editor.update(rt, |e| e.move_word_left(shift)),
+        Key::Named(NamedKey::ArrowRight) if ctrl => editor.update(rt, |e| e.move_word_right(shift)),
         Key::Named(NamedKey::ArrowLeft) => editor.update(rt, |e| e.move_left(shift)),
         Key::Named(NamedKey::ArrowRight) => editor.update(rt, |e| e.move_right(shift)),
-        Key::Named(NamedKey::Home) => editor.update(rt, |e| e.move_home(shift)),
-        Key::Named(NamedKey::End) => editor.update(rt, |e| e.move_end(shift)),
+        Key::Named(NamedKey::Home) if ctrl => editor.update(rt, |e| e.move_home(shift)),
+        Key::Named(NamedKey::End) if ctrl => editor.update(rt, |e| e.move_end(shift)),
+        Key::Named(NamedKey::Home) => editor.update(rt, |e| e.move_line_home(shift)),
+        Key::Named(NamedKey::End) => editor.update(rt, |e| e.move_line_end(shift)),
         Key::Character(s) if ctrl => match s.to_lowercase().as_str() {
             "a" => editor.update(rt, |e| e.select_all()),
+            "l" => editor.update(rt, |e| e.select_line()),
             "c" => rt.set_clipboard(editor.get(rt).selected_text()),
             _ => {}
         },
@@ -328,15 +360,25 @@ pub(crate) fn edit_key(
     let shift = ke.modifiers.contains(Modifiers::SHIFT);
     let mut changed = true;
     match &ke.key {
+        Key::Named(NamedKey::Backspace) if ctrl => editor.update(rt, |e| e.delete_word_left()),
+        Key::Named(NamedKey::Delete) if ctrl => editor.update(rt, |e| e.delete_word_right()),
         Key::Named(NamedKey::Backspace) => editor.update(rt, |e| e.backspace()),
         Key::Named(NamedKey::Delete) => editor.update(rt, |e| e.delete()),
+        Key::Named(NamedKey::ArrowLeft) if ctrl => editor.update(rt, |e| e.move_word_left(shift)),
+        Key::Named(NamedKey::ArrowRight) if ctrl => editor.update(rt, |e| e.move_word_right(shift)),
         Key::Named(NamedKey::ArrowLeft) => editor.update(rt, |e| e.move_left(shift)),
         Key::Named(NamedKey::ArrowRight) => editor.update(rt, |e| e.move_right(shift)),
-        Key::Named(NamedKey::Home) => editor.update(rt, |e| e.move_home(shift)),
-        Key::Named(NamedKey::End) => editor.update(rt, |e| e.move_end(shift)),
+        // Ctrl jumps to the ends of the buffer; bare Home/End stay on the line,
+        // which is the same key in a single-line field and the useful one in a
+        // multi-line field.
+        Key::Named(NamedKey::Home) if ctrl => editor.update(rt, |e| e.move_home(shift)),
+        Key::Named(NamedKey::End) if ctrl => editor.update(rt, |e| e.move_end(shift)),
+        Key::Named(NamedKey::Home) => editor.update(rt, |e| e.move_line_home(shift)),
+        Key::Named(NamedKey::End) => editor.update(rt, |e| e.move_line_end(shift)),
         Key::Named(NamedKey::Enter) if multiline => editor.update(rt, |e| e.insert("\n")),
         Key::Character(s) if ctrl => match s.to_lowercase().as_str() {
             "a" => editor.update(rt, |e| e.select_all()),
+            "l" => editor.update(rt, |e| e.select_line()),
             "c" => {
                 rt.set_clipboard(editor.get(rt).selected_text());
                 changed = false;

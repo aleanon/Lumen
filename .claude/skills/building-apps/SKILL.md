@@ -95,13 +95,23 @@ P.4), `LineChart::element(values, labels)` / `PieChart::element(slices)`,
 ## Widget options you can now rely on (W1–W5, 2026-08-03)
 
 - `.disabled(true)` on **any** widget — enforced, not cosmetic: no clicks, no
-  hover, no Tab, and the agent's `invokeAction` refuses it. `:disabled` styling
-  works.
+  hover, no Tab, the advertised `Action`s are dropped so the agent's
+  `invokeAction` refuses it, and the subtree is washed out so it *looks*
+  inert. `:disabled` styling overrides the default dimming.
 - Keyboard: `Slider`/`RangeSlider` (arrows/Home/End/PageUp/Down), `Tabs` (←/→),
   `PickList` (↑/↓/Home/End/Escape), `Scrollable` (arrows/Page/Home/End).
-- `TextInput`: `.placeholder()`, `.password(bullet)`, `.max_length()`,
-  `.read_only()`, `.on_change()`. Masking hides the value from the semantic tree
-  too, so secrets don't leak to the agent or logs.
+- **Text editing is one shared key map** (`text_input::edit_key`), so
+  `TextInput`, `TextField`, `SearchField`, `Combobox`, `RichTextEditor` and
+  `FindReplaceBar` all behave identically: ←/→ by grapheme, **Ctrl+←/→ by
+  word**, Home/End by *line* (Ctrl+Home/End for the buffer),
+  **Ctrl+Backspace/Delete by word**, Ctrl+A select all, **Ctrl+L select the
+  line**, Ctrl+C/X/V, Ctrl+Z/Y, Shift+motion to extend. A command chord never
+  types: the shell drops the character the platform resolves it to, so Ctrl+A
+  no longer inserts an "a" before selecting.
+- `TextInput`: `.placeholder()` (shown only while empty, and the accessible
+  name), `.password(bullet)`, `.max_length()`, `.read_only()`, `.on_change()`.
+  Masking hides the value from the semantic tree too, so secrets don't leak to
+  the agent or logs. Every text field carries a hairline border by default.
 - `ProgressBar::indeterminate(cx)`, `Avatar::image()`, `Chip::selected()`,
   `Toast::action()`/`.auto_dismiss()`, `Tooltip` (hover-gated, no layout shift),
   and the new `Card` / `Badge`.

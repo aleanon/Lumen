@@ -198,6 +198,121 @@ impl TextEditor {
             self.anchor = self.cursor;
         }
     }
+    // --- word and line granularity -----------------------------------------
+    //
+    // A "word" here is the convention every desktop editor shares: moving left
+    // skips any whitespace immediately behind the cursor, then the run of word
+    // characters behind that; moving right skips the run of word characters
+    // ahead, then the whitespace after it. That asymmetry is what makes
+    // Ctrl+Left/Ctrl+Right land on word *starts* going both ways.
+
+    /// The byte offset one word to the left of `at`.
+    pub fn prev_word(&self, at: usize) -> usize {
+        let b = self.text.as_bytes();
+        let mut i = at;
+        while i > 0 && !is_word_byte(b, self.prev_boundary(i)) {
+            i = self.prev_boundary(i);
+        }
+        while i > 0 && is_word_byte(b, self.prev_boundary(i)) {
+            i = self.prev_boundary(i);
+        }
+        i
+    }
+
+    /// The byte offset one word to the right of `at`.
+    pub fn next_word(&self, at: usize) -> usize {
+        let b = self.text.as_bytes();
+        let mut i = at;
+        while i < self.text.len() && is_word_byte(b, i) {
+            i = self.next_boundary(i);
+        }
+        while i < self.text.len() && !is_word_byte(b, i) {
+            i = self.next_boundary(i);
+        }
+        i
+    }
+
+    /// Move the cursor one word left (Ctrl+Left).
+    pub fn move_word_left(&mut self, extend: bool) {
+        self.cursor = self.prev_word(self.cursor);
+        if !extend {
+            self.anchor = self.cursor;
+        }
+    }
+
+    /// Move the cursor one word right (Ctrl+Right).
+    pub fn move_word_right(&mut self, extend: bool) {
+        self.cursor = self.next_word(self.cursor);
+        if !extend {
+            self.anchor = self.cursor;
+        }
+    }
+
+    /// Delete the selection, or the word before the cursor (Ctrl+Backspace).
+    pub fn delete_word_left(&mut self) {
+        if self.has_selection() {
+            self.backspace();
+            return;
+        }
+        let from = self.prev_word(self.cursor);
+        if from == self.cursor {
+            return;
+        }
+        self.snapshot();
+        self.text.replace_range(from..self.cursor, "");
+        self.cursor = from;
+        self.anchor = from;
+    }
+
+    /// Delete the selection, or the word after the cursor (Ctrl+Delete).
+    pub fn delete_word_right(&mut self) {
+        if self.has_selection() {
+            self.delete();
+            return;
+        }
+        let to = self.next_word(self.cursor);
+        if to == self.cursor {
+            return;
+        }
+        self.snapshot();
+        self.text.replace_range(self.cursor..to, "");
+    }
+
+    /// The `(start, end)` byte range of the line containing `at`, excluding the
+    /// trailing newline.
+    pub fn line_bounds(&self, at: usize) -> (usize, usize) {
+        let at = at.min(self.text.len());
+        let start = self.text[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let end = self.text[at..]
+            .find('\n')
+            .map(|i| at + i)
+            .unwrap_or(self.text.len());
+        (start, end)
+    }
+
+    /// Move to the start of the current line (Home in a multi-line field).
+    pub fn move_line_home(&mut self, extend: bool) {
+        self.cursor = self.line_bounds(self.cursor).0;
+        if !extend {
+            self.anchor = self.cursor;
+        }
+    }
+
+    /// Move to the end of the current line (End in a multi-line field).
+    pub fn move_line_end(&mut self, extend: bool) {
+        self.cursor = self.line_bounds(self.cursor).1;
+        if !extend {
+            self.anchor = self.cursor;
+        }
+    }
+
+    /// Select the whole line the cursor is on (Ctrl+L).
+    pub fn select_line(&mut self) {
+        let (a, b) = self.line_bounds(self.cursor);
+        self.anchor = a;
+        self.cursor = b;
+    }
+
     /// Select the whole buffer.
     pub fn select_all(&mut self) {
         self.anchor = 0;
@@ -314,9 +429,81 @@ impl TextEditor {
     }
 }
 
+/// Whether the byte at `i` starts a word character.
+///
+/// ASCII alphanumerics and `_` are word bytes; so is every non-ASCII byte,
+/// which keeps accented and CJK text inside a word instead of treating each
+/// multi-byte char as its own token.
+fn is_word_byte(b: &[u8], i: usize) -> bool {
+    match b.get(i) {
+        Some(c) => c.is_ascii_alphanumeric() || *c == b'_' || !c.is_ascii(),
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn word_motion_lands_on_word_starts() {
+        let mut e = TextEditor::new("the quick  brown fox");
+        e.move_word_left(false);
+        assert_eq!(e.cursor(), 17, "from the end, back to the start of `fox`");
+        e.move_word_left(false);
+        assert_eq!(e.cursor(), 11, "past the double space to `brown`");
+        e.move_home(false);
+        e.move_word_right(false);
+        assert_eq!(e.cursor(), 4, "forward stops at the next word start");
+    }
+
+    #[test]
+    fn ctrl_backspace_eats_one_word_and_its_gap() {
+        let mut e = TextEditor::new("hello brave world");
+        e.delete_word_left();
+        assert_eq!(e.text(), "hello brave ");
+        e.delete_word_left();
+        assert_eq!(e.text(), "hello ");
+        // Undo restores in the same steps, so a mis-hit is recoverable.
+        e.undo();
+        assert_eq!(e.text(), "hello brave ");
+    }
+
+    #[test]
+    fn ctrl_delete_eats_forward() {
+        let mut e = TextEditor::new("hello brave world");
+        e.move_home(false);
+        e.delete_word_right();
+        assert_eq!(e.text(), "brave world");
+    }
+
+    #[test]
+    fn word_ops_on_a_selection_act_on_the_selection() {
+        let mut e = TextEditor::new("hello world");
+        e.select_all();
+        e.delete_word_left();
+        assert_eq!(e.text(), "", "a selection is what gets deleted, not a word");
+    }
+
+    #[test]
+    fn line_ops_are_line_relative() {
+        let mut e = TextEditor::new("first line\nsecond line\nthird");
+        e.place(14, false); // inside "second"
+        assert_eq!(e.line_bounds(14), (11, 22));
+        e.move_line_home(false);
+        assert_eq!(e.cursor(), 11);
+        e.move_line_end(false);
+        assert_eq!(e.cursor(), 22);
+        e.select_line();
+        assert_eq!(e.selected_text(), "second line");
+    }
+
+    #[test]
+    fn select_line_on_a_single_line_buffer_takes_all_of_it() {
+        let mut e = TextEditor::new("just one line");
+        e.select_line();
+        assert_eq!(e.selected_text(), "just one line");
+    }
 
     #[test]
     fn insert_select_delete() {

@@ -775,7 +775,10 @@ impl ApplicationHandler<ShellEvent> for Shell {
             WindowEvent::KeyboardInput { event, .. } => {
                 // Direct (non-IME) text entry: when no IME context is composing,
                 // the key's resolved text is the committed character(s).
-                if event.state == ElementState::Pressed && !self.ime_active {
+                if event.state == ElementState::Pressed
+                    && !self.ime_active
+                    && !is_command_chord(self.modifiers)
+                {
                     if let Some(t) = &event.text {
                         if !t.is_empty() && !t.chars().all(char::is_control) {
                             self.inject(Event::TextInput(TextInputEvent {
@@ -1249,7 +1252,7 @@ impl Shell {
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 // Direct text + keys; IME composition stays main-window (v1).
-                if event.state == ElementState::Pressed {
+                if event.state == ElementState::Pressed && !is_command_chord(modifiers) {
                     if let Some(t) = &event.text {
                         if !t.is_empty() && !t.chars().all(char::is_control) {
                             sw.headless.inject(Event::TextInput(TextInputEvent {
@@ -1703,6 +1706,18 @@ fn attach_native_menu(menu: &muda::Menu, _window: &Window) {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 #[cfg(feature = "desktop-integration")]
 fn attach_native_menu(_menu: &muda::Menu, _window: &Window) {}
+
+/// Whether these modifiers make the keypress a *command*, not typing.
+///
+/// A chord like Ctrl+A is a command; the platform may still resolve it to the
+/// character "a" (X11 and macOS both do), and committing that would type an "a"
+/// into the field before the command ran — which is exactly what Ctrl+A used to
+/// do. Ctrl+Alt is excluded: Windows maps AltGr to it, and AltGr genuinely
+/// produces characters on most European layouts.
+fn is_command_chord(m: Modifiers) -> bool {
+    let cmd = m.contains(Modifiers::CTRL) || m.contains(Modifiers::META);
+    cmd && !m.contains(Modifiers::ALT)
+}
 
 fn map_modifiers(s: winit::keyboard::ModifiersState) -> Modifiers {
     let mut m = Modifiers::empty();

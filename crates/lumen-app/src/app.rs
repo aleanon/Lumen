@@ -3621,12 +3621,41 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             f |= NodeFlags::DISABLED;
             f.remove(NodeFlags::HIT_TESTABLE | NodeFlags::FOCUSABLE);
             self.tree.set_flags(node, f);
+            // …and stop *advertising* what it can no longer do. The action list
+            // is a contract the agent and assistive tech read: a disabled button
+            // that still lists `Focus`, or a read-only field still listing
+            // `SetValue`, promises behaviour the node has just had removed —
+            // which `audit_actions` (W0106) correctly reports as a defect.
+            // Clearing them here, after the flags, keeps the two in step for
+            // every widget at once rather than per widget.
+            if let Some(m) = self.meta.get_mut(&node) {
+                m.actions.retain(|a| !Self::is_interactive_action_impl(a));
+            }
         }
         let mut c = self.tree.first_child(node);
         while c.is_some() {
             self.propagate_disabled(c, disabled);
             c = self.tree.next_sibling(c);
         }
+    }
+
+    /// Whether this action promises *input* the node must be able to accept.
+    ///
+    /// `ScrollIntoView` is not one — a disabled control can still be revealed,
+    /// and screen readers rely on that to describe it.
+    fn is_interactive_action_impl(a: &Action) -> bool {
+        matches!(
+            a,
+            Action::Click
+                | Action::Focus
+                | Action::Blur
+                | Action::SetValue
+                | Action::Increment
+                | Action::Decrement
+                | Action::Expand
+                | Action::Collapse
+                | Action::Dismiss
+        )
     }
 
     /// Whether `node` is disabled (itself or by an ancestor).

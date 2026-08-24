@@ -2,7 +2,7 @@
 //! the full caret/selection machinery, and the find/replace UI.
 
 use kurbo::Size;
-use lumen_core::events::{Event, Key, KeyEvent, Modifiers, NamedKey, PointerEvent};
+use lumen_core::events::{Event, Key, KeyEvent, Modifiers, NamedKey, PointerEvent, TextInputEvent};
 use lumen_core::geometry::Point;
 use lumen_widgets::richdoc::{Block, RichDoc};
 use lumen_widgets::{widgets, App, Headless};
@@ -138,33 +138,47 @@ fn find_replace_bar_counts_and_rewrites() {
     .run_headless(Size::new(600.0, 400.0));
     h.pump();
 
-    // Set the find/replace inputs through their signals (what typing does).
-    let find = h.runtime().signal("fr.find", String::new);
-    find.set(h.runtime(), "good".into());
-    h.pump();
-    assert!(
-        h.semantics_json().to_string().contains("2 match(es)"),
-        "live count"
-    );
-    let rep = h.runtime().signal("fr.replace", String::new);
-    rep.set(h.runtime(), "great".into());
-    h.pump();
-
-    // Click "Replace all".
-    let root = h.semantics_doc().root.elided();
     fn find_id(n: &lumen_core::semantics::SemanticsNode, id: &str) -> Option<kurbo::Rect> {
         if n.id.as_ref().map(|i| i.as_str()) == Some(id) {
             return Some(n.bounds);
         }
         n.children.iter().find_map(|c| find_id(c, id))
     }
-    let b = find_id(&root, "fr-apply").expect("apply button");
-    let p = Point::new((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0);
-    h.inject(Event::PointerDown(PointerEvent::at(p)));
-    h.inject(Event::PointerUp(PointerEvent::at(p)));
+    fn click(h: &mut Headless, id: &str) {
+        let root = h.semantics_doc().root.elided();
+        let b = find_id(&root, id).unwrap_or_else(|| panic!("no #{id}"));
+        let p = Point::new((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0);
+        h.inject(Event::PointerDown(PointerEvent::at(p)));
+        h.inject(Event::PointerUp(PointerEvent::at(p)));
+        h.pump();
+    }
+
+    // The fields are real `TextInput`s now, so drive them the way a user does:
+    // focus, then type. Their state is a `TextEditor` under `fr.find` /
+    // `fr.replace`, mirrored as a string at `{key}.text`.
+    assert!(
+        h.semantics_json().to_string().contains("no search term"),
+        "an empty search term says so rather than claiming zero matches"
+    );
+    click(&mut h, "fr-find");
+    h.inject(Event::TextInput(TextInputEvent {
+        text: "good".into(),
+    }));
     h.pump();
+    assert!(
+        h.semantics_json().to_string().contains("2 matches"),
+        "live count"
+    );
+    click(&mut h, "fr-replace");
+    h.inject(Event::TextInput(TextInputEvent {
+        text: "great".into(),
+    }));
+    h.pump();
+
+    // Replace all.
+    click(&mut h, "fr-apply");
 
     let src = h.runtime().signal("doc.text", String::new).get(h.runtime());
     assert_eq!(src, "great day, great night");
-    assert!(h.semantics_json().to_string().contains("0 match(es)"));
+    assert!(h.semantics_json().to_string().contains("no matches"));
 }

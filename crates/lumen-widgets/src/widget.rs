@@ -26,11 +26,21 @@ macro_rules! impl_common {
                 self
             }
             /// Disable the widget: it stops responding to clicks, hover,
-            /// drags, keyboard focus and the agent's `input.invokeAction`, and
-            /// reports `SemState::Disabled` so `:disabled` styling and assistive
-            /// tech agree with what the user can actually do.
+            /// drags, keyboard focus and the agent's `input.invokeAction`,
+            /// drops the actions it advertises, reports `SemState::Disabled`
+            /// so `:disabled` styling and assistive tech agree with what the
+            /// user can actually do — and *looks* it.
+            ///
+            /// The dimming matters as much as the enforcement: before it, a
+            /// disabled button rendered identically to an enabled one, so the
+            /// only way to discover it was inert was to click it and watch
+            /// nothing happen. A `:disabled` rule in `.lss` still wins over
+            /// this default.
             pub fn disabled(mut self, yes: bool) -> Self {
                 self.el.disabled = yes;
+                if yes {
+                    $crate::widget::mute(&mut self.el);
+                }
                 self
             }
             /// Override the background fill.
@@ -67,3 +77,34 @@ macro_rules! impl_common {
 }
 
 pub(crate) use impl_common;
+
+/// Wash a disabled subtree out toward the page.
+///
+/// Applied to the built element and its descendants, so a button's label fades
+/// with its fill rather than staying full-strength on a pale box. Blending
+/// toward white assumes a light surface, which is the framework's default
+/// theme; a `.lss` `:disabled` rule overrides it wherever that is wrong.
+pub(crate) fn mute(el: &mut crate::Element) {
+    /// How much of the original colour survives.
+    const KEEP: f32 = 0.38;
+    fn wash(c: lumen_core::Color) -> lumen_core::Color {
+        lumen_core::Color::new_linear(
+            c.r * KEEP + (1.0 - KEEP),
+            c.g * KEEP + (1.0 - KEEP),
+            c.b * KEEP + (1.0 - KEEP),
+            c.a,
+        )
+    }
+    if let Some(bg) = el.background {
+        el.background = Some(wash(bg));
+    }
+    if let Some(b) = &mut el.border {
+        b.color = wash(b.color);
+    }
+    if let Some(ts) = el.text_style_mut() {
+        ts.color = wash(ts.color);
+    }
+    for c in &mut el.children {
+        mute(c);
+    }
+}

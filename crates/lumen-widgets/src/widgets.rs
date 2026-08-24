@@ -206,7 +206,13 @@ pub fn scroll(
 }
 
 /// A single-style text input with its own string state (`name`). Pre-IME
-/// (committed text only); full IME lands in M1.
+/// (committed text only): no caret, no selection, no key map — Backspace pops
+/// the last character and that is the whole edit model.
+///
+/// **Prefer [`TextInput`](crate::TextInput)**, which has all of it. This
+/// remains only for the pre-M1 string-signal contract; the last widget still
+/// built on it (`FindReplaceBar`) moved off it because a field you cannot
+/// correct a typo in is not a field.
 pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
     let value = cx.signal(name, || initial.to_string());
     let v = value.get(cx.runtime());

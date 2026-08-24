@@ -61,9 +61,14 @@ impl SearchField {
     pub fn new(cx: &BuildCx, name: &str, placeholder: impl Into<String>) -> SearchField {
         let editor = cx.signal(name, || TextEditor::new(""));
         let has_text = !editor.get(cx.runtime()).text().is_empty();
-        let _ = placeholder; // placeholder rendering is the input's concern (below)
 
-        let mut input: Element = TextInput::new(cx, name, "").into();
+        // The placeholder used to be dropped on the floor here — an empty
+        // search field showed nothing and, having neither label nor value,
+        // was invisible to a11y and to selectors (W0301). `TextInput` already
+        // knows how to render one and report it as the accessible name.
+        let mut input: Element = TextInput::new(cx, name, "")
+            .placeholder(placeholder.into())
+            .into();
         // Focus tracking is id-based: without an id on the inner editor,
         // clicking the field would focus nothing and typing would drop.
         input = input.id(format!("{name}-input"));

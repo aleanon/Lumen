@@ -159,8 +159,13 @@ impl RichTextEditor {
                 label: src.clone(),
                 value: Some(src.clone()),
                 actions: vec![Action::Focus, Action::SetValue],
-                background: Some(Color::srgb8(0xf2, 0xf2, 0xf2, 0xff)),
-                corner_radius: 4.0,
+                background: Some(Color::srgb8(0xf7, 0xf8, 0xfa, 0xff)),
+                corner_radius: 6.0,
+                // Matches `TextInput`: a filled box with no edge reads as a label.
+                border: Some(lumen_render::Border {
+                    width: 1.0,
+                    color: Color::srgb8(0xc9, 0xd0, 0xdb, 0xff),
+                }),
                 style: LayoutStyle {
                     padding: Edges::all(Dim::px(6.0)),
                     min_width: Dim::px(220.0),
@@ -177,6 +182,17 @@ impl RichTextEditor {
                 })),
                 on_caret_set: Some(Rc::new(move |rt, byte, extend| {
                     editor.update(rt, |e| e.place(byte, extend));
+                })),
+                // W2: `SetValue` is advertised, so implement it — replace the
+                // whole source through the normal edit path so undo stays
+                // coherent. Without this the agent could type into the editor
+                // but never set it.
+                on_set_value: Some(Rc::new(move |rt, v: &str| {
+                    editor.update(rt, |e| {
+                        e.select_all();
+                        e.insert(v);
+                    });
+                    mirror.set(rt, editor.get(rt).text().to_string());
                 })),
                 on_key: Some(Rc::new(move |rt, ke| {
                     crate::text_input::edit_key(rt, ke, editor, mirror, true);
@@ -243,23 +259,35 @@ pub struct FindReplaceBar {
 
 impl FindReplaceBar {
     /// M.4: a find/replace bar operating on a [`rich_text_editor`]'s source.
-    /// `{name}.find` / `{name}.replace` hold the inputs; the count label shows
-    /// live match counts and the button rewrites every occurrence (caret resets
-    /// to the end; the editor's undo history keeps the previous text).
+    ///
+    /// The two fields are real [`TextInput`]s — caret, selection, and the whole
+    /// shared editing key map (word motion, Ctrl+Backspace, Ctrl+A/L, undo) —
+    /// keyed `{name}.find` and `{name}.replace`, each with the usual
+    /// `{key}.text` string mirror. They were `text_field_basic` boxes before:
+    /// no caret, no borders, no placeholder, and Backspace could only pop the
+    /// last character, so a typo meant retyping the term.
+    ///
+    /// The count label shows live match counts and the button rewrites every
+    /// occurrence (caret resets to the end; the editor's undo history keeps the
+    /// previous text). With an empty search term there is nothing to replace,
+    /// so the button is disabled rather than silently doing nothing.
     pub fn new(cx: &BuildCx, name: &str, editor_name: &str) -> FindReplaceBar {
         let el = {
             use lumen_text::TextEditor;
             let editor = cx.signal(editor_name, || TextEditor::new(""));
             let mirror = cx.signal(format!("{editor_name}.text"), String::new);
-            let find = cx.signal(format!("{name}.find"), String::new);
-            let needle = find.get(cx.runtime());
+            let find_key = format!("{name}.find");
+            let replace_key = format!("{name}.replace");
+
+            let needle = crate::TextInput::text_of(cx.runtime(), &find_key);
             let count = crate::richdoc::RichDoc::find(&mirror.get(cx.runtime()), &needle).len();
 
-            let replace = cx.signal(format!("{name}.replace"), String::new);
             let apply = {
+                let find_key = find_key.clone();
+                let replace_key = replace_key.clone();
                 move |rt: &lumen_core::state::Runtime| {
-                    let needle = find.get(rt);
-                    let with = replace.get(rt);
+                    let needle = crate::TextInput::text_of(rt, &find_key);
+                    let with = crate::TextInput::text_of(rt, &replace_key);
                     if needle.is_empty() {
                         return;
                     }
@@ -275,19 +303,36 @@ impl FindReplaceBar {
                 }
             };
 
+            let label = match count {
+                0 if needle.is_empty() => "no search term".to_string(),
+                0 => "no matches".to_string(),
+                1 => "1 match".to_string(),
+                n => format!("{n} matches"),
+            };
+            let mut count_el = crate::widgets::text(label).id(format!("{name}-count"));
+            if let Some(ts) = count_el.text_style_mut() {
+                ts.font_size = 12.0;
+                ts.color = Color::srgb8(0x6b, 0x74, 0x88, 0xff);
+            }
+
             let mut row = crate::widgets::row(vec![
-                crate::widgets::text_field_basic(cx, &format!("{name}.find"), &needle)
-                    .id(format!("{name}-find")),
-                crate::widgets::text_field_basic(
-                    cx,
-                    &format!("{name}.replace"),
-                    &replace.get(cx.runtime()),
-                )
-                .id(format!("{name}-replace")),
-                crate::widgets::text(format!("{count} match(es)")).id(format!("{name}-count")),
-                crate::widgets::button("Replace all", apply).id(format!("{name}-apply")),
+                crate::TextInput::new(cx, &find_key, "")
+                    .placeholder("Find")
+                    .id(format!("{name}-find"))
+                    .into(),
+                crate::TextInput::new(cx, &replace_key, "")
+                    .placeholder("Replace with")
+                    .id(format!("{name}-replace"))
+                    .into(),
+                count_el,
+                crate::Button::new("Replace all")
+                    .on_press(apply)
+                    .disabled(needle.is_empty())
+                    .id(format!("{name}-apply"))
+                    .into(),
             ]);
             row.style.column_gap = Dim::px(8.0);
+            row.style.align_items = Some(lumen_layout::Align::Center);
             row
         };
         FindReplaceBar { el }

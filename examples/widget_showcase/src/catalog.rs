@@ -486,19 +486,15 @@ fn d_button(cx: &mut BuildCx) -> Element {
                 .on_press(move |rt| count.update(rt, |n| *n += 1))
                 .id("btn-ghost")
                 .into(),
-            // `.disabled(true)` is behavioural — the dimming is the app's (or
-            // a `:disabled` rule's) job, so tint it here to make it legible.
             Button::new("Disabled")
                 .on_press(move |rt| count.update(rt, |n| *n += 1))
                 .disabled(true)
-                .background(Color::srgb8(0xdc, 0xe1, 0xea, 0xff))
-                .text_color(muted())
                 .id("btn-disabled")
                 .into(),
         ]),
         note(
-            "The disabled button takes no clicks, no hover and no Tab — and the agent's \
-             invokeAction refuses it.",
+            "The disabled button dims itself, takes no clicks, no hover and no Tab, and \
+             drops the actions it advertises — so the agent refuses it too.",
         ),
     ])
 }

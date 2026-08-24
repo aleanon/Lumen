@@ -602,7 +602,15 @@ impl Tree {
                     role: Role::TreeItem,
                     label: label.clone(),
                     focusable: true,
-                    actions: vec![Action::Click, Action::Focus],
+                    // Only a parent row does anything on click. A leaf used to
+                    // advertise `Click` regardless, which promised the agent and
+                    // assistive tech an activation that would silently do
+                    // nothing (W0106). Both kinds stay focusable and reachable.
+                    actions: if toggleable {
+                        vec![Action::Click, Action::Focus]
+                    } else {
+                        vec![Action::Focus]
+                    },
                     states,
                     style: LayoutStyle {
                         padding: Edges {
