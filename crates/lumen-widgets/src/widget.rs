@@ -95,6 +95,9 @@ pub(crate) fn mute(el: &mut crate::Element) {
             c.a,
         )
     }
+    // A disabled control must not advertise a hand or an I-beam: the pointer
+    // shape is a promise about what a click will do, and the answer is nothing.
+    el.cursor = None;
     if let Some(bg) = el.background {
         el.background = Some(wash(bg));
     }

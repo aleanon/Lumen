@@ -2008,13 +2008,37 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         &self.rt
     }
 
+    /// The pointer shape as a stable name — `"pointer"`, `"text"`,
+    /// `"col-resize"`, … or `"default"` when no rule applies.
+    ///
+    /// The cursor is user-visible state that no screenshot captures, so
+    /// without this an agent or a test cannot tell whether a control advertises
+    /// itself as draggable or typeable. `"default"` rather than `null` for the
+    /// no-rule case, because that is what the shell shows.
+    pub fn cursor_name(&self) -> &'static str {
+        use lumen_core::CursorShape as C;
+        match self.cursor_shape().unwrap_or(C::Default) {
+            C::Default => "default",
+            C::Pointer => "pointer",
+            C::Text => "text",
+            C::Wait => "wait",
+            C::Crosshair => "crosshair",
+            C::Move => "move",
+            C::ColResize => "col-resize",
+            C::RowResize => "row-resize",
+            C::NotAllowed => "not-allowed",
+            C::None => "none",
+        }
+    }
+
     /// PROP1: the pointer shape for whatever the pointer is currently over.
     ///
-    /// Resolved from the hovered node's `.lss` `cursor`, walking ancestors —
-    /// CSS `cursor` inherits, and a button's label should not punch a hole in
-    /// the button's own pointer. `None` means "no rule applies"; the shell then
-    /// leaves the platform default alone rather than forcing an arrow, so a
-    /// cursor set by something else (a drag, an IME) is not stomped.
+    /// Resolved from the hovered node's `cursor` — the `.lss` rule if there is
+    /// one, else the widget's own — walking ancestors, because CSS `cursor`
+    /// inherits and a button's label should not punch a hole in the button's
+    /// own pointer. `None` means "no rule applies", which the shell renders as
+    /// the platform default; see [`cursor_name`](Self::cursor_name) for the
+    /// resolved name.
     ///
     /// Lives here rather than in the shell because hit-testing and the resolved
     /// style are both runtime state; the shell only maps the shape to its
@@ -3519,12 +3543,40 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             .into_iter()
             .filter_map(|n| {
                 let h = self.meta.get(&n).and_then(|m| m.on_dismiss.clone())?;
-                (!self.tree.bounds(n).contains(pos)).then_some(h)
+                (!self.dismiss_owner_contains(n, pos)).then_some(h)
             })
             .collect();
         for h in hits {
             h(&self.rt);
         }
+    }
+
+    /// Whether `pos` lands on the overlay `n` **or on the element that owns
+    /// it** — its direct parent, which is also the trigger's parent.
+    ///
+    /// Testing the overlay's own bounds alone made every toggling trigger
+    /// un-closable. A press on the trigger is outside the panel, so the press
+    /// (`PointerDown`) dismissed the panel, and then the release
+    /// (`PointerUp`) ran the trigger's toggle and opened it straight back up:
+    /// clicking an open dropdown collapsed and instantly re-expanded it.
+    ///
+    /// The parent is the right frame because that is the shape every anchored
+    /// overlay has — a `Position::Relative` wrapper holding the trigger plus an
+    /// absolutely-positioned panel — so the wrapper's box *is* "the trigger",
+    /// the panel being out of flow. Only the direct parent: walking further up
+    /// would reach a root that contains everything and nothing would ever
+    /// dismiss.
+    ///
+    /// `Sheet`/`Drawer` sit inside a full-window wrapper, so this never
+    /// dismisses them from a press — their scrim closes them through its own
+    /// `on_click` instead, which correctly leaves a press on the panel alone.
+    /// Escape is unaffected: it goes through `dismiss_all`.
+    fn dismiss_owner_contains(&self, n: NodeIndex, pos: Point) -> bool {
+        if self.tree.bounds(n).contains(pos) {
+            return true;
+        }
+        let parent = self.tree.parent(n);
+        parent.is_some() && self.tree.bounds(parent).contains(pos)
     }
 
     /// Fire every `on_dismiss` (Escape closes all overlays).

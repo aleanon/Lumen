@@ -169,6 +169,13 @@ impl PaneGrid {
                 style: LayoutStyle {
                     width: Dim::px(6.0),
                     height: Dim::pct(1.0),
+                    // The panes are `flex_grow` with a zero basis, so they take
+                    // the whole row and the default `flex_shrink: 1` squeezed
+                    // the divider to **zero width** — it painted nothing and
+                    // could not be hovered or hit, which is why the grab was
+                    // undiscoverable in the first place.
+                    flex_grow: 0.0,
+                    flex_shrink: 0.0,
                     ..LayoutStyle::default()
                 },
                 ..Element::default()

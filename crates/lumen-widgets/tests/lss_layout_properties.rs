@@ -550,8 +550,10 @@ fn cursor_resolves_from_the_hovered_node_and_inherits() {
     h.pump();
     assert_eq!(h.cursor_shape(), Some(CursorShape::Pointer));
 
-    // A node with no rule anywhere up its chain reports None, so the shell
-    // leaves the platform default alone rather than forcing an arrow.
+    // A node with no rule anywhere up its chain reports None — which the shell
+    // renders as the platform default. It used to leave whatever was showing,
+    // so the first hand or I-beam the pointer touched stuck to it across the
+    // whole window until it crossed another node with a rule.
     let p = h.node_bounds_by_id("plain").expect("plain");
     h.inject(lumen_core::events::Event::PointerMove(
         lumen_core::events::PointerEvent::at(kurbo::Point::new(
@@ -561,6 +563,22 @@ fn cursor_resolves_from_the_hovered_node_and_inherits() {
     ));
     h.pump();
     assert_eq!(h.cursor_shape(), None);
+    assert_eq!(
+        h.cursor_name(),
+        "default",
+        "no rule resolves to the platform default, not to whatever was showing"
+    );
+
+    // …and moving back onto the button reports the hand again, so the shape
+    // tracks the pointer rather than latching.
+    h.inject(lumen_core::events::Event::PointerMove(
+        lumen_core::events::PointerEvent::at(kurbo::Point::new(
+            b.x0 + b.width() / 2.0,
+            b.y0 + b.height() / 2.0,
+        )),
+    ));
+    h.pump();
+    assert_eq!(h.cursor_name(), "pointer");
 }
 
 /// An unsupported cursor name reports W0109 rather than silently doing nothing.

@@ -372,6 +372,10 @@ fn handle<R: Renderer, E: Spawner>(
                 "overdue_ms": a.overdue_ms,
             })).collect::<Vec<_>>()
         })),
+        // The pointer shape under the cursor. Not in a screenshot and not in
+        // the semantic tree, so this is the only way to check that a control
+        // advertises itself as draggable/typeable.
+        "ui.getCursor" => Ok(json!({ "cursor": app.cursor_name() })),
         "ui.getDeps" => Ok(app.get_deps(sel(params)?)),
         "ui.whatDependsOn" => {
             let sig = params

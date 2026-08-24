@@ -156,6 +156,8 @@ impl RichTextEditor {
             let source_pane = Element {
                 role: Role::TextInput,
                 focusable: true,
+                // An I-beam, like every other editable surface.
+                cursor: Some(lumen_core::CursorShape::Text),
                 label: src.clone(),
                 value: Some(src.clone()),
                 actions: vec![Action::Focus, Action::SetValue],

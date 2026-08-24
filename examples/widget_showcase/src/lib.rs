@@ -204,6 +204,7 @@ fn picker(cx: &mut BuildCx, entry: &'static Entry) -> Element {
     trigger.elide_semantics = false;
     trigger.id = Some("widget-picker".into());
     trigger.background = Some(band());
+    trigger.cursor = Some(lumen_core::CursorShape::Pointer);
     trigger.corner_radius = 9.0;
     trigger.style.width = Dim::px(PICKER_W);
     trigger.style.height = Dim::px(38.0);
@@ -324,6 +325,7 @@ fn option_row(
     row.elide_semantics = false;
     row.id = Some(format!("opt-{}", entry.slug).into());
     row.background = Some(if current { hilite() } else { band() });
+    row.cursor = Some(lumen_core::CursorShape::Pointer);
     row.corner_radius = 6.0;
     row.style.height = Dim::px(ROW_H as f32);
     row.style.width = Dim::pct(1.0);

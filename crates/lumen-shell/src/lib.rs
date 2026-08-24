@@ -870,19 +870,29 @@ impl ApplicationHandler<ShellEvent> for Shell {
                     // Present only when the frame actually changed (R2): an idle
                     // tick repaints nothing, so the surface keeps its last frame.
                     let stats = h.pump();
-                    // PROP1: apply the `.lss` `cursor` for whatever the pointer
-                    // is over. Only on CHANGE — `set_cursor` is a platform call
-                    // per invocation, and a frame does not need to re-assert a
-                    // shape that is already showing.
+                    // PROP1: apply the `cursor` for whatever the pointer is
+                    // over. Only on CHANGE — `set_cursor` is a platform call per
+                    // invocation, and a frame does not need to re-assert a shape
+                    // that is already showing.
                     let want = h.cursor_shape();
                     if want != self.cursor_shape {
                         self.cursor_shape = want;
                         if let Some(w) = &self.window {
                             match want {
-                                // No rule applies: leave whatever is showing.
-                                // Forcing an arrow here would stomp a cursor set
-                                // by a drag or an IME.
-                                None => {}
+                                // No rule applies ⇒ the platform default. This
+                                // arm used to leave whatever was showing, on the
+                                // theory that a drag or an IME might have set
+                                // it — but nothing else in the stack sets the
+                                // cursor, and the practical effect was that the
+                                // first hand or I-beam the pointer touched stuck
+                                // to it everywhere until it happened to cross
+                                // another node with a rule. The hovered node is
+                                // the authority, and "no rule" is `default`,
+                                // exactly as it is in CSS.
+                                None => {
+                                    w.set_cursor_visible(true);
+                                    w.set_cursor(winit_cursor(lumen_core::CursorShape::Default));
+                                }
                                 Some(lumen_core::CursorShape::None) => w.set_cursor_visible(false),
                                 Some(shape) => {
                                     w.set_cursor_visible(true);
