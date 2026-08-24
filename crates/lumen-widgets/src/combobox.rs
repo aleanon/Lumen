@@ -3,7 +3,7 @@
 //! mirrors it into the input. State: the editor under `{name}` (standard
 //! TextInput contract), open flag `{name}.open`, selection `{name}.selected`.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element, TextInput};
 use lumen_core::semantics::Role;
 use lumen_core::Color;
@@ -41,11 +41,23 @@ const MAX_VISIBLE: usize = 8;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Combobox {
-    el: Element,
+    /// The field, still unbuilt — `TextInput` is a `Widget`.
+    input: TextInput,
+    name: String,
+    open: lumen_core::state::Signal<bool>,
+    /// The dropdown panel, or `None` while closed.
+    ///
+    /// **This one is built eagerly**, and it marks the limit of deferral: the
+    /// panel may contain a `VirtualList`, whose construction needs the
+    /// `BuildCx` (it owns a scroll signal). A widget can only defer as far as
+    /// the last thing that needs the build context — everything past that has
+    /// to be materialized where the context is.
+    menu: Option<Element>,
+    common: Common,
 }
 
 impl Combobox {
-    /// A combobox over `options`; selection lands in `{name}.selected`.
+    /// A text field with a filtered dropdown of `options`.
     pub fn new(
         cx: &BuildCx,
         name: &str,
@@ -58,22 +70,7 @@ impl Combobox {
         let query = editor.get(cx.runtime()).text().to_string();
         let is_open = open.get(cx.runtime());
 
-        let mut input: Element = TextInput::new(cx, name, "").into();
-        input = input.id(format!("{name}-input"));
-        input.style.flex_grow = 1.0;
-        // Typing re-opens the list; the click focuses the editor as usual.
-        {
-            let prev = input.on_click.take();
-            input.on_click = Some(Rc::new(move |rt| {
-                if let Some(p) = &prev {
-                    p(rt);
-                }
-                open.set(rt, true);
-            }));
-        }
-
-        let mut children = vec![input];
-        if is_open {
+        let menu = is_open.then(|| {
             let q = query.to_lowercase();
             let rows: Vec<Element> = options
                 .iter()
@@ -143,10 +140,48 @@ impl Combobox {
             };
             menu.style.margin.top = Dim::px(4.0);
             menu.style.width = Dim::px(W as f32);
+            menu
+        });
+
+        Combobox {
+            input: TextInput::new(cx, name, ""),
+            name: name.to_string(),
+            open,
+            menu,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for Combobox {
+    fn build(self) -> Element {
+        let Combobox {
+            input,
+            name,
+            open,
+            menu,
+            common,
+        } = self;
+
+        let mut input: Element = input.id(format!("{name}-input")).into();
+        input.style.flex_grow = 1.0;
+        // Typing re-opens the list; the click focuses the editor as usual.
+        {
+            let prev = input.on_click.take();
+            input.on_click = Some(Rc::new(move |rt| {
+                if let Some(p) = &prev {
+                    p(rt);
+                }
+                open.set(rt, true);
+            }));
+        }
+
+        let mut children = vec![input];
+        if let Some(menu) = menu {
             children.push(menu);
         }
 
-        let el = Element {
+        let mut el = Element {
             role: Role::Group,
             style: LayoutStyle {
                 position: Position::Relative,
@@ -158,8 +193,9 @@ impl Combobox {
             children,
             ..Element::default()
         };
-        Combobox { el }
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Combobox);
+impl_widget!(Combobox);

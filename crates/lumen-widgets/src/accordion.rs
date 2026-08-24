@@ -3,7 +3,7 @@
 //! [`Accordion::new`] / [`Accordion::body`]; the open/closed flag lives in a
 //! boolean signal keyed by `name`.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Element};
 use lumen_core::semantics::{Action, Role, State as SemState};
 use lumen_core::Color;
@@ -42,26 +42,78 @@ use std::rc::Rc;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Accordion {
-    el: Element,
-    /// The state key, so [`Accordion::body`] can tag its panel `{name}-body`.
     name: String,
-    /// Snapshot of the open-state signal at build time (a pure function of it), so
-    /// [`Accordion::body`] mounts the content iff the section is open.
+    title: crate::Text,
+    /// The disclosure flag, read where the `BuildCx` is.
     is_open: bool,
+    open: lumen_core::state::Signal<bool>,
+    /// The body, collected only while the section is open.
+    body: Option<Vec<Element>>,
+    color: Option<Color>,
+    common: Common,
 }
 
 impl Accordion {
-    /// A collapsed-by-default disclosure titled `title`, its open/closed flag
-    /// stored under `name`. Add content with [`Accordion::body`].
+    /// A disclosure section titled `title`, open/closed under `name`.
     pub fn new(cx: &BuildCx, name: &str, title: impl Into<crate::Text>) -> Accordion {
-        let title = title.into();
         let open = cx.signal(name, || false);
-        let is_open = open.get(cx.runtime());
+        Accordion {
+            name: name.to_string(),
+            title: title.into(),
+            is_open: open.get(cx.runtime()),
+            open,
+            body: None,
+            color: None,
+            common: Common::default(),
+        }
+    }
+
+    /// Mount `content` inside the section (shown only while it is open).
+    pub fn body(mut self, content: impl IntoIterator<Item = Element>) -> Accordion {
+        // Collected only when it will be shown, exactly as before — a collapsed
+        // section pays nothing for a body it will not mount.
+        if self.is_open {
+            self.body = Some(content.into_iter().collect());
+        }
+        self
+    }
+
+    /// Whether the section named `name` is currently open.
+    pub fn is_open(cx: &BuildCx, name: &str) -> bool {
+        cx.signal(name, || false).get(cx.runtime())
+    }
+
+    /// Set the title's text colour.
+    pub fn color(mut self, c: Color) -> Accordion {
+        self.color = Some(c);
+        self
+    }
+}
+
+impl Widget for Accordion {
+    fn build(self) -> Element {
+        let Accordion {
+            name,
+            title,
+            is_open,
+            open,
+            body,
+            color,
+            common,
+        } = self;
 
         // Header: chevron + title in a row. Clicking it (or Space/Enter when
         // focused, which routes to `on_click`) flips the flag.
         let chevron = Element::text(if is_open { "▼" } else { "▶" });
         let (title_s, title_dyn) = title.clone().into_parts();
+        // The colour is applied to the title as it is made, rather than walked
+        // back to through `children[0].children.last()`.
+        let mut title_el = Element::text(title);
+        if let Some(c) = color {
+            if let Some(ts) = title_el.text_style_mut() {
+                ts.color = c;
+            }
+        }
         let header = Element {
             role: Role::Button,
             label: title_s,
@@ -89,13 +141,29 @@ impl Accordion {
             },
             // Capture only the `Copy` signal handle (ADR-013); mutate in place.
             on_click: Some(Rc::new(move |rt| open.update(rt, |o| *o = !*o))),
-            children: vec![chevron, Element::text(title)],
+            children: vec![chevron, title_el],
             ..Element::default()
         };
 
+        let mut children = vec![header];
+        if let Some(content) = body {
+            children.push(Element {
+                id: Some(format!("{name}-body").into()),
+                role: Role::Group,
+                style: LayoutStyle {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Dim::px(6.0),
+                    ..LayoutStyle::default()
+                },
+                children: content,
+                ..Element::default()
+            });
+        }
+
         // The outer node mirrors the disclosure state in semantics so the agent
         // sees expanded/collapsed on the section as a whole.
-        let el = Element {
+        let mut el = Element {
             role: Role::Group,
             states: vec![if is_open {
                 SemState::Expanded
@@ -108,64 +176,15 @@ impl Accordion {
                 row_gap: Dim::px(6.0),
                 ..LayoutStyle::default()
             },
-            children: vec![header],
+            children,
             ..Element::default()
         };
-        Accordion {
-            el,
-            name: name.to_string(),
-            is_open,
-        }
-    }
-
-    /// Supply the body shown when the section is open. The `content` nodes are
-    /// mounted **only when open** — collapsed, the body is absent from the tree
-    /// (conditional structure, not a hidden flag). Wrapped in a `Column`-styled
-    /// panel tagged `{name}-body` for hit-testing / tests. Calling this again
-    /// replaces any previous body.
-    pub fn body(mut self, content: impl IntoIterator<Item = Element>) -> Accordion {
-        // Drop any previously-mounted body (index 0 is always the header).
-        self.el.children.truncate(1);
-        if self.is_open {
-            let panel = Element {
-                id: Some(format!("{}-body", self.name).into()),
-                role: Role::Group,
-                style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Dim::px(6.0),
-                    ..LayoutStyle::default()
-                },
-                children: content.into_iter().collect(),
-                ..Element::default()
-            };
-            self.el.children.push(panel);
-        }
-        self
-    }
-
-    /// Whether the accordion named `name` is currently open (an external reader
-    /// for the app, mirroring the signal without a rebuild).
-    pub fn is_open(cx: &BuildCx, name: &str) -> bool {
-        cx.signal(name, || false).get(cx.runtime())
-    }
-
-    /// Set the header title colour (e.g. to match a dark theme).
-    pub fn color(mut self, c: Color) -> Accordion {
-        if let Some(ts) = self
-            .el
-            .children
-            .first_mut()
-            .and_then(|h| h.children.last_mut())
-            .and_then(|t| t.text_style_mut())
-        {
-            ts.color = c;
-        }
-        self
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Accordion);
+impl_widget!(Accordion);
 
 #[cfg(test)]
 mod tests {

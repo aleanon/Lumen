@@ -2,7 +2,7 @@
 //! open, an overlay list) is built inside [`PickList::new`]; the selection and
 //! open state live in signals keyed by `name`.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element};
 use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::Role;
@@ -46,9 +46,21 @@ const MAX_VISIBLE: usize = 8;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct PickList {
-    el: Element,
+    name: String,
+    placeholder: String,
+    /// The current selection, read where the `BuildCx` is.
+    sel: String,
+    options: Vec<String>,
+    selected: lumen_core::state::Signal<String>,
+    open: lumen_core::state::Signal<bool>,
+    /// The dropdown panel, or `None` while closed. Built eagerly for the same
+    /// reason as `Combobox`'s: a long list becomes a `VirtualList`, which needs
+    /// the `BuildCx`.
+    menu: Option<Element>,
+    common: Common,
 }
 
+/// The dropdown's disclosure chevron.
 fn chevron() -> Element {
     widgets::canvas(12.0, 12.0, |f, size| {
         use kurbo::{BezPath, Point};
@@ -61,6 +73,7 @@ fn chevron() -> Element {
     })
 }
 
+/// A 14 px run in `color`.
 fn text(s: impl Into<crate::Text>, color: Color) -> Element {
     let mut e = widgets::text(s);
     if let Some(ts) = e.text_style_mut() {
@@ -71,8 +84,8 @@ fn text(s: impl Into<crate::Text>, color: Color) -> Element {
 }
 
 impl PickList {
-    /// A dropdown over `options`, selection stored under `name`, showing
-    /// `placeholder` when nothing is selected.
+    /// A dropdown over `options`; the choice lives in the signal keyed by
+    /// `name`.
     pub fn new(
         cx: &BuildCx,
         name: &str,
@@ -84,83 +97,8 @@ impl PickList {
         let open = cx.signal(format!("{name}.open"), || false);
         let sel = selected.get(cx.runtime());
         let is_open = open.get(cx.runtime());
-        let placeholder = placeholder.into();
 
-        // Trigger: current selection (or placeholder) + a chevron.
-        let label = if sel.is_empty() {
-            text(placeholder, Color::srgb8(0x9a, 0xa1, 0xad, 0xff))
-        } else {
-            text(sel.clone(), Color::srgb8(0x1c, 0x22, 0x30, 0xff))
-        };
-        let mut label = label;
-        label.style.flex_grow = 1.0;
-        let mut trigger = widgets::row(vec![label, chevron()]);
-        trigger.role = Role::Button;
-        trigger.focusable = true;
-        // Focus is keyed by StableId, so a focusable node needs one or it can
-        // never hold focus (and never receives keys). Namespaced under `name`
-        // so two dropdowns don't collide (W4).
-        trigger.id = Some(format!("{name}-trigger").into());
-        // `widgets::row` marks itself structural, which splices it (and its id)
-        // out of the semantic tree — but this row IS the control now, so it has
-        // to be visible to selectors, focus and assistive tech.
-        trigger.elide_semantics = false;
-        trigger.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
-        trigger.corner_radius = 8.0;
-        trigger.style.align_items = Some(Align::Center);
-        trigger.style.column_gap = Dim::px(8.0);
-        trigger.style.height = Dim::px(TRIGGER_H as f32);
-        trigger.style.padding = Edges {
-            left: Dim::px(12.0),
-            right: Dim::px(10.0),
-            top: Dim::px(0.0),
-            bottom: Dim::px(0.0),
-        };
-        trigger.on_click = Some(Rc::new(move |rt| open.update(rt, |o| *o = !*o)));
-        // W3: the WAI-ARIA combobox/listbox keys. ↑/↓ move the selection
-        // directly (and open a closed list), Home/End jump to the ends, Escape
-        // closes. Keyboard users no longer need the pointer to choose.
-        {
-            let opts: Vec<String> = options.clone();
-            trigger.on_key = Some(Rc::new(move |rt, ke| {
-                if opts.is_empty() {
-                    return;
-                }
-                let cur = selected.get(rt);
-                let at = opts.iter().position(|o| *o == cur);
-                let pick = |rt: &lumen_core::state::Runtime, i: usize| {
-                    selected.set(rt, opts[i].clone());
-                };
-                match ke.key {
-                    Key::Named(NamedKey::ArrowDown) => {
-                        open.set(rt, true);
-                        let i = match at {
-                            Some(i) if i + 1 < opts.len() => i + 1,
-                            Some(i) => i,
-                            None => 0,
-                        };
-                        pick(rt, i);
-                    }
-                    Key::Named(NamedKey::ArrowUp) => {
-                        open.set(rt, true);
-                        let i = match at {
-                            Some(i) if i > 0 => i - 1,
-                            Some(i) => i,
-                            None => opts.len() - 1,
-                        };
-                        pick(rt, i);
-                    }
-                    Key::Named(NamedKey::Home) => pick(rt, 0),
-                    Key::Named(NamedKey::End) => pick(rt, opts.len() - 1),
-                    Key::Named(NamedKey::Escape) => open.set(rt, false),
-                    _ => {}
-                }
-            }));
-        }
-
-        let mut children = vec![trigger];
-
-        if is_open {
+        let menu = is_open.then(|| {
             let row_at = {
                 let options = options.clone();
                 let sel = sel.clone();
@@ -219,10 +157,109 @@ impl PickList {
                 ..Edges::AUTO
             };
             menu.style.width = Dim::px(W as f32);
+            menu
+        });
+
+        PickList {
+            name: name.to_string(),
+            placeholder: placeholder.into(),
+            sel,
+            options,
+            selected,
+            open,
+            menu,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for PickList {
+    fn build(self) -> Element {
+        let PickList {
+            name,
+            placeholder,
+            sel,
+            options,
+            selected,
+            open,
+            menu,
+            common,
+        } = self;
+
+        // Trigger: current selection (or placeholder) + a chevron.
+        let mut label = if sel.is_empty() {
+            text(placeholder, Color::srgb8(0x9a, 0xa1, 0xad, 0xff))
+        } else {
+            text(sel, Color::srgb8(0x1c, 0x22, 0x30, 0xff))
+        };
+        label.style.flex_grow = 1.0;
+        let mut trigger = widgets::row(vec![label, chevron()]);
+        trigger.role = Role::Button;
+        trigger.focusable = true;
+        // Focus is keyed by StableId, so a focusable node needs one or it can
+        // never hold focus (and never receives keys). Namespaced under `name`
+        // so two dropdowns don't collide (W4).
+        trigger.id = Some(format!("{name}-trigger").into());
+        // `widgets::row` marks itself structural, which splices it (and its id)
+        // out of the semantic tree — but this row IS the control now, so it has
+        // to be visible to selectors, focus and assistive tech.
+        trigger.elide_semantics = false;
+        trigger.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
+        trigger.corner_radius = 8.0;
+        trigger.style.align_items = Some(Align::Center);
+        trigger.style.column_gap = Dim::px(8.0);
+        trigger.style.height = Dim::px(TRIGGER_H as f32);
+        trigger.style.padding = Edges {
+            left: Dim::px(12.0),
+            right: Dim::px(10.0),
+            top: Dim::px(0.0),
+            bottom: Dim::px(0.0),
+        };
+        trigger.on_click = Some(Rc::new(move |rt| open.update(rt, |o| *o = !*o)));
+        // W3: the WAI-ARIA combobox/listbox keys. ↑/↓ move the selection
+        // directly (and open a closed list), Home/End jump to the ends, Escape
+        // closes. Keyboard users no longer need the pointer to choose.
+        trigger.on_key = Some(Rc::new(move |rt, ke| {
+            if options.is_empty() {
+                return;
+            }
+            let cur = selected.get(rt);
+            let at = options.iter().position(|o| *o == cur);
+            let pick = |rt: &lumen_core::state::Runtime, i: usize| {
+                selected.set(rt, options[i].clone());
+            };
+            match ke.key {
+                Key::Named(NamedKey::ArrowDown) => {
+                    open.set(rt, true);
+                    let i = match at {
+                        Some(i) if i + 1 < options.len() => i + 1,
+                        Some(i) => i,
+                        None => 0,
+                    };
+                    pick(rt, i);
+                }
+                Key::Named(NamedKey::ArrowUp) => {
+                    open.set(rt, true);
+                    let i = match at {
+                        Some(i) if i > 0 => i - 1,
+                        Some(i) => i,
+                        None => options.len() - 1,
+                    };
+                    pick(rt, i);
+                }
+                Key::Named(NamedKey::Home) => pick(rt, 0),
+                Key::Named(NamedKey::End) => pick(rt, options.len() - 1),
+                Key::Named(NamedKey::Escape) => open.set(rt, false),
+                _ => {}
+            }
+        }));
+
+        let mut children = vec![trigger];
+        if let Some(menu) = menu {
             children.push(menu);
         }
 
-        let el = Element {
+        let mut el = Element {
             role: Role::Group,
             style: LayoutStyle {
                 position: Position::Relative,
@@ -234,8 +271,9 @@ impl PickList {
             children,
             ..Element::default()
         };
-        PickList { el }
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(PickList);
+impl_widget!(PickList);
