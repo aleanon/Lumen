@@ -110,8 +110,7 @@ fn build(cx: &mut BuildCx) -> Element {
                 .into(),
             Space::new().into(),
             result(format!("Count: {}", count.get(rt))),
-        ], 10.0, 0.0)
-        .into()],
+        ], 10.0, 0.0)],
     );
 
     // --- slider → progress bar ---
@@ -144,8 +143,7 @@ fn build(cx: &mut BuildCx) -> Element {
                 "Notify: {}",
                 if notify.get(rt) { "on" } else { "off" }
             )),
-        ], 0.0, 0.0)
-        .into()],
+        ], 0.0, 0.0)],
     );
 
     // --- radio group (re-themes the gallery) ---
@@ -167,8 +165,7 @@ fn build(cx: &mut BuildCx) -> Element {
             } else {
                 cur_theme
             }),
-        ], 16.0, 0.0)
-        .into()],
+        ], 16.0, 0.0)],
     );
 
     // --- pick list ---
@@ -191,8 +188,7 @@ fn build(cx: &mut BuildCx) -> Element {
             } else {
                 cur_fruit
             }),
-        ], 0.0, 0.0)
-        .into()],
+        ], 0.0, 0.0)],
     );
 
     // --- text input → scrolling to-do list ---
@@ -274,9 +270,9 @@ fn build(cx: &mut BuildCx) -> Element {
     let todo = section(
         "TextInput adds to a list",
         vec![
-            add_input.into(),
+            add_input,
             result(format!("{} item(s)", list.len())),
-            scroll.into(),
+            scroll,
         ],
     );
 
@@ -287,7 +283,7 @@ fn build(cx: &mut BuildCx) -> Element {
         // needed here — reaching into the built node just predated it.
         vec![TextField::new(cx, "notes", "Type notes…\nEnter adds a line")
             .lines(3)
-            .width(INNER as f32)
+            .width(INNER)
             .id("notes")
             .into()],
     );

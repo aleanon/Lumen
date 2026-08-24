@@ -10,6 +10,9 @@ use lumen_core::Color;
 use lumen_layout::{Align, Dim, Edges};
 use std::rc::Rc;
 
+/// A click handler on a feedback widget's affordance.
+type Press = Rc<dyn Fn(&lumen_core::state::Runtime)>;
+
 /// Toast severity — sets the accent bar + background tint and the class.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToastKind {
@@ -70,7 +73,7 @@ pub struct Toast {
     title: crate::Text,
     body: crate::Text,
     /// An optional trailing action.
-    action: Option<(String, Rc<dyn Fn(&lumen_core::state::Runtime)>)>,
+    action: Option<(String, Press)>,
     /// Set by `auto_dismiss` once the toast has outlived its window.
     expired: bool,
     common: Common,
@@ -292,11 +295,11 @@ impl_widget!(Spinner);
 pub struct Chip {
     label: crate::Text,
     /// `(on, handler)` when the chip is selectable.
-    selected: Option<(bool, Rc<dyn Fn(&lumen_core::state::Runtime)>)>,
+    selected: Option<(bool, Press)>,
     /// A leading glyph.
     icon: Option<String>,
     /// A trailing remove (×) affordance.
-    on_remove: Option<Rc<dyn Fn(&lumen_core::state::Runtime)>>,
+    on_remove: Option<Press>,
     common: Common,
 }
 
