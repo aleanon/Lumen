@@ -87,6 +87,26 @@ impl PlatformConfig for DefaultPlatform {
 /// machines for a reported number to be comparable.
 pub const FRAME_BUDGET_MS: f32 = 1000.0 / 60.0;
 
+/// One in-flight animation (O3.3, `ui.animations`).
+#[derive(Clone, Debug)]
+pub struct AnimationInfo {
+    /// The animating node's author id.
+    pub node: String,
+    /// The property being animated, or `"animation"` for a keyframe timeline.
+    pub property: &'static str,
+    /// `0.0..=1.0` for a transition; `0.0` for a keyframe timeline, whose
+    /// phase is not a fraction of a finite whole.
+    pub progress: f64,
+    /// Milliseconds until this transition's declared duration elapses.
+    pub remaining_ms: f64,
+    /// Whether this animation has no declared end (`animation: … infinite`).
+    /// Such an animation is **never** overdue — it is working as declared.
+    pub infinite: bool,
+    /// How far past its declared total a finite animation has run. `0.0` while
+    /// it is on time.
+    pub overdue_ms: f64,
+}
+
 /// O1.3: the performance surface behind `app.perf`.
 ///
 /// **Counters are cumulative for the life of the runtime**, not per-frame.
@@ -2113,6 +2133,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         out.extend(self.blank_frame_findings());
         out.extend(self.occlusion_findings());
         out.extend(self.truncation_findings());
+        out.extend(self.stuck_animation_findings());
         out.extend(self.contrast_findings());
         out
     }
@@ -2198,6 +2219,86 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
         out.sort_by(|a, b| a.message.cmp(&b.message));
         out
+    }
+
+    /// One in-flight animation, as reported by `ui.animations` (O3.3).
+    ///
+    /// A human sees motion. An agent takes a screenshot mid-transition and
+    /// compares it to a golden with no way to know it caught a frame in
+    /// flight — `is_animating()` and `next_deadline()` existed on this type and
+    /// appeared nowhere in `lumen-agent`, and `ui.waitSettled` uses the
+    /// underlying condition without ever reporting *what* is moving.
+    pub fn animations(&self) -> Vec<AnimationInfo> {
+        let now = self.clock_ms;
+        let mut out: Vec<AnimationInfo> = Vec::new();
+        for ((id, prop), a) in self.prop_anims.iter() {
+            if a.committed {
+                continue;
+            }
+            let total = (a.delay_ms + a.duration_ms) as f64;
+            let elapsed = now - a.start_ms;
+            out.push(AnimationInfo {
+                node: id.as_str().to_string(),
+                property: prop,
+                progress: a.progress(now) as f64,
+                remaining_ms: (total - elapsed).max(0.0),
+                infinite: false,
+                // A transition's duration is declared, so "should have finished
+                // by now" is answerable from the animation itself rather than
+                // from a magic constant.
+                overdue_ms: (elapsed - total).max(0.0),
+            });
+        }
+        for (id, (start, done)) in self.key_anims.iter() {
+            if *done {
+                continue;
+            }
+            out.push(AnimationInfo {
+                node: id.as_str().to_string(),
+                property: "animation",
+                progress: 0.0,
+                remaining_ms: 0.0,
+                // A keyframe timeline still running has not hit its iteration
+                // count — including `infinite`, where there is none. Never
+                // overdue: an `animation: spin infinite` is working as declared
+                // for any duration, and warning on it would fire on every
+                // loading spinner in existence.
+                infinite: true,
+                overdue_ms: 0.0,
+            });
+            let _ = start;
+        }
+        out.sort_by(|a, b| a.node.cmp(&b.node).then_with(|| a.property.cmp(b.property)));
+        out
+    }
+
+    /// How far past its own declared duration a transition must run before it
+    /// is called stuck. Generous, because a busy frame legitimately overshoots.
+    const ANIM_OVERDUE_MS: f64 = 2000.0;
+
+    /// W0116: a **finite** animation that has run well past its declared total.
+    ///
+    /// Self-calibrating: the threshold is the animation's own duration plus
+    /// slack, not a global constant. Infinite keyframe timelines are exempt by
+    /// construction — a spinner is doing exactly what it was told to, for as
+    /// long as it is told to, and "this is taking too long" is a question about
+    /// the work behind it, not about the animation.
+    fn stuck_animation_findings(&self) -> Vec<lumen_core::Diagnostic> {
+        self.animations()
+            .into_iter()
+            .filter(|a| !a.infinite && a.overdue_ms > Self::ANIM_OVERDUE_MS)
+            .map(|a| {
+                lumen_core::Diagnostic::new(
+                    lumen_core::codes::W0116,
+                    format!(
+                        "`#{}` has been transitioning `{}` for {:.0} ms past its \
+                         declared duration and has not settled. Whatever it is \
+                         fading toward is not arriving.",
+                        a.node, a.property, a.overdue_ms
+                    ),
+                )
+            })
+            .collect()
     }
 
     /// O3.2: the paint-tier values this node is currently drawn with, as

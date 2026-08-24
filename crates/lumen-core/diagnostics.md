@@ -36,6 +36,7 @@ same commit. Codes are assigned by `02-spec-core.md §9` and `04-spec-lss-stylin
 | W0113 | warning  | Interactive node is almost entirely covered by a later-painted opaque node (invisible and unreachable) | 02 §9 |
 | W0114 | warning  | Frame paints nothing — the tree has content but no node has any area (blank window) | 02 §9 |
 | W0115 | warning  | Active renderer backend has a known rendering defect (GL: gradients render as nothing, silently) | 02 §9 |
+| W0116 | warning  | A finite animation has run past its own declared duration without settling (infinite timelines exempt) | 02 §9 |
 | E0201 | error    | Shader compile error                                  | 02 §9       |
 | W0301 | warning  | Missing semantics on a focusable leaf (no label/value)| 02 §9, 03 §1|
 | W0303 | warning  | Text contrast below the legibility floor, measured with APCA against the composited backdrop (WCAG 1.4.3) | 02 §9, 03 §1|
@@ -53,7 +54,7 @@ drifted to 9 documented rows against 16 defined consts once already, and a
 proposed `W0105` for parse-only `.lss` properties collided with the live
 zero-area-node code):
 
-- `W01xx` layout/render: next free is **W0116**
+- `W01xx` layout/render: next free is **W0117**
 - `W03xx` semantics: next free is **W0304**
 - `W04xx` i18n/text: next free is **W0404**
 - `E01xx` styling: next free is **E0105**

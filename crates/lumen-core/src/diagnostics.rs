@@ -276,6 +276,16 @@ pub mod codes {
     /// read, the semantic tree is entirely correct, and a screenshot is only
     /// wrong if you already know what it should have looked like.
     pub const W0115: &str = "W0115";
+    /// A **finite** animation has run well past its own declared duration and
+    /// has not settled — whatever it is animating toward is not arriving.
+    ///
+    /// Self-calibrating: measured against the animation's declared total plus
+    /// slack, not a global timeout. Infinite keyframe timelines are exempt by
+    /// construction — an `animation: spin infinite` is doing exactly what it
+    /// was told to for as long as it was told to, and warning on it would fire
+    /// on every loading spinner in existence. "This is taking too long" is a
+    /// question about the work behind the spinner, not about the animation.
+    pub const W0116: &str = "W0116";
     /// The frame paints **nothing**: the tree has real content, and not one
     /// node of it was laid out with any area, so the window shows only its
     /// background.

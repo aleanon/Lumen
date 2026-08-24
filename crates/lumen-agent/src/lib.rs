@@ -353,6 +353,25 @@ fn handle<R: Renderer, E: Spawner>(
         // `node_computed`, which still holds the target — so during a fade
         // `ui.getStyles` reports a colour the node is not currently drawn in.
         "ui.getAppliedStyles" => Ok(app.applied_styles(sel(params)?)),
+        // O3.3: what is moving right now. A human sees motion; an agent that
+        // screenshots mid-transition and diffs against a golden has no way to
+        // know it caught a frame in flight. `is_animating`/`next_deadline`
+        // existed on `Headless` and appeared nowhere on the protocol, and
+        // `ui.waitSettled` uses the underlying condition without reporting
+        // WHAT is animating.
+        "ui.animations" => Ok(json!({
+            "animations": app.animations().iter().map(|a| json!({
+                "node": a.node,
+                "property": a.property,
+                "progress": a.progress,
+                "remaining_ms": a.remaining_ms,
+                // An `animation: ... infinite` has no end by design and is
+                // never "overdue" -- warning on duration alone would fire on
+                // every loading spinner in existence.
+                "infinite": a.infinite,
+                "overdue_ms": a.overdue_ms,
+            })).collect::<Vec<_>>()
+        })),
         "ui.getDeps" => Ok(app.get_deps(sel(params)?)),
         "ui.whatDependsOn" => {
             let sig = params
@@ -1427,6 +1446,10 @@ pub fn mcp_manifest() -> Value {
             tool(
                 "ui_lastChange",
                 "What the last pump did: idle/patch/rebuild + patched nodes.",
+            ),
+            tool(
+                "ui_animations",
+                "In-flight animations: node, property, progress, remaining ms.",
             ),
             tool(
                 "ui_getAppliedStyles",
