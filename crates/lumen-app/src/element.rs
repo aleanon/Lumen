@@ -236,6 +236,12 @@ pub struct Element {
     pub container: bool,
     /// Optional drop shadow behind the box.
     pub shadow: Option<Shadow>,
+    /// Pointer shape while this node is hovered, as a Rust-side default.
+    ///
+    /// `cursor` was reachable only from `.lss`, so a widget that ships no
+    /// stylesheet — every built-in one — had no way to say "this edge is
+    /// draggable". A `.lss` `cursor` rule still wins over this.
+    pub cursor: Option<lumen_core::CursorShape>,
     /// Typed inline `.lss` mirror (B.6b, 04 §8): the `Origin::Inline` tier —
     /// beats stylesheet declarations unless they are `!important`. Set with
     /// [`css`](Self::css). Boxed: most elements carry none.
@@ -310,6 +316,7 @@ impl Default for Element {
             overlay: false,
             container: false,
             shadow: None,
+            cursor: None,
             css_inline: None,
             scope_deps: None,
             scope_key: None,
@@ -590,6 +597,12 @@ impl Element {
         self.dyn_classes = Some(d);
         self
     }
+    /// Set the pointer shape shown while this node is hovered.
+    pub fn cursor(mut self, c: lumen_core::CursorShape) -> Self {
+        self.cursor = Some(c);
+        self
+    }
+
     /// Set a uniform border (`width` logical px, `color`).
     pub fn border(mut self, color: Color, width: f64) -> Self {
         self.border = Some(lumen_render::Border { width, color });

@@ -712,6 +712,8 @@ struct NodeMeta {
     clip: bool,
     overlay: bool,
     shadow: Option<crate::element::Shadow>,
+    /// Rust-side pointer shape (a `.lss` `cursor` rule overrides it).
+    cursor: Option<lumen_core::CursorShape>,
     /// Typed inline style (B.6b) — retained so the A.5 restyle path can
     /// re-merge it after re-resolving sheet rules.
     css_inline: Option<Box<lumen_style::Style>>,
@@ -2008,7 +2010,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     pub fn cursor_shape(&self) -> Option<lumen_core::CursorShape> {
         let mut node = self.hovered_node()?;
         loop {
-            if let Some(c) = self.node_style.get(&node).and_then(|s| s.cursor) {
+            // `.lss` wins; the element's own shape is the widget's default.
+            if let Some(c) = self
+                .node_style
+                .get(&node)
+                .and_then(|s| s.cursor)
+                .or_else(|| self.meta.get(&node).and_then(|m| m.cursor))
+            {
                 return Some(c);
             }
             let parent = self.tree.parent(node);
@@ -5834,6 +5842,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 clip: el.clip,
                 overlay: el.overlay,
                 shadow: el.shadow,
+                cursor: el.cursor,
                 css_inline: el.css_inline.take(),
                 content: el.content,
                 pad,

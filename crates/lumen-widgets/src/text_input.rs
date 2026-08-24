@@ -68,6 +68,8 @@ impl TextInput {
         let el = Element {
             role: Role::TextInput,
             focusable: true,
+            // An I-beam over anything typeable.
+            cursor: Some(lumen_core::CursorShape::Text),
             label: text.clone(),
             value: Some(text.clone()),
             actions: vec![Action::Focus, Action::SetValue],

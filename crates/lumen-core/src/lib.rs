@@ -56,6 +56,12 @@ pub enum CursorShape {
     Crosshair,
     /// Move/grab.
     Move,
+    /// Resize a vertical edge — the shape for a pane divider or a column
+    /// boundary. Without it, "you can drag this" is discoverable only by
+    /// trying, which is precisely the affordance a cursor exists to give.
+    ColResize,
+    /// Resize a horizontal edge (a row boundary).
+    RowResize,
     /// The action is not allowed here.
     NotAllowed,
     /// Explicitly hidden.

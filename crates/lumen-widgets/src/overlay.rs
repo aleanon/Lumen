@@ -217,13 +217,15 @@ pub fn tooltip(cx: &BuildCx, name: &str, target: Element, text: impl Into<crate:
 ///
 /// ```
 /// # use lumen_widgets::App;
-/// use lumen_widgets::{centered, Menu, BuildCx, Element};
+/// use lumen_widgets::{top, Menu, BuildCx, Element};
 ///
 /// fn build(cx: &mut BuildCx) -> Element {
-///     centered(cx, Menu::new(&["New", "Open", "Save", "Quit"]).into())
+///     let menu = Menu::button(cx, "file", "File ▾", &["New", "Open", "Save", "Quit"], |_, _| {});
+///     top(cx, menu.into())
 /// }
 /// # let app = App::new(build);
-/// # lumen_widgets::doc_shot(app, 160.0, 170.0, "menu");
+/// # // Rendered with the panel open (`file.open`).
+/// # lumen_widgets::doc_shot_open(app, 180.0, 210.0, "menu", "file.open");
 /// ```
 ///
 /// Renders:
@@ -242,7 +244,11 @@ pub struct Menu {
 type SelectHandler = Rc<dyn Fn(&Runtime, usize)>;
 
 impl Menu {
-    /// A vertical menu of selectable items.
+    /// A vertical menu of selectable items, always shown.
+    ///
+    /// This is the *panel*, not the menu: it renders inline wherever you put
+    /// it. For the ordinary thing — a button that opens the panel over the
+    /// page and closes on a choice or a click away — use [`Menu::button`].
     ///
     /// Attach [`Menu::on_select`] to react to a choice — without it the items
     /// are inert. (They still carry `Role::MenuItem` + a label, so the menu
@@ -261,6 +267,36 @@ impl Menu {
             ..Element::default()
         };
         Menu { el, items }
+    }
+
+    /// A menu *button*: `label` opens a floating panel of `items` over the
+    /// page; choosing one runs `on_select` and closes it, and so does a click
+    /// away or Escape. Open state is `{name}.open`.
+    ///
+    /// This is what "menu" means everywhere else — [`Menu::new`] on its own is
+    /// a permanently-open list, which reads as a column of buttons rather than
+    /// as a menu.
+    pub fn button(
+        cx: &BuildCx,
+        name: &str,
+        label: impl Into<crate::Text>,
+        items: &[&str],
+        on_select: impl Fn(&Runtime, usize) + 'static,
+    ) -> crate::Popover {
+        let open = cx.signal(format!("{name}.open"), || false);
+        let panel: Element = Menu::new(items)
+            .on_select(move |rt, i| {
+                on_select(rt, i);
+                // A menu closes on choice — leaving it open is how a
+                // permanently-open list behaves, not a menu.
+                open.set(rt, false);
+            })
+            .id(format!("{name}-panel"))
+            .into();
+        let trigger: Element = crate::Button::new(label)
+            .id(format!("{name}-trigger"))
+            .into();
+        crate::Popover::new(cx, name, trigger, panel).id(name)
     }
 
     /// One menu item. `on` is the shared select handler; with `None` the item

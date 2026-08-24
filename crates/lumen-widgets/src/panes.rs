@@ -163,8 +163,11 @@ impl PaneGrid {
             let divider = Element {
                 role: Role::Generic,
                 background: Some(Color::srgb8(0x88, 0x8c, 0x90, 0xff)),
+                // The only cue that this edge is draggable. A 4 px strip with
+                // an arrow cursor is indistinguishable from decoration.
+                cursor: Some(lumen_core::CursorShape::ColResize),
                 style: LayoutStyle {
-                    width: Dim::px(4.0),
+                    width: Dim::px(6.0),
                     height: Dim::pct(1.0),
                     ..LayoutStyle::default()
                 },

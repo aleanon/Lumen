@@ -1701,6 +1701,8 @@ fn as_cursor(v: &Value) -> Option<lumen_core::CursorShape> {
             "wait" | "progress" => Some(C::Wait),
             "crosshair" => Some(C::Crosshair),
             "move" | "grab" | "grabbing" => Some(C::Move),
+            "col-resize" | "ew-resize" => Some(C::ColResize),
+            "row-resize" | "ns-resize" => Some(C::RowResize),
             "not-allowed" => Some(C::NotAllowed),
             "none" => Some(C::None),
             _ => None,

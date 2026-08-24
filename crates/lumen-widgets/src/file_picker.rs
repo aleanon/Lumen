@@ -31,6 +31,7 @@ use lumen_layout::Dim;
 /// drifts from that committed image, so the picture is always current.
 pub struct FilePicker {
     el: Element,
+    name: String,
 }
 
 impl FilePicker {
@@ -56,8 +57,77 @@ impl FilePicker {
         });
         el = el.class("file-picker");
         el.style.min_width = Dim::px(120.0);
-        FilePicker { el }
+        FilePicker {
+            el,
+            name: name.to_string(),
+        }
     }
+}
+
+impl FilePicker {
+    /// Show the chosen file beneath the button, scaled to fit `max_side`.
+    ///
+    /// A picker that reports only a path leaves the user with no way to tell
+    /// whether they picked the right file. The bytes are read on the blocking
+    /// pool (keyed on the path, so changing the selection refetches and the
+    /// previous preview stays up meanwhile) and decoded through
+    /// [`crate::asset::decode`], which caches — so a rebuild does not re-decode.
+    ///
+    /// Non-images and unreadable files render the reason instead of the picture;
+    /// the picker never becomes a silent no-op.
+    pub fn preview(mut self, cx: &BuildCx, max_side: f64) -> FilePicker {
+        let path = cx
+            .signal(format!("{}.path", self.name), String::new)
+            .get(cx.runtime());
+        if path.is_empty() {
+            return self;
+        }
+        let bytes = cx.resource_blocking(
+            &format!("{}.bytes", self.name),
+            path.clone(),
+            |p: String| std::fs::read(&p).map_err(|e| e.to_string()),
+        );
+
+        let shown = match (&bytes.value, &bytes.error) {
+            (Some(b), _) => match crate::asset::decode(b) {
+                Ok(img) => {
+                    let (w, h) = (img.width() as f64, img.height() as f64);
+                    // Fit inside the box without distorting: scale by the
+                    // longer side, never up past the image's own size.
+                    let k = (max_side / w.max(h)).min(1.0);
+                    let mut e: Element = crate::Image::new(img).into();
+                    e.style.width = Dim::px((w * k) as f32);
+                    e.style.height = Dim::px((h * k) as f32);
+                    e
+                }
+                Err(e) => note(format!("not an image Lumen can decode: {e}")),
+            },
+            (None, Some(e)) => note(format!("could not read {path}: {e}")),
+            (None, None) => note("loading…"),
+        };
+
+        let caption = note(
+            std::path::Path::new(&path)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.clone()),
+        );
+        let mut col = widgets::column(vec![self.el, shown, caption]);
+        col.style.row_gap = Dim::px(8.0);
+        col.style.align_items = Some(lumen_layout::Align::Center);
+        self.el = col;
+        self
+    }
+}
+
+/// A small muted caption line.
+fn note(s: impl Into<String>) -> Element {
+    let mut e = widgets::text(s.into());
+    if let Some(ts) = e.text_style_mut() {
+        ts.font_size = 12.0;
+        ts.color = lumen_core::Color::srgb8(0x6b, 0x74, 0x88, 0xff);
+    }
+    e
 }
 
 impl_common!(FilePicker);

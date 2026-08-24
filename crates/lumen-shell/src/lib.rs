@@ -1481,6 +1481,8 @@ fn winit_cursor(shape: lumen_core::CursorShape) -> winit::window::CursorIcon {
         C::Wait => W::Wait,
         C::Crosshair => W::Crosshair,
         C::Move => W::Move,
+        C::ColResize => W::ColResize,
+        C::RowResize => W::RowResize,
         C::NotAllowed => W::NotAllowed,
     }
 }

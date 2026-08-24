@@ -709,11 +709,12 @@ fn d_time_picker(cx: &mut BuildCx) -> Element {
 fn d_file_picker(cx: &mut BuildCx) -> Element {
     stack(vec![
         FilePicker::new(cx, "fp-doc", "Choose an image…", ["png", "jpg", "webp"])
+            .preview(cx, 260.0)
             .id("fp-doc")
             .into(),
         note(
             "Queues a SystemRequest::OpenFile on the host mailbox; the shell opens the native \
-             dialog and replies into fp.doc.path.",
+             dialog, replies into fp-doc.path, and the picker shows what you chose.",
         ),
     ])
 }
@@ -771,11 +772,15 @@ fn d_select(cx: &mut BuildCx) -> Element {
 fn d_menu(cx: &mut BuildCx) -> Element {
     let last = cx.signal("menu-last", || -1i64);
     stack(vec![
-        Menu::new(&["New file", "Open…", "Save", "Save as…", "Quit"])
-            .on_select(move |rt, i| last.set(rt, i as i64))
-            .id("menu-file")
-            .into(),
-        note("A flat list of commands; on_select gets the chosen index."),
+        note("Click File — the panel floats over the page and closes on a choice or a click away."),
+        Menu::button(
+            cx,
+            "menu-file",
+            "File ▾",
+            &["New file", "Open…", "Save", "Save as…", "Quit"],
+            move |rt, i| last.set(rt, i as i64),
+        )
+        .into(),
     ])
 }
 
@@ -2011,9 +2016,9 @@ static CHOICE: &[Entry] = &[
     entry!(
         "Menu",
         "menu",
-        Center,
+        Top,
         d_menu,
-        "A flat list of commands.",
+        "A button that opens a floating command list.",
         s_menu
     ),
 ];

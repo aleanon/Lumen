@@ -47,6 +47,9 @@ impl Button {
             dyn_text,
             actions: vec![Action::Click, Action::Focus],
             focusable: true,
+            // A hand over anything clickable: the affordance users read
+            // without thinking.
+            cursor: Some(lumen_core::CursorShape::Pointer),
             background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
             corner_radius: 8.0,
             style: LayoutStyle {
