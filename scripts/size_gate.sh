@@ -130,11 +130,11 @@ RS
 (cd "$TMP/win-app" && cargo build -q --release)
 WSIZE=$(stat -c%s "$TMP/win-app/target/release/win-app")
 echo "win-app:  $(echo "scale=1; $WSIZE/1048576" | bc -l) MB"
-# 12 MB is a REGRESSION guard at today's measured 10.4 MB, not a target. The
+# 10 MB is a REGRESSION guard at today's measured 8.5 MB, not a target. The
 # 01 §9 goal is <5 MB; reaching it needs a CPU presentation path so wgpu can be
 # dropped (see docs/constrained-profile.md) — wgpu is currently an
 # unconditional dependency of lumen-shell.
-[ "$WSIZE" -lt $((12 * 1048576)) ] || { echo "FAIL: lean windowed > 12 MB"; exit 1; }
+[ "$WSIZE" -lt $((10 * 1048576)) ] || { echo "FAIL: lean windowed > 10 MB"; exit 1; }
 
 echo "==> NO-GPU windowed (softbuffer presentation, ADR-003 amendment)"
 mkdir -p "$TMP/nogpu-app/src"
@@ -152,6 +152,6 @@ echo "nogpu-app: $(echo "scale=1; $NSIZE/1048576" | bc -l) MB"
   echo "      Check with: cargo tree -p lumen-shell --no-default-features -e normal --invert wgpu"
   exit 1
 }
-[ "$NSIZE" -lt $((9 * 1048576)) ] || { echo "FAIL: no-GPU > 9 MB"; exit 1; }
+[ "$NSIZE" -lt $((7 * 1048576)) ] || { echo "FAIL: no-GPU > 7 MB"; exit 1; }
 
 echo "size gates OK"
