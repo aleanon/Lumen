@@ -516,6 +516,21 @@ Size-gate ceilings re-tightened so the saving cannot be given back silently: lea
 
 **Not attempted:** the state store stays non-swappable. MOD6 measured it at **+117.6% on signal writes**. The precedent that matters is procedural — each seam is measured before it is promised.
 
+## A11Y1 ☑ Accessibility becomes an opt-out feature — 2.15 MB (2026-08-24)
+The OS accessibility bridge was an **unconditional** dependency in three crates. `LUMEN_A11Y=0` / `NO_AT_BRIDGE=1` existed but are runtime switches, so the code, the D-Bus stack and the thread `accesskit_unix::Adapter::new` spawns all shipped whether or not anyone wanted them. `accessibility` (default-on) makes it a compile-time choice.
+
+*Measured*, `lumen-lean-app` against an otherwise identical `lumen-noa11y-app`: **16.08 → 13.93 MB, 2.15 MB.** `cargo tree -i zbus` shows accesskit is the only thing pulling zbus into the shell, so the gate takes the whole atspi/D-Bus stack with it — the OFF binary contains no `accesskit`, `org.a11y`, `atspi` or `zbus` marker at all. Larger than the 1.42 MB a symbol survey predicted, because that counted `.text` only.
+
+**It gates the PUBLISHER, never the tree.** `SemanticsNode` is Lumen's observability contract, not an accessibility detail: twelve modules read it — the agent protocol, `ui.lint`, `lumen-test`, `audit.rs`, `wcag.rs`, the Android shell — and exactly one publishes it to the OS. Gating the tree would break the other eleven. `semantics_json`, `semantics_elided` and selector lookup stay available in both states, which is what `tests/accessibility_gate.rs` pins: the same three assertions compile and pass with the feature on and off, because "turning it off is invisible to everything except the OS bridge" is a claim that has to be checked in the state where it could break.
+
+**A dead dependency fell out of the audit:** `lumen-app` declared `accesskit` and never used it. Removed.
+
+**Two measurement traps, both hit and both worth recording.** Building the ON and OFF variants in one `cargo build -p a -p b` reported *identical* sizes — Cargo unifies features across a single invocation, so the OFF app silently got the feature back. They have to be built separately. And the first "baseline" was wrong in the other direction: `lumen-lean-app` passes `default-features = false` to the shell, so it had *already* lost accessibility and was measuring 13.93 against 13.93. It now names the feature explicitly to be the ON side.
+
+*No trait, deliberately.* A backend seam was designed and declined for now: publishing is a clean one-way interface, but action routing is not — an AT click arrives as `ShellEvent::AccessKit(accesskit_winit::Event)`, an accesskit-typed variant in the shell's own event enum, and the adapter needs `&ActiveEventLoop` plus a window handle at construction. A generic backend therefore needs either winit types in the trait or a pull-based `poll_actions`, and today there would be exactly one implementation — the one-implementation trap this codebase has already hit with `Prop<T>` and with `PlatformConfig` being headless-only. The feature is a prerequisite for the trait either way, since the trait would live under the gate.
+
+*Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
+
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
 - Any public-API signature in `02 §4`/`§8` that won't compile as written beyond a *minimal semantics-preserving* fix.

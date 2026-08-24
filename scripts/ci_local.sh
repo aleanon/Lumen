@@ -154,6 +154,18 @@ _leg_lean_inner() {
   cargo test -q -p lumen-text --test complex_scripts || return 1
   cargo test -q -p lumen-text --test complex_scripts --features complex-scripts || return 1
   echo "OK (both feature states)"
+
+  # A11Y1: same reasoning. `accessibility` is default-on, so every other leg
+  # runs with it enabled and the OFF branch is otherwise unreachable. The
+  # claim being pinned is that turning it off is invisible to the semantics
+  # tree — which twelve modules read and exactly one publishes — so it has to
+  # be checked in the state where it could break.
+  printf '  %-18s ' "accessibility"
+  cargo test -q -p lumen-widgets --test accessibility_gate || return 1
+  cargo test -q -p lumen-widgets --no-default-features \
+      --features wgpu,snapshot,codecs --test accessibility_gate || return 1
+  cargo check -q -p lumen-shell --no-default-features --features wgpu || return 1
+  echo "OK (both feature states)"
 }
 
 leg_executors() {

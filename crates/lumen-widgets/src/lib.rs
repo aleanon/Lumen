@@ -8,6 +8,7 @@
 //! `lumen::App`.
 #![warn(missing_docs)]
 
+#[cfg(feature = "accessibility")]
 pub mod a11y;
 pub mod accordion;
 pub use lumen_app::app;

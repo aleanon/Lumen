@@ -4009,7 +4009,6 @@ checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
 name = "lumen-app"
 version = "0.1.0"
 dependencies = [
- "accesskit 0.24.1",
  "kurbo 0.13.1",
  "lumen-core",
  "lumen-layout",
@@ -4076,6 +4075,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "lumen-noa11y-app"
+version = "0.1.0"
+dependencies = [
+ "lumen-core",
+ "lumen-shell",
+ "lumen-widgets",
 ]
 
 [[package]]

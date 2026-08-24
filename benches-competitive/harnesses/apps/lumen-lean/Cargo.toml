@@ -7,5 +7,5 @@ edition = "2021"
 # menus and tray from the GPU stack.
 [dependencies]
 lumen-widgets = { path = "../../../../crates/lumen-widgets" }
-lumen-shell = { path = "../../../../crates/lumen-shell", default-features = false, features = ["wgpu"] }
+lumen-shell = { path = "../../../../crates/lumen-shell", default-features = false, features = ["wgpu", "accessibility"] }
 lumen-core = { path = "../../../../crates/lumen-core" }

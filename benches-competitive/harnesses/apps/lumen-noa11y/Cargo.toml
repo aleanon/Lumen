@@ -1,0 +1,19 @@
+[package]
+name = "lumen-noa11y-app"
+version = "0.1.0"
+edition = "2021"
+# A11Y1: the lean app again with `accessibility` off, so the A/B against
+# `lumen-lean-app` isolates exactly that feature. Cargo has no
+# "default minus one" syntax, so the other defaults are re-listed by hand.
+
+[dependencies]
+lumen-widgets = { path = "../../../../crates/lumen-widgets", default-features = false, features = [
+    "wgpu",
+    "snapshot",
+    "codecs",
+    "complex-scripts",
+] }
+lumen-shell = { path = "../../../../crates/lumen-shell", default-features = false, features = [
+    "wgpu",
+] }
+lumen-core = { path = "../../../../crates/lumen-core" }

@@ -73,6 +73,7 @@ enum ShellEvent {
     Wake,
     /// P.4: an assistive technology activated, deactivated, or requested an
     /// action; the accesskit_winit adapter posts these through the loop.
+    #[cfg(feature = "accessibility")]
     AccessKit(accesskit_winit::Event),
     /// P.3c/P.3e: a native menu activation — menubar item (Windows/macOS) or
     /// tray-menu item (all platforms; the tray menu hosts the app's
@@ -83,6 +84,7 @@ enum ShellEvent {
     Menu(muda::MenuEvent),
 }
 
+#[cfg(feature = "accessibility")]
 impl From<accesskit_winit::Event> for ShellEvent {
     fn from(ev: accesskit_winit::Event) -> ShellEvent {
         ShellEvent::AccessKit(ev)
@@ -211,6 +213,7 @@ pub fn run_any<
         menu_rev_seen: 0,
         #[cfg(feature = "desktop-integration")]
         native_menu: None,
+        #[cfg(feature = "accessibility")]
         a11y: None,
         force_present: false,
         #[cfg(feature = "desktop-integration")]
@@ -455,6 +458,7 @@ struct Shell<
     /// and tests read, is published after every frame. The adapter itself is
     /// NOT free: constructing it spawns a D-Bus thread on Linux whether or not
     /// an AT exists, which is why creation is gated by `a11y_enabled` (GX4).
+    #[cfg(feature = "accessibility")]
     a11y: Option<accesskit_winit::Adapter>,
     /// Present on the next `RedrawRequested` even if its pump paints nothing:
     /// set by paths that already pumped (agent dispatch, AT actions, style
@@ -608,6 +612,7 @@ impl<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig>
                 self.force_present = true;
                 self.redraw_all();
             }
+            #[cfg(feature = "accessibility")]
             ShellEvent::AccessKit(ev) => {
                 use accesskit_winit::WindowEvent as AkEvent;
                 match ev.window_event {
@@ -644,6 +649,7 @@ impl<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig>
             // first shown — create invisible, attach, then show.
             .with_visible(false);
         let window = Arc::new(el.create_window(attrs).expect("window"));
+        #[cfg(feature = "accessibility")]
         if a11y_enabled() {
             // accesskit_winit 0.33 takes the `ActiveEventLoop` too — it needs it
             // to register the adapter's handlers with the platform before the
@@ -730,6 +736,7 @@ impl<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig>
             return;
         }
         // P.4: the adapter tracks focus/visibility from the raw event stream.
+        #[cfg(feature = "accessibility")]
         if let (Some(a), Some(w)) = (&mut self.a11y, &self.window) {
             a.process_event(w, &event);
         }
@@ -1046,6 +1053,7 @@ impl<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig>
                         // P.4: publish the new semantic tree to any
                         // subscribed AT (no-op — the closure never runs —
                         // when none is active).
+                        #[cfg(feature = "accessibility")]
                         if let Some(a) = &mut self.a11y {
                             a.update_if_active(|| {
                                 lumen_widgets::a11y::build_tree(&h.semantics_elided())
@@ -1355,6 +1363,7 @@ impl<E: lumen_core::tasks::Spawner, P: lumen_widgets::app::PlatformConfig> Shell
 
     /// P.4: publish the current semantic tree to the AT (used for the
     /// initial-tree request; per-frame updates ride `RedrawRequested`).
+    #[cfg(feature = "accessibility")]
     fn push_a11y_tree(&mut self) {
         let Some(h) = &self.headless else { return };
         if let Some(a) = &mut self.a11y {
@@ -1530,6 +1539,7 @@ fn winit_cursor(shape: lumen_core::CursorShape) -> winit::window::CursorIcon {
 /// having to opt in. `NO_AT_BRIDGE=1` is honoured because GTK and Qt already
 /// use it, so a user who has disabled the AT bridge system-wide should not have
 /// to learn a Lumen-specific variable to be obeyed.
+#[cfg(feature = "accessibility")]
 fn a11y_enabled() -> bool {
     a11y_enabled_from(
         std::env::var("LUMEN_A11Y").ok().as_deref(),
@@ -1539,6 +1549,7 @@ fn a11y_enabled() -> bool {
 
 /// The decision in [`a11y_enabled`], as a pure function of the two variables so
 /// it can be tested without mutating process-global environment state.
+#[cfg(feature = "accessibility")]
 fn a11y_enabled_from(lumen_a11y: Option<&str>, no_at_bridge: Option<&str>) -> bool {
     if let Some(v) = lumen_a11y {
         // An explicit Lumen setting wins over the ecosystem variable, in both
@@ -1554,6 +1565,7 @@ fn a11y_enabled_from(lumen_a11y: Option<&str>, no_at_bridge: Option<&str>) -> bo
 /// exact shape the agent's `input.click` and the live pointer produce.
 /// (Focus/scroll actions are documented-unrouted until a headless focus-by-
 /// node API exists; Tab-order focus already works through key events.)
+#[cfg(feature = "accessibility")]
 fn route_at_action<
     R: lumen_render::Renderer,
     E: lumen_core::tasks::Spawner,

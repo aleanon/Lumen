@@ -13,9 +13,10 @@ name = "lumen_shell_android"
 [features]
 # Forwarded tiers (GX3). Default preserves today's behaviour exactly;
 # `--no-default-features` is what makes a lean build of this platform reachable.
-default = ["snapshot", "complex-scripts"]
+default = ["snapshot", "complex-scripts", "accessibility"]
 pan-unicode = ["lumen/pan-unicode"]
 complex-scripts = ["lumen/complex-scripts"]
+accessibility = ["lumen/accessibility"]
 snapshot = ["lumen/snapshot"]
 
 [dependencies]

@@ -51,7 +51,14 @@ pub use lumen_widgets::renderer_override;
 /// They exposed *when* a widget was added — an internal scheduling fact that
 /// meant nothing to a consumer and could not be reorganized without a breaking
 /// change. Everything now lives in `widgets`.
-pub use lumen_widgets::{a11y, forms, i18n, nav, system, theme, undo, widgets};
+pub use lumen_widgets::{forms, i18n, nav, system, theme, undo, widgets};
+
+/// A11Y1: the AccessKit tree builder, present only with the `accessibility`
+/// feature (default-on). It is the only part of the accessibility story that is
+/// gated — `semantics_json`, `semantics_elided` and selector lookup are the
+/// observability contract and are always available.
+#[cfg(feature = "accessibility")]
+pub use lumen_widgets::a11y;
 
 /// Cached decoded assets, and the hook to release them.
 ///
