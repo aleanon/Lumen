@@ -66,16 +66,76 @@ impl ToastKind {
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Toast {
-    el: Element,
+    kind: ToastKind,
+    title: crate::Text,
+    body: crate::Text,
+    /// An optional trailing action.
+    action: Option<(String, Rc<dyn Fn(&lumen_core::state::Runtime)>)>,
+    /// Set by `auto_dismiss` once the toast has outlived its window.
+    expired: bool,
+    common: Common,
 }
 
 impl Toast {
-    /// A toast card. `Role::Alert` so agents/screen readers see it announce.
+    /// A toast of `kind` with a heading and a body line.
     pub fn new(
         kind: ToastKind,
         title: impl Into<crate::Text>,
         body: impl Into<crate::Text>,
     ) -> Toast {
+        Toast {
+            kind,
+            title: title.into(),
+            body: body.into(),
+            action: None,
+            expired: false,
+            common: Common::default(),
+        }
+    }
+
+    /// Add a trailing action button.
+    pub fn action(
+        mut self,
+        label: impl Into<String>,
+        f: impl Fn(&lumen_core::state::Runtime) + 'static,
+    ) -> Toast {
+        self.action = Some((label.into(), Rc::new(f)));
+        self
+    }
+
+    /// Vanish `ms` after the toast first appeared.
+    ///
+    /// Recording expiry as a flag rather than overwriting the built node means
+    /// an expired toast never assembles its bar, heading, body and action at
+    /// all — the eager version built the whole thing and then threw it away.
+    pub fn auto_dismiss(mut self, cx: &BuildCx, name: &str, ms: f64) -> Toast {
+        let now = cx.now_ms();
+        let shown_at: lumen_core::Signal<f64> = cx.signal(name, || now);
+        let deadline = shown_at.get(cx.runtime()) + ms;
+        if now >= deadline {
+            // Expired: collapse to nothing (and stop asking for frames).
+            self.expired = true;
+        } else {
+            cx.wake_at(deadline);
+        }
+        self
+    }
+}
+
+impl Widget for Toast {
+    fn build(self) -> Element {
+        let Toast {
+            kind,
+            title,
+            body,
+            action,
+            expired,
+            common,
+        } = self;
+        if expired {
+            return Element::default();
+        }
+
         let mut bar = Element::default().class("bar").class(kind.class());
         bar.background = Some(kind.accent());
         bar.style.width = Dim::px(5.0);
@@ -94,9 +154,23 @@ impl Toast {
         let mut col = widgets::column(vec![title_el.class("t-title"), body_el.class("t-body")]);
         col.style.row_gap = Dim::px(3.0);
 
-        let mut row = widgets::row(vec![bar, col])
-            .class("toast")
-            .class(kind.class());
+        let mut children = vec![bar, col];
+        if let Some((label, f)) = action {
+            let mut btn = widgets::text(label);
+            if let Some(ts) = btn.text_style_mut() {
+                ts.font_size = 13.0;
+                ts.weight = 600.0;
+                ts.color = Color::srgb8(0x1a, 0x73, 0xe8, 0xff);
+            }
+            btn.role = Role::Button;
+            btn.focusable = true;
+            btn.actions = vec![Action::Click, Action::Focus];
+            btn.on_click = Some(f);
+            btn.style.flex_shrink = 0.0;
+            children.push(btn);
+        }
+
+        let mut row = widgets::row(children).class("toast").class(kind.class());
         row.role = Role::Alert;
         row.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
         row.corner_radius = 10.0;
@@ -110,54 +184,12 @@ impl Toast {
             bottom: Dim::px(13.0),
         };
         row.style.width = Dim::px(360.0);
-        Toast { el: row }
-    }
-
-    /// Add a trailing action (Material's snackbar action — "Undo", "Retry").
-    pub fn action(
-        mut self,
-        label: impl Into<String>,
-        f: impl Fn(&lumen_core::state::Runtime) + 'static,
-    ) -> Toast {
-        let mut btn = widgets::text(label.into());
-        if let Some(ts) = btn.text_style_mut() {
-            ts.font_size = 13.0;
-            ts.weight = 600.0;
-            ts.color = Color::srgb8(0x1a, 0x73, 0xe8, 0xff);
-        }
-        btn.role = Role::Button;
-        btn.focusable = true;
-        btn.actions = vec![Action::Click, Action::Focus];
-        btn.on_click = Some(Rc::new(f));
-        btn.style.flex_shrink = 0.0;
-        self.el.children.push(btn);
-        self
-    }
-
-    /// Disappear on its own after `ms` — Material's snackbar timeout, the
-    /// behaviour that makes a toast a toast rather than a banner.
-    ///
-    /// `name` keys the moment this toast first appeared, so the countdown
-    /// survives rebuilds. Expiry is a **pure function of the clock**: once
-    /// `ms` have passed the widget renders nothing. No side effect runs during
-    /// build, and because the clock is virtual the behaviour is deterministic —
-    /// a test advances the clock instead of sleeping.
-    pub fn auto_dismiss(mut self, cx: &BuildCx, name: &str, ms: f64) -> Toast {
-        let now = cx.now_ms();
-        let shown_at: lumen_core::Signal<f64> = cx.signal(name, || now);
-        let started = shown_at.get(cx.runtime());
-        let deadline = started + ms;
-        if now >= deadline {
-            // Expired: collapse to nothing (and stop asking for frames).
-            self.el = Element::default();
-        } else {
-            cx.wake_at(deadline);
-        }
-        self
+        common.apply(&mut row);
+        row
     }
 }
 
-impl_common!(Toast);
+impl_widget!(Toast);
 
 /// An indeterminate progress spinner (canvas arc, `cx.animate()`-driven).
 /// # Example
@@ -181,19 +213,39 @@ impl_common!(Toast);
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Spinner {
-    el: Element,
+    diameter: f64,
+    color: Color,
+    /// The rotation phase, sampled where the `BuildCx` is (a tracked clock read).
+    t: f64,
+    common: Common,
 }
 
 impl Spinner {
-    /// A spinner of `diameter` px in the accent color.
+    /// An indeterminate spinner in the theme accent.
     pub fn new(cx: &BuildCx, diameter: f64) -> Spinner {
         Spinner::colored(cx, diameter, crate::theme::accent())
     }
 
-    /// A spinner in an explicit color.
+    /// An indeterminate spinner in `color`.
     pub fn colored(cx: &BuildCx, diameter: f64, color: Color) -> Spinner {
         cx.animate();
-        let t = cx.now_ms() / 1000.0;
+        Spinner {
+            diameter,
+            color,
+            t: cx.now_ms() / 1000.0,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for Spinner {
+    fn build(self) -> Element {
+        let Spinner {
+            diameter,
+            color,
+            t,
+            common,
+        } = self;
         let mut el = widgets::canvas(diameter, diameter, move |f, size| {
             use kurbo::{Arc, Circle, Point, Shape, Vec2};
             let c = Point::new(size.width / 2.0, size.height / 2.0);
@@ -209,11 +261,12 @@ impl Spinner {
         el = el.class("spinner");
         el.role = Role::Progress;
         el.label = "loading".to_string();
-        Spinner { el }
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Spinner);
+impl_widget!(Spinner);
 
 /// A compact pill label, optionally removable.
 /// # Example

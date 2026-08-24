@@ -4,7 +4,7 @@
 //! lives in a signal keyed by `name` (`{name}.open`), so any handler can
 //! open one: `cx.signal("cart.open", || false).set(rt, true)`.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Element};
 use lumen_core::semantics::Role;
 use lumen_core::Color;
@@ -102,12 +102,16 @@ fn scrim_and_panel(
 /// output. `doc_shot_open` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Sheet {
+    /// The scrim + panel layer, or the collapsed placeholder while closed.
+    ///
+    /// Built where the `BuildCx` is: the layer reads the open flag *and* the
+    /// window size, so there is nothing left to defer past it.
     el: Element,
+    common: Common,
 }
 
 impl Sheet {
-    /// A bottom sheet whose open flag is `{name}.open`; `content` fills the
-    /// panel. Scrim click / Escape closes it.
+    /// A bottom sheet over `content`, open/closed under `{name}.open`.
     pub fn new(cx: &BuildCx, name: &str, content: Element) -> Sheet {
         let style = LayoutStyle {
             position: Position::Absolute,
@@ -122,11 +126,20 @@ impl Sheet {
         };
         Sheet {
             el: scrim_and_panel(cx, name, content, style),
+            common: Common::default(),
         }
     }
 }
 
-impl_common!(Sheet);
+impl Widget for Sheet {
+    fn build(self) -> Element {
+        let Sheet { mut el, common } = self;
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(Sheet);
 
 /// A modal side drawer.
 /// # Example
@@ -150,13 +163,14 @@ impl_common!(Sheet);
 /// output. `doc_shot_open` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Drawer {
+    /// As in [`Sheet`]: the layer needs the `BuildCx`, so it is built there.
     el: Element,
     side: DrawerSide,
+    common: Common,
 }
 
 impl Drawer {
-    /// A drawer (default: from the left, 300 px wide) whose open flag is
-    /// `{name}.open`.
+    /// A side drawer over `content`, open/closed under `{name}.open`.
     pub fn new(cx: &BuildCx, name: &str, content: Element) -> Drawer {
         let style = LayoutStyle {
             position: Position::Absolute,
@@ -173,14 +187,31 @@ impl Drawer {
         Drawer {
             el: scrim_and_panel(cx, name, content, style),
             side: DrawerSide::Left,
+            common: Common::default(),
         }
     }
 
-    /// Slide from the right edge instead.
+    /// Which edge the drawer slides in from.
     pub fn side(mut self, side: DrawerSide) -> Self {
         self.side = side;
+        self
+    }
+
+    /// The edge this drawer is configured for.
+    pub fn current_side(&self) -> DrawerSide {
+        self.side
+    }
+}
+
+impl Widget for Drawer {
+    fn build(self) -> Element {
+        let Drawer {
+            mut el,
+            side,
+            common,
+        } = self;
         if side == DrawerSide::Right {
-            if let Some(panel) = self.el.children.get_mut(1) {
+            if let Some(panel) = el.children.get_mut(1) {
                 panel.style.inset = Edges {
                     right: Dim::px(0.0),
                     top: Dim::px(0.0),
@@ -189,13 +220,9 @@ impl Drawer {
                 };
             }
         }
-        self
-    }
-
-    /// The configured side (introspection/tests).
-    pub fn current_side(&self) -> DrawerSide {
-        self.side
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Drawer);
+impl_widget!(Drawer);

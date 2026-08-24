@@ -4,7 +4,7 @@
 //! (SD2: regrouped out of the milestone-named `widgets_m*`/`misc_w2` modules,
 //! which recorded WHEN a widget was written rather than what it is.)
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Element};
 use lumen_core::semantics::Role;
 use lumen_core::Color;
@@ -50,48 +50,71 @@ use std::rc::Rc;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct SplitPane {
-    el: Element,
+    first: Element,
+    second: Element,
+    ratio: f32,
+    common: Common,
 }
 
-impl SplitPane {
-    /// A two-pane horizontal split; `ratio` is the fraction given to the first pane.
-    pub fn new(first: Element, second: Element, ratio: f32) -> SplitPane {
-        let el = {
-            let pane = |child: Element, grow: f32| Element {
-                role: Role::Group,
-                style: LayoutStyle {
-                    flex_grow: grow,
-                    flex_basis: Dim::px(0.0),
-                    ..LayoutStyle::default()
-                },
-                children: vec![child],
-                ..Element::default()
-            };
-            Element {
-                role: Role::Group,
-                style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Row,
-                    align_items: Some(Align::Stretch),
-                    width: Dim::pct(1.0),
-                    ..LayoutStyle::default()
-                },
-                // A hairline seam: without it the split is invisible whenever
-                // the two panes happen to share a background, which is the
-                // common case (both inherit the page).
-                children: vec![
-                    pane(first, ratio.clamp(0.05, 0.95)),
-                    divider(),
-                    pane(second, (1.0 - ratio).clamp(0.05, 0.95)),
-                ],
-                ..Element::default()
-            }
-        };
-        SplitPane { el }
+/// Wrap `child` in a flex pane that takes `grow` of the row.
+fn pane(child: Element, grow: f32) -> Element {
+    Element {
+        role: Role::Group,
+        style: LayoutStyle {
+            flex_grow: grow,
+            flex_basis: Dim::px(0.0),
+            ..LayoutStyle::default()
+        },
+        children: vec![child],
+        ..Element::default()
     }
 }
 
-/// The 1 px seam painted between the two panes.
+impl SplitPane {
+    /// Two panes side by side, `first` taking `ratio` of the width.
+    pub fn new(first: Element, second: Element, ratio: f32) -> SplitPane {
+        SplitPane {
+            first,
+            second,
+            ratio,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for SplitPane {
+    fn build(self) -> Element {
+        let SplitPane {
+            first,
+            second,
+            ratio,
+            common,
+        } = self;
+        let mut el = Element {
+            role: Role::Group,
+            style: LayoutStyle {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                align_items: Some(Align::Stretch),
+                width: Dim::pct(1.0),
+                ..LayoutStyle::default()
+            },
+            // A hairline seam: without it the split is invisible whenever
+            // the two panes happen to share a background, which is the
+            // common case (both inherit the page).
+            children: vec![
+                pane(first, ratio.clamp(0.05, 0.95)),
+                divider(),
+                pane(second, (1.0 - ratio).clamp(0.05, 0.95)),
+            ],
+            ..Element::default()
+        };
+        common.apply(&mut el);
+        el
+    }
+}
+
+/// The hairline between two panes.
 fn divider() -> Element {
     Element {
         role: Role::Generic,
@@ -108,7 +131,7 @@ fn divider() -> Element {
     }
 }
 
-impl_common!(SplitPane);
+impl_widget!(SplitPane);
 
 /// A two-pane horizontal split; `ratio` is the fraction given to the first pane.
 /// *(Thin shim over [`SplitPane`] — the typed form is preferred.)*
@@ -140,74 +163,89 @@ pub fn split_pane(first: Element, second: Element, ratio: f32) -> Element {
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct PaneGrid {
-    el: Element,
+    name: String,
+    first: Element,
+    second: Element,
+    /// The split ratio, read where the `BuildCx` is.
+    r: f64,
+    ratio: lumen_core::state::Signal<f64>,
+    common: Common,
 }
 
 impl PaneGrid {
-    /// A resizable two-pane split (E8.4). Dragging within the grid sets the split
-    /// position; `name` keys the ratio. A visual divider marks the boundary.
+    /// Two panes with a draggable divider; the split lives in the signal keyed
+    /// by `name`.
     pub fn new(cx: &BuildCx, name: &str, first: Element, second: Element) -> PaneGrid {
-        let el = {
-            let ratio = cx.signal(name, || 0.5f64);
-            let r = ratio.get(cx.runtime());
-            let pane = |child: Element, grow: f32| Element {
-                role: Role::Group,
-                style: LayoutStyle {
-                    flex_grow: grow,
-                    flex_basis: Dim::px(0.0),
-                    ..LayoutStyle::default()
-                },
-                children: vec![child],
-                ..Element::default()
-            };
-            let divider = Element {
-                role: Role::Generic,
-                background: Some(Color::srgb8(0x88, 0x8c, 0x90, 0xff)),
-                // The only cue that this edge is draggable. A 4 px strip with
-                // an arrow cursor is indistinguishable from decoration.
-                cursor: Some(lumen_core::CursorShape::ColResize),
-                style: LayoutStyle {
-                    width: Dim::px(6.0),
-                    height: Dim::pct(1.0),
-                    // The panes are `flex_grow` with a zero basis, so they take
-                    // the whole row and the default `flex_shrink: 1` squeezed
-                    // the divider to **zero width** — it painted nothing and
-                    // could not be hovered or hit, which is why the grab was
-                    // undiscoverable in the first place.
-                    flex_grow: 0.0,
-                    flex_shrink: 0.0,
-                    ..LayoutStyle::default()
-                },
-                ..Element::default()
-            }
-            .id(format!("{name}-divider"));
-            Element {
-                role: Role::Group,
-                value: Some(format!("{:.2}", r)),
-                on_drag: Some(Rc::new(move |rt, frac, _, _| {
-                    ratio.set(rt, frac.clamp(0.1, 0.9))
-                })),
-                style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Row,
-                    width: Dim::pct(1.0),
-                    height: Dim::pct(1.0),
-                    ..LayoutStyle::default()
-                },
-                children: vec![
-                    pane(first, r as f32),
-                    divider,
-                    pane(second, (1.0 - r) as f32),
-                ],
-                ..Element::default()
-            }
-            .id(name)
-        };
-        PaneGrid { el }
+        let ratio = cx.signal(name, || 0.5f64);
+        PaneGrid {
+            name: name.to_string(),
+            first,
+            second,
+            r: ratio.get(cx.runtime()),
+            ratio,
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(PaneGrid);
+impl Widget for PaneGrid {
+    fn build(self) -> Element {
+        let PaneGrid {
+            name,
+            first,
+            second,
+            r,
+            ratio,
+            common,
+        } = self;
+        let divider = Element {
+            role: Role::Generic,
+            background: Some(Color::srgb8(0x88, 0x8c, 0x90, 0xff)),
+            // The only cue that this edge is draggable. A 4 px strip with
+            // an arrow cursor is indistinguishable from decoration.
+            cursor: Some(lumen_core::CursorShape::ColResize),
+            style: LayoutStyle {
+                width: Dim::px(6.0),
+                height: Dim::pct(1.0),
+                // The panes are `flex_grow` with a zero basis, so they take
+                // the whole row and the default `flex_shrink: 1` squeezed
+                // the divider to **zero width** — it painted nothing and
+                // could not be hovered or hit, which is why the grab was
+                // undiscoverable in the first place.
+                flex_grow: 0.0,
+                flex_shrink: 0.0,
+                ..LayoutStyle::default()
+            },
+            ..Element::default()
+        }
+        .id(format!("{name}-divider"));
+        let mut el = Element {
+            role: Role::Group,
+            value: Some(format!("{r:.2}")),
+            on_drag: Some(Rc::new(move |rt, frac, _, _| {
+                ratio.set(rt, frac.clamp(0.1, 0.9))
+            })),
+            style: LayoutStyle {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                width: Dim::pct(1.0),
+                height: Dim::pct(1.0),
+                ..LayoutStyle::default()
+            },
+            children: vec![
+                pane(first, r as f32),
+                divider,
+                pane(second, (1.0 - r) as f32),
+            ],
+            ..Element::default()
+        }
+        .id(name);
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(PaneGrid);
 
 /// A resizable two-pane split (E8.4). Dragging within the grid sets the split
 /// position; `name` keys the ratio. A visual divider marks the boundary.
