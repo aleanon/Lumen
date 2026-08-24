@@ -2112,6 +2112,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         out.extend(self.offscreen_findings());
         out.extend(self.blank_frame_findings());
         out.extend(self.occlusion_findings());
+        out.extend(self.truncation_findings());
         out.extend(self.contrast_findings());
         out
     }
@@ -2148,6 +2149,72 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             n = parent;
         }
         acc
+    }
+
+    /// W0403: text painted truncated while the semantic label stays full.
+    ///
+    /// The signal was already stored — `NodeMeta.display_text` is *"the
+    /// truncated string the PAINT pass draws"*, so `Some(_)` **is** the
+    /// truncation flag. Its own doc comment defends keeping `label` full,
+    /// and that reasoning is right: truncating the tree would make
+    /// `ui.getTree` report `"Some long lab…"` and corrupt the observability
+    /// surface to fix a visual one. What was missing is the third option —
+    /// keep the label full *and* say that the paint differs.
+    ///
+    /// Advisory: truncation is usually intentional. It rings as `warn` because
+    /// `Diagnostic::new` infers severity from the code's leading letter and a
+    /// `W` code cannot be `info`; the advisory nature lives in the wording, not
+    /// in a severity the type system cannot express.
+    fn truncation_findings(&self) -> Vec<lumen_core::Diagnostic> {
+        let mut out = Vec::new();
+        for (node, m) in self.meta.iter() {
+            let Some(painted) = &m.display_text else {
+                continue;
+            };
+            let NodeContent::Text(full, _) = &m.content else {
+                continue;
+            };
+            if painted == full {
+                continue;
+            }
+            let who =
+                m.id.as_ref()
+                    .map(|i| format!("`#{}`", i.as_str()))
+                    .unwrap_or_else(|| "a text node".to_string());
+            let d = lumen_core::Diagnostic::new(
+                lumen_core::codes::W0403,
+                format!(
+                    "{who} paints {painted:?} but its label is {full:?}. The \
+                     semantic tree deliberately keeps the full string, so text \
+                     assertions pass while the user sees the truncation — widen \
+                     the box if that is not intended."
+                ),
+            );
+            let d = match self.handle_for_index(node.index()) {
+                Some(h) => d.with_target(h.to_wire(), m.id.as_ref()),
+                None => d,
+            };
+            out.push(d);
+        }
+        out.sort_by(|a, b| a.message.cmp(&b.message));
+        out
+    }
+
+    /// The string this node actually PAINTS, when it differs from its label
+    /// (`text-overflow: ellipsis`). `None` when paint and label agree.
+    ///
+    /// Surfaced through `ui.getLayout` beside `ink` and `opacity` — the
+    /// per-node visual facts the tree deliberately does not carry.
+    pub fn node_painted_text(&self, selector: &str) -> Option<String> {
+        let root = self.semantics_elided();
+        let id = lumen_core::semantics::resolve_one(&root, selector).ok()?;
+        let node = self.node_for_handle(id)?;
+        let m = self.meta.get(&node)?;
+        let painted = m.display_text.as_ref()?;
+        match &m.content {
+            NodeContent::Text(full, _) if painted != full => Some(painted.clone()),
+            _ => None,
+        }
     }
 
     /// Fraction of an interactive node's box that must be covered before the

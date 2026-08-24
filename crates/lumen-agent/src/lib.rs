@@ -438,6 +438,15 @@ fn handle<R: Renderer, E: Spawner>(
                     out["opacity"] = json!(o);
                 }
             }
+            // O3.1: what this node actually PAINTS, when it differs from its
+            // label. The tree keeps the full string on purpose — truncating it
+            // would corrupt the observability surface to fix a visual one — so
+            // this is the field that makes the split knowable rather than
+            // undiscoverable.
+            if let Some(painted) = app.node_painted_text(sel(params)?) {
+                out["painted_text"] = json!(painted);
+                out["truncated"] = json!(true);
+            }
             // Reactive dependencies if this node is a `cx.scope` root (F2): the
             // signals whose change re-runs this subtree.
             if let Some(deps) = &node.deps {

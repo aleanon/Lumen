@@ -337,6 +337,21 @@ pub mod codes {
     /// registered font covers (T.4; the lean Latin-subset build surfaces
     /// uncovered scripts here instead of silently drawing boxes).
     pub const W0402: &str = "W0402";
+
+    /// Text is **painted truncated** (`text-overflow: ellipsis`) while the
+    /// semantic tree keeps the full string.
+    ///
+    /// That split is deliberate and correct — truncating the tree would make
+    /// `ui.getTree` report `"Some long lab…"` and corrupt the observability
+    /// surface to fix a visual one. But it leaves an agent confidently wrong:
+    /// the screen reads `Quarterly rev…`, the tree reads
+    /// `Quarterly revenue by region`, `assertText` passes, and the real bug —
+    /// the column is too narrow — is invisible.
+    ///
+    /// This is the missing third option: keep the label full, and report the
+    /// split explicitly. Advisory — truncation is often exactly what the author
+    /// intended; the value is that it becomes *knowable*.
+    pub const W0403: &str = "W0403";
     /// A build/layout/paint panic was contained; the previous frame was kept
     /// and the app stayed alive (T7.3 error boundary, top level).
     pub const E0701: &str = "E0701";

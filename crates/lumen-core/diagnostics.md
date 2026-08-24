@@ -42,6 +42,7 @@ same commit. Codes are assigned by `02-spec-core.md §9` and `04-spec-lss-stylin
 | W0302 | warning  | Deprecated `node-<index>` agent handle accepted; use `nx-<hex>` (ID2 alias window) | 03 §1, §2 |
 | W0401 | warning  | Missing translation for a message key in the active locale (T5.3) | 02 §9 |
 | W0402 | warning  | Tofu — shaped text contains `.notdef` glyphs no registered font covers (T.4) | 02 §9 |
+| W0403 | warning  | Text is painted truncated (`text-overflow: ellipsis`) while the semantic label keeps the full string — advisory, so the split is knowable | 02 §9 |
 | E0701 | error    | A build/layout/paint panic was contained; previous frame kept, app alive (T7.3) | 02 §9 |
 | E0702 | error    | An **un**contained panic crossed the crash-report hook (E.3); process is going down | 02 §9 |
 
@@ -54,6 +55,6 @@ zero-area-node code):
 
 - `W01xx` layout/render: next free is **W0116**
 - `W03xx` semantics: next free is **W0304**
-- `W04xx` i18n/text: next free is **W0403**
+- `W04xx` i18n/text: next free is **W0404**
 - `E01xx` styling: next free is **E0105**
 - `E07xx` panics: next free is **E0703**
