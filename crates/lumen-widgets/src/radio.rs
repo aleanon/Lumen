@@ -2,7 +2,7 @@
 //! [`Radio::new`]; the selection lives in a signal keyed by the group name (the
 //! shared `group` string), so radios with the same group are mutually exclusive.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Element};
 use lumen_core::semantics::{Action, Role, State as SemState};
 use lumen_core::Color;
@@ -32,11 +32,18 @@ use std::rc::Rc;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Radio {
-    el: Element,
+    value: String,
+    label: String,
+    /// Whether this member is the selected one, resolved where the `BuildCx` is.
+    selected: bool,
+    signal: lumen_core::state::Signal<String>,
+    color: Option<Color>,
+    common: Common,
 }
 
 impl Radio {
-    /// A radio labelled `label` selecting `value` in group `group`.
+    /// One option in the single-choice group `group`; picking it sets the
+    /// group's signal to `value`.
     pub fn new(
         cx: &BuildCx,
         group: &str,
@@ -44,10 +51,35 @@ impl Radio {
         label: impl Into<String>,
     ) -> Radio {
         let value = value.into();
-        let label = label.into();
-        let selected = cx.signal(group, String::new);
-        let cur = selected.get(cx.runtime());
-        let is = cur == value;
+        let signal = cx.signal(group, String::new);
+        let selected = signal.get(cx.runtime()) == value;
+        Radio {
+            value,
+            label: label.into(),
+            selected,
+            signal,
+            color: None,
+            common: Common::default(),
+        }
+    }
+
+    /// Set the label text colour (e.g. to match a dark theme).
+    pub fn color(mut self, c: Color) -> Radio {
+        self.color = Some(c);
+        self
+    }
+}
+
+impl Widget for Radio {
+    fn build(self) -> Element {
+        let Radio {
+            value,
+            label,
+            selected: is,
+            signal,
+            color,
+            common,
+        } = self;
 
         // Outer ring + (when selected) an inner dot.
         let ring_color = if is {
@@ -82,10 +114,16 @@ impl Radio {
             ring.children = vec![dot];
         }
 
-        let on_set = value.clone();
-        let el = Element {
+        let mut text = Element::text(label.clone());
+        if let Some(c) = color {
+            if let Some(ts) = text.text_style_mut() {
+                ts.color = c;
+            }
+        }
+
+        let mut el = Element {
             role: Role::Radio,
-            label: label.clone(),
+            label,
             focusable: true,
             actions: vec![Action::Click, Action::Focus],
             states: vec![if is {
@@ -100,20 +138,13 @@ impl Radio {
                 column_gap: Dim::px(8.0),
                 ..LayoutStyle::default()
             },
-            on_click: Some(Rc::new(move |rt| selected.set(rt, on_set.clone()))),
-            children: vec![ring, Element::text(label)],
+            on_click: Some(Rc::new(move |rt| signal.set(rt, value.clone()))),
+            children: vec![ring, text],
             ..Element::default()
         };
-        Radio { el }
-    }
-
-    /// Set the label text colour (e.g. to match a dark theme).
-    pub fn color(mut self, c: Color) -> Radio {
-        if let Some(ts) = self.el.children.last_mut().and_then(|e| e.text_style_mut()) {
-            ts.color = c;
-        }
-        self
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Radio);
+impl_widget!(Radio);

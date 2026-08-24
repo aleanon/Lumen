@@ -4,7 +4,7 @@
 //! shell fulfils it natively once P.4 lands (until then it records too). The
 //! chosen path arrives back in the `{name}.path` signal when fulfilled.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element};
 use lumen_layout::Dim;
 
@@ -30,13 +30,17 @@ use lumen_layout::Dim;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct FilePicker {
-    el: Element,
     name: String,
+    label: crate::Text,
+    filters: Vec<String>,
+    /// The preview rows, resolved by `preview()` because they read resources
+    /// through the `BuildCx`.
+    preview: Option<Vec<Element>>,
+    common: Common,
 }
 
 impl FilePicker {
-    /// A picker labelled `label`, filtering to `filters` extensions; the
-    /// fulfilled path lands in `{name}.path`.
+    /// A button that asks the shell for a file, replying into `{name}.path`.
     pub fn new(
         cx: &BuildCx,
         name: &str,
@@ -44,37 +48,16 @@ impl FilePicker {
         filters: impl IntoIterator<Item = impl Into<String>>,
     ) -> FilePicker {
         cx.signal(format!("{name}.path"), String::new);
-        let filters: Vec<String> = filters.into_iter().map(Into::into).collect();
-        let reply = format!("{name}.path");
-        let mut el: Element = widgets::button(label, move |rt| {
-            crate::system::queue_system(
-                rt,
-                crate::system::SystemRequest::OpenFile {
-                    filters: filters.clone(),
-                    reply: reply.clone(),
-                },
-            );
-        });
-        el = el.class("file-picker");
-        el.style.min_width = Dim::px(120.0);
         FilePicker {
-            el,
             name: name.to_string(),
+            label: label.into(),
+            filters: filters.into_iter().map(Into::into).collect(),
+            preview: None,
+            common: Common::default(),
         }
     }
-}
 
-impl FilePicker {
-    /// Show the chosen file beneath the button, scaled to fit `max_side`.
-    ///
-    /// A picker that reports only a path leaves the user with no way to tell
-    /// whether they picked the right file. The bytes are read on the blocking
-    /// pool (keyed on the path, so changing the selection refetches and the
-    /// previous preview stays up meanwhile) and decoded through
-    /// [`crate::asset::decode`], which caches — so a rebuild does not re-decode.
-    ///
-    /// Non-images and unreadable files render the reason instead of the picture;
-    /// the picker never becomes a silent no-op.
+    /// Show the chosen file beneath the button, scaled to fit `max_side` px.
     pub fn preview(mut self, cx: &BuildCx, max_side: f64) -> FilePicker {
         let path = cx
             .signal(format!("{}.path", self.name), String::new)
@@ -112,15 +95,12 @@ impl FilePicker {
                 .map(|f| f.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.clone()),
         );
-        let mut col = widgets::column(vec![self.el, shown, caption]);
-        col.style.row_gap = Dim::px(8.0);
-        col.style.align_items = Some(lumen_layout::Align::Center);
-        self.el = col;
+        self.preview = Some(vec![shown, caption]);
         self
     }
 }
 
-/// A small muted caption line.
+/// A small grey caption line.
 fn note(s: impl Into<String>) -> Element {
     let mut e = widgets::text(s.into());
     if let Some(ts) = e.text_style_mut() {
@@ -130,4 +110,43 @@ fn note(s: impl Into<String>) -> Element {
     e
 }
 
-impl_common!(FilePicker);
+impl Widget for FilePicker {
+    fn build(self) -> Element {
+        let FilePicker {
+            name,
+            label,
+            filters,
+            preview,
+            common,
+        } = self;
+        let reply = format!("{name}.path");
+        let mut button: Element = widgets::button(label, move |rt| {
+            crate::system::queue_system(
+                rt,
+                crate::system::SystemRequest::OpenFile {
+                    filters: filters.clone(),
+                    reply: reply.clone(),
+                },
+            );
+        });
+        button = button.class("file-picker");
+        button.style.min_width = Dim::px(120.0);
+
+        let mut el = match preview {
+            None => button,
+            Some(rows) => {
+                let mut children = Vec::with_capacity(rows.len() + 1);
+                children.push(button);
+                children.extend(rows);
+                let mut col = widgets::column(children);
+                col.style.row_gap = Dim::px(8.0);
+                col.style.align_items = Some(lumen_layout::Align::Center);
+                col
+            }
+        };
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(FilePicker);

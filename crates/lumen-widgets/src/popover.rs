@@ -4,7 +4,7 @@
 //! (overlay), escapes ancestor clips, and light-dismisses (click-away /
 //! Escape).
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Element};
 use lumen_core::semantics::Role;
 use lumen_core::Color;
@@ -49,15 +49,49 @@ pub enum PopoverSide {
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Popover {
-    el: Element,
+    trigger: Element,
+    content: Element,
+    /// Whether the panel is showing, resolved where the `BuildCx` is.
+    is_open: bool,
+    open: lumen_core::state::Signal<bool>,
+    side: PopoverSide,
+    common: Common,
 }
 
 impl Popover {
-    /// A popover whose open flag is stored under `{name}.open`. `trigger`
-    /// toggles it; `content` renders inside the floating panel while open.
-    pub fn new(cx: &BuildCx, name: &str, mut trigger: Element, content: Element) -> Popover {
+    /// An anchored floating panel: `trigger` toggles it, `content` fills it.
+    pub fn new(cx: &BuildCx, name: &str, trigger: Element, content: Element) -> Popover {
         let open = cx.signal(format!("{name}.open"), || false);
-        let is_open = open.get(cx.runtime());
+        Popover {
+            trigger,
+            content,
+            is_open: open.get(cx.runtime()),
+            open,
+            side: PopoverSide::default(),
+            common: Common::default(),
+        }
+    }
+
+    /// Which side of the trigger the panel opens on.
+    ///
+    /// A stored choice now, rather than a reach into `children.get_mut(1)` —
+    /// which silently did nothing when the popover happened to be closed.
+    pub fn side(mut self, side: PopoverSide) -> Self {
+        self.side = side;
+        self
+    }
+}
+
+impl Widget for Popover {
+    fn build(self) -> Element {
+        let Popover {
+            mut trigger,
+            content,
+            is_open,
+            open,
+            side,
+            common,
+        } = self;
 
         if trigger.role == Role::Generic {
             trigger.role = Role::Button;
@@ -85,19 +119,31 @@ impl Popover {
             panel.on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
             panel.style.position = Position::Absolute;
             panel.style.padding = Edges::all(Dim::px(10.0));
-            // Anchored just below the trigger: the wrapper is exactly the
+            // Anchored against the trigger: the wrapper is exactly the
             // trigger's box (the panel is absolute), so `top: 100%` lands at
             // its bottom edge; a small margin adds the gap.
-            panel.style.inset = Edges {
-                left: Dim::px(0.0),
-                top: Dim::pct(1.0),
-                ..Edges::AUTO
-            };
-            panel.style.margin.top = Dim::px(4.0);
+            match side {
+                PopoverSide::Below => {
+                    panel.style.inset = Edges {
+                        left: Dim::px(0.0),
+                        top: Dim::pct(1.0),
+                        ..Edges::AUTO
+                    };
+                    panel.style.margin.top = Dim::px(4.0);
+                }
+                PopoverSide::Above => {
+                    panel.style.inset = Edges {
+                        left: Dim::px(0.0),
+                        bottom: Dim::pct(1.0),
+                        ..Edges::AUTO
+                    };
+                    panel.style.margin.bottom = Dim::px(4.0);
+                }
+            }
             children.push(panel);
         }
 
-        let el = Element {
+        let mut el = Element {
             role: Role::Group,
             style: LayoutStyle {
                 position: Position::Relative,
@@ -108,24 +154,9 @@ impl Popover {
             children,
             ..Element::default()
         };
-        Popover { el }
-    }
-
-    /// Open the panel above instead of below the trigger.
-    pub fn side(mut self, side: PopoverSide) -> Self {
-        if side == PopoverSide::Above {
-            if let Some(panel) = self.el.children.get_mut(1) {
-                panel.style.inset = Edges {
-                    left: Dim::px(0.0),
-                    bottom: Dim::pct(1.0),
-                    ..Edges::AUTO
-                };
-                panel.style.margin.top = Dim::px(0.0);
-                panel.style.margin.bottom = Dim::px(4.0);
-            }
-        }
-        self
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Popover);
+impl_widget!(Popover);

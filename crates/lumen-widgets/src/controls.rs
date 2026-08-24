@@ -4,7 +4,7 @@
 //! (SD2: regrouped out of the milestone-named `widgets_m*`/`misc_w2` modules,
 //! which recorded WHEN a widget was written rather than what it is.)
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Canvas, Element};
 use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role, State as SemState};
@@ -36,7 +36,14 @@ use std::rc::Rc;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Skeleton {
-    el: Element,
+    width: f64,
+    height: f64,
+    /// The pulse alpha, sampled in `new`.
+    ///
+    /// Reading the animation clock registers a dependency, so it has to happen
+    /// where the `BuildCx` is — deferring it to `build` would move the edge.
+    alpha: u8,
+    common: Common,
 }
 
 impl Skeleton {
@@ -46,17 +53,41 @@ impl Skeleton {
         let t = cx.now_ms() / 1000.0;
         // 0.55..0.95 alpha pulse.
         let a = 0.75 + 0.20 * (t * 2.2).sin();
-        let mut el = Element::default().class("skeleton");
-        el.role = Role::Generic;
-        el.background = Some(Color::srgb8(0xd7, 0xdb, 0xe1, (a * 255.0) as u8));
-        el.corner_radius = 6.0;
-        el.style.width = Dim::px(width as f32);
-        el.style.height = Dim::px(height as f32);
-        Skeleton { el }
+        Skeleton {
+            width,
+            height,
+            alpha: (a * 255.0) as u8,
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(Skeleton);
+impl Widget for Skeleton {
+    fn build(self) -> Element {
+        let Skeleton {
+            width,
+            height,
+            alpha,
+            common,
+        } = self;
+        let mut el = Element {
+            role: Role::Generic,
+            background: Some(Color::srgb8(0xd7, 0xdb, 0xe1, alpha)),
+            corner_radius: 6.0,
+            classes: vec!["skeleton".to_string()],
+            style: LayoutStyle {
+                width: Dim::px(width as f32),
+                height: Dim::px(height as f32),
+                ..LayoutStyle::default()
+            },
+            ..Element::default()
+        };
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(Skeleton);
 
 /// A round avatar showing the initials of a name over a color hashed from it.
 /// # Example
@@ -80,18 +111,44 @@ impl_common!(Skeleton);
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Avatar {
-    el: Element,
+    name: String,
+    diameter: f64,
+    /// A picture to show instead of the initials.
+    img: Option<lumen_render::RgbaImage>,
+    common: Common,
 }
 
 impl Avatar {
     /// An avatar of `diameter` px for `name` (initials + stable hash color).
     pub fn new(name: &str, diameter: f64) -> Avatar {
-        let initials: String = name
-            .split_whitespace()
-            .filter_map(|w| w.chars().next())
-            .take(2)
-            .collect::<String>()
-            .to_uppercase();
+        Avatar {
+            name: name.to_string(),
+            diameter,
+            img: None,
+            common: Common::default(),
+        }
+    }
+
+    /// Show `img` instead of the initials, clipped to the avatar's circle.
+    ///
+    /// Initials remain the **fallback** — the framework-agnostic contract for an
+    /// avatar (Flutter's `CircleAvatar.backgroundImage`, Material's avatar) — so
+    /// a failed or absent image still renders something identifiable, and the
+    /// accessible label stays the person's name either way.
+    pub fn image(mut self, img: lumen_render::RgbaImage) -> Avatar {
+        self.img = Some(img);
+        self
+    }
+}
+
+impl Widget for Avatar {
+    fn build(self) -> Element {
+        let Avatar {
+            name,
+            diameter,
+            img,
+            common,
+        } = self;
         let hash: u32 = name
             .bytes()
             .fold(2166136261u32, |h, b| (h ^ b as u32).wrapping_mul(16777619));
@@ -104,54 +161,63 @@ impl Avatar {
             Color::srgb8(0x00, 0x83, 0x8f, 0xff),
         ];
         let bg = palette[(hash as usize) % palette.len()];
+        let d = Dim::px(diameter as f32);
 
-        let mut text = widgets::text(if initials.is_empty() {
-            "?".to_string()
-        } else {
-            initials
-        });
-        if let Some(ts) = text.text_style_mut() {
-            ts.font_size = (diameter * 0.4) as f32;
-            ts.weight = 600.0;
-            ts.color = Color::srgb8(0xff, 0xff, 0xff, 0xff);
-        }
+        // The picture path skips the initials entirely rather than building them
+        // and throwing them away, which is what the eager version had to do:
+        // `.image()` arrived after `new()` had already shaped the text.
+        let (children, clip) = match img {
+            Some(img) => {
+                let mut pic: Element = crate::Image::new(img).into();
+                pic.style.width = d;
+                pic.style.height = d;
+                pic.elide_semantics = true; // the avatar itself carries the label
+                (vec![pic], true)
+            }
+            None => {
+                let initials: String = name
+                    .split_whitespace()
+                    .filter_map(|w| w.chars().next())
+                    .take(2)
+                    .collect::<String>()
+                    .to_uppercase();
+                let mut text = widgets::text(if initials.is_empty() {
+                    "?".to_string()
+                } else {
+                    initials
+                });
+                if let Some(ts) = text.text_style_mut() {
+                    ts.font_size = (diameter * 0.4) as f32;
+                    ts.weight = 600.0;
+                    ts.color = Color::srgb8(0xff, 0xff, 0xff, 0xff);
+                }
+                (vec![text], false)
+            }
+        };
+
         let mut el = Element {
             role: Role::Image,
-            label: name.to_string(),
+            label: name,
             background: Some(bg),
             corner_radius: diameter / 2.0,
-            children: vec![text],
+            clip,
+            classes: vec!["avatar".to_string()],
+            style: LayoutStyle {
+                width: d,
+                height: d,
+                align_items: Some(LAlign::Center),
+                justify_content: Some(LAlign::Center),
+                ..LayoutStyle::default()
+            },
+            children,
             ..Element::default()
         };
-        el = el.class("avatar");
-        el.style.width = Dim::px(diameter as f32);
-        el.style.height = Dim::px(diameter as f32);
-        el.style.align_items = Some(LAlign::Center);
-        el.style.justify_content = Some(LAlign::Center);
-        Avatar { el }
+        common.apply(&mut el);
+        el
     }
 }
 
-impl Avatar {
-    /// Show `img` instead of the initials, clipped to the avatar's circle.
-    ///
-    /// Initials remain the **fallback** — the framework-agnostic contract for an
-    /// avatar (Flutter's `CircleAvatar.backgroundImage`, Material's avatar) — so
-    /// a failed or absent image still renders something identifiable, and the
-    /// accessible label stays the person's name either way.
-    pub fn image(mut self, img: lumen_render::RgbaImage) -> Avatar {
-        let d = self.el.style.width;
-        let mut pic: Element = crate::Image::new(img).into();
-        pic.style.width = d;
-        pic.style.height = self.el.style.height;
-        pic.elide_semantics = true; // the avatar itself carries the label
-        self.el.children = vec![pic];
-        self.el.clip = true; // round the picture to the avatar's circle
-        self
-    }
-}
-
-impl_common!(Avatar);
+impl_widget!(Avatar);
 
 /// A radio button in the group keyed by `group`; selecting it sets the group to
 /// `value`. Exactly one member of a group is checked.
@@ -242,7 +308,8 @@ pub fn text_area(cx: &BuildCx, name: &str, initial: &str) -> Element {
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Icon {
-    el: Element,
+    label: String,
+    common: Common,
 }
 
 impl Icon {
@@ -251,16 +318,27 @@ impl Icon {
     /// `close`, `menu` — and any other name falls back to a star. The label is
     /// also the accessible name.
     pub fn new(label: &str) -> Icon {
+        Icon {
+            label: label.to_string(),
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for Icon {
+    fn build(self) -> Element {
+        let Icon { label, common } = self;
         let color = Color::srgb8(0x33, 0x37, 0x3d, 0xff);
         let name = label.to_lowercase();
         let mut el: Element =
             Canvas::new(26.0, 26.0, move |f, sz| draw_icon(f, &name, sz, color)).into();
-        el.label = label.to_string();
-        Icon { el }
+        el.label = label;
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Icon);
+impl_widget!(Icon);
 
 /// Paint a simple vector glyph named by `name` into the icon square.
 fn draw_icon(
@@ -410,92 +488,111 @@ pub fn icon(label: &str) -> Element {
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Switch {
-    el: Element,
+    label: crate::Text,
+    /// The signal's current value, read where the `BuildCx` is.
+    checked: bool,
+    /// The handle the click handler toggles (`Copy`, eight bytes).
+    signal: lumen_core::state::Signal<bool>,
+    common: Common,
 }
 
 impl Switch {
     /// A toggle switch with its own boolean state (`name`).
     pub fn new(cx: &BuildCx, name: &str, label: impl Into<crate::Text>) -> Switch {
-        let el = {
-            let label = label.into();
-            let on = cx.signal(name, || false);
-            let is = on.get(cx.runtime());
-            // The knob is what makes a switch read as a switch: it sits left
-            // when off and right when on, so the state is legible without
-            // relying on the track colour alone (which fails for the ~8% of men
-            // with a red-green deficiency, and in any monochrome capture).
-            const TRACK_W: f64 = 36.0;
-            const TRACK_H: f64 = 20.0;
-            const KNOB: f64 = 16.0;
-            const KNOB_PAD: f64 = (TRACK_H - KNOB) / 2.0;
-            let knob = Element {
-                background: Some(Color::WHITE),
-                corner_radius: KNOB / 2.0,
-                shadow: Some(crate::element::Shadow::soft()),
-                style: LayoutStyle {
-                    position: Position::Absolute,
-                    inset: Edges {
-                        left: Dim::px(if is {
-                            (TRACK_W - KNOB - KNOB_PAD) as f32
-                        } else {
-                            KNOB_PAD as f32
-                        }),
-                        top: Dim::px(KNOB_PAD as f32),
-                        ..Edges::AUTO
-                    },
-                    width: Dim::px(KNOB as f32),
-                    height: Dim::px(KNOB as f32),
-                    ..LayoutStyle::default()
-                },
-                ..Element::default()
-            }
-            .part("knob");
-            let track = Element {
-                background: Some(if is {
-                    Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
-                } else {
-                    Color::srgb8(0xcc, 0xcc, 0xcc, 0xff)
-                }),
-                corner_radius: TRACK_H / 2.0,
-                style: LayoutStyle {
-                    position: Position::Relative,
-                    width: Dim::px(TRACK_W as f32),
-                    height: Dim::px(TRACK_H as f32),
-                    flex_shrink: 0.0,
-                    ..LayoutStyle::default()
-                },
-                children: vec![knob],
-                ..Element::default()
-            }
-            .part("track");
-            let (label_s, label_dyn) = label.clone().into_parts();
-            Element {
-                role: Role::Switch,
-                label: label_s,
-                dyn_text: label_dyn,
-                focusable: true,
-                actions: vec![Action::Click, Action::Focus],
-                states: vec![if is {
-                    SemState::Checked
-                } else {
-                    SemState::Unchecked
-                }],
-                style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Dim::px(6.0),
-                    ..LayoutStyle::default()
-                },
-                on_click: Some(Rc::new(move |rt| on.update(rt, |v| *v = !*v))),
-                children: vec![track, Element::text(label)],
-                ..Element::default()
-            }
-        };
-        Switch { el }
+        let signal = cx.signal(name, || false);
+        Switch {
+            label: label.into(),
+            checked: signal.get(cx.runtime()),
+            signal,
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(Switch);
+impl Widget for Switch {
+    fn build(self) -> Element {
+        let Switch {
+            label,
+            checked: is,
+            signal,
+            common,
+        } = self;
+        // The knob is what makes a switch read as a switch: it sits left
+        // when off and right when on, so the state is legible without
+        // relying on the track colour alone (which fails for the ~8% of men
+        // with a red-green deficiency, and in any monochrome capture).
+        const TRACK_W: f64 = 36.0;
+        const TRACK_H: f64 = 20.0;
+        const KNOB: f64 = 16.0;
+        const KNOB_PAD: f64 = (TRACK_H - KNOB) / 2.0;
+        let knob = Element {
+            background: Some(Color::WHITE),
+            corner_radius: KNOB / 2.0,
+            shadow: Some(crate::element::Shadow::soft()),
+            style: LayoutStyle {
+                position: Position::Absolute,
+                inset: Edges {
+                    left: Dim::px(if is {
+                        (TRACK_W - KNOB - KNOB_PAD) as f32
+                    } else {
+                        KNOB_PAD as f32
+                    }),
+                    top: Dim::px(KNOB_PAD as f32),
+                    ..Edges::AUTO
+                },
+                width: Dim::px(KNOB as f32),
+                height: Dim::px(KNOB as f32),
+                ..LayoutStyle::default()
+            },
+            ..Element::default()
+        }
+        .part("knob");
+        let track = Element {
+            background: Some(if is {
+                Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
+            } else {
+                Color::srgb8(0xcc, 0xcc, 0xcc, 0xff)
+            }),
+            corner_radius: TRACK_H / 2.0,
+            style: LayoutStyle {
+                position: Position::Relative,
+                width: Dim::px(TRACK_W as f32),
+                height: Dim::px(TRACK_H as f32),
+                flex_shrink: 0.0,
+                ..LayoutStyle::default()
+            },
+            children: vec![knob],
+            ..Element::default()
+        }
+        .part("track");
+        let (label_s, label_dyn) = label.clone().into_parts();
+        let mut el = Element {
+            role: Role::Switch,
+            label: label_s,
+            dyn_text: label_dyn,
+            focusable: true,
+            actions: vec![Action::Click, Action::Focus],
+            states: vec![if is {
+                SemState::Checked
+            } else {
+                SemState::Unchecked
+            }],
+            style: LayoutStyle {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                column_gap: Dim::px(6.0),
+                ..LayoutStyle::default()
+            },
+            on_click: Some(Rc::new(move |rt| signal.update(rt, |v| *v = !*v))),
+            children: vec![track, Element::text(label)],
+            ..Element::default()
+        };
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(Switch);
 
 /// A toggle switch with its own boolean state (`name`).
 /// *(Thin shim over [`Switch`] — the typed form is preferred.)*
@@ -526,73 +623,97 @@ pub fn switch(cx: &BuildCx, name: &str, label: impl Into<crate::Text>) -> Elemen
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Stepper {
-    el: Element,
+    /// Kept because the child ids are namespaced under it (W4).
+    name: String,
+    min: i64,
+    max: i64,
+    /// The signal's current value, read where the `BuildCx` is.
+    value: i64,
+    signal: lumen_core::state::Signal<i64>,
+    common: Common,
 }
 
 impl Stepper {
     /// A numeric stepper (`-`/value/`+`) with its own integer state (`name`).
     pub fn new(cx: &BuildCx, name: &str, min: i64, max: i64) -> Stepper {
-        let el = {
-            let value = cx.signal(name, || min);
-            let v = value.get(cx.runtime());
-            // W4: child ids are namespaced under `name` — hardcoded "dec"/"inc"/
-            // "value" made two steppers on one screen collide (W0001), and the
-            // agent would drive whichever came first.
-            let dec =
-                crate::widgets::button("-", move |rt| value.update(rt, |x| *x = (*x - 1).max(min)))
-                    .id(format!("{name}-dec"));
-            let inc =
-                crate::widgets::button("+", move |rt| value.update(rt, |x| *x = (*x + 1).min(max)))
-                    .id(format!("{name}-inc"));
-            Element {
-                role: Role::Group,
-                label: format!("{v}"),
-                value: Some(format!("{v}")),
-                actions: vec![Action::Increment, Action::Decrement, Action::SetValue],
-                focusable: true,
-                style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Dim::px(8.0),
-                    ..LayoutStyle::default()
-                },
-                // W2: honour the declared actions.
-                on_increment: Some(Rc::new(move |rt| {
-                    value.update(rt, |x| *x = (*x + 1).min(max))
-                })),
-                on_decrement: Some(Rc::new(move |rt| {
-                    value.update(rt, |x| *x = (*x - 1).max(min))
-                })),
-                on_set_value: Some(Rc::new(move |rt, s| {
-                    if let Ok(n) = s.parse::<i64>() {
-                        value.set(rt, n.clamp(min, max));
-                    }
-                })),
-                // W3: arrow keys adjust, Home/End jump to the bounds.
-                on_key: Some(Rc::new(move |rt, ke| match ke.key {
-                    Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::ArrowRight) => {
-                        value.update(rt, |x| *x = (*x + 1).min(max))
-                    }
-                    Key::Named(NamedKey::ArrowDown) | Key::Named(NamedKey::ArrowLeft) => {
-                        value.update(rt, |x| *x = (*x - 1).max(min))
-                    }
-                    Key::Named(NamedKey::Home) => value.set(rt, min),
-                    Key::Named(NamedKey::End) => value.set(rt, max),
-                    _ => {}
-                })),
-                children: vec![
-                    dec,
-                    Element::text(format!("{v}")).id(format!("{name}-value")),
-                    inc,
-                ],
-                ..Element::default()
-            }
-        };
-        Stepper { el }
+        let signal = cx.signal(name, || min);
+        Stepper {
+            name: name.to_string(),
+            min,
+            max,
+            value: signal.get(cx.runtime()),
+            signal,
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(Stepper);
+impl Widget for Stepper {
+    fn build(self) -> Element {
+        let Stepper {
+            name,
+            min,
+            max,
+            value: v,
+            signal: value,
+            common,
+        } = self;
+        // W4: child ids are namespaced under `name` — hardcoded "dec"/"inc"/
+        // "value" made two steppers on one screen collide (W0001), and the
+        // agent would drive whichever came first.
+        let dec = crate::widgets::button("-", move |rt| value.update(rt, |x| *x = (*x - 1).max(min)))
+            .id(format!("{name}-dec"));
+        let inc = crate::widgets::button("+", move |rt| value.update(rt, |x| *x = (*x + 1).min(max)))
+            .id(format!("{name}-inc"));
+        let mut el = Element {
+            role: Role::Group,
+            label: format!("{v}"),
+            value: Some(format!("{v}")),
+            actions: vec![Action::Increment, Action::Decrement, Action::SetValue],
+            focusable: true,
+            style: LayoutStyle {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                column_gap: Dim::px(8.0),
+                ..LayoutStyle::default()
+            },
+            // W2: honour the declared actions.
+            on_increment: Some(Rc::new(move |rt| {
+                value.update(rt, |x| *x = (*x + 1).min(max))
+            })),
+            on_decrement: Some(Rc::new(move |rt| {
+                value.update(rt, |x| *x = (*x - 1).max(min))
+            })),
+            on_set_value: Some(Rc::new(move |rt, s| {
+                if let Ok(n) = s.parse::<i64>() {
+                    value.set(rt, n.clamp(min, max));
+                }
+            })),
+            // W3: arrow keys adjust, Home/End jump to the bounds.
+            on_key: Some(Rc::new(move |rt, ke| match ke.key {
+                Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::ArrowRight) => {
+                    value.update(rt, |x| *x = (*x + 1).min(max))
+                }
+                Key::Named(NamedKey::ArrowDown) | Key::Named(NamedKey::ArrowLeft) => {
+                    value.update(rt, |x| *x = (*x - 1).max(min))
+                }
+                Key::Named(NamedKey::Home) => value.set(rt, min),
+                Key::Named(NamedKey::End) => value.set(rt, max),
+                _ => {}
+            })),
+            children: vec![
+                dec,
+                Element::text(format!("{v}")).id(format!("{name}-value")),
+                inc,
+            ],
+            ..Element::default()
+        };
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(Stepper);
 
 /// A numeric stepper (`-`/value/`+`) with its own integer state (`name`).
 /// *(Thin shim over [`Stepper`] — the typed form is preferred.)*

@@ -6,7 +6,7 @@
 
 use crate::element::NodeContent;
 use crate::text_input::edit_key;
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Element};
 use lumen_core::semantics::{Action, Role};
 use lumen_core::Color;
@@ -37,31 +37,79 @@ use std::rc::Rc;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct TextField {
-    el: Element,
+    /// The editor's text at build time, and its caret/selection.
+    text: String,
+    caret: usize,
+    selection: Option<(usize, usize)>,
+    editor: lumen_core::state::Signal<TextEditor>,
+    mirror: lumen_core::state::Signal<String>,
+    /// Visible height in lines, and the box width in px.
+    lines: u32,
+    width: f32,
+    common: Common,
 }
 
+/// The default visible height, in lines.
+const LINES: u32 = 5;
+/// One line of the default text style, px.
+const LINE_H: f32 = 20.0;
+
 impl TextField {
-    /// A multi-line field with `initial` contents, state stored under `name`.
-    /// Defaults to ~5 visible lines; override with [`lines`](TextField::lines)
-    /// or [`width`](TextField::width).
+    /// A multi-line editable area; the editor lives in a `Signal<TextEditor>`
+    /// keyed by `name`, with a `"{name}.text"` string mirror.
     pub fn new(cx: &BuildCx, name: &str, initial: &str) -> TextField {
         let editor = cx.signal(name, || TextEditor::new(initial));
         let mirror = cx.signal(format!("{name}.text"), || initial.to_string());
         let ed = editor.get(cx.runtime());
-        let text = ed.text().to_string();
+        TextField {
+            text: ed.text().to_string(),
+            caret: ed.cursor(),
+            selection: ed.has_selection().then(|| ed.selection()),
+            editor,
+            mirror,
+            lines: LINES,
+            width: 260.0,
+            common: Common::default(),
+        }
+    }
+
+    /// Visible height, in lines of text.
+    pub fn lines(mut self, n: u32) -> TextField {
+        self.lines = n;
+        self
+    }
+
+    /// Box width in px.
+    pub fn width(mut self, px: f32) -> TextField {
+        self.width = px;
+        self
+    }
+}
+
+impl Widget for TextField {
+    fn build(self) -> Element {
+        let TextField {
+            text,
+            caret,
+            selection,
+            editor,
+            mirror,
+            lines,
+            width,
+            common,
+        } = self;
         let shown = if text.is_empty() {
             " ".to_string()
         } else {
             text.clone()
         };
-        let line_h = 20.0_f32;
-        let el = Element {
+        let mut el = Element {
             role: Role::TextInput,
             focusable: true,
             // An I-beam over anything typeable.
             cursor: Some(lumen_core::CursorShape::Text),
             label: text.clone(),
-            value: Some(text.clone()),
+            value: Some(text),
             actions: vec![Action::Focus, Action::SetValue],
             background: Some(Color::srgb8(0xf7, 0xf8, 0xfa, 0xff)),
             corner_radius: 6.0,
@@ -75,13 +123,13 @@ impl TextField {
                 min_width: Dim::px(220.0),
                 // Several lines tall, and a fixed width so the text wraps
                 // (multi-line). Height grows past this via min_height semantics.
-                min_height: Dim::px(line_h * 5.0 + 16.0),
-                width: Dim::px(260.0),
+                min_height: Dim::px(LINE_H * lines as f32 + 16.0),
+                width: Dim::px(width),
                 ..LayoutStyle::default()
             },
             content: NodeContent::Text(shown, TextStyle::default()),
-            caret_byte: Some(ed.cursor()),
-            selection: ed.has_selection().then(|| ed.selection()),
+            caret_byte: Some(caret),
+            selection,
             on_text: Some(Rc::new(move |rt, t| {
                 editor.update(rt, |e| e.insert(t));
                 let text = editor.get(rt).text().to_string();
@@ -111,20 +159,9 @@ impl TextField {
             })),
             ..Element::default()
         };
-        TextField { el }
-    }
-
-    /// Set the visible line count (≈ rows of `20px`).
-    pub fn lines(mut self, n: u32) -> TextField {
-        self.el.style.min_height = Dim::px(20.0 * n as f32 + 16.0);
-        self
-    }
-
-    /// Set the wrap width in px.
-    pub fn width(mut self, px: f32) -> TextField {
-        self.el.style.width = Dim::px(px);
-        self
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(TextField);
+impl_widget!(TextField);

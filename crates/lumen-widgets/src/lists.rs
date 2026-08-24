@@ -4,7 +4,7 @@
 //! (SD2: regrouped out of the milestone-named `widgets_m*`/`misc_w2` modules,
 //! which recorded WHEN a widget was written rather than what it is.)
 
-use crate::widget::impl_common;
+use crate::widget::{impl_common, impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element};
 use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
 use lumen_core::Color;
@@ -35,7 +35,13 @@ use std::rc::Rc;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Pagination {
-    el: Element,
+    /// Kept because every child id is namespaced under it.
+    name: String,
+    pages: i64,
+    /// The clamped current page, read where the `BuildCx` is.
+    current: i64,
+    signal: lumen_core::state::Signal<i64>,
+    common: Common,
 }
 
 impl Pagination {
@@ -43,8 +49,26 @@ impl Pagination {
     /// `{name}.page` signal (`i64`, clamped).
     pub fn new(cx: &BuildCx, name: &str, pages: i64) -> Pagination {
         let pages = pages.max(1);
-        let page = cx.signal(format!("{name}.page"), || 1i64);
-        let cur = page.get(cx.runtime()).clamp(1, pages);
+        let signal = cx.signal(format!("{name}.page"), || 1i64);
+        Pagination {
+            name: name.to_string(),
+            pages,
+            current: signal.get(cx.runtime()).clamp(1, pages),
+            signal,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for Pagination {
+    fn build(self) -> Element {
+        let Pagination {
+            name,
+            pages,
+            current: cur,
+            signal: page,
+            common,
+        } = self;
 
         let btn = |label: String, target: i64, active: bool, enabled: bool| {
             let mut b = widgets::text(label);
@@ -80,8 +104,8 @@ impl Pagination {
             b
         };
 
-        let mut children =
-            vec![btn("‹".into(), cur - 1, false, cur > 1).id(format!("{name}-prev"))];
+        let mut children = Vec::with_capacity(pages as usize + 2);
+        children.push(btn("‹".into(), cur - 1, false, cur > 1).id(format!("{name}-prev")));
         for p in 1..=pages {
             children.push(btn(p.to_string(), p, p == cur, true).id(format!("{name}-p{p}")));
         }
@@ -91,11 +115,12 @@ impl Pagination {
         row.role = Role::Group;
         row.style.column_gap = Dim::px(6.0);
         row.style.align_items = Some(LAlign::Center);
-        Pagination { el: row }
+        common.apply(&mut row);
+        row
     }
 }
 
-impl_common!(Pagination);
+impl_widget!(Pagination);
 
 /// [`VirtualList`] — a windowing list materializing only visible items
 /// plus overscan; scroll offset under `name` (typed form of

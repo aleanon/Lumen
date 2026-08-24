@@ -5,7 +5,7 @@
 //! Default styles are hardcoded constants until the `.lss` system (T1.2).
 
 use crate::element::{BuildCx, Element};
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use lumen_core::semantics::{Action, Role, ScrollInfo};
 use lumen_core::Color;
 use lumen_layout::{Dim, Edges, LayoutStyle, Position};
@@ -83,30 +83,40 @@ pub fn leaf(w: impl crate::LeafWidget + 'static) -> Element {
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Image {
-    el: Element,
+    img: RgbaImage,
+    common: Common,
 }
 
 impl Image {
     /// An image of its own pixel size.
     pub fn new(img: RgbaImage) -> Image {
-        let el = {
-            let (w, h) = (img.width() as f32, img.height() as f32);
-            Element {
-                role: Role::Image,
-                content: crate::NodeContent::Image(img),
-                style: LayoutStyle {
-                    width: Dim::px(w),
-                    height: Dim::px(h),
-                    ..LayoutStyle::default()
-                },
-                ..Element::default()
-            }
-        };
-        Image { el }
+        Image {
+            img,
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(Image);
+impl Widget for Image {
+    fn build(self) -> Element {
+        let Image { img, common } = self;
+        let (w, h) = (img.width() as f32, img.height() as f32);
+        let mut el = Element {
+            role: Role::Image,
+            content: crate::NodeContent::Image(img),
+            style: LayoutStyle {
+                width: Dim::px(w),
+                height: Dim::px(h),
+                ..LayoutStyle::default()
+            },
+            ..Element::default()
+        };
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(Image);
 
 /// An image of its own pixel size.
 /// *(Thin shim over [`Image`] — the typed form is preferred.)*
@@ -293,7 +303,10 @@ pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Canvas {
-    el: Element,
+    width: f64,
+    height: f64,
+    draw: crate::element::CanvasFn,
+    common: Common,
 }
 
 impl Canvas {
@@ -304,24 +317,39 @@ impl Canvas {
         height: f64,
         draw: impl Fn(&mut lumen_render::canvas::Frame, lumen_core::geometry::Size) + 'static,
     ) -> Canvas {
-        let el = {
-            use lumen_layout::{Dim, LayoutStyle};
-            Element {
-                role: lumen_core::semantics::Role::Image,
-                style: LayoutStyle {
-                    width: Dim::px(width as f32),
-                    height: Dim::px(height as f32),
-                    ..LayoutStyle::default()
-                },
-                content: crate::NodeContent::Canvas(std::rc::Rc::new(draw)),
-                ..Element::default()
-            }
-        };
-        Canvas { el }
+        Canvas {
+            width,
+            height,
+            draw: Rc::new(draw),
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(Canvas);
+impl Widget for Canvas {
+    fn build(self) -> Element {
+        let Canvas {
+            width,
+            height,
+            draw,
+            common,
+        } = self;
+        let mut el = Element {
+            role: Role::Image,
+            style: LayoutStyle {
+                width: Dim::px(width as f32),
+                height: Dim::px(height as f32),
+                ..LayoutStyle::default()
+            },
+            content: crate::NodeContent::Canvas(draw),
+            ..Element::default()
+        };
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(Canvas);
 
 /// An immediate-mode drawing canvas (E8.1). `draw` paints into a `Frame` sized
 /// to the widget each frame; emit paths, rects, circles, and gradients.
