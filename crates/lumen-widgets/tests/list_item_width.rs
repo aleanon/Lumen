@@ -21,6 +21,10 @@ use std::rc::Rc;
 
 const W: f64 = 300.0;
 const VIEWPORT: f64 = 200.0;
+/// The lane the overlay scrollbar keeps to itself (`scrollable::GUTTER`), which
+/// scrolling rows stop short of rather than running under. These lists overflow
+/// their viewport, so every row here is inset by it.
+const GUTTER: f64 = 12.0;
 
 /// A list whose rows are bare text — the shape that shrink-wrapped.
 #[test]
@@ -39,7 +43,7 @@ fn a_bare_text_row_spans_the_list() {
     let b = h.node_bounds_by_id("row-3").expect("row 3 is mounted");
     assert_eq!(
         (b.x0, b.x1),
-        (0.0, W),
+        (0.0, W - GUTTER),
         "a text row must span the list, not its glyphs ({b:?})"
     );
 }

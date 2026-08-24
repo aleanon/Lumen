@@ -19,8 +19,9 @@ fn slider_track_and_thumb_take_part_styles() {
     let shot = h.screenshot();
     // Value starts at min → the 16px thumb sits at the track's left edge.
     let thumb = shot.pixel(b.x0 as u32 + 8, b.y0 as u32 + 8);
-    // The track band (y 8..12) well to the right of the thumb.
-    let track = shot.pixel(b.x0 as u32 + 150, b.y0 as u32 + 10);
+    // The track band well to the right of the thumb. It is 4 px tall and
+    // centred on the 16 px thumb's axis, so y 6..10 — sample its middle.
+    let track = shot.pixel(b.x0 as u32 + 150, b.y0 as u32 + 8);
     assert!(
         thumb[0] > 200 && thumb[1] < 60,
         "thumb painted red via `slider .thumb`: {thumb:?}"

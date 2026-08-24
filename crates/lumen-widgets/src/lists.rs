@@ -219,11 +219,7 @@ fn viewport(w: &Window, viewport_h: f64, children: Vec<Element>) -> Element {
             offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
         })),
         children: match crate::scrollable::overlay_scrollbar(viewport_h, y, max_y, offset) {
-            Some(bar) => {
-                let mut c = children;
-                c.push(bar);
-                c
-            }
+            Some(bar) => vec![crate::scrollable::gutter_plane(children), bar],
             None => children,
         },
         ..Element::default()
@@ -466,11 +462,7 @@ impl DataGrid {
                     offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
                 })),
                 children: match crate::scrollable::overlay_scrollbar(viewport_h, y, max_y, offset) {
-                    Some(bar) => {
-                        let mut r = rows;
-                        r.push(bar);
-                        r
-                    }
+                    Some(bar) => vec![crate::scrollable::gutter_plane(rows), bar],
                     None => rows,
                 },
                 ..Element::default()

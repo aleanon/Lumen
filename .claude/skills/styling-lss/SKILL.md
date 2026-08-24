@@ -96,7 +96,7 @@ bundled one rather than rendering tofu.)
 | `shadow: <dx> <dy> [blur] [spread] <color>` | single outer shadow (B.3); `inset`/comma lists unsupported — `inset` disables the declaration |
 | inline styles: `.css(Style::new().background(c)…)` on any widget/Element | `Origin::Inline` — beats sheet rules unless `!important`; layout fields reach taffy; works with no stylesheet at all (B.6b) |
 | `@media container(width > 200px)` | tests the nearest `Element::container()` ancestor's laid-out size (not the window); only width/height; false with no container ancestor (B.2b) |
-| widget parts: `slider .track`, `slider .thumb`, `progress .fill` | parts are classes on the internals, scoped by the ancestor chain; custom widgets expose parts with `Element::part("thumb")` (B.7) |
+| widget parts: `slider .track`, `slider .thumb`, `range-slider .track`/`.fill`/`.thumb-lo`/`.thumb-hi`, `switch .track`/`.knob`, `progress .fill` | parts are classes on the internals, scoped by the ancestor chain; custom widgets expose parts with `Element::part("thumb")` (B.7) |
 | relative colors `oklch(from <color or $token> L C H)` | channel keywords `l`/`c`/`h` + `calc(l + 0.06)` (`+ - *`, left-to-right, spaces around operators); alpha from the base; `$token`s resolve inside function args/shorthand lists (B.7) |
 | `@tokens { … }` / `@theme light\|dark { … }` / `$token` | full token resolution, theme-scoped first |
 | **Nested rules** `&:hovered { … }` / `&.class { … }` / `& > .part { … }` | flattened at parse into real rules with correct specificity (B.1) |

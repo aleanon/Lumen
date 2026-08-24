@@ -9,7 +9,7 @@ use crate::{widgets, BuildCx, Canvas, Element};
 use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role, State as SemState};
 use lumen_core::Color;
-use lumen_layout::{Align as LAlign, Dim, Display, Edges, FlexDirection, LayoutStyle};
+use lumen_layout::{Align as LAlign, Dim, Display, Edges, FlexDirection, LayoutStyle, Position};
 use lumen_text::TextStyle;
 use std::rc::Rc;
 
@@ -420,20 +420,54 @@ impl Switch {
             let label = label.into();
             let on = cx.signal(name, || false);
             let is = on.get(cx.runtime());
+            // The knob is what makes a switch read as a switch: it sits left
+            // when off and right when on, so the state is legible without
+            // relying on the track colour alone (which fails for the ~8% of men
+            // with a red-green deficiency, and in any monochrome capture).
+            const TRACK_W: f64 = 36.0;
+            const TRACK_H: f64 = 20.0;
+            const KNOB: f64 = 16.0;
+            const KNOB_PAD: f64 = (TRACK_H - KNOB) / 2.0;
+            let knob = Element {
+                background: Some(Color::WHITE),
+                corner_radius: KNOB / 2.0,
+                shadow: Some(crate::element::Shadow::soft()),
+                style: LayoutStyle {
+                    position: Position::Absolute,
+                    inset: Edges {
+                        left: Dim::px(if is {
+                            (TRACK_W - KNOB - KNOB_PAD) as f32
+                        } else {
+                            KNOB_PAD as f32
+                        }),
+                        top: Dim::px(KNOB_PAD as f32),
+                        ..Edges::AUTO
+                    },
+                    width: Dim::px(KNOB as f32),
+                    height: Dim::px(KNOB as f32),
+                    ..LayoutStyle::default()
+                },
+                ..Element::default()
+            }
+            .part("knob");
             let track = Element {
                 background: Some(if is {
                     Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
                 } else {
                     Color::srgb8(0xcc, 0xcc, 0xcc, 0xff)
                 }),
-                corner_radius: 10.0,
+                corner_radius: TRACK_H as f64 / 2.0,
                 style: LayoutStyle {
-                    width: Dim::px(36.0),
-                    height: Dim::px(20.0),
+                    position: Position::Relative,
+                    width: Dim::px(TRACK_W as f32),
+                    height: Dim::px(TRACK_H as f32),
+                    flex_shrink: 0.0,
                     ..LayoutStyle::default()
                 },
+                children: vec![knob],
                 ..Element::default()
-            };
+            }
+            .part("track");
             let (label_s, label_dyn) = label.clone().into_parts();
             Element {
                 role: Role::Switch,

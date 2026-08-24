@@ -56,6 +56,11 @@ impl Scrollable {
         inner.style.margin.top = Dim::px(-(y as f32));
         // Fill the viewport width so rows can right-align (flex_grow) within it.
         inner.style.width = Dim::pct(1.0);
+        // Leave the overlay scrollbar its own lane. `inner` is in flow, so
+        // padding narrows its stretched children — no plane needed here.
+        if max_y > 0.5 {
+            inner.style.padding.right = Dim::px(GUTTER as f32);
+        }
 
         let el = Element {
             role: Role::ScrollArea,
@@ -136,6 +141,41 @@ impl_common!(Scrollable);
 /// already "how far down the track", with no window-coordinate arithmetic and
 /// no drag-origin state. It also makes clicking the track jump there, which is
 /// the behaviour being asked for.
+/// Width of the overlay scrollbar's track.
+pub(crate) const TRACK_W: f64 = 8.0;
+/// Horizontal space scroll content leaves free on its right so rows stop short
+/// of the bar instead of running under it. The bar is an *overlay* — it takes
+/// no layout space of its own — so without this every scrolling widget paints
+/// its content beneath the thumb.
+pub(crate) const GUTTER: f64 = TRACK_W + 4.0;
+
+/// Hold absolutely-positioned scroll content clear of the overlay scrollbar.
+///
+/// The rows are `position: absolute` with `width: 100%`, and a percentage
+/// resolves against the containing block's *padding* box — so padding on the
+/// viewport cannot narrow them. An intermediate plane pinned `left: 0,
+/// right: GUTTER` has a definite width that excludes the bar, and the rows
+/// resolve against that instead. `elide_semantics` keeps it out of the
+/// semantic tree, so selectors and tests see the same shape as before.
+pub(crate) fn gutter_plane(children: Vec<Element>) -> Element {
+    Element {
+        role: lumen_core::semantics::Role::Generic,
+        elide_semantics: true,
+        style: LayoutStyle {
+            position: Position::Absolute,
+            inset: Edges {
+                left: Dim::px(0.0),
+                right: Dim::px(GUTTER as f32),
+                top: Dim::px(0.0),
+                bottom: Dim::px(0.0),
+            },
+            ..LayoutStyle::default()
+        },
+        children,
+        ..Element::default()
+    }
+}
+
 pub(crate) fn overlay_scrollbar(
     viewport_h: f64,
     y: f64,
@@ -145,7 +185,6 @@ pub(crate) fn overlay_scrollbar(
     if max_y <= 0.5 || viewport_h <= 0.0 {
         return None;
     }
-    const TRACK_W: f64 = 8.0;
     const MIN_THUMB: f64 = 24.0;
     let content_h = viewport_h + max_y;
     // Proportional, with a floor so a very long list still leaves something

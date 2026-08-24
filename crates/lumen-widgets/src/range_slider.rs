@@ -12,6 +12,11 @@ use std::rc::Rc;
 
 const W: f64 = 200.0;
 const THUMB: f64 = 16.0;
+/// Track thickness.
+const TRACK_H: f64 = 4.0;
+/// Track top, so the bar is centred on the thumb's axis rather than sitting
+/// below it — `THUMB / 2` is the centre line, and the bar straddles it.
+const TRACK_TOP: f64 = (THUMB - TRACK_H) / 2.0;
 
 /// A double-ended slider over `[min, max]`.
 /// # Example
@@ -54,11 +59,11 @@ impl RangeSlider {
                 position: Position::Absolute,
                 inset: Edges {
                     left: Dim::px(0.0),
-                    top: Dim::px(8.0),
+                    top: Dim::px(TRACK_TOP as f32),
                     ..Edges::AUTO
                 },
                 width: Dim::px(W as f32),
-                height: Dim::px(4.0),
+                height: Dim::px(TRACK_H as f32),
                 ..LayoutStyle::default()
             },
             ..Element::default()
@@ -75,11 +80,11 @@ impl RangeSlider {
                 position: Position::Absolute,
                 inset: Edges {
                     left: Dim::px(fill_x0 as f32),
-                    top: Dim::px(8.0),
+                    top: Dim::px(TRACK_TOP as f32),
                     ..Edges::AUTO
                 },
                 width: Dim::px((fill_x1 - fill_x0).max(0.0) as f32),
-                height: Dim::px(4.0),
+                height: Dim::px(TRACK_H as f32),
                 ..LayoutStyle::default()
             },
             ..Element::default()

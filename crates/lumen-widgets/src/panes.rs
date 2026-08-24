@@ -76,14 +76,35 @@ impl SplitPane {
                     width: Dim::pct(1.0),
                     ..LayoutStyle::default()
                 },
+                // A hairline seam: without it the split is invisible whenever
+                // the two panes happen to share a background, which is the
+                // common case (both inherit the page).
                 children: vec![
                     pane(first, ratio.clamp(0.05, 0.95)),
+                    divider(),
                     pane(second, (1.0 - ratio).clamp(0.05, 0.95)),
                 ],
                 ..Element::default()
             }
         };
         SplitPane { el }
+    }
+}
+
+/// The 1 px seam painted between the two panes.
+fn divider() -> Element {
+    Element {
+        role: Role::Generic,
+        elide_semantics: true,
+        background: Some(lumen_core::Color::srgb8(0xd6, 0xdb, 0xe4, 0xff)),
+        style: LayoutStyle {
+            width: Dim::px(1.0),
+            flex_grow: 0.0,
+            flex_shrink: 0.0,
+            align_self: Some(Align::Stretch),
+            ..LayoutStyle::default()
+        },
+        ..Element::default()
     }
 }
 

@@ -12,6 +12,10 @@ use std::rc::Rc;
 
 const W: f64 = 200.0;
 const THUMB: f64 = 16.0;
+/// Track thickness.
+const TRACK_H: f64 = 4.0;
+/// Track top, so the bar is centred on the thumb's axis.
+const TRACK_TOP: f64 = (THUMB - TRACK_H) / 2.0;
 
 /// A horizontal slider; drag or press to set the value from the pointer position.
 /// # Example
@@ -75,11 +79,11 @@ impl Slider {
                 position: Position::Absolute,
                 inset: Edges {
                     left: Dim::px(0.0),
-                    top: Dim::px(8.0),
+                    top: Dim::px(TRACK_TOP as f32),
                     ..Edges::AUTO
                 },
                 width: Dim::px(W as f32),
-                height: Dim::px(4.0),
+                height: Dim::px(TRACK_H as f32),
                 ..LayoutStyle::default()
             },
             ..Element::default()
