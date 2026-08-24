@@ -1183,6 +1183,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // sees fresh state. Keeps `pump` a pure function of (state, queued
         // events + deferred ops, clock). Deferred results write signals → bump the
         // reactive write-gen, which the skip check below observes.
+        // O4.5: `drain_deferred` returns a count that was discarded. "Your data
+        // arrived on frame N" is the line that separates "the fetch never
+        // completed" from "it completed and the view ignored it" — two very
+        // different bugs that look identical from outside.
+        #[cfg(feature = "dev-observability")]
+        {
+            let applied = self.rt.drain_deferred();
+            if applied > 0 {
+                self.rt.log(
+                    "info",
+                    format!("{applied} background result(s) applied on this frame"),
+                );
+            }
+        }
+        #[cfg(not(feature = "dev-observability"))]
         self.rt.drain_deferred();
         // Input-driven visual state that doesn't go through a signal (hover/focus/
         // pressed). Snapshot it to detect changes from routing.

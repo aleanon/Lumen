@@ -124,7 +124,23 @@ fn finish<T: State + MaybeSend, E: State + MaybeSend>(
                     c.value = Some(v);
                     c.error = None;
                 }
-                Err(e) => c.error = Some(e),
+                Err(e) => {
+                    // O4.4: mirror the failure into the ring regardless of
+                    // whether the view renders it. The error is stored here for
+                    // the view to show, and early on a view usually doesn't —
+                    // so a failed fetch was invisible to the developer and to
+                    // their agent, indistinguishable from one still in flight.
+                    #[cfg(feature = "dev-observability")]
+                    rt.log(
+                        "warn",
+                        format!(
+                            "a resource fetch failed with <{}> — the error is on \
+                             the resource cell; render it, or it stays invisible",
+                            std::any::type_name::<E>()
+                        ),
+                    );
+                    c.error = Some(e);
+                }
             }
         });
     });
