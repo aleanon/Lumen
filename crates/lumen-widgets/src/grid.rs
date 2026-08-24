@@ -276,9 +276,16 @@ impl Grid {
         self
     }
 
-    /// The grid's window-space rect `(x, y, w, h)`. Drags arrive in window
-    /// coordinates, and virtualization needs the size (layout runs *after* build),
-    /// so set this when the grid isn't the whole window (e.g. below a toolbar).
+    /// The grid's window-space rect `(x, y, w, h)`.
+    ///
+    /// **Set this unless the grid really fills the window.** A grid virtualizes
+    /// during *build*, and layout runs after — so it cannot measure the box it
+    /// will get and assumes the whole surface. A grid placed anywhere else then
+    /// lays out cells for a box larger than it has and maps drags to the wrong
+    /// column, and both failures look like nothing at all: the cells that do
+    /// land are correct. There is no diagnostic for it, because the mismatch is
+    /// only knowable after layout.
+    ///
     /// Defaults to `(0, 0, surface_w, surface_h)`.
     pub fn viewport(mut self, x: f64, y: f64, w: f64, h: f64) -> Grid {
         self.viewport = Some((x, y, w, h));
@@ -465,10 +472,10 @@ impl Grid {
             layers.push(filled(0.0, 0.0, hw, hh, s.corner, gp));
         }
 
-        // Scrollbars — extent = the used range, grown to include where we are.
+        // Content extent = the used range, grown to include where we are.
+        let content_h = pos_of(&rhv, def_h, self.extent.0).max(oy + vhc);
+        let content_w = pos_of(&cwv, def_w, self.extent.1).max(ox + vwc);
         if self.scrollbars {
-            let content_h = pos_of(&rhv, def_h, self.extent.0).max(oy + vhc);
-            let content_w = pos_of(&cwv, def_w, self.extent.1).max(ox + vwc);
             if vh > 0.0 {
                 layers.push(vscrollbar(name, vpw, vh, hh, content_h, oy, vhc, vy, s, sy));
             }
@@ -489,6 +496,20 @@ impl Grid {
                 ..LayoutStyle::default()
             },
             clip: true,
+            // The grid clips its overscan, but publishing `scroll` is what
+            // makes that legible to everything else: `ui.getScroll` and
+            // `scrollIntoView` can see the position, and the visual audit's
+            // scroll-container exemption — which keys off an ancestor `scroll`,
+            // not `clip` — stops reporting the clipped overscan row as
+            // overflowing (W0103) and as invisible text (W0303). Every other
+            // scrolling widget publishes it; the grid was the exception.
+            scroll: Some(lumen_core::semantics::ScrollInfo {
+                x: ox,
+                y: oy,
+                max_x: (content_w - vwc).max(0.0),
+                max_y: (content_h - vhc).max(0.0),
+            }),
+            actions: vec![lumen_core::semantics::Action::ScrollIntoView],
             children: layers,
             ..Element::default()
         };

@@ -1411,6 +1411,12 @@ fn d_tabs(cx: &mut BuildCx) -> Element {
 
 fn d_app_bar(cx: &mut BuildCx) -> Element {
     let saved = cx.signal("appbar-saved", || 0i64);
+    // An AppBar is the *screen's* header strip — the bar across the top of a
+    // page carrying its title and that page's actions. Material calls it a top
+    // app bar; iOS calls it a navigation bar. It is not the OS window title bar
+    // (that is `system::WindowDesc`) and not the application menu bar (that is
+    // `system::MenuModel`); it belongs to the screen, so it changes as you
+    // navigate.
     let mut page: Element = Container::new(vec![
         AppBar::new(
             "Inbox",
@@ -1428,7 +1434,20 @@ fn d_app_bar(cx: &mut BuildCx) -> Element {
             ],
         )
         .into(),
-        framed(note("Page content sits under the bar."), 460.0, 120.0),
+        framed(
+            Label::new(
+                "The screen's own header strip: its title on the left, that screen's \
+                 actions on the right. Not the OS title bar (system::WindowDesc) and not \
+                 the app menu bar (system::MenuModel) — this one changes as you navigate.",
+            )
+            .size(12.0)
+            .color(muted())
+            .line_height(1.45)
+            .width(420.0)
+            .into(),
+            460.0,
+            120.0,
+        ),
     ])
     .column()
     .gap(12.0)
@@ -2237,7 +2256,7 @@ static NAV: &[Entry] = &[
         "app-bar",
         Center,
         d_app_bar,
-        "A title bar with trailing actions.",
+        "The screen's header strip — title plus that screen's actions.",
         s_appbar
     ),
     entry!(

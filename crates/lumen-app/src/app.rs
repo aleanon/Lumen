@@ -1304,6 +1304,18 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             self.rebuild(); // baselines force_rebuild + last_build_gen
         } else if restyle_only {
             // restyle_visual already updated flags/styles/semantics/paint.
+            //
+            // …except for text bindings. A pointer press changes visual state
+            // (`pressed`), so a pump where the click ALSO moved a signal a
+            // `bind!` text reads came down this arm — which never reached the
+            // binding check below, and served a frame whose bound text was one
+            // edit behind. `assert_view_coherent` fails on exactly that frame.
+            // It healed on the next pump, so a live window hid it and only
+            // headless tests (which pump once per event) saw it.
+            if write_changed && self.text_bindings_stale() && !self.patch_text_bindings() {
+                self.allow_copy_forward = !visual_changed && !full_rebuild_forced();
+                self.rebuild();
+            }
         } else if write_changed && self.text_bindings_stale() {
             // F3.5: a text binding changed. Patch if the new string measures
             // the same, else rebuild — `patch_text_bindings` commits nothing
@@ -6762,6 +6774,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// and contrast is measured against the *composited* backdrop.
     pub fn contrast_report(&mut self) -> lumen_render::ContrastReport {
         let (dl, mut targets) = self.build_display_list();
+        // Text that a clipping ancestor cuts away entirely is not painted, so
+        // it has no contrast to assess. A virtualized surface always has some:
+        // every windowing widget materializes a row or two of overscan outside
+        // its viewport so scrolling has something to reveal. Reporting those as
+        // unreadable is a finding about pixels that do not exist.
+        targets.retain(|t| {
+            !t.node
+                .as_deref()
+                .and_then(|s| s.parse::<u32>().ok())
+                .is_some_and(|i| self.is_clipped_away(i))
+        });
         // ID1: translate arena indices into agent handles, so a finding binds
         // to an id the agent can actually use as a selector. Done here rather
         // than at paint time because the semantic tree only exists afterwards.
@@ -6771,6 +6794,26 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
         }
         lumen_render::analyze_contrast(&dl, Color::srgb8(255, 255, 255, 255), &targets)
+    }
+
+    /// Whether the node at arena `index` falls entirely outside a clipping
+    /// ancestor's box — i.e. nothing of it is painted.
+    fn is_clipped_away(&self, index: u32) -> bool {
+        let Some(node) = self.meta.keys().copied().find(|n| n.index() == index) else {
+            return false;
+        };
+        let b = self.tree.bounds(node);
+        let mut p = self.tree.parent(node);
+        while p.is_some() {
+            if self.meta.get(&p).is_some_and(|m| m.clip) {
+                let cb = self.tree.bounds(p);
+                if b.y1 <= cb.y0 || b.y0 >= cb.y1 || b.x1 <= cb.x0 || b.x0 >= cb.x1 {
+                    return true;
+                }
+            }
+            p = self.tree.parent(p);
+        }
+        false
     }
 
     /// ID1: arena index -> agent handle, via the semantic tree that holds both.

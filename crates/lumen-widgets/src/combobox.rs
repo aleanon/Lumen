@@ -13,6 +13,10 @@ use std::rc::Rc;
 
 const W: f64 = 240.0;
 const ROW_H: f64 = 32.0;
+/// How many matches the panel shows before it starts scrolling. Past this many
+/// the list becomes a windowed [`VirtualList`](crate::VirtualList), so filtering
+/// a long option set stays O(visible) and the tail is still reachable.
+const MAX_VISIBLE: usize = 8;
 
 /// A filtering dropdown over a fixed option list.
 /// # Example
@@ -101,7 +105,21 @@ impl Combobox {
                 })
                 .collect();
             let empty = rows.is_empty();
-            let mut menu = widgets::column(rows);
+            let mut menu = if rows.len() > MAX_VISIBLE {
+                let rows = std::rc::Rc::new(rows);
+                let list: Element = crate::VirtualList::new(
+                    cx,
+                    &format!("{name}.scroll"),
+                    rows.len(),
+                    ROW_H,
+                    MAX_VISIBLE as f64 * ROW_H,
+                    move |i| rows[i].clone(),
+                )
+                .into();
+                widgets::column(vec![list])
+            } else {
+                widgets::column(rows)
+            };
             if empty {
                 let mut none = widgets::text("no matches");
                 if let Some(ts) = none.text_style_mut() {

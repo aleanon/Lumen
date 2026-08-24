@@ -355,3 +355,47 @@ fn text_macro_sugar_tracks_signals_and_reports_deps() {
     assert!(h.semantics_json().to_string().contains("40 + 2"));
     h.assert_view_coherent();
 }
+
+/// A pump that changes visual state AND a bound signal settles both.
+///
+/// A pointer press sets `pressed`, so the pump takes the restyle-only path.
+/// That path used to return without settling text bindings, serving a frame
+/// whose bound text was one edit behind — `assert_view_coherent` catches
+/// exactly that. It healed on the following pump, so a live window (which
+/// pumps again on its own) hid it and only a headless test, which pumps once
+/// per event, could see it.
+#[test]
+fn a_click_settles_the_binding_it_changes_in_the_same_pump() {
+    use lumen_core::events::{PointerButton, PointerEvent, PointerKind};
+    use lumen_core::geometry::Point;
+
+    let mut h = App::new(|cx: &mut BuildCx| {
+        let n: Signal<i64> = cx.signal("n", || 0);
+        widgets::column(vec![
+            widgets::button("bump", move |rt| n.update(rt, |v| *v += 1)).id("b"),
+            widgets::text(Dynamic::new(move |rt| format!("n={}", n.get(rt)))).id("out"),
+        ])
+    })
+    .run_headless(Size::new(240.0, 120.0));
+    h.pump();
+    assert!(h.semantics_json().to_string().contains("n=0"));
+
+    let b = h.node_bounds_by_id("b").expect("the button");
+    let p = Point::new((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0);
+    let pe = PointerEvent {
+        pos: p,
+        button: PointerButton::Left,
+        pointer: PointerKind::Mouse,
+        modifiers: Default::default(),
+        click_count: 1,
+    };
+    h.inject(lumen_core::events::Event::PointerDown(pe));
+    h.inject(lumen_core::events::Event::PointerUp(pe));
+    h.pump();
+
+    assert!(
+        h.semantics_json().to_string().contains("n=1"),
+        "one pump, not two: the readout follows the click that caused it"
+    );
+    h.assert_view_coherent();
+}

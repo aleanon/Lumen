@@ -91,6 +91,14 @@ host mailbox — visible in `app.systemRequests`; native dialog lands with
 P.4), `LineChart::element(values, labels)` / `PieChart::element(slices)`,
 `AlignBox::center(child)`. Anything unbounded
 (lists/tables) must use `virtual_list`/`data_grid` — they're O(visible).
+`PickList`/`Combobox` window their own panels past 8 options, so a long option
+list needs no arranging.
+
+⚠️ **`Grid` needs `.viewport(x, y, w, h)`** unless it fills the window. It
+virtualizes during *build*, before layout runs, so it cannot measure its box and
+assumes the whole surface — a grid placed below a header lays out cells for a
+box larger than it gets and maps drags to the wrong column, silently. No
+diagnostic can catch it: the mismatch is only knowable after layout.
 
 ## Widget options you can now rely on (W1–W5, 2026-08-03)
 

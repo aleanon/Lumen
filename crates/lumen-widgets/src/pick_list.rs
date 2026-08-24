@@ -13,6 +13,14 @@ use std::rc::Rc;
 const W: f64 = 220.0;
 const TRIGGER_H: f64 = 38.0;
 const ROW_H: f64 = 34.0;
+/// How many options the panel shows before it starts scrolling.
+///
+/// An uncapped panel is only usable while the option list is short: fifty
+/// options rendered fifty rows straight off the bottom of the window, with no
+/// way to reach the ones past the edge. Past this many the panel becomes a
+/// windowed [`VirtualList`](crate::VirtualList) — so it costs the same whether
+/// there are 20 options or 20 000, and no caller has to arrange it.
+const MAX_VISIBLE: usize = 8;
 
 /// A dropdown: the trigger shows the selection (or `placeholder`); clicking it
 /// reveals the options, and choosing one stores it under `name`.
@@ -153,9 +161,11 @@ impl PickList {
         let mut children = vec![trigger];
 
         if is_open {
-            let rows: Vec<Element> = options
-                .iter()
-                .map(|opt| {
+            let row_at = {
+                let options = options.clone();
+                let sel = sel.clone();
+                move |i: usize| {
+                    let opt = options[i].clone();
                     let opt_s = opt.clone();
                     let mut r = widgets::row(vec![text(
                         opt.clone(),
@@ -169,7 +179,7 @@ impl PickList {
                         top: Dim::px(0.0),
                         bottom: Dim::px(0.0),
                     };
-                    r.background = if *opt == sel {
+                    r.background = if opt == sel {
                         Some(Color::srgb8(0xed, 0xf2, 0xff, 0xff))
                     } else {
                         Some(Color::srgb8(0xff, 0xff, 0xff, 0xff))
@@ -179,9 +189,22 @@ impl PickList {
                         open.set(rt, false);
                     }));
                     r
-                })
-                .collect();
-            let mut menu = widgets::column(rows);
+                }
+            };
+            let mut menu = if options.len() > MAX_VISIBLE {
+                let list: Element = crate::VirtualList::new(
+                    cx,
+                    &format!("{name}.scroll"),
+                    options.len(),
+                    ROW_H,
+                    MAX_VISIBLE as f64 * ROW_H,
+                    row_at,
+                )
+                .into();
+                widgets::column(vec![list])
+            } else {
+                widgets::column((0..options.len()).map(row_at).collect::<Vec<Element>>())
+            };
             menu.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
             menu.corner_radius = 8.0;
             menu.shadow = Some(crate::element::Shadow::soft());

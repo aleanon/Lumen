@@ -27,13 +27,6 @@ fn has_id(a: &Headless, id: &str) -> bool {
 }
 
 /// Click and settle.
-///
-/// The second pump is not superstition. A pointer press changes visual state
-/// (`pressed`), which sends that pump down the restyle-only path — and that
-/// path does not settle text bindings, so a bound readout whose signal moved in
-/// the same pump is still showing the old string when it returns. The next
-/// pump has no visual delta, falls through to the binding check, and patches.
-/// A live window pumps again on its own; a test has to ask.
 fn press(a: &mut Headless, p: Point) {
     let pe = PointerEvent {
         pos: p,
@@ -44,7 +37,6 @@ fn press(a: &mut Headless, p: Point) {
     };
     a.inject(Event::PointerDown(pe));
     a.inject(Event::PointerUp(pe));
-    a.pump();
     a.pump();
 }
 
@@ -72,13 +64,6 @@ fn known_framework_finding(widget: &str, code: &str) -> bool {
         // Overhanging the target's corner *is* the widget, and insets resolve
         // against the border box, so no caller-side padding absorbs it.
         "W0103" if widget == "Badge" => true,
-        // `Grid`'s viewport sets `clip: true` but publishes no `ScrollInfo`,
-        // and the audit's scroll-container exemption keys off an ancestor
-        // `scroll`, not `clip`. So the grid's one row of overscan — clipped,
-        // never painted — is reported both as overflowing the viewport (W0103)
-        // and as white-on-page-background text (W0303), while `VirtualList`,
-        // `DataGrid` and `Scrollable`, which all publish `scroll`, are exempt.
-        "W0103" | "W0303" if widget == "Grid" => true,
         _ => false,
     }
 }
