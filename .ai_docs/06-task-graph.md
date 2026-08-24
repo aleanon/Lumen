@@ -502,8 +502,12 @@ Size-gate ceilings re-tightened so the saving cannot be given back silently: lea
 
 *Guarded by* `crates/lumen-text/tests/complex_scripts.rs`, which asserts **opposite outcomes per feature state** — Thai must wrap with it and must overflow without it — so neither reinstating the hardcoded dependency nor quietly dropping the feature from the defaults can pass. Ablating the forwarding fails it.
 
-## O ◐ Agent observability — what the agent cannot see of a running app (2026-08-24)
+## O ☑ Agent observability — what the agent cannot see of a running app (2026-08-24)
 `docs/plan-agent-observability.md` (rev 2, after three expert reviews); evidence in `docs/review-agent-observability-2026-08.md`.
+
+**COMPLETE 2026-08-24** — all phases O0–O5 landed across 26 commits, every one with `just ci` green and docs updated in the same commit. Nine new diagnostics (W0111–W0117, W0303, W0403), six new/extended agent methods, and the ambient audit that turns the whole lint surface from pull into push at **+2.4%** frame cost.
+
+*Two defects were found by verification rather than by review, and both are recorded above where they were fixed:* `ui.lastDamage` returning `none` for a click that demonstrably repainted (live-window only — headless structurally could not reproduce it), and the occlusion check silently never firing because `NodeMeta.background` holds only the *typed* element background, not a `.lss`-set one.
 
 **Premise.** Lumen's agent surface is strong but *interrogative* — `ui.explain`, `ui.getStyles`, `ui.probe` answer well only if you already suspect a node and can name it. Human sight is ambient, push, and hypothesis-free. The phase adds a per-frame dev-build audit that volunteers what a human notices, written into the existing `Runtime::log` ring.
 
