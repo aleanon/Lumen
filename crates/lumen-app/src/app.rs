@@ -2200,6 +2200,73 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         out
     }
 
+    /// O3.2: the paint-tier values this node is currently drawn with, as
+    /// opposed to the cascade result `get_styles` reports.
+    ///
+    /// The two diverge in exactly one place, and it is a place authors hit
+    /// constantly: `apply_transitions` and `apply_keyframes` substitute the
+    /// mid-flight blend into `css` **before** the split at the end of the
+    /// cascade (`node_style` gets `css`, `node_computed` gets `resolved`).
+    /// `get_styles` reads `node_computed`, so during a 300 ms fade it reports
+    /// the *target* colour while the node paints something else entirely —
+    /// "why is this blue when my stylesheet says red" with no way to answer it.
+    ///
+    /// Deliberately a **separate method** rather than an extra key on
+    /// `get_styles`: that response is a flat map of property name to value, so
+    /// adding a sibling key would make `applied` look like a CSS property to
+    /// anything iterating it.
+    ///
+    /// Reports the four properties transitions can animate (`PAINT_PROPS`);
+    /// everything else is identical to the computed value by construction.
+    ///
+    /// Snapshot builds only, matching `get_styles` — it is the same JSON
+    /// introspection surface, and `serde_json` is not linked in a lean build.
+    #[cfg(feature = "snapshot")]
+    pub fn applied_styles(&self, selector: &str) -> serde_json::Value {
+        let root = self.semantics_elided();
+        let Ok(id) = lumen_core::semantics::resolve_one(&root, selector) else {
+            return serde_json::Value::Null;
+        };
+        let Some(node) = self.node_for_handle(id) else {
+            return serde_json::Value::Null;
+        };
+        let Some(st) = self.node_style.get(&node) else {
+            return serde_json::Value::Null;
+        };
+        let mut map = serde_json::Map::new();
+        if let Some(c) = st.background {
+            map.insert("background".into(), serde_json::json!(c.to_hex()));
+        }
+        if let Some(c) = st.color {
+            map.insert("color".into(), serde_json::json!(c.to_hex()));
+        }
+        if let Some(o) = st.opacity {
+            map.insert("opacity".into(), serde_json::json!(o));
+        }
+        if let Some(r) = st.border_radius {
+            map.insert("border-radius".into(), serde_json::json!(r));
+        }
+        // Whether any of this is currently mid-blend, so a caller can tell
+        // "the cascade says something else" from "the cascade is being
+        // interpolated toward something else".
+        let animating = self
+            .meta
+            .get(&node)
+            .and_then(|m| m.id.as_ref())
+            .is_some_and(|id| {
+                self.key_anims.get(id).is_some_and(|(_, done)| !done)
+                    || ["background", "color", "opacity", "border-radius"]
+                        .iter()
+                        .any(|p| {
+                            self.prop_anims
+                                .get(&(id.clone(), *p))
+                                .is_some_and(|a| !a.committed)
+                        })
+            });
+        map.insert("animating".into(), serde_json::json!(animating));
+        serde_json::Value::Object(map)
+    }
+
     /// The string this node actually PAINTS, when it differs from its label
     /// (`text-overflow: ellipsis`). `None` when paint and label agree.
     ///

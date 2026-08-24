@@ -347,6 +347,12 @@ fn handle<R: Renderer, E: Spawner>(
             }
         }
         "ui.getStyles" => Ok(app.get_styles(sel(params)?)),
+        // O3.2: what the node is actually PAINTED with, as opposed to what the
+        // cascade resolved. They diverge mid-transition: `apply_transitions`
+        // substitutes the blend into `node_style` while `get_styles` reads
+        // `node_computed`, which still holds the target — so during a fade
+        // `ui.getStyles` reports a colour the node is not currently drawn in.
+        "ui.getAppliedStyles" => Ok(app.applied_styles(sel(params)?)),
         "ui.getDeps" => Ok(app.get_deps(sel(params)?)),
         "ui.whatDependsOn" => {
             let sig = params
@@ -1421,6 +1427,10 @@ pub fn mcp_manifest() -> Value {
             tool(
                 "ui_lastChange",
                 "What the last pump did: idle/patch/rebuild + patched nodes.",
+            ),
+            tool(
+                "ui_getAppliedStyles",
+                "Paint-tier values actually in use (differs from getStyles mid-transition).",
             ),
             tool(
                 "ui_lastDamage",

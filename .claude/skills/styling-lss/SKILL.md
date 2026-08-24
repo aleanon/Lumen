@@ -170,6 +170,14 @@ planned (B.5). Test both themes: `TestApp::with_options(size, theme)`.
    ```
    Values serialize canonically (`{px: 6.0}`, `#3b82f6ff`) with a `source`
    field (only `stylesheet` is reachable today).
+
+   **`ui.getStyles` reports the CASCADE result, not what is on screen.**
+   Mid-transition they differ: the blend is substituted into the paint tier
+   while the cascade already holds the target, so during a fade `getStyles`
+   names a colour the node is not currently drawn in. Use
+   `ui.getAppliedStyles {selector}` for the painted values plus an
+   `animating` flag — that is the one to trust when a colour "looks wrong"
+   and the stylesheet looks right.
 4. Golden the result (CPU-exact) per the `verifying-apps` skill.
 
 ## Diagnostics reality
