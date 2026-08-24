@@ -286,6 +286,19 @@ pub mod codes {
     /// on every loading spinner in existence. "This is taking too long" is a
     /// question about the work behind the spinner, not about the animation.
     pub const W0116: &str = "W0116";
+    /// The text shaping cache is **thrashing**: its live working set exceeds
+    /// the absolute ceiling, so every sweep drops entries the next frame
+    /// immediately re-shapes.
+    ///
+    /// Measured, in `sweep`'s own doc comment: 1183 re-shapes per frame and a
+    /// **2.2x frame-time penalty** (3.8 → 8.5 ms) on a 2000-row list. It was
+    /// entirely silent — an app would simply get slower with no signal
+    /// distinguishing it from any other cause.
+    ///
+    /// `VirtualList` renders only the visible window plus overscan and is flat
+    /// in item count; a non-virtualized list of tens of thousands of distinct
+    /// labels is what drives a working set past any reasonable cache.
+    pub const W0117: &str = "W0117";
     /// The frame paints **nothing**: the tree has real content, and not one
     /// node of it was laid out with any area, so the window shows only its
     /// background.

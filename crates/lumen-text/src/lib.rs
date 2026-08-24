@@ -376,15 +376,34 @@ struct Aged<V> {
 /// frame still carry the previous epoch, and dropping them would re-shape them
 /// moments later — reintroducing the sequential-scan worst case that defeats
 /// plain LRU. Stale strings (the growth source) are exactly what this reclaims.
+/// What a sweep did, for the caller to latch and report (O5.2).
+///
+/// `sweep` runs deep inside the text engine, which has no `Runtime` handle, so
+/// it reports upward rather than logging — the same latch-and-drain shape the
+/// GPU backend uses for `atlas_overflow`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct SweepOutcome {
+    /// The live set alone crossed the absolute ceiling, so the sweep fell back
+    /// to dropping half. **This is the thrash regime** its own doc measures at
+    /// a 2.2x frame-time penalty; `VirtualList` is the answer.
+    pub hit_hard_cap: bool,
+    /// The soft cap was retargeted upward — the working set outgrew the cache.
+    /// Not yet a problem, and the leading indicator of one.
+    pub cap_grew_to: Option<usize>,
+}
+
 fn sweep<K: Eq + std::hash::Hash, V, S: std::hash::BuildHasher>(
     map: &mut std::collections::HashMap<K, Aged<V>, S>,
     epoch: u64,
     cap: &mut usize,
     base_cap: usize,
     hard_cap: usize,
-) {
+) -> SweepOutcome {
+    let cap_before = *cap;
+    let mut outcome = SweepOutcome::default();
     map.retain(|_, e| e.epoch + 1 >= epoch);
     if map.len() >= hard_cap {
+        outcome.hit_hard_cap = true;
         // The live set alone is over the ceiling: fall back to dropping half.
         let mut keep = map.len() / 2;
         map.retain(|_, _| {
@@ -397,6 +416,10 @@ fn sweep<K: Eq + std::hash::Hash, V, S: std::hash::BuildHasher>(
     // an insert away (which would make every insert an O(n) scan). Shrinks back
     // toward the base cap as the working set does.
     *cap = base_cap.max(map.len().saturating_mul(2)).min(hard_cap);
+    if *cap > cap_before {
+        outcome.cap_grew_to = Some(*cap);
+    }
+    outcome
 }
 
 /// A cached, **origin-relative** glyph run (R5 incremental paint): the positioned
@@ -440,6 +463,17 @@ pub trait TextEngineApi {
     /// Advance the frame epoch. Called once per frame that shapes; see
     /// [`TextEngine::begin_frame`] for why it must not be called when idle.
     fn begin_frame(&mut self);
+
+    /// Diagnostics this engine produced since the last call, **and clear them**.
+    ///
+    /// Mirrors `Renderer::take_diagnostics`. The text engine sits below the
+    /// runtime and has no `Runtime` handle, so it latches regime changes and
+    /// reports them upward when the app drains — the same shape the GPU
+    /// backend's `atlas_overflow` uses. Default empty: an engine with no cache
+    /// has no regime to change.
+    fn take_diagnostics(&mut self) -> Vec<lumen_core::Diagnostic> {
+        Vec::new()
+    }
 
     /// Cache occupancy and current soft caps:
     /// `(shape_len, shape_cap, run_len, run_cap)`.
@@ -562,6 +596,27 @@ impl TextEngineApi for TextEngine {
     fn begin_frame(&mut self) {
         TextEngine::begin_frame(self)
     }
+    fn take_diagnostics(&mut self) -> Vec<lumen_core::Diagnostic> {
+        let mut out = Vec::new();
+        // O5.2: `sweep`'s own doc records the measurement -- 1183 re-shapes per
+        // frame and a 2.2x frame-time penalty (3.8 -> 8.5 ms) at 2000 rows --
+        // and it emitted nothing. Latched on ENTRY to the regime, not per
+        // sweep: sweeps are routine, regime changes are not.
+        if self.thrashing.take() {
+            out.push(lumen_core::Diagnostic::new(
+                lumen_core::codes::W0117,
+                format!(
+                    "the text cache is thrashing: its live working set exceeds \
+                     the {SHAPE_CACHE_HARD_CAP}-entry ceiling, so every sweep \
+                     now drops entries the next frame re-shapes. Measured at a \
+                     2.2x frame-time penalty. `VirtualList` materializes only \
+                     the visible window and is flat in item count."
+                ),
+            ));
+        }
+        out
+    }
+
     fn cache_stats(&self) -> (usize, usize, usize, usize) {
         (
             self.shape_cache.len(),
@@ -655,6 +710,11 @@ pub struct TextEngine {
     /// Current soft caps. Start at the base and retarget on each sweep.
     shape_cap: usize,
     run_cap: usize,
+    /// O5.2: a sweep hit the absolute ceiling and fell back to dropping half —
+    /// the thrash regime. A `Cell` latch drained by `take_diagnostics`, because
+    /// this crate has no `Runtime` handle; the GPU backend's `atlas_overflow`
+    /// uses the same shape.
+    thrashing: std::cell::Cell<bool>,
 }
 
 impl Default for TextEngine {
@@ -713,6 +773,7 @@ impl TextEngine {
             epoch: 0,
             shape_cap: SHAPE_CACHE_CAP,
             run_cap: RUN_CACHE_CAP,
+            thrashing: std::cell::Cell::new(false),
         }
     }
 
@@ -787,13 +848,14 @@ impl TextEngine {
         } else {
             let block = self.layout(text, base.clone(), &[], max_width, align);
             if self.shape_cache.len() >= self.shape_cap {
-                sweep(
+                let o = sweep(
                     &mut self.shape_cache,
                     self.epoch,
                     &mut self.shape_cap,
                     SHAPE_CACHE_CAP,
                     SHAPE_CACHE_HARD_CAP,
                 );
+                self.thrashing.set(self.thrashing.get() || o.hit_hard_cap);
             }
             let epoch = self.epoch;
             self.shape_cache.insert(
@@ -845,13 +907,14 @@ impl TextEngine {
                 }
             };
             if self.run_cache.len() >= self.run_cap {
-                sweep(
+                let o = sweep(
                     &mut self.run_cache,
                     self.epoch,
                     &mut self.run_cap,
                     RUN_CACHE_CAP,
                     RUN_CACHE_HARD_CAP,
                 );
+                self.thrashing.set(self.thrashing.get() || o.hit_hard_cap);
             }
             let epoch = self.epoch;
             self.run_cache.insert(
@@ -1536,6 +1599,59 @@ mod glyph_cache_tests {
 #[cfg(test)]
 mod eviction_tests {
     use super::*;
+
+    /// O5.2: entering the thrash regime is reported, once.
+    ///
+    /// `sweep`'s own doc records the measurement — 1183 re-shapes per frame,
+    /// a 2.2x frame-time penalty — and it emitted nothing at all. An app in
+    /// this regime just got slower, with no signal distinguishing it from any
+    /// other cause.
+    #[test]
+    fn crossing_the_hard_cap_reports_thrashing_once() {
+        let mut engine = TextEngine::new();
+        let style = TextStyle::default();
+        // A live working set past the absolute ceiling: every entry is used
+        // every frame, so the sweep's "keep this frame or last" policy cannot
+        // reclaim anything and must fall back to dropping half.
+        let live = SHAPE_CACHE_HARD_CAP + 64;
+        engine.begin_frame();
+        for i in 0..live {
+            engine.shaped(&format!("row {i}"), &style, None, TextAlign::Start);
+        }
+        let first = engine.take_diagnostics();
+        assert!(
+            first.iter().any(|d| d.code == "W0117"),
+            "entering the thrash regime must be reported: {:?}",
+            first.iter().map(|d| d.code).collect::<Vec<_>>()
+        );
+
+        // Latched, not repeated: draining clears it, and the regime holding is
+        // not a fresh event. Re-reporting every frame would flush the
+        // 1000-entry ring in seconds.
+        let second = engine.take_diagnostics();
+        assert!(
+            !second.iter().any(|d| d.code == "W0117"),
+            "the regime is latched, not re-reported: {second:?}"
+        );
+    }
+
+    /// A healthy cache must stay silent, or the signal is worthless.
+    #[test]
+    fn an_ordinary_working_set_reports_nothing() {
+        let mut engine = TextEngine::new();
+        let style = TextStyle::default();
+        for frame in 0..20 {
+            engine.begin_frame();
+            for i in 0..50 {
+                engine.shaped(&format!("row {i}"), &style, None, TextAlign::Start);
+            }
+            engine.shaped(&format!("clock {frame}"), &style, None, TextAlign::Start);
+        }
+        assert!(
+            engine.take_diagnostics().is_empty(),
+            "a 50-row list with a ticking clock is not thrashing"
+        );
+    }
 
     /// **The regression this policy exists for.** A live working set above
     /// `SHAPE_CACHE_CAP / 2`, plus one changing string per frame, used to lock

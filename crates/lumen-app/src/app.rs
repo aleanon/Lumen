@@ -2076,6 +2076,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // What the renderer actually clamped this frame (W0110). The CPU
         // backend returns nothing; only a GPU one has limits to hit.
         out.extend(self.renderer.take_diagnostics());
+        // O5.2: the text engine latches its own regime changes the same way —
+        // it has no `Runtime` handle, so it reports upward and the app drains.
+        out.extend(self.text.take_diagnostics());
         // SD4: W0106 (a node advertises a semantic Action it does not
         // implement) was emitted only by `audit_actions()`, which tests call
         // and `ui.lint` never did — so an agent could not observe this class of
