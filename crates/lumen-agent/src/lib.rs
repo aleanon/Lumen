@@ -769,7 +769,26 @@ fn handle<R: Renderer, E: Spawner>(
                 .runtime()
                 .logs_since(since)
                 .into_iter()
-                .map(|e| json!({ "seq": e.seq, "level": e.level, "message": e.message }))
+                .map(|e| {
+                    let mut o = json!({
+                        "seq": e.seq,
+                        "level": e.level,
+                        "message": e.message,
+                        // O4.6: entries sharing a frame came from the same
+                        // pump, so "what happened when I clicked that" is a
+                        // group-by rather than sequence arithmetic.
+                        "frame": e.frame,
+                    });
+                    // Present only for diagnostic-sourced entries; free-text
+                    // causal entries have no code by design.
+                    if let Some(c) = e.code {
+                        o["code"] = json!(c);
+                    }
+                    if let Some(n) = &e.node {
+                        o["node"] = json!(n);
+                    }
+                    o
+                })
                 .collect();
             Ok(json!({ "entries": entries }))
         }

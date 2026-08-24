@@ -131,3 +131,66 @@ fn a_clean_app_logs_nothing() {
         "a clean app must not fill the ring: {entries:?}"
     );
 }
+
+/// O4.6: a diagnostic-sourced entry keeps its structure. `LogEntry` was
+/// `{seq, level, message}`, and `Diagnostic::fmt` never printed the node — so
+/// flattening a finding into the ring destroyed the identity that makes it
+/// actionable and left the consumer regexing prose.
+#[test]
+fn logged_findings_keep_their_code_and_node() {
+    let mut h = App::new(|_cx: &mut BuildCx| -> Element {
+        widgets::column(vec![widgets::text("overflowing").id("a")]).id("root")
+    })
+    .run_headless(Size::new(400.0, 200.0));
+    h.set_stylesheet("#root { width: 400px; } #a { width: 900px; }");
+    h.pump();
+
+    let logs = call(&mut h, "app.logs", json!({}));
+    let e = logs["result"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["code"].as_str() == Some("W0103"))
+        .unwrap_or_else(|| panic!("a coded entry: {logs}"));
+
+    // The HANDLE, not the author id: path-derived, always present (an unnamed
+    // node has no `#id` at all), and directly usable as a selector. The
+    // friendly id stays recoverable from the rendered message.
+    assert!(
+        e["node"].as_str().is_some_and(|n| n.starts_with("nx-")),
+        "the node anchor must survive into the ring, unparsed: {e}"
+    );
+    assert!(
+        e["message"].as_str().unwrap().contains("[#a]"),
+        "and the author's id is still readable in the message: {e}"
+    );
+    assert!(
+        e["frame"].as_u64().is_some(),
+        "entries carry the pump that produced them: {e}"
+    );
+}
+
+/// Free-text causal entries have no code by design — that is the lint/log split
+/// working, not a gap.
+#[test]
+fn handler_written_entries_carry_no_code() {
+    let mut h = App::new(|cx: &mut BuildCx| -> Element {
+        let _ = cx.signal("n", || 0i64);
+        widgets::column(vec![
+            widgets::button("go", |rt| rt.log("info", "clicked")).id("go")
+        ])
+        .id("root")
+    })
+    .run_headless(Size::new(400.0, 200.0));
+    h.pump();
+    call(&mut h, "input.click", json!({ "selector": "#go" }));
+
+    let logs = call(&mut h, "app.logs", json!({}));
+    let e = logs["result"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["message"].as_str() == Some("clicked"))
+        .unwrap_or_else(|| panic!("the handler's entry: {logs}"));
+    assert!(e.get("code").is_none(), "no code on free text: {e}");
+}

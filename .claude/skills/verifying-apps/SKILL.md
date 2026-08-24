@@ -182,8 +182,11 @@ The ones you'll actually use:
   subtract. Do NOT expect per-frame values: `ui.waitSettled` pumps until
   quiescent, so it ends on idle pumps.
   `app.logs {since?}` returns the diagnostic ring (handler
-  `rt.log(level, msg)` entries, E0701 panics, stylesheet rejections) —
-  page with `since` = last seq + 1.
+  `rt.log(level, msg)` entries, E0701 panics, stylesheet rejections, and
+  in a dev build the ambient audit's lint findings as they appear) —
+  page with `since` = last seq + 1. Entries carry `frame` (group by the
+  pump that produced them) and, for diagnostic-sourced ones, `code` and
+  `node` as structured fields rather than prose to re-parse.
 - **Tofu doctrine (rewritten with T.4).** Symbols now *render*: a DejaVu
   symbols fallback (arrows, geometric shapes, stars, checkmarks — the
   U+2000–2BFF blocks) ships in every build, and `ui.lint` flags any

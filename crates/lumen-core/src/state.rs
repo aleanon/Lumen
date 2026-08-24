@@ -456,6 +456,9 @@ pub struct Runtime {
     /// Reachable from handlers and builds (a side-channel that never feeds
     /// rendering); the agent reads it via `app.logs`.
     logs: Rc<RefCell<(u64, std::collections::VecDeque<LogEntry>)>>,
+    /// O4.6: the painted-frame counter stamped onto each log entry, so an agent
+    /// can group entries by the pump that produced them.
+    log_frame: Rc<std::cell::Cell<u64>>,
 }
 
 /// A diagnostic log entry (C.2) — agent-visible via the protocol's
@@ -468,6 +471,28 @@ pub struct LogEntry {
     pub level: &'static str,
     /// The message text.
     pub message: String,
+    /// Stable diagnostic code, for entries that came from a [`Diagnostic`]
+    /// (`"W0103"`, …). `None` for free-text causal entries, which have no code
+    /// by design.
+    ///
+    /// Without this a consumer has to prefix-parse the code back out of
+    /// `message` — an unenforced convention rather than a contract.
+    pub code: Option<&'static str>,
+    /// The agent handle (`"nx-<hex>"`) or author id of the node this entry
+    /// concerns, for entries that came from a node-anchored [`Diagnostic`].
+    ///
+    /// `Diagnostic::fmt` never printed the node, so flattening a diagnostic
+    /// into a string destroyed the identity that makes a finding actionable
+    /// and left the consumer guessing from whatever backtick-quoted text each
+    /// check's author happened to embed.
+    pub node: Option<String>,
+    /// The painted-frame counter at the time this entry was written.
+    ///
+    /// The cheap correlation primitive: entries sharing a `frame` came from the
+    /// same pump, so an agent can group "what happened when I clicked that"
+    /// without doing sequence-number arithmetic against a `app.logs` call it
+    /// had to remember to make beforehand.
+    pub frame: u64,
 }
 
 impl Default for Runtime {
@@ -498,6 +523,7 @@ impl Runtime {
             deferred: Rc::new(crate::tasks::DeferredChannel::new()),
             clipboard: Rc::new(RefCell::new(String::new())),
             logs: Rc::new(RefCell::new((0, std::collections::VecDeque::new()))),
+            log_frame: Rc::new(std::cell::Cell::new(0)),
         }
     }
 
@@ -505,6 +531,37 @@ impl Runtime {
     /// — a side-channel that never feeds rendering, so build purity holds.
     /// Ring-buffered: the oldest entry drops past 1000.
     pub fn log(&self, level: &'static str, message: impl Into<String>) {
+        self.log_entry(level, message.into(), None, None);
+    }
+
+    /// Append a log entry carrying a diagnostic's structure (O4.6).
+    ///
+    /// Used by the ambient audit so a finding keeps its `code` and node anchor
+    /// on the way into the ring instead of being flattened into prose the
+    /// consumer must re-parse.
+    pub fn log_diagnostic(&self, level: &'static str, d: &crate::Diagnostic) {
+        let node = d
+            .handle
+            .as_deref()
+            .map(str::to_string)
+            .or_else(|| d.node.as_ref().map(|n| n.as_str().to_string()));
+        self.log_entry(level, d.to_string(), Some(d.code), node);
+    }
+
+    /// The frame counter stamped onto subsequent log entries. Set by the
+    /// runtime host each painted frame; `0` when nothing sets it (headless
+    /// tests that never pump).
+    pub fn set_log_frame(&self, frame: u64) {
+        self.log_frame.set(frame);
+    }
+
+    fn log_entry(
+        &self,
+        level: &'static str,
+        message: String,
+        code: Option<&'static str>,
+        node: Option<String>,
+    ) {
         let mut l = self.logs.borrow_mut();
         let seq = l.0;
         l.0 += 1;
@@ -514,7 +571,10 @@ impl Runtime {
         l.1.push_back(LogEntry {
             seq,
             level,
-            message: message.into(),
+            message,
+            code,
+            node,
+            frame: self.log_frame.get(),
         });
     }
 

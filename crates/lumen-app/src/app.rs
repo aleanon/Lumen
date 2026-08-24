@@ -1346,6 +1346,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // stylesheet edit is idle — and that is exactly the moment a developer
         // most wants to hear about a new finding.
         #[cfg(feature = "dev-observability")]
+        self.rt.set_log_frame(self.frames_rendered);
+        #[cfg(feature = "dev-observability")]
         if stats.painted || self.sem_gen.get() != self.last_audit_gen {
             self.ambient_audit();
         }
@@ -1409,7 +1411,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 lumen_core::Severity::Error => "error",
                 lumen_core::Severity::Warning => "warn",
             };
-            self.rt.log(level, d.to_string());
+            // O4.6: keep `code` and the node anchor structured rather than
+            // flattening them into prose the consumer has to re-parse.
+            self.rt.log_diagnostic(level, d);
         }
     }
 
