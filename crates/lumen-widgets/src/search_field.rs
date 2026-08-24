@@ -4,7 +4,7 @@
 //! `TextInput` would use (key = `name`), with the mirror string readable at
 //! `{name}.text` like every editor.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element, TextInput};
 use lumen_core::semantics::Role;
 use lumen_core::Color;
@@ -34,9 +34,18 @@ use std::rc::Rc;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct SearchField {
-    el: Element,
+    name: String,
+    /// The inner field, still unbuilt: `TextInput` is itself a `Widget` now, so
+    /// a composite can hold the widget value rather than a materialized node.
+    input: TextInput,
+    /// Whether the clear (×) affordance is needed, resolved where the
+    /// `BuildCx` is.
+    has_text: bool,
+    editor: lumen_core::state::Signal<TextEditor>,
+    common: Common,
 }
 
+/// The magnifier glyph.
 fn magnifier() -> Element {
     widgets::canvas(14.0, 14.0, |f, size| {
         use kurbo::{Circle, Line, Point, Shape};
@@ -57,21 +66,36 @@ fn magnifier() -> Element {
 }
 
 impl SearchField {
-    /// A search field storing its editor under `name`.
+    /// A search box over the `Signal<TextEditor>` keyed by `name`.
     pub fn new(cx: &BuildCx, name: &str, placeholder: impl Into<String>) -> SearchField {
         let editor = cx.signal(name, || TextEditor::new(""));
-        let has_text = !editor.get(cx.runtime()).text().is_empty();
-
         // The placeholder used to be dropped on the floor here — an empty
         // search field showed nothing and, having neither label nor value,
         // was invisible to a11y and to selectors (W0301). `TextInput` already
         // knows how to render one and report it as the accessible name.
-        let mut input: Element = TextInput::new(cx, name, "")
-            .placeholder(placeholder.into())
-            .into();
+        SearchField {
+            has_text: !editor.get(cx.runtime()).text().is_empty(),
+            input: TextInput::new(cx, name, "").placeholder(placeholder.into()),
+            name: name.to_string(),
+            editor,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for SearchField {
+    fn build(self) -> Element {
+        let SearchField {
+            name,
+            input,
+            has_text,
+            editor,
+            common,
+        } = self;
+
         // Focus tracking is id-based: without an id on the inner editor,
         // clicking the field would focus nothing and typing would drop.
-        input = input.id(format!("{name}-input"));
+        let mut input: Element = input.id(format!("{name}-input")).into();
         input.style.flex_grow = 1.0;
 
         let mut children = vec![magnifier(), input];
@@ -102,8 +126,9 @@ impl SearchField {
             top: Dim::px(4.0),
             bottom: Dim::px(4.0),
         };
-        SearchField { el: row }
+        common.apply(&mut row);
+        row
     }
 }
 
-impl_common!(SearchField);
+impl_widget!(SearchField);

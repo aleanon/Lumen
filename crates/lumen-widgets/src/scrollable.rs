@@ -2,7 +2,7 @@
 //! built inside [`Scrollable::new`]; the offset lives in a signal keyed by
 //! `name`. (For very long lists, virtualize — this lays out all children.)
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Element};
 use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role, ScrollInfo};
@@ -32,12 +32,19 @@ use std::rc::Rc;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Scrollable {
-    el: Element,
+    name: String,
+    viewport_h: f64,
+    children: Vec<Element>,
+    /// The clamped scroll offset and the extent, resolved where the `BuildCx`
+    /// is.
+    y: f64,
+    max_y: f64,
+    offset: lumen_core::state::Signal<f64>,
+    common: Common,
 }
 
 impl Scrollable {
-    /// A `viewport_h`-tall viewport over `content_h` of `children`, offset stored
-    /// under `name`.
+    /// A clipped viewport `viewport_h` px tall over `content_h` px of content.
     pub fn new(
         cx: &BuildCx,
         name: &str,
@@ -51,6 +58,29 @@ impl Scrollable {
         // can shrink between builds (a tab switch, a filter), and a stale
         // offset must not push what's left out of the viewport.
         let y = offset.get(cx.runtime()).clamp(0.0, max_y);
+        Scrollable {
+            name: name.to_string(),
+            viewport_h,
+            children: children.into(),
+            y,
+            max_y,
+            offset,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for Scrollable {
+    fn build(self) -> Element {
+        let Scrollable {
+            name,
+            viewport_h,
+            children,
+            y,
+            max_y,
+            offset,
+            common,
+        } = self;
 
         let mut inner = Element::column(children);
         inner.style.margin.top = Dim::px(-(y as f32));
@@ -74,7 +104,7 @@ impl Scrollable {
             inner.style.padding.right = Dim::px(GUTTER as f32);
         }
 
-        let el = Element {
+        let mut el = Element {
             role: Role::ScrollArea,
             clip: true, // overflow:hidden — content outside the viewport is masked
             scroll: Some(ScrollInfo {
@@ -119,17 +149,18 @@ impl Scrollable {
                 };
                 offset.update(rt, |o| *o = (*o + step).clamp(0.0, max_y));
             })),
-            children: match overlay_scrollbar(name, viewport_h, y, max_y, offset) {
+            children: match overlay_scrollbar(&name, viewport_h, y, max_y, offset) {
                 Some(bar) => vec![inner, bar],
                 None => vec![inner],
             },
             ..Element::default()
         };
-        Scrollable { el }
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Scrollable);
+impl_widget!(Scrollable);
 
 /// An overlay scrollbar for any container that reports [`ScrollInfo`].
 ///

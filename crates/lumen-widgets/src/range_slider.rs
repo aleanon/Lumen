@@ -2,7 +2,7 @@
 //! Values live in `{name}.lo` / `{name}.hi` signals; dragging moves whichever
 //! thumb is nearer the pointer, and the thumbs cannot cross.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::Element;
 use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role};
@@ -40,15 +40,45 @@ const TRACK_TOP: f64 = (THUMB - TRACK_H) / 2.0;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct RangeSlider {
-    el: Element,
+    min: f64,
+    max: f64,
+    /// Both ends' current values, read where the `BuildCx` is.
+    lo_v: f64,
+    hi_v: f64,
+    lo: lumen_core::state::Signal<f64>,
+    hi: lumen_core::state::Signal<f64>,
+    common: Common,
 }
 
 impl RangeSlider {
-    /// A range slider storing its ends under `{name}.lo` / `{name}.hi`.
+    /// A two-ended slider over `min..=max`; the ends live in `{name}.lo` and
+    /// `{name}.hi`.
     pub fn new(cx: &crate::BuildCx, name: &str, min: f64, max: f64) -> RangeSlider {
         let lo = cx.signal(format!("{name}.lo"), || min);
         let hi = cx.signal(format!("{name}.hi"), || max);
-        let (lo_v, hi_v) = (lo.get(cx.runtime()), hi.get(cx.runtime()));
+        RangeSlider {
+            min,
+            max,
+            lo_v: lo.get(cx.runtime()),
+            hi_v: hi.get(cx.runtime()),
+            lo,
+            hi,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for RangeSlider {
+    fn build(self) -> Element {
+        let RangeSlider {
+            min,
+            max,
+            lo_v,
+            hi_v,
+            lo,
+            hi,
+            common,
+        } = self;
         let span = (max - min).max(f64::EPSILON);
         let frac = |v: f64| ((v - min) / span).clamp(0.0, 1.0);
 
@@ -116,6 +146,12 @@ impl RangeSlider {
             focusable: true,
             value: Some(format!("{lo_v:.0}–{hi_v:.0}")),
             actions: vec![Action::SetValue, Action::Increment, Action::Decrement],
+            style: LayoutStyle {
+                position: Position::Relative,
+                width: Dim::px(W as f32),
+                height: Dim::px(THUMB as f32),
+                ..LayoutStyle::default()
+            },
             children: vec![
                 track,
                 fill,
@@ -124,9 +160,6 @@ impl RangeSlider {
             ],
             ..Element::default()
         };
-        el.style.position = Position::Relative;
-        el.style.width = Dim::px(W as f32);
-        el.style.height = Dim::px(THUMB as f32);
         // Drag: the x fraction sets whichever end is nearer (ties → the one
         // the pointer is beyond); ends clamp so they can't cross.
         el.on_drag = Some(Rc::new(move |rt, fx, _fy, _pos| {
@@ -183,8 +216,9 @@ impl RangeSlider {
                 _ => {}
             }
         }));
-        RangeSlider { el }
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(RangeSlider);
+impl_widget!(RangeSlider);

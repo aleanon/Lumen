@@ -2,7 +2,7 @@
 //! `Element` (track + thumb + draggable container) is built inside
 //! [`Slider::new`]; the value lives in a signal keyed by `name`.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Element};
 use lumen_core::events::{Key, NamedKey};
 use lumen_core::semantics::{Action, Role};
@@ -39,16 +39,21 @@ const TRACK_TOP: f64 = (THUMB - TRACK_H) / 2.0;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct Slider {
-    el: Element,
-    /// Kept so `.step()` can rebuild the handlers with the new step.
-    cfg: (f64, f64, f64),
+    min: f64,
+    max: f64,
+    /// An explicit step, or `None` for the default hundredth of the range.
+    ///
+    /// Storing the choice is the whole saving here: the eager `.step()` had to
+    /// **rebuild three `Rc` closures** that `::new()` had just allocated, because
+    /// the increment, decrement and key handlers all close over the step.
+    step: Option<f64>,
+    /// The signal's current value, read where the `BuildCx` is.
+    current: f64,
     value: lumen_core::Signal<f64>,
+    common: Common,
 }
 
-/// Format a value with enough decimals to be meaningful for its step.
-///
-/// The old fixed `{:.0}` made a `0.0..1.0` slider report `"0"` at every
-/// position — the agent and assistive tech saw a control that never changed.
+/// Format `v` with as many decimals as `step` warrants.
 fn fmt_value(v: f64, step: f64) -> String {
     if step >= 1.0 {
         format!("{v:.0}")
@@ -62,15 +67,39 @@ fn fmt_value(v: f64, step: f64) -> String {
 }
 
 impl Slider {
-    /// A slider over `[min, max]`, value stored under `name`.
-    ///
-    /// Defaults to a continuous-feeling step of 1% of the range; override with
-    /// [`Slider::step`].
+    /// A horizontal slider over `min..=max`; the value lives in the signal
+    /// keyed by `name`.
     pub fn new(cx: &BuildCx, name: &str, min: f64, max: f64) -> Slider {
         let value = cx.signal(name, || min);
-        let v = value.get(cx.runtime());
+        Slider {
+            min,
+            max,
+            step: None,
+            current: value.get(cx.runtime()),
+            value,
+            common: Common::default(),
+        }
+    }
+
+    /// Set the increment for arrows, `Action::Increment`, and value formatting.
+    pub fn step(mut self, step: f64) -> Slider {
+        self.step = Some(step.abs().max(f64::EPSILON));
+        self
+    }
+}
+
+impl Widget for Slider {
+    fn build(self) -> Element {
+        let Slider {
+            min,
+            max,
+            step,
+            current: v,
+            value,
+            common,
+        } = self;
+        let step = step.unwrap_or((max - min) / 100.0);
         let frac = ((v - min) / (max - min)).clamp(0.0, 1.0);
-        let step = (max - min) / 100.0;
 
         let track = Element {
             background: Some(Color::srgb8(0xcc, 0xcc, 0xcc, 0xff)),
@@ -111,9 +140,12 @@ impl Slider {
         }
         .part("thumb");
 
-        let el = Element {
+        let mut el = Element {
             role: Role::Slider,
             focusable: true,
+            // Formatted with the *final* step. The eager version formatted in
+            // `::new()` with the default one, so `.step(0.01)` left the
+            // accessible value rounded to whole numbers.
             value: Some(fmt_value(v, step)),
             actions: vec![Action::SetValue, Action::Increment, Action::Decrement],
             style: LayoutStyle {
@@ -160,46 +192,9 @@ impl Slider {
             children: vec![track, thumb],
             ..Element::default()
         };
-        Slider {
-            el,
-            cfg: (min, max, step),
-            value,
-        }
-    }
-
-    /// Set the adjustment step used by the arrow keys, `Increment`/`Decrement`
-    /// and `PageUp`/`PageDown` (which move ten steps).
-    pub fn step(mut self, step: f64) -> Slider {
-        let (min, max, _) = self.cfg;
-        let step = step.abs().max(f64::EPSILON);
-        self.cfg = (min, max, step);
-        let value = self.value;
-        // Re-derive everything that depends on the step.
-        self.el.on_increment = Some(Rc::new(move |rt| {
-            value.update(rt, |x| *x = (*x + step).clamp(min, max))
-        }));
-        self.el.on_decrement = Some(Rc::new(move |rt| {
-            value.update(rt, |x| *x = (*x - step).clamp(min, max))
-        }));
-        self.el.on_key = Some(Rc::new(move |rt, ke| match ke.key {
-            Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowUp) => {
-                value.update(rt, |x| *x = (*x + step).clamp(min, max))
-            }
-            Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowDown) => {
-                value.update(rt, |x| *x = (*x - step).clamp(min, max))
-            }
-            Key::Named(NamedKey::Home) => value.set(rt, min),
-            Key::Named(NamedKey::End) => value.set(rt, max),
-            Key::Named(NamedKey::PageUp) => {
-                value.update(rt, |x| *x = (*x + step * 10.0).clamp(min, max))
-            }
-            Key::Named(NamedKey::PageDown) => {
-                value.update(rt, |x| *x = (*x - step * 10.0).clamp(min, max))
-            }
-            _ => {}
-        }));
-        self
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Slider);
+impl_widget!(Slider);
