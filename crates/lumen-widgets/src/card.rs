@@ -5,7 +5,7 @@
 //! related content. `Badge` is the small count/dot overlaid on another widget
 //! (unread messages, cart items).
 
-use crate::widget::{impl_common, impl_widget, Common, Widget};
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, Element};
 use lumen_core::semantics::{Action, Role};
 use lumen_core::Color;
@@ -165,7 +165,13 @@ impl_widget!(Card);
 /// `doc_shot` re-renders it every test run and fails if the render drifts from
 /// that committed image, so the picture is always current.
 pub struct Badge {
-    el: Element,
+    target: Element,
+    label: crate::Text,
+    /// Pill colour override.
+    color: Option<Color>,
+    /// A bare dot with no count (Material's "small" badge).
+    dot: bool,
+    common: Common,
 }
 
 impl Badge {
@@ -175,19 +181,60 @@ impl Badge {
     /// target's layout. Its text is announced as part of the group, so a screen
     /// reader hears "Inbox 3" rather than losing the count.
     pub fn new(target: Element, label: impl Into<crate::Text>) -> Badge {
-        let label = label.into();
-        let mut t = widgets::text(label.clone());
-        if let Some(ts) = t.text_style_mut() {
-            ts.font_size = 11.0;
-            ts.weight = 600.0;
-            ts.color = Color::WHITE;
+        Badge {
+            target,
+            label: label.into(),
+            color: None,
+            dot: false,
+            common: Common::default(),
         }
+    }
+
+    /// Recolour the badge pill.
+    pub fn color(mut self, c: Color) -> Badge {
+        self.color = Some(c);
+        self
+    }
+
+    /// A bare dot with no count (Material's "small" badge).
+    ///
+    /// A flag rather than a walk into `children[1]` that cleared the count
+    /// element `::new()` had just built and styled.
+    pub fn dot(mut self) -> Badge {
+        self.dot = true;
+        self
+    }
+}
+
+impl Widget for Badge {
+    fn build(self) -> Element {
+        let Badge {
+            target,
+            label,
+            color,
+            dot,
+            common,
+        } = self;
         let (label_s, label_dyn) = label.clone().into_parts();
+
+        // A dot carries no count, so the run is never made in the first place.
+        let children = if dot {
+            Vec::new()
+        } else {
+            let mut t = widgets::text(label);
+            if let Some(ts) = t.text_style_mut() {
+                ts.font_size = 11.0;
+                ts.weight = 600.0;
+                ts.color = Color::WHITE;
+            }
+            vec![t]
+        };
+
         let pill = Element {
             role: Role::Text,
-            label: label_s,
-            dyn_text: label_dyn,
-            background: Some(Color::srgb8(0xd3, 0x2f, 0x2f, 0xff)),
+            label: if dot { "unread".to_string() } else { label_s },
+            dyn_text: if dot { None } else { label_dyn },
+            background: Some(color.unwrap_or(Color::srgb8(0xd3, 0x2f, 0x2f, 0xff))),
             corner_radius: 999.0,
             style: LayoutStyle {
                 position: Position::Absolute,
@@ -199,22 +246,26 @@ impl Badge {
                 display: Display::Flex,
                 align_items: Some(Align::Center),
                 justify_content: Some(Align::Center),
-                min_width: Dim::px(18.0),
-                height: Dim::px(18.0),
-                padding: Edges {
-                    left: Dim::px(5.0),
-                    right: Dim::px(5.0),
-                    top: Dim::px(0.0),
-                    bottom: Dim::px(0.0),
+                min_width: Dim::px(if dot { 10.0 } else { 18.0 }),
+                height: Dim::px(if dot { 10.0 } else { 18.0 }),
+                padding: if dot {
+                    Edges::all(Dim::px(0.0))
+                } else {
+                    Edges {
+                        left: Dim::px(5.0),
+                        right: Dim::px(5.0),
+                        top: Dim::px(0.0),
+                        bottom: Dim::px(0.0),
+                    }
                 },
                 ..LayoutStyle::default()
             },
-            children: vec![t],
+            children,
             ..Element::default()
         }
         .class("badge");
 
-        let el = Element {
+        let mut el = Element {
             role: Role::Group,
             style: LayoutStyle {
                 position: Position::Relative,
@@ -224,31 +275,12 @@ impl Badge {
             children: vec![target, pill],
             ..Element::default()
         };
-        Badge { el }
-    }
-
-    /// Recolour the badge pill.
-    pub fn color(mut self, c: Color) -> Badge {
-        if let Some(p) = self.el.children.get_mut(1) {
-            p.background = Some(c);
-        }
-        self
-    }
-
-    /// A bare dot with no count (Material's "small" badge).
-    pub fn dot(mut self) -> Badge {
-        if let Some(p) = self.el.children.get_mut(1) {
-            p.children.clear();
-            p.label = "unread".to_string();
-            p.style.min_width = Dim::px(10.0);
-            p.style.height = Dim::px(10.0);
-            p.style.padding = Edges::all(Dim::px(0.0));
-        }
-        self
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(Badge);
+impl_widget!(Badge);
 
 #[cfg(test)]
 mod tests {

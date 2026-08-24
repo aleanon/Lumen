@@ -3,7 +3,7 @@
 //! keeps its richer themed copy). Both measure to the available box, paint
 //! with `Frame` geometry + text, and expose value-bearing semantics.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, Element, LeafWidget};
 use kurbo::{BezPath, Point, Rect, Size};
 use lumen_core::semantics::Role;
@@ -317,55 +317,75 @@ impl LeafWidget for PieChart {
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct BarChart {
-    el: Element,
+    values: Vec<f64>,
+    width: f64,
+    height: f64,
+    common: Common,
 }
 
 impl BarChart {
     /// A simple bar chart: one bar per value, heights proportional to the max.
     /// `name` is the accessible label; the value is the bar count.
     pub fn new(values: &[f64], width: f64, height: f64) -> BarChart {
-        let el = {
-            let max = values.iter().cloned().fold(f64::MIN, f64::max).max(1e-9);
-            let bars = values
-                .iter()
-                .map(|v| {
-                    let frac = (v / max).clamp(0.0, 1.0);
-                    Element {
-                        role: Role::Generic,
-                        background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
-                        style: LayoutStyle {
-                            flex_grow: 1.0,
-                            flex_basis: Dim::px(0.0),
-                            height: Dim::px((frac * height) as f32),
-                            align_self: Some(lumen_layout::Align::End),
-                            ..LayoutStyle::default()
-                        },
-                        ..Element::default()
-                    }
-                })
-                .collect();
-            Element {
-                role: Role::Group,
-                label: format!("bar chart, {} values", values.len()),
-                value: Some(format!("{}", values.len())),
-                style: LayoutStyle {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Row,
-                    align_items: Some(lumen_layout::Align::End),
-                    column_gap: Dim::px(2.0),
-                    width: Dim::px(width as f32),
-                    height: Dim::px(height as f32),
-                    ..LayoutStyle::default()
-                },
-                children: bars,
-                ..Element::default()
-            }
-        };
-        BarChart { el }
+        BarChart {
+            values: values.to_vec(),
+            width,
+            height,
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(BarChart);
+impl Widget for BarChart {
+    fn build(self) -> Element {
+        let BarChart {
+            values,
+            width,
+            height,
+            common,
+        } = self;
+        let max = values.iter().cloned().fold(f64::MIN, f64::max).max(1e-9);
+        let n = values.len();
+        let bars = values
+            .into_iter()
+            .map(|v| {
+                let frac = (v / max).clamp(0.0, 1.0);
+                Element {
+                    role: Role::Generic,
+                    background: Some(Color::srgb8(0x1a, 0x73, 0xe8, 0xff)),
+                    style: LayoutStyle {
+                        flex_grow: 1.0,
+                        flex_basis: Dim::px(0.0),
+                        height: Dim::px((frac * height) as f32),
+                        align_self: Some(lumen_layout::Align::End),
+                        ..LayoutStyle::default()
+                    },
+                    ..Element::default()
+                }
+            })
+            .collect();
+        let mut el = Element {
+            role: Role::Group,
+            label: format!("bar chart, {n} values"),
+            value: Some(format!("{n}")),
+            style: LayoutStyle {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                align_items: Some(lumen_layout::Align::End),
+                column_gap: Dim::px(2.0),
+                width: Dim::px(width as f32),
+                height: Dim::px(height as f32),
+                ..LayoutStyle::default()
+            },
+            children: bars,
+            ..Element::default()
+        };
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(BarChart);
 
 /// A simple bar chart: one bar per value, heights proportional to the max.
 /// `name` is the accessible label; the value is the bar count.

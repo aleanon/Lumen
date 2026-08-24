@@ -4,7 +4,7 @@
 //! (SD2: regrouped out of the milestone-named `widgets_m*`/`misc_w2` modules,
 //! which recorded WHEN a widget was written rather than what it is.)
 
-use crate::widget::{impl_common, impl_widget, Common, Widget};
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element};
 use lumen_core::semantics::{Action, Role, ScrollInfo, State as SemState};
 use lumen_core::Color;
@@ -147,8 +147,30 @@ impl_widget!(Pagination);
 /// The picture above is `src/doc_shots/virtual_list.png` — this exact example's
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
+///
+/// # Why this one keeps a built `Element`
+///
+/// Most typed widgets store their arguments and lower in
+/// [`Widget::build`](crate::Widget::build). This one cannot, for two reasons
+/// that are structural rather than incidental:
+///
+/// * **The row builder is a borrowed generic.** `render` / `cell_text` /
+///   `rows` are `impl Fn` or `&[_]` bound to the constructor call. A widget
+///   value outlives that call, so storing them means either boxing (an
+///   allocation per widget) or making the type generic over the closure — and
+///   a generic `VirtualList<F>` cannot sit in a `Vec<Element>` beside its
+///   siblings without a second boxing.
+/// * **Row memoization needs the build context.**
+///   [`memoized`](VirtualList::memoized) wraps each row in
+///   `cx.scope_with_deps`, which *is* the `BuildCx`.
+///
+/// So the rows are materialized where the context is, and only the universal
+/// modifiers defer. Deferral reaches exactly as far as ownership and the
+/// build context allow.
 pub struct VirtualList {
+    /// Built where the `BuildCx` is — see the note on the type.
     el: Element,
+    common: Common,
 }
 
 /// The scroll window a `VirtualList` materializes: which items, and where the
@@ -274,6 +296,7 @@ impl VirtualList {
             .collect();
         VirtualList {
             el: viewport(name, &w, viewport_h, children),
+            common: Common::default(),
         }
     }
 
@@ -339,11 +362,20 @@ impl VirtualList {
             .collect();
         VirtualList {
             el: viewport(name, &w, viewport_h, children),
+            common: Common::default(),
         }
     }
 }
 
-impl_common!(VirtualList);
+impl Widget for VirtualList {
+    fn build(self) -> Element {
+        let VirtualList { mut el, common } = self;
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(VirtualList);
 
 /// A windowing list (02 §10): materializes only the visible items plus overscan,
 /// regardless of `item_count`. State (`name`) is the scroll offset.
@@ -400,8 +432,30 @@ fn cell(text: String, role: Role) -> Element {
 /// The picture above is `src/doc_shots/data_grid.png` — this exact example's
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
+///
+/// # Why this one keeps a built `Element`
+///
+/// Most typed widgets store their arguments and lower in
+/// [`Widget::build`](crate::Widget::build). This one cannot, for two reasons
+/// that are structural rather than incidental:
+///
+/// * **The row builder is a borrowed generic.** `render` / `cell_text` /
+///   `rows` are `impl Fn` or `&[_]` bound to the constructor call. A widget
+///   value outlives that call, so storing them means either boxing (an
+///   allocation per widget) or making the type generic over the closure — and
+///   a generic `VirtualList<F>` cannot sit in a `Vec<Element>` beside its
+///   siblings without a second boxing.
+/// * **Row memoization needs the build context.**
+///   [`memoized`](VirtualList::memoized) wraps each row in
+///   `cx.scope_with_deps`, which *is* the `BuildCx`.
+///
+/// So the rows are materialized where the context is, and only the universal
+/// modifiers defer. Deferral reaches exactly as far as ownership and the
+/// build context allow.
 pub struct DataGrid {
+    /// Built where the `BuildCx` is — see the note on the type.
     el: Element,
+    common: Common,
 }
 
 impl DataGrid {
@@ -507,11 +561,22 @@ impl DataGrid {
                 ..Element::default()
             }
         };
-        DataGrid { el }
+        DataGrid {
+            el,
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(DataGrid);
+impl Widget for DataGrid {
+    fn build(self) -> Element {
+        let DataGrid { mut el, common } = self;
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(DataGrid);
 
 /// A virtualized data grid: a header plus a windowed body that materializes only
 /// the visible rows, so cost is independent of `row_count` (supports 1M+ rows).
@@ -584,8 +649,30 @@ pub struct TreeRow<'a> {
 /// The picture above is `src/doc_shots/tree.png` — this exact example's
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
+///
+/// # Why this one keeps a built `Element`
+///
+/// Most typed widgets store their arguments and lower in
+/// [`Widget::build`](crate::Widget::build). This one cannot, for two reasons
+/// that are structural rather than incidental:
+///
+/// * **The row builder is a borrowed generic.** `render` / `cell_text` /
+///   `rows` are `impl Fn` or `&[_]` bound to the constructor call. A widget
+///   value outlives that call, so storing them means either boxing (an
+///   allocation per widget) or making the type generic over the closure — and
+///   a generic `VirtualList<F>` cannot sit in a `Vec<Element>` beside its
+///   siblings without a second boxing.
+/// * **Row memoization needs the build context.**
+///   [`memoized`](VirtualList::memoized) wraps each row in
+///   `cx.scope_with_deps`, which *is* the `BuildCx`.
+///
+/// So the rows are materialized where the context is, and only the universal
+/// modifiers defer. Deferral reaches exactly as far as ownership and the
+/// build context allow.
 pub struct Tree {
+    /// Built where the `BuildCx` is — see the note on the type.
     el: Element,
+    common: Common,
 }
 
 impl Tree {
@@ -675,11 +762,22 @@ impl Tree {
                 ..Element::default()
             }
         };
-        Tree { el }
+        Tree {
+            el,
+            common: Common::default(),
+        }
     }
 }
 
-impl_common!(Tree);
+impl Widget for Tree {
+    fn build(self) -> Element {
+        let Tree { mut el, common } = self;
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(Tree);
 
 /// An expand/collapse tree. `name` keys the set of expanded ids; collapsing a
 /// node hides its descendants. Clicking a parent toggles it.

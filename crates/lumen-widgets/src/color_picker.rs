@@ -3,7 +3,7 @@
 //! Arbitrary-color (wheel/eyedropper) selection is out of scope until a
 //! native dialog arrives with P.4 — the palette covers themed-app needs.
 
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element};
 use lumen_core::semantics::Role;
 use lumen_core::Color;
@@ -60,7 +60,24 @@ const PRESETS: [&str; 16] = [
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct ColorPicker {
-    el: Element,
+    /// Kept because the panel's child ids are namespaced under it.
+    name: String,
+    /// The stored hex, read where the `BuildCx` is.
+    current: String,
+    /// Whether the editor panel is showing.
+    is_open: bool,
+    /// The working HSVA, resolved from the signals below.
+    h: f64,
+    s_: f64,
+    v: f64,
+    a: f64,
+    value: lumen_core::state::Signal<String>,
+    open: lumen_core::state::Signal<bool>,
+    hue: lumen_core::state::Signal<f64>,
+    sat: lumen_core::state::Signal<f64>,
+    val: lumen_core::state::Signal<f64>,
+    alpha: lumen_core::state::Signal<f64>,
+    common: Common,
 }
 
 /// Panel geometry.
@@ -185,7 +202,46 @@ impl ColorPicker {
         let alpha = cx.signal(format!("{name}.a"), || px(3));
 
         let rt = cx.runtime();
-        let (h, s_, v, a) = (hue.get(rt), sat.get(rt), val.get(rt), alpha.get(rt));
+        ColorPicker {
+            name: name.to_string(),
+            current,
+            is_open,
+            h: hue.get(rt),
+            s_: sat.get(rt),
+            v: val.get(rt),
+            a: alpha.get(rt),
+            value,
+            open,
+            hue,
+            sat,
+            val,
+            alpha,
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for ColorPicker {
+    fn build(self) -> Element {
+        // Everything past the signal reads is plain arithmetic over `Copy`
+        // handles, so the whole panel — plane, bars, swatches, hex — lowers
+        // here instead of in the constructor.
+        let ColorPicker {
+            name,
+            current,
+            is_open,
+            h,
+            s_,
+            v,
+            a,
+            value,
+            open,
+            hue,
+            sat,
+            val,
+            alpha,
+            common,
+        } = self;
         let chosen = hsva_color(h, s_, v, a);
 
         // Any control writing HSVA also republishes the hex.
@@ -399,8 +455,10 @@ impl ColorPicker {
             children,
             ..Element::default()
         };
-        ColorPicker { el }
+        let mut el = el;
+        common.apply(&mut el);
+        el
     }
 }
 
-impl_common!(ColorPicker);
+impl_widget!(ColorPicker);

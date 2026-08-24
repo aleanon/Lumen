@@ -80,9 +80,17 @@ fn build(cx: &mut BuildCx) -> Element {
         Container::new(kids).gap(8.0).into()
     };
     let rule = move || -> Element { Rule::horizontal().background(pal.divider).into() };
-    let row_full = |kids: Vec<Element>| -> Container {
-        let mut r = Container::new(kids).row().align(Align::Center);
-        r.element_mut().style.width = Dim::pct(1.0);
+    // Takes its gap/padding rather than returning a `Container` for the caller
+    // to keep chaining: a typed widget no longer exposes its node before it
+    // lowers, so the percent width is applied to the finished `Element`.
+    let row_full = |kids: Vec<Element>, gap: f32, pad: f32| -> Element {
+        let mut r: Element = Container::new(kids)
+            .row()
+            .align(Align::Center)
+            .gap(gap)
+            .padding(pad)
+            .into();
+        r.style.width = Dim::pct(1.0);
         r
     };
 
@@ -102,8 +110,7 @@ fn build(cx: &mut BuildCx) -> Element {
                 .into(),
             Space::new().into(),
             result(format!("Count: {}", count.get(rt))),
-        ])
-        .gap(10.0)
+        ], 10.0, 0.0)
         .into()],
     );
 
@@ -137,7 +144,7 @@ fn build(cx: &mut BuildCx) -> Element {
                 "Notify: {}",
                 if notify.get(rt) { "on" } else { "off" }
             )),
-        ])
+        ], 0.0, 0.0)
         .into()],
     );
 
@@ -160,8 +167,7 @@ fn build(cx: &mut BuildCx) -> Element {
             } else {
                 cur_theme
             }),
-        ])
-        .gap(16.0)
+        ], 16.0, 0.0)
         .into()],
     );
 
@@ -185,7 +191,7 @@ fn build(cx: &mut BuildCx) -> Element {
             } else {
                 cur_fruit
             }),
-        ])
+        ], 0.0, 0.0)
         .into()],
     );
 
@@ -194,13 +200,14 @@ fn build(cx: &mut BuildCx) -> Element {
     let list = items.get(rt);
     let add_input = row_full(vec![
         {
-            let mut t = TextInput::new(cx, "draft", "")
+            let mut t: Element = TextInput::new(cx, "draft", "")
                 .id("draft")
-                .on_submit(move |rt, text| items.update(rt, |v| v.push(text.to_string())));
-            t.element_mut().style.flex_grow = 1.0;
+                .on_submit(move |rt, text| items.update(rt, |v| v.push(text.to_string())))
+                .into();
+            t.style.flex_grow = 1.0;
             // W0301: an empty input still needs an accessible name.
-            t.element_mut().label = "New to-do".to_string();
-            t.into()
+            t.label = "New to-do".to_string();
+            t
         },
         Button::new("Add")
             .on_press(move |rt| {
@@ -211,8 +218,7 @@ fn build(cx: &mut BuildCx) -> Element {
             })
             .id("add")
             .into(),
-    ])
-    .gap(8.0);
+    ], 8.0, 0.0);
     let rows: Vec<Element> = if list.is_empty() {
         vec![Label::new("No items yet — type and press Enter")
             .color(pal.muted)
@@ -222,7 +228,7 @@ fn build(cx: &mut BuildCx) -> Element {
             .enumerate()
             .map(|(i, item)| {
                 // A compact, theme-aware delete button (no big white square).
-                let mut del = Button::new("×")
+                let mut del: Element = Button::new("×")
                     .background(pal.divider)
                     .text_color(pal.muted)
                     .on_press(move |rt| {
@@ -231,37 +237,40 @@ fn build(cx: &mut BuildCx) -> Element {
                                 v.remove(i);
                             }
                         })
-                    });
-                {
-                    let e = del.element_mut();
-                    e.corner_radius = 7.0;
-                    e.style.padding = Edges {
-                        left: Dim::px(9.0),
-                        right: Dim::px(9.0),
-                        top: Dim::px(2.0),
-                        bottom: Dim::px(2.0),
-                    };
-                }
-                let mut row = row_full(vec![
-                    {
-                        let mut l = Label::new(format!("{}. {item}", i + 1)).color(pal.ink);
-                        l.element_mut().style.flex_grow = 1.0;
-                        l.into()
-                    },
-                    del.into(),
-                ])
-                .padding(2.0);
-                row.element_mut().style.height = Dim::px(ITEM_H as f32);
-                row.into()
+                    })
+                    .into();
+                del.corner_radius = 7.0;
+                del.style.padding = Edges {
+                    left: Dim::px(9.0),
+                    right: Dim::px(9.0),
+                    top: Dim::px(2.0),
+                    bottom: Dim::px(2.0),
+                };
+                let mut row = row_full(
+                    vec![
+                        {
+                            let mut l: Element =
+                                Label::new(format!("{}. {item}", i + 1)).color(pal.ink).into();
+                            l.style.flex_grow = 1.0;
+                            l
+                        },
+                        del,
+                    ],
+                    0.0,
+                    2.0,
+                );
+                row.style.height = Dim::px(ITEM_H as f32);
+                row
             })
             .collect()
     };
     let content_h = (list.len() as f64 * ITEM_H).max(LIST_VIEW);
-    let mut scroll = Scrollable::new(cx, "items-scroll", LIST_VIEW, content_h, rows)
+    let mut scroll: Element = Scrollable::new(cx, "items-scroll", LIST_VIEW, content_h, rows)
         .background(pal.field)
-        .id("items");
-    scroll.element_mut().corner_radius = 10.0;
-    scroll.element_mut().style.width = Dim::pct(1.0);
+        .id("items")
+        .into();
+    scroll.corner_radius = 10.0;
+    scroll.style.width = Dim::pct(1.0);
     let todo = section(
         "TextInput adds to a list",
         vec![
@@ -274,11 +283,13 @@ fn build(cx: &mut BuildCx) -> Element {
     // --- multi-line text field ---
     let notes = section(
         "TextField (multi-line)",
-        vec![{
-            let mut t = TextField::new(cx, "notes", "Type notes…\nEnter adds a line").lines(3);
-            t.element_mut().style.width = Dim::px(INNER);
-            t.id("notes").into()
-        }],
+        // `TextField` has a `width` modifier, so the escape hatch was never
+        // needed here — reaching into the built node just predated it.
+        vec![TextField::new(cx, "notes", "Type notes…\nEnter adds a line")
+            .lines(3)
+            .width(INNER as f32)
+            .id("notes")
+            .into()],
     );
 
     let mut card: Element = Container::new(vec![

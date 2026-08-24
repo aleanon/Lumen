@@ -6,7 +6,7 @@
 //! which recorded WHEN a widget was written rather than what it is.)
 
 use crate::nav_chrome::TOUCH_MIN;
-use crate::widget::impl_common;
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{BuildCx, Canvas, Element};
 use lumen_core::semantics::{Action, Role, State as SemState};
 use lumen_core::{Color, Runtime};
@@ -36,7 +36,16 @@ use std::rc::Rc;
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct DatePicker {
-    el: Element,
+    name: String,
+    /// The selected date, read where the `BuildCx` is. Everything else the
+    /// calendar needs is arithmetic over these and the `Copy` handles below.
+    yv: i64,
+    mv: i64,
+    dv: i64,
+    year: lumen_core::state::Signal<i64>,
+    month: lumen_core::state::Signal<i64>,
+    day: lumen_core::state::Signal<i64>,
+    common: Common,
 }
 
 impl DatePicker {
@@ -45,13 +54,42 @@ impl DatePicker {
     /// a grid of day cells with the selected day highlighted. `name` keys three
     /// signals (`.year`/`.month`/`.day`); value serialises as `YYYY-MM-DD`.
     pub fn new(cx: &BuildCx, name: &str) -> DatePicker {
+        let year = cx.signal(format!("{name}.year"), || 2026i64);
+        let month = cx.signal(format!("{name}.month"), || 6i64);
+        let day = cx.signal(format!("{name}.day"), || 16i64);
+        let rt = cx.runtime();
         DatePicker {
-            el: calendar(cx, name),
+            name: name.to_string(),
+            yv: year.get(rt),
+            mv: month.get(rt),
+            dv: day.get(rt),
+            year,
+            month,
+            day,
+            common: Common::default(),
         }
     }
 }
 
-impl_common!(DatePicker);
+impl Widget for DatePicker {
+    fn build(self) -> Element {
+        let DatePicker {
+            name,
+            yv,
+            mv,
+            dv,
+            year,
+            month,
+            day,
+            common,
+        } = self;
+        let mut el = calendar(&name, yv, mv, dv, year, month, day);
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(DatePicker);
 
 /// A month-calendar date picker. `name` keys three signals; value is `YYYY-MM-DD`.
 /// *(Thin shim over [`DatePicker`] — the typed form is preferred.)*
@@ -96,16 +134,17 @@ fn first_dow(y: i64, m: i64) -> i64 {
 }
 
 /// The month-calendar body of [`DatePicker`].
-fn calendar(cx: &BuildCx, name: &str) -> Element {
+#[allow(clippy::too_many_arguments)]
+fn calendar(
+    name: &str,
+    yv: i64,
+    mv: i64,
+    dv: i64,
+    year: lumen_core::state::Signal<i64>,
+    month: lumen_core::state::Signal<i64>,
+    day: lumen_core::state::Signal<i64>,
+) -> Element {
     let accent = Color::srgb8(0x1a, 0x73, 0xe8, 0xff);
-    let year = cx.signal(format!("{name}.year"), || 2026i64);
-    let month = cx.signal(format!("{name}.month"), || 6i64);
-    let day = cx.signal(format!("{name}.day"), || 16i64);
-    let (yv, mv, dv) = (
-        year.get(cx.runtime()),
-        month.get(cx.runtime()),
-        day.get(cx.runtime()),
-    );
     let val = format!("{yv:04}-{mv:02}-{dv:02}");
 
     // Header: ‹  Month YYYY  ›
@@ -328,7 +367,14 @@ fn nav_button(label: &str, id: &str, on: impl Fn(&Runtime) + 'static) -> Element
 /// output. `doc_shot` re-renders it every test run and fails if the render
 /// drifts from that committed image, so the picture is always current.
 pub struct TimePicker {
-    el: Element,
+    /// Kept because the dial's child ids are namespaced under it.
+    name: String,
+    /// The selected time, read where the `BuildCx` is.
+    hv: i64,
+    mnv: i64,
+    hour: lumen_core::state::Signal<i64>,
+    minute: lumen_core::state::Signal<i64>,
+    common: Common,
 }
 
 impl TimePicker {
@@ -337,13 +383,37 @@ impl TimePicker {
     /// the selected hour, and a compact minute control. Value serialises as
     /// `HH:MM`; `name` keys `.hour`/`.minute`.
     pub fn new(cx: &BuildCx, name: &str) -> TimePicker {
+        let hour = cx.signal(format!("{name}.hour"), || 9i64);
+        let minute = cx.signal(format!("{name}.minute"), || 30i64);
+        let rt = cx.runtime();
         TimePicker {
-            el: clock(cx, name),
+            name: name.to_string(),
+            hv: hour.get(rt),
+            mnv: minute.get(rt),
+            hour,
+            minute,
+            common: Common::default(),
         }
     }
 }
 
-impl_common!(TimePicker);
+impl Widget for TimePicker {
+    fn build(self) -> Element {
+        let TimePicker {
+            name,
+            hv,
+            mnv,
+            hour,
+            minute,
+            common,
+        } = self;
+        let mut el = clock(&name, hv, mnv, hour, minute);
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(TimePicker);
 
 /// A clock-dial time picker. Value serialises as `HH:MM`; `name` keys signals.
 /// *(Thin shim over [`TimePicker`] — the typed form is preferred.)*
@@ -352,13 +422,15 @@ pub fn time_picker(cx: &BuildCx, name: &str) -> Element {
 }
 
 /// The clock-dial body of [`TimePicker`].
-fn clock(cx: &BuildCx, name: &str) -> Element {
+fn clock(
+    name: &str,
+    hv: i64,
+    mnv: i64,
+    hour: lumen_core::state::Signal<i64>,
+    minute: lumen_core::state::Signal<i64>,
+) -> Element {
     let accent = Color::srgb8(0x1a, 0x73, 0xe8, 0xff);
     let dark = Color::srgb8(0x20, 0x24, 0x2a, 0xff);
-    let hour = cx.signal(format!("{name}.hour"), || 9i64);
-    let minute = cx.signal(format!("{name}.minute"), || 30i64);
-    let hv = hour.get(cx.runtime());
-    let mnv = minute.get(cx.runtime());
     let hd = if hv % 12 == 0 { 12 } else { hv % 12 };
     let val = format!("{hv:02}:{mnv:02}");
 

@@ -3,7 +3,7 @@
 //! library. Colors are built in (per kind) so the widgets work with no
 //! stylesheet; the classes stay on the elements for `.lss` overrides.
 
-use crate::widget::{impl_common, impl_widget, Common, Widget};
+use crate::widget::{impl_widget, Common, Widget};
 use crate::{widgets, BuildCx, Element};
 use lumen_core::semantics::{Action, Role, State as SemState};
 use lumen_core::Color;
