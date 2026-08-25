@@ -121,6 +121,14 @@ pub struct TreeSink {
     pub(crate) pending_css: HashMap<NodeIndex, Style>,
     /// W1: depth of the enclosing disabled subtree, for inherited `:disabled`.
     pub(crate) disabled_depth: usize,
+    /// Spans retained from the previous frame, by scope key.
+    pub(crate) prev_spans: HashMap<u64, SpanRec>,
+    /// Spans recorded this frame.
+    pub(crate) spans: HashMap<u64, SpanRec>,
+    /// The previous frame's root, for the sweep.
+    pub(crate) old_root: Option<NodeIndex>,
+    /// What this frame did.
+    pub(crate) stats: FrameStats,
     /// Nodes begun but not yet ended, innermost last.
     ///
     /// The first cut kept every record in `meta` from `begin` and reached it
@@ -128,7 +136,7 @@ pub struct TreeSink {
     /// lookups for a `Button`, where the `Element` path writes struct fields
     /// and inserts once. That alone made direct lowering measurably slower
     /// than the path it was supposed to beat.
-    pub(crate) open: Vec<(NodeIndex, Meta)>,
+    pub(crate) open: Vec<(NodeIndex, Meta, bool)>,
 }
 
 impl Default for TreeSink {
@@ -149,6 +157,10 @@ impl TreeSink {
             desc_stack: Vec::new(),
             pending_css: HashMap::new(),
             disabled_depth: 0,
+            prev_spans: HashMap::new(),
+            spans: HashMap::new(),
+            old_root: None,
+            stats: FrameStats::default(),
             open: Vec::new(),
         }
     }
@@ -169,6 +181,7 @@ impl TreeSink {
                 role,
                 ..Meta::default()
             },
+            false,
         ));
         n
     }
@@ -179,9 +192,32 @@ impl TreeSink {
         let i = self
             .open
             .iter()
-            .rposition(|(k, _)| *k == n)
+            .rposition(|(k, _, _)| *k == n)
             .expect("node begun but not ended");
         &mut self.open[i].1
+    }
+
+    /// Mark a node as having resolved, so `end` knows to pop the ancestor it
+    /// pushed. Inferring this from a stored style was wrong: with no
+    /// stylesheet loaded `resolve` still pushes an ancestor but stores nothing,
+    /// so the pop never happened and the chain grew without bound — caught by
+    /// `assert_balanced`, which is what it is for.
+    fn mark_resolved(&mut self, n: NodeIndex) {
+        let i = self
+            .open
+            .iter()
+            .rposition(|(k, _, _)| *k == n)
+            .expect("node begun but not ended");
+        self.open[i].2 = true;
+    }
+
+    /// Whether `n` resolved.
+    fn did_resolve(&self, n: NodeIndex) -> bool {
+        self.open
+            .iter()
+            .rposition(|(k, _, _)| *k == n)
+            .map(|i| self.open[i].2)
+            .unwrap_or(false)
     }
 
     /// Read the record under construction.
@@ -189,7 +225,7 @@ impl TreeSink {
         let i = self
             .open
             .iter()
-            .rposition(|(k, _)| *k == n)
+            .rposition(|(k, _, _)| *k == n)
             .expect("node begun but not ended");
         &self.open[i].1
     }
@@ -289,12 +325,14 @@ impl TreeSink {
         // Fold the cascade's layout properties onto the widget's own style —
         // composition, where `build_node` mutated the element in place.
         let mut styled;
+        if self.did_resolve(n) {
+            self.desc_stack.pop();
+        }
         let style = match self.pending_css.remove(&n) {
             None => style,
             Some(css) => {
                 styled = style.clone();
                 apply_css_layout(&mut styled, &css);
-                self.desc_stack.pop();
                 &styled
             }
         };
@@ -309,9 +347,9 @@ impl TreeSink {
         let i = self
             .open
             .iter()
-            .rposition(|(k, _)| *k == n)
+            .rposition(|(k, _, _)| *k == n)
             .expect("node begun but not ended");
-        let (_, meta) = self.open.remove(i);
+        let (_, meta, _) = self.open.remove(i);
         self.meta.insert(n, meta);
         lnode
     }
@@ -705,6 +743,7 @@ impl TreeSink {
     /// children. The resolved paint lands immediately; the resolved layout is
     /// held until [`end`](TreeSink::end) folds it onto the widget's own style.
     pub fn resolve(&mut self, n: NodeIndex) {
+        self.mark_resolved(n);
         let Some(env) = &self.styles else {
             self.desc_stack.push(NodeDesc::default());
             return;
@@ -988,7 +1027,7 @@ impl TreeSink {
             "{} node(s) were begun and never ended; they are in the tree with \
              no semantics record: {:?}",
             self.open.len(),
-            self.open.iter().map(|(n, m)| (*n, m.role)).collect::<Vec<_>>()
+            self.open.iter().map(|(n, m, _)| (*n, m.role)).collect::<Vec<_>>()
         );
         assert!(
             self.desc_stack.is_empty(),
@@ -1005,5 +1044,139 @@ impl TreeSink {
     pub fn node(&mut self, parent: Option<NodeIndex>, role: Role) -> Declaring<'_> {
         let n = self.begin(parent, role);
         Declaring { sink: self, n }
+    }
+}
+
+// --- scope memoization, without a cloneable Element ------------------------
+//
+// The question this answers: `cx.scope` memoization is the one part of the
+// engine that genuinely *retains* an `Element` — `shared: Option<Rc<Element>>`
+// on a memo-hit stub. If it cannot survive without one, direct lowering is dead
+// however good its other numbers look.
+//
+// Reading `splice_span` settles it: **the fast path never touches `Element`.**
+// A memo hit is pure tree surgery — `detach` the retained subtree from the
+// parent being rebuilt and `attach_last_child` it under the new one, both O(1)
+// since the child list is doubly linked. The `Rc<Element>` exists only for the
+// *fallback*, when splicing is refused (the span's root died, or it contains an
+// animating node whose styles are mid-interpolation).
+//
+// So the design question is narrower than it looked: with no `Element` to
+// re-lower, the fallback has to be "run the closure again", which is what a
+// cache miss already does. That is strictly more work than re-lowering a cached
+// node — but only on a path that is refused, and a scope closure is pure by
+// ADR-013, so re-running it is always sound.
+
+/// One memoized scope's retained span.
+#[derive(Clone, Copy)]
+pub struct SpanRec {
+    /// The subtree root retained from the previous frame.
+    pub root: NodeIndex,
+    /// The caller's dependency stamp; a change forces a rebuild.
+    pub dep: u64,
+    /// Preorder node count, for reporting.
+    pub count: usize,
+}
+
+/// What a frame did, for the benchmark to assert on.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FrameStats {
+    /// Scopes reused by splicing.
+    pub spliced: usize,
+    /// Scopes whose closure ran.
+    pub rebuilt: usize,
+    /// Nodes reused without being rebuilt.
+    pub nodes_reused: usize,
+    /// Nodes freed by the sweep.
+    pub nodes_freed: usize,
+}
+
+impl TreeSink {
+    /// Start a new frame over the retained tree.
+    ///
+    /// The tree persists across frames — that is what makes splicing possible.
+    /// The previous root is remembered so the sweep can free whatever this
+    /// frame did not reattach.
+    pub fn begin_frame(&mut self) {
+        self.old_root = Some(self.tree.root());
+        std::mem::swap(&mut self.prev_spans, &mut self.spans);
+        self.spans.clear();
+        self.stats = FrameStats::default();
+    }
+
+    /// A memoized subtree.
+    ///
+    /// If `key`'s span survives from the previous frame and `dep` is unchanged,
+    /// the retained nodes are re-parented under `parent` and `f` never runs.
+    /// Otherwise `f` runs and its span is recorded for next time.
+    pub fn scope<F>(
+        &mut self,
+        parent: Option<NodeIndex>,
+        key: u64,
+        dep: u64,
+        f: F,
+    ) -> (NodeIndex, LayoutNode)
+    where
+        F: FnOnce(&mut TreeSink, Option<NodeIndex>) -> (NodeIndex, LayoutNode),
+    {
+        if let Some(rec) = self.prev_spans.get(&key).copied() {
+            if rec.dep == dep && self.tree.is_alive(rec.root) {
+                if let Some(raw) = self.tree.lnode(rec.root) {
+                    // The whole memo hit: two pointer updates and a record.
+                    self.tree.detach(rec.root);
+                    match parent {
+                        Some(p) => self.tree.attach_last_child(p, rec.root),
+                        None => self.tree.set_root(rec.root),
+                    }
+                    self.spans.insert(key, rec);
+                    self.stats.spliced += 1;
+                    self.stats.nodes_reused += rec.count;
+                    return (rec.root, LayoutNode::from_raw(raw));
+                }
+            }
+        }
+        let before = self.tree.len();
+        let (n, ln) = f(self, parent);
+        let count = self.tree.len().saturating_sub(before);
+        self.spans.insert(key, SpanRec { root: n, dep, count });
+        self.stats.rebuilt += 1;
+        (n, ln)
+    }
+
+    /// Free everything the frame did not reattach.
+    ///
+    /// Spliced spans were detached from the old parent, so they are no longer
+    /// reachable from the old root — the walk enumerates only dead nodes, which
+    /// is what keeps a memo-heavy frame O(changed) rather than O(tree).
+    pub fn end_frame(&mut self) {
+        let Some(old_root) = self.old_root.take() else {
+            return;
+        };
+        if old_root == self.tree.root() || !self.tree.is_alive(old_root) {
+            return;
+        }
+        let mut stack = vec![old_root];
+        while let Some(n) = stack.pop() {
+            if n.is_none() || n == self.tree.root() || !self.tree.is_alive(n) {
+                continue;
+            }
+            let mut c = self.tree.first_child(n);
+            while c.is_some() {
+                stack.push(c);
+                c = self.tree.next_sibling(c);
+            }
+            if let Some(raw) = self.tree.lnode(n) {
+                self.layout.remove(LayoutNode::from_raw(raw));
+            }
+            self.meta.remove(&n);
+            self.pending_css.remove(&n);
+            self.tree.free_one(n);
+            self.stats.nodes_freed += 1;
+        }
+    }
+
+    /// What the last frame did.
+    pub fn stats(&self) -> FrameStats {
+        self.stats
     }
 }
