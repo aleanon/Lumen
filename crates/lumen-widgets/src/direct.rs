@@ -129,6 +129,8 @@ pub struct TreeSink {
     pub(crate) old_root: Option<NodeIndex>,
     /// What this frame did.
     pub(crate) stats: FrameStats,
+    /// Depth of the enclosing overlay subtree.
+    pub(crate) overlay_depth: usize,
     /// The text engine, when text leaves should be measured.
     pub(crate) text: Option<Box<lumen_text::TextEngine>>,
     /// Nodes begun but not yet ended, innermost last.
@@ -163,6 +165,7 @@ impl TreeSink {
             spans: HashMap::new(),
             old_root: None,
             stats: FrameStats::default(),
+            overlay_depth: 0,
             text: None,
             open: Vec::new(),
         }
@@ -178,6 +181,9 @@ impl TreeSink {
             }
             Some(p) => self.tree.insert_child(p),
         };
+        if self.overlay_depth > 0 {
+            self.tree.set_z(n, OVERLAY_Z);
+        }
         self.open.push((
             n,
             Meta {
@@ -1086,6 +1092,9 @@ pub struct SpanRec {
     pub dep: u64,
     /// Preorder node count, for reporting.
     pub count: usize,
+    /// The outside context the span was built in. A splice into a different
+    /// one would reuse a subtree the cascade would now resolve differently.
+    pub ctx: u128,
 }
 
 /// What a frame did, for the benchmark to assert on.
@@ -1129,8 +1138,12 @@ impl TreeSink {
     where
         F: FnOnce(&mut TreeSink, Option<NodeIndex>) -> (NodeIndex, LayoutNode),
     {
+        let ctx = self.ctx_hash();
         if let Some(rec) = self.prev_spans.get(&key).copied() {
-            if rec.dep == dep && self.tree.is_alive(rec.root) {
+            // Both must match: the scope's own data AND the surroundings that
+            // feed the cascade. Checking `dep` alone reuses a span whose
+            // styling would now resolve differently.
+            if rec.dep == dep && rec.ctx == ctx && self.tree.is_alive(rec.root) {
                 if let Some(raw) = self.tree.lnode(rec.root) {
                     // The whole memo hit: two pointer updates and a record.
                     self.tree.detach(rec.root);
@@ -1148,7 +1161,15 @@ impl TreeSink {
         let before = self.tree.len();
         let (n, ln) = f(self, parent);
         let count = self.tree.len().saturating_sub(before);
-        self.spans.insert(key, SpanRec { root: n, dep, count });
+        self.spans.insert(
+            key,
+            SpanRec {
+                root: n,
+                dep,
+                count,
+                ctx,
+            },
+        );
         self.stats.rebuilt += 1;
         (n, ln)
     }
@@ -1264,5 +1285,62 @@ fn dim_px(d: Dim) -> f64 {
     match d {
         Dim::Px(v) => v as f64,
         _ => 0.0,
+    }
+}
+
+
+// --- P2: overlay routing, and the context a splice must match --------------
+//
+// The engine guards every splice with `span_ctx_hash`: the ancestor chain, the
+// container size, the overlay flag and the hidden/disabled depths. All of it
+// feeds the cascade, so a span may only be reused when the whole *outside
+// context* is unchanged — same data under different surroundings is a different
+// node.
+//
+// The first cut of `scope()` checked only the caller's `dep`, which is wrong in
+// a way tests can demonstrate: a button retained under `.calm` and spliced under
+// `.danger` keeps the styling it got under `.calm`, and one retained outside an
+// overlay keeps `z = 0` after being moved into one — painting under the page it
+// is supposed to float above.
+
+/// Nodes in an overlay subtree paint in a final pass above the rest of the UI.
+pub const OVERLAY_Z: u32 = 1000;
+
+impl TreeSink {
+    /// Enter an overlay subtree: this node and its descendants route to the
+    /// overlay pass. Inherited, not local — a button inside a dropdown is as
+    /// much part of the overlay as the dropdown.
+    pub fn enter_overlay(&mut self) {
+        self.overlay_depth += 1;
+    }
+
+    /// Leave an overlay subtree.
+    pub fn exit_overlay(&mut self) {
+        self.overlay_depth = self.overlay_depth.saturating_sub(1);
+    }
+
+    /// Whether the cursor is inside an overlay.
+    pub fn in_overlay(&self) -> bool {
+        self.overlay_depth > 0
+    }
+
+    /// The outside context a retained span must match to be spliceable.
+    ///
+    /// Mirrors `span_ctx_hash`: everything that can change what the cascade
+    /// resolves for a node without the node's own data changing. `IdHasher`
+    /// rather than the default: this runs once per scope per frame, and a
+    /// collision splices a stale subtree — a wrong view, not a slow one.
+    pub(crate) fn ctx_hash(&self) -> u128 {
+        use std::hash::Hash;
+        let mut h = lumen_core::identity::IdHasher::new();
+        for d in &self.desc_stack {
+            d.id.hash(&mut h);
+            d.classes.hash(&mut h);
+            d.states.hash(&mut h);
+            d.ty.hash(&mut h);
+        }
+        self.in_overlay().hash(&mut h);
+        (self.disabled_depth > 0).hash(&mut h);
+        h.finish128()
     }
 }
