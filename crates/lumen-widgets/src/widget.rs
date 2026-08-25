@@ -52,6 +52,18 @@ pub trait Widget: Sized {
     fn build(self) -> Element;
 }
 
+/// [`Common::into_parts`]'s return: id, classes, background, layout-style
+/// override, disabled. Named so the `direct` prototype's decomposition does
+/// not trip the type-complexity lint.
+#[doc(hidden)]
+pub type CommonParts = (
+    Option<StableId>,
+    Vec<String>,
+    Option<Color>,
+    Option<Box<LayoutStyle>>,
+    bool,
+);
+
 /// The universal modifiers every typed widget supports, held as data.
 ///
 /// # Why it is shaped like this
@@ -81,18 +93,6 @@ pub trait Widget: Sized {
 /// `.id()` is the one modifier real apps use constantly, since the agent, the
 /// tests and `.lss` all address widgets by it), and one pointer each for the
 /// two large, rarely-set fields.
-/// [`Common::into_parts`]'s return: id, classes, background, layout-style
-/// override, disabled. Named so the `direct` prototype's decomposition does
-/// not trip the type-complexity lint.
-#[doc(hidden)]
-pub type CommonParts = (
-    Option<StableId>,
-    Vec<String>,
-    Option<Color>,
-    Option<Box<LayoutStyle>>,
-    bool,
-);
-
 #[derive(Default)]
 pub struct Common {
     /// Stable id (`.id("…")`) — tests, the agent, focus, `.lss` selectors.
