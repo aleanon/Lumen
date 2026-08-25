@@ -130,15 +130,7 @@ impl Common {
     /// Decompose for the `direct` prototype, which folds these into a
     /// `TreeSink` rather than an `Element`.
     #[doc(hidden)]
-    pub fn into_parts(
-        self,
-    ) -> (
-        Option<StableId>,
-        Vec<String>,
-        Option<Color>,
-        Option<Box<LayoutStyle>>,
-        bool,
-    ) {
+    pub fn into_parts(self) -> CommonParts {
         (
             self.id,
             self.classes,
