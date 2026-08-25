@@ -129,6 +129,8 @@ pub struct TreeSink {
     pub(crate) old_root: Option<NodeIndex>,
     /// What this frame did.
     pub(crate) stats: FrameStats,
+    /// The text engine, when text leaves should be measured.
+    pub(crate) text: Option<Box<lumen_text::TextEngine>>,
     /// Nodes begun but not yet ended, innermost last.
     ///
     /// The first cut kept every record in `meta` from `begin` and reached it
@@ -161,6 +163,7 @@ impl TreeSink {
             spans: HashMap::new(),
             old_root: None,
             stats: FrameStats::default(),
+            text: None,
             open: Vec::new(),
         }
     }
@@ -328,14 +331,21 @@ impl TreeSink {
         if self.did_resolve(n) {
             self.desc_stack.pop();
         }
-        let style = match self.pending_css.remove(&n) {
-            None => style,
+        let mut style = match self.pending_css.get(&n) {
+            None => style.clone(),
             Some(css) => {
                 styled = style.clone();
-                apply_css_layout(&mut styled, &css);
-                &styled
+                apply_css_layout(&mut styled, css);
+                styled
             }
         };
+        // P1: a text leaf sizes its own box here, where the widget's style, the
+        // cascade's overrides and the content are all finally known.
+        if self.text.is_some() {
+            self.measure_text(n, &mut style);
+        }
+        self.pending_css.remove(&n);
+        let style = &style;
         self.at(n).layout_style = style.clone();
         let lnode = if children.is_empty() {
             self.layout.leaf_ref(style)
@@ -1178,5 +1188,81 @@ impl TreeSink {
     /// What the last frame did.
     pub fn stats(&self) -> FrameStats {
         self.stats
+    }
+}
+
+
+// --- P1: text measurement feeding layout -----------------------------------
+//
+// `build_node` shapes a text leaf and writes a fixed size onto the style before
+// taffy sees it. Three inputs arrive at different times — the widget's own
+// width, the cascade's `text-wrap`, and the content — and today they are
+// reconciled by mutating one element.
+//
+// In the sink they meet at `end()` instead, which is the moment all three are
+// known: the widget has declared its content, `resolve` has folded the sheet on,
+// and the caller is handing over the style. So the reconciliation point exists
+// without an element; it just moved from "the element everyone mutates" to "the
+// call that closes the node".
+//
+// The rules are `build_node`'s, deliberately including the two it documents as
+// hard-won: an explicit width or height is never overwritten by a measurement,
+// and a percentage width cannot feed the wrap width (the containing block is not
+// resolved until layout runs, which is after this).
+
+impl TreeSink {
+    /// Attach a text engine, enabling measurement of text leaves.
+    pub fn with_text(mut self, text: lumen_text::TextEngine) -> TreeSink {
+        self.text = Some(Box::new(text));
+        self
+    }
+
+    /// Size a text leaf's box, mirroring `build_node`'s reconciliation.
+    ///
+    /// Returns the wrap width used, so a caller can assert on it.
+    fn measure_text(&mut self, n: NodeIndex, style: &mut LayoutStyle) -> Option<f32> {
+        let Some(engine) = self.text.as_mut() else {
+            return None;
+        };
+        let (txt, ts) = match &self.open.iter().rposition(|(k, _, _)| *k == n) {
+            Some(i) => match &self.open[*i].1.content {
+                NodeContent::Text(t, ts) => (t.clone(), ts.clone()),
+                _ => return None,
+            },
+            None => return None,
+        };
+        let (pl, pr) = (dim_px(style.padding.left), dim_px(style.padding.right));
+        let (pt, pb) = (dim_px(style.padding.top), dim_px(style.padding.bottom));
+
+        // An explicit pixel width turns the label into a wrapping paragraph; a
+        // percentage cannot, because the containing block is not resolved yet.
+        let mut wrap = match style.width {
+            Dim::Px(w) => Some((w - (pl + pr) as f32).max(0.0)),
+            _ => None,
+        };
+        // PROP1 `text-wrap: nowrap` keeps the explicit width for the BOX but
+        // shapes unwrapped, so the run overflows on one line.
+        if self.pending_css.get(&n).and_then(|c| c.text_wrap) == Some(false) {
+            wrap = None;
+        }
+        let block = engine.shaped(&txt, &ts, wrap, ts.align);
+        let (bw, bh) = (block.width().ceil(), block.height().ceil());
+        // Never overwrite an axis the author fixed — `== Dim::Auto`, not
+        // `wrap.is_none()`. Both of these guards cost real bugs to learn.
+        if style.width == Dim::Auto {
+            style.width = Dim::px(bw + (pl + pr) as f32);
+        }
+        if style.height == Dim::Auto {
+            style.height = Dim::px(bh + (pt + pb) as f32);
+        }
+        wrap
+    }
+}
+
+/// Pixels out of a `Dim`, zero for anything not definite.
+fn dim_px(d: Dim) -> f64 {
+    match d {
+        Dim::Px(v) => v as f64,
+        _ => 0.0,
     }
 }
