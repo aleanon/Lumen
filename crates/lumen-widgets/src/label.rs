@@ -104,6 +104,14 @@ impl Label {
     }
 }
 
+impl Label {
+    /// Decompose for the `direct` prototype (WT-EXP).
+    #[doc(hidden)]
+    pub fn into_parts(self) -> (crate::Text, TextStyle, Option<f32>, Common) {
+        (self.text, self.style, self.width, self.common)
+    }
+}
+
 impl Widget for Label {
     fn build(self) -> Element {
         let Label {

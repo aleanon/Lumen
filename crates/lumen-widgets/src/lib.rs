@@ -60,6 +60,10 @@ pub mod undo;
 pub mod wcag;
 /// The [`Widget`] trait: a typed widget is data, lowered to an `Element` on
 /// demand. See the module docs for why the previous eager model was replaced.
+/// **WT-EXP prototype**: lowering a widget straight into the tree, with no
+/// `Element` staging record. See the module docs for the experiment it serves.
+#[doc(hidden)]
+pub mod direct;
 pub mod widget;
 // ShaderWidget needs the wgpu GPU backend (`wgpu` feature), which is not built on
 // wasm; on the web, shaders are a WebGPU presenter concern.

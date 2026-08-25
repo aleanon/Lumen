@@ -112,6 +112,22 @@ impl ProgressBar {
     }
 }
 
+impl ProgressBar {
+    /// Decompose for the `direct` prototype (WT-EXP). Determinate bars only —
+    /// the indeterminate sweep is not part of the benchmarked set.
+    #[doc(hidden)]
+    pub fn into_parts(self) -> (f64, f32, f32, Color, Common) {
+        let frac = match self.mode {
+            Mode::Determinate(f) => f,
+            Mode::Indeterminate { .. } => unreachable!("prototype covers determinate bars"),
+        };
+        let ink = self
+            .fill_color
+            .unwrap_or(Color::srgb8(0x1a, 0x73, 0xe8, 0xff));
+        (frac, self.width, self.height, ink, self.common)
+    }
+}
+
 impl Widget for ProgressBar {
     fn build(self) -> Element {
         let ProgressBar {

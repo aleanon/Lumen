@@ -127,6 +127,27 @@ impl Common {
         self.disabled = yes;
     }
 
+    /// Decompose for the `direct` prototype, which folds these into a
+    /// `TreeSink` rather than an `Element`.
+    #[doc(hidden)]
+    pub fn into_parts(
+        self,
+    ) -> (
+        Option<StableId>,
+        Vec<String>,
+        Option<Color>,
+        Option<Box<LayoutStyle>>,
+        bool,
+    ) {
+        (
+            self.id,
+            self.classes,
+            self.background,
+            self.style,
+            self.disabled,
+        )
+    }
+
     /// Fold the universal modifiers onto a freshly built element.
     ///
     /// Applied **after** the widget's own construction, which is what makes the

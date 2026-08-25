@@ -113,6 +113,17 @@ impl Button {
     }
 }
 
+impl Button {
+    /// Decompose for the `direct` prototype (WT-EXP), with the emphasis already
+    /// resolved to `(fill, ink)` — the same resolution `build` performs.
+    #[doc(hidden)]
+    pub fn into_parts(self) -> (crate::Text, Option<Handler>, Color, Color, Common) {
+        let (fill, ink) = self.emphasis.colors();
+        let ink = self.text_color.unwrap_or(ink);
+        (self.label, self.on_press, fill, ink, self.common)
+    }
+}
+
 impl Widget for Button {
     fn build(self) -> Element {
         let Button {
