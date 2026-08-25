@@ -155,6 +155,41 @@ fn main() {
     println!("  progress_1k : {prog_a:>7} allocs  {:>7} KiB   ({:.1}/widget)", prog_b / 1024, prog_a as f64 / N as f64);
     println!("  mixed_1k    : {mix_a:>7} allocs  {:>7} KiB   ({:.1}/row)", mix_b / 1024, mix_a as f64 / N as f64);
 
+
+    // The universal modifiers, priced separately. `.class()`/`.style()`/`.css()`
+    // are the ones the deferred model routes through a boxed `Rare` record, so
+    // this is where an extra allocation would show up if there is one.
+    let (_, cls_a, cls_b) = cost_of(|| {
+        let v: Vec<Element> = (0..N)
+            .map(|_| Button::new("Save").class("primary").into())
+            .collect();
+        v.len()
+    });
+    let (_, id_a, id_b) = cost_of(|| {
+        let v: Vec<Element> = (0..N).map(|_| Button::new("Save").id("btn").into()).collect();
+        v.len()
+    });
+    let (_, sty_a, sty_b) = cost_of(|| {
+        let v: Vec<Element> = (0..N)
+            .map(|_| {
+                Button::new("Save")
+                    .style(lumen_layout::LayoutStyle::default())
+                    .into()
+            })
+            .collect();
+        v.len()
+    });
+    let (_, bare_a, bare_b) = cost_of(|| {
+        let v: Vec<Element> = (0..N).map(|_| Button::new("Save").into()).collect();
+        v.len()
+    });
+    println!("\nWT-EXP — universal modifiers, allocations per {N} buttons");
+    println!("──────────────────────────────────────────────────────────────");
+    println!("  no modifier   : {bare_a:>7} allocs  {:>7} KiB", bare_b / 1024);
+    println!("  .id(\"btn\")    : {id_a:>7} allocs  {:>7} KiB", id_b / 1024);
+    println!("  .class(\"x\")   : {cls_a:>7} allocs  {:>7} KiB", cls_b / 1024);
+    println!("  .style(..)     : {sty_a:>7} allocs  {:>7} KiB", sty_b / 1024);
+
     // --- 3. allocations + RSS for a real frame ------------------------------
     let rss_before = rss_kib();
     let mut h = widget_app(500).run_headless(Size::new(600.0, 800.0));
