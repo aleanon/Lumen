@@ -1263,9 +1263,7 @@ impl TreeSink {
     ///
     /// Returns the wrap width used, so a caller can assert on it.
     fn measure_text(&mut self, n: NodeIndex, style: &mut LayoutStyle) -> Option<f32> {
-        let Some(engine) = self.text.as_mut() else {
-            return None;
-        };
+        let engine = self.text.as_mut()?;
         let (txt, ts) = match &self.open.iter().rposition(|(k, _, _)| *k == n) {
             Some(i) => match &self.open[*i].1.content {
                 NodeContent::Text(t, ts) => (t.clone(), ts.clone()),
