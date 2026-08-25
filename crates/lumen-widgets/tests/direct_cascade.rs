@@ -195,9 +195,9 @@ fn a_caller_supplied_class_is_visible_to_the_cascade() {
 #[should_panic(expected = "begun and never ended")]
 fn an_unended_node_is_caught() {
     let mut s = sink("");
-    let open = s.node(None, Role::Group).resolve();
-    let _ = open.index();
-    std::mem::forget(open); // simulate the `#[must_use]` warning being ignored
+    // Dropping the guard unused is what `#[must_use]` warns about; a warning
+    // is not an error everywhere, so the balance check is the backstop.
+    drop(s.node(None, Role::Group).resolve());
     s.assert_balanced();
 }
 
