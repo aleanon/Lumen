@@ -462,19 +462,15 @@ fn apply_common(out: &mut TreeSink, n: NodeIndex, common: Common) -> bool {
 impl Direct for crate::Label {
     fn lower(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
         let (text, style, width, common) = self.into_parts();
-        let n = out.begin(parent, Role::Text);
         let (s, _dyn_text) = text.into_parts();
-        out.label(n, s.clone());
-        out.text(n, s, style);
-        let disabled = apply_common(out, n, common);
-        // The cascade runs here: after the widget has declared everything a
-        // selector can match on, and before it would lower any children.
-        out.resolve(n);
+        let (d, disabled) = out.node(parent, Role::Text).common(common);
+        let node = d.label(s.clone()).text(s, style).resolve();
+        let n = node.index();
         let mut ls = LayoutStyle::default();
         if let Some(px) = width {
             ls.width = Dim::px(px);
         }
-        let ln = out.end(n, &ls, &[], disabled);
+        let ln = node.end(&ls, &[], disabled);
         (n, ln)
     }
 }
@@ -482,28 +478,28 @@ impl Direct for crate::Label {
 impl Direct for crate::Button {
     fn lower(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
         let (label, on_press, fill, ink, common) = self.into_parts();
-        let n = out.begin(parent, Role::Button);
         let (s, _dyn_text) = label.into_parts();
-        out.label(n, s.clone());
-        out.actions(n, vec![Action::Click, Action::Focus]);
-        out.focusable(n, true);
-        out.background(n, fill);
-        out.corner_radius(n, 8.0);
+        let (d, disabled) = out.node(parent, Role::Button).common(common);
+        let mut d = d
+            .label(s.clone())
+            .actions(vec![Action::Click, Action::Focus])
+            .focusable(true)
+            .background(fill)
+            .corner_radius(8.0)
+            .text(
+                s,
+                TextStyle {
+                    font_size: 15.0,
+                    weight: 600.0,
+                    color: ink,
+                    ..TextStyle::default()
+                },
+            );
         if let Some(h) = on_press {
-            out.on_click(n, h);
+            d = d.on_click(h);
         }
-        out.text(
-            n,
-            s,
-            TextStyle {
-                font_size: 15.0,
-                weight: 600.0,
-                color: ink,
-                ..TextStyle::default()
-            },
-        );
-        let disabled = apply_common(out, n, common);
-        out.resolve(n);
+        let node = d.resolve();
+        let n = node.index();
         let ls = LayoutStyle {
             padding: Edges {
                 left: Dim::px(16.0),
@@ -513,7 +509,7 @@ impl Direct for crate::Button {
             },
             ..LayoutStyle::default()
         };
-        let ln = out.end(n, &ls, &[], disabled);
+        let ln = node.end(&ls, &[], disabled);
         (n, ln)
     }
 }
@@ -521,26 +517,25 @@ impl Direct for crate::Button {
 impl Direct for crate::ProgressBar {
     fn lower(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
         let (frac, width, height, ink, common) = self.into_parts();
-        let n = out.begin(parent, Role::Progress);
-        out.value(n, format!("{:.0}%", frac * 100.0));
-        out.background(n, Color::srgb8(0xe3, 0xe6, 0xeb, 0xff));
-        out.corner_radius(n, 5.0);
-        // The `Common` lands BEFORE `resolve`, or a caller's `.id()`/`.class()`
-        // is invisible to the cascade — a silent miss, not an error. This
-        // ordering is the obligation the direct design moves from the engine
-        // onto each widget author; `direct_cascade.rs` pins it.
-        let disabled = apply_common(out, n, common);
-        out.resolve(n);
+        // The ordering that used to be a comment is now the only thing that
+        // compiles: `common` lands on `Declaring`, and the fill child is only
+        // reachable from the `Open` this `resolve` returns.
+        let (d, disabled) = out.node(parent, Role::Progress).common(common);
+        let mut node = d
+            .value(format!("{:.0}%", frac * 100.0))
+            .background(Color::srgb8(0xe3, 0xe6, 0xeb, 0xff))
+            .corner_radius(5.0)
+            .resolve();
+        let n = node.index();
 
-        // The fill child, lowered while this bar is on the ancestor stack.
-        let f = out.begin(Some(n), Role::Generic);
-        out.elide(f, true);
-        out.class(f, "fill".to_string());
-        out.background(f, ink);
-        out.corner_radius(f, 5.0);
-        out.resolve(f);
-        let fill_ln = out.end(
-            f,
+        let fill = node
+            .begin_child(Role::Generic)
+            .elide(true)
+            .class("fill")
+            .background(ink)
+            .corner_radius(5.0)
+            .resolve();
+        let fill_ln = fill.end(
             &LayoutStyle {
                 width: Dim::pct(frac as f32),
                 height: Dim::pct(1.0),
@@ -555,7 +550,7 @@ impl Direct for crate::ProgressBar {
             height: Dim::px(height),
             ..LayoutStyle::default()
         };
-        let ln = out.end(n, &ls, &[fill_ln], disabled);
+        let ln = node.end(&ls, &[fill_ln], disabled);
         (n, ln)
     }
 }
@@ -750,5 +745,265 @@ impl TreeSink {
         self.pending_css.insert(n, css);
         // B.1: this node is now an ancestor for its children's matching.
         self.desc_stack.push(desc);
+    }
+}
+
+// --- making the ordering unrepresentable -----------------------------------
+//
+// The prototype above found a real hazard: a widget that calls `resolve()`
+// before declaring its id/classes is silently unstyled, and one that never
+// calls it at all is silently unstyled too. Neither produces a diagnostic.
+// `ProgressBar` shipped with the first bug in this very file.
+//
+// Comments do not fix that; types do. The node passes through two states, and
+// each one exposes only the operations legal in it:
+//
+//   Declaring — the cascade's inputs may still be set (id, class, role,
+//               states, disabled) and no child may exist yet, because this
+//               node's `NodeDesc` is not on the ancestor stack.
+//   Open      — the cascade has run; children may be lowered, and the
+//               matchable properties can no longer be changed behind its back.
+//
+// `resolve` is the only way from one to the other, `end` exists only on `Open`,
+// and both guards are `#[must_use]`. So "children before resolve", "declare
+// after resolve" and "never resolve at all" stop being mistakes a widget author
+// can make — they stop compiling.
+
+/// A node whose cascade inputs are still being declared.
+///
+/// Consumed by [`resolve`](Declaring::resolve), which is the only route to a
+/// node that may have children.
+///
+/// # The mistakes this makes impossible
+///
+/// Each of these was reachable before, and silently produced an unstyled node.
+///
+/// A child before the cascade has run — `child` does not exist on `Declaring`,
+/// so the parent cannot be missing from the ancestor stack when a descendant
+/// selector is matched against it:
+///
+/// ```compile_fail
+/// # use lumen_widgets::direct::TreeSink;
+/// # use lumen_core::semantics::Role;
+/// # use lumen_widgets::Label;
+/// let mut sink = TreeSink::new();
+/// let mut d = sink.node(None, Role::Group);
+/// d.child(Label::new("too early"));   // no method `child` on `Declaring`
+/// ```
+///
+/// A class declared after the cascade has run — the matchable setters are gone
+/// from `Open`, so a rule can no longer be defeated by ordering. This is the
+/// exact bug `ProgressBar` shipped with:
+///
+/// ```compile_fail
+/// # use lumen_widgets::direct::TreeSink;
+/// # use lumen_core::semantics::Role;
+/// let mut sink = TreeSink::new();
+/// let open = sink.node(None, Role::Group).resolve();
+/// open.class("too-late");             // no method `class` on `Open`
+/// ```
+///
+/// Ending without resolving at all — `end` exists only on `Open`, and `Open` is
+/// only reachable through `resolve`:
+///
+/// ```compile_fail
+/// # use lumen_widgets::direct::TreeSink;
+/// # use lumen_core::semantics::Role;
+/// # use lumen_layout::LayoutStyle;
+/// let mut sink = TreeSink::new();
+/// let d = sink.node(None, Role::Group);
+/// d.end(&LayoutStyle::default(), &[], false);   // no method `end` on `Declaring`
+/// ```
+///
+/// And the correct shape, for contrast:
+///
+/// ```
+/// # use lumen_widgets::direct::TreeSink;
+/// # use lumen_core::semantics::Role;
+/// # use lumen_layout::LayoutStyle;
+/// # use lumen_widgets::Label;
+/// let mut sink = TreeSink::new();
+/// let mut open = sink.node(None, Role::Group).class("panel").resolve();
+/// let child = open.child(Label::new("in time"));
+/// open.end(&LayoutStyle::default(), &[child], false);
+/// ```
+#[must_use = "a declared node must be resolved and ended, or it never reaches the tree"]
+pub struct Declaring<'a> {
+    sink: &'a mut TreeSink,
+    n: NodeIndex,
+}
+
+/// A resolved node, open for children.
+#[must_use = "an open node must be ended, or its layout node is never created"]
+pub struct Open<'a> {
+    sink: &'a mut TreeSink,
+    n: NodeIndex,
+}
+
+impl<'a> Declaring<'a> {
+    /// This node's index — for tests and for wiring handlers by id.
+    pub fn index(&self) -> NodeIndex {
+        self.n
+    }
+    /// Accessible name.
+    pub fn label(self, s: impl Into<String>) -> Self {
+        let v = s.into();
+        self.sink.label(self.n, v);
+        self
+    }
+    /// Current value.
+    pub fn value(self, s: impl Into<String>) -> Self {
+        let v = s.into();
+        self.sink.value(self.n, v);
+        self
+    }
+    /// Stable id. Matchable, so it must be set before `resolve`.
+    pub fn id(self, id: impl Into<StableId>) -> Self {
+        let v = id.into();
+        self.sink.id(self.n, v);
+        self
+    }
+    /// A `.lss` class. Matchable, so it must be set before `resolve`.
+    pub fn class(self, c: impl Into<String>) -> Self {
+        let v = c.into();
+        self.sink.class(self.n, v);
+        self
+    }
+    /// Advertised actions.
+    pub fn actions(self, a: Vec<Action>) -> Self {
+        self.sink.actions(self.n, a);
+        self
+    }
+    /// Semantic states. Matchable (`checkbox:checked`), so before `resolve`.
+    pub fn states(self, s: Vec<SemState>) -> Self {
+        self.sink.states(self.n, s);
+        self
+    }
+    /// Keyboard focusable.
+    pub fn focusable(self, yes: bool) -> Self {
+        self.sink.focusable(self.n, yes);
+        self
+    }
+    /// Elide from semantics.
+    pub fn elide(self, yes: bool) -> Self {
+        self.sink.elide(self.n, yes);
+        self
+    }
+    /// Disabled. Matchable (`:disabled`), so before `resolve`.
+    pub fn disabled(self, yes: bool) -> Self {
+        self.sink.disabled(self.n, yes);
+        self
+    }
+    /// Click handler.
+    pub fn on_click(self, h: crate::Handler) -> Self {
+        self.sink.on_click(self.n, h);
+        self
+    }
+    /// Background fill (the sheet may still override it).
+    pub fn background(self, c: Color) -> Self {
+        self.sink.background(self.n, c);
+        self
+    }
+    /// Border.
+    pub fn border(self, b: Border) -> Self {
+        self.sink.border(self.n, b);
+        self
+    }
+    /// Corner radius.
+    pub fn corner_radius(self, r: f64) -> Self {
+        self.sink.corner_radius(self.n, r);
+        self
+    }
+    /// Text content. Declared before `resolve` because the cascade restyles it
+    /// and measurement happens afterwards.
+    pub fn text(self, s: impl Into<String>, ts: TextStyle) -> Self {
+        let v = s.into();
+        self.sink.text(self.n, v, ts);
+        self
+    }
+    /// Fold a [`Common`] on. Returns `Self`, so it cannot land after `resolve`.
+    pub fn common(self, common: Common) -> (Self, bool) {
+        let disabled = apply_common(self.sink, self.n, common);
+        (self, disabled)
+    }
+
+    /// Run the cascade and open the node for children.
+    ///
+    /// The only transition. Everything matchable is already declared; nothing
+    /// declared after this could have affected selection anyway.
+    pub fn resolve(self) -> Open<'a> {
+        self.sink.resolve(self.n);
+        Open {
+            sink: self.sink,
+            n: self.n,
+        }
+    }
+}
+
+impl<'a> Open<'a> {
+    /// This node's index.
+    pub fn index(&self) -> NodeIndex {
+        self.n
+    }
+
+    /// Lower `w` as a child of this node.
+    ///
+    /// Only reachable from `Open`, so a child can never be written while its
+    /// parent is missing from the ancestor stack.
+    pub fn child<W: Direct>(&mut self, w: W) -> LayoutNode {
+        let (_, ln) = w.lower(self.sink, Some(self.n));
+        ln
+    }
+
+    /// Begin a nested node directly, for containers that are not themselves a
+    /// [`Direct`] widget.
+    pub fn begin_child(&mut self, role: Role) -> Declaring<'_> {
+        self.sink.node(Some(self.n), role)
+    }
+
+    /// Borrow the sink, for the few things that are neither a property nor a
+    /// child (entering a disabled subtree, say).
+    pub fn sink(&mut self) -> &mut TreeSink {
+        self.sink
+    }
+
+    /// Close the node: fold the cascade's layout on, create the layout node.
+    pub fn end(self, style: &LayoutStyle, children: &[LayoutNode], disabled: bool) -> LayoutNode {
+        self.sink.end(self.n, style, children, disabled)
+    }
+}
+
+impl TreeSink {
+    /// Every begun node was ended.
+    ///
+    /// The one mistake the type states cannot catch: `#[must_use]` warns when
+    /// an `Open` is dropped unused, but a warning is not a compile error
+    /// everywhere. A node begun and never ended sits in the tree with no
+    /// record in the side table — invisible to semantics, so invisible to the
+    /// agent and to assistive tech, which is precisely the class of bug this
+    /// framework cannot afford to ship. Call this at the end of a build.
+    pub fn assert_balanced(&self) {
+        assert!(
+            self.open.is_empty(),
+            "{} node(s) were begun and never ended; they are in the tree with \
+             no semantics record: {:?}",
+            self.open.len(),
+            self.open.iter().map(|(n, m)| (*n, m.role)).collect::<Vec<_>>()
+        );
+        assert!(
+            self.desc_stack.is_empty(),
+            "the cascade's ancestor stack is unbalanced ({} left); a resolved \
+             node was not ended, so later siblings matched against a stale chain",
+            self.desc_stack.len()
+        );
+    }
+
+    /// Begin a node under `parent`, in the declaring state.
+    ///
+    /// The guarded entry point — [`begin`](TreeSink::begin) remains for the
+    /// `Element` path, which is centrally ordered by its own walk.
+    pub fn node(&mut self, parent: Option<NodeIndex>, role: Role) -> Declaring<'_> {
+        let n = self.begin(parent, role);
+        Declaring { sink: self, n }
     }
 }

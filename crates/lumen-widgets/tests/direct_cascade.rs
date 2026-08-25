@@ -187,3 +187,28 @@ fn a_caller_supplied_class_is_visible_to_the_cascade() {
          widget resolved before applying its Common"
     );
 }
+
+
+/// The one ordering mistake the type states cannot reject at compile time —
+/// beginning a node and never ending it — is caught positively instead.
+#[test]
+#[should_panic(expected = "begun and never ended")]
+fn an_unended_node_is_caught() {
+    let mut s = sink("");
+    let open = s.node(None, Role::Group).resolve();
+    let _ = open.index();
+    std::mem::forget(open); // simulate the `#[must_use]` warning being ignored
+    s.assert_balanced();
+}
+
+/// …and a well-formed build passes it.
+#[test]
+fn a_balanced_build_passes_the_check() {
+    let mut s = sink("button { border-radius: 2px; }");
+    let root = begin_row(&mut s, None);
+    s.resolve(root);
+    let (_, a) = Label::new("hello").lower(&mut s, Some(root));
+    let (_, b) = Button::new("Go").lower(&mut s, Some(root));
+    s.end(root, &row_style(8.0, 0.0), &[a, b], false);
+    s.assert_balanced();
+}
