@@ -14,6 +14,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use lumen_widgets::direct::{begin_row, lower_element, lowered_eq, row_style, Direct, TreeSink};
+use lumen_widgets::direct::{StyleEnv, VisualState};
 use lumen_widgets::{Button, Element, Label, ProgressBar};
 use std::hint::black_box;
 
@@ -103,5 +104,59 @@ fn lowering(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(lowercost, lowering);
+/// A stylesheet with the shapes that cost most to match: a type rule, a class
+/// rule, a descendant selector and a state rule.
+const SHEET: &str = "
+button { border-radius: 4px; }
+.fill { opacity: 1.0; }
+group button { font-weight: 600; }
+button:disabled { background: #cccccc; }
+";
+
+fn env() -> StyleEnv {
+    let (sheet, _) = lumen_style::parse("bench.lss", SHEET);
+    StyleEnv {
+        sources: vec![lumen_style::StyleSource {
+            sheet,
+            origin: lumen_style::Origin::App,
+        }],
+        tokens: lumen_style::Tokens::default(),
+        media: lumen_style::MediaContext::default(),
+    }
+}
+
+fn lower_direct_styled() -> TreeSink {
+    let mut sink = TreeSink::new().with_styles(env(), VisualState::default());
+    let root = sink.begin(None, lumen_core::semantics::Role::Group);
+    sink.resolve(root);
+    let style = row_style(8.0, 4.0);
+    let mut lns = Vec::with_capacity(ROWS);
+    for i in 0..ROWS {
+        let n = begin_row(&mut sink, Some(root));
+        sink.resolve(n);
+        let (_, a) = Label::new(format!("row {i}")).size(14.0).lower(&mut sink, Some(n));
+        let (_, b) = ProgressBar::new(i as f64 / ROWS as f64).lower(&mut sink, Some(n));
+        let (_, c) = Button::new("Open")
+            .ghost()
+            .on_press(|_| {})
+            .lower(&mut sink, Some(n));
+        lns.push(sink.end(n, &style, &[a, b, c], false));
+    }
+    sink.end(root, &Default::default(), &lns, false);
+    sink
+}
+
+/// What the cascade costs on top of bare lowering, in the composed design.
+fn styled(c: &mut Criterion) {
+    let mut g = c.benchmark_group("cascade");
+    g.bench_function("direct_unstyled", |b| {
+        b.iter(|| black_box(lower_direct().tree.len()))
+    });
+    g.bench_function("direct_styled", |b| {
+        b.iter(|| black_box(lower_direct_styled().tree.len()))
+    });
+    g.finish();
+}
+
+criterion_group!(lowercost, lowering, styled);
 criterion_main!(lowercost);

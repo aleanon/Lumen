@@ -18,6 +18,7 @@ lumen-layout = { workspace = true }
 lumen-render = { workspace = true }
 lumen-widgets = { workspace = true }
 lumen-app = { workspace = true }
+lumen-style = { workspace = true }
 kurbo = { workspace = true }
 
 [dev-dependencies]

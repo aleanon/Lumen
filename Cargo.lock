@@ -2947,6 +2947,7 @@ dependencies = [
  "lumen-core",
  "lumen-layout",
  "lumen-render",
+ "lumen-style",
  "lumen-widgets",
 ]
 

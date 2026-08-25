@@ -63,6 +63,8 @@ pub struct Meta {
     pub focusable: bool,
     /// Elided from semantics (pure layout).
     pub elide: bool,
+    /// Disabled — inert, and matched by `:disabled`.
+    pub disabled: bool,
     /// Click handler.
     pub on_click: Option<crate::Handler>,
     /// Background fill.
@@ -73,6 +75,8 @@ pub struct Meta {
     pub corner_radius: f64,
     /// Leaf content.
     pub content: NodeContent,
+    /// The style handed to taffy: the widget's own, with the cascade folded on.
+    pub layout_style: LayoutStyle,
 }
 
 impl Default for Meta {
@@ -87,11 +91,13 @@ impl Default for Meta {
             states: Vec::new(),
             focusable: false,
             elide: false,
+            disabled: false,
             on_click: None,
             background: None,
             border: None,
             corner_radius: 0.0,
             content: NodeContent::None,
+            layout_style: LayoutStyle::default(),
         }
     }
 }
@@ -105,6 +111,24 @@ pub struct TreeSink {
     pub layout: LayoutTree,
     /// Per-node semantics/handlers/paint.
     pub meta: HashMap<NodeIndex, Meta>,
+    /// The stylesheet environment, if any.
+    pub(crate) styles: Option<StyleEnv>,
+    /// Engine-side focus/hover, which the cascade matches on.
+    pub(crate) visual: VisualState,
+    /// B.1: the ancestor chain, for descendant and `>` selectors.
+    pub(crate) desc_stack: Vec<NodeDesc>,
+    /// Resolved layout properties, held between `resolve` and `end`.
+    pub(crate) pending_css: HashMap<NodeIndex, Style>,
+    /// W1: depth of the enclosing disabled subtree, for inherited `:disabled`.
+    pub(crate) disabled_depth: usize,
+    /// Nodes begun but not yet ended, innermost last.
+    ///
+    /// The first cut kept every record in `meta` from `begin` and reached it
+    /// through `meta.get_mut(&n)` on *every* property setter — eight hashed
+    /// lookups for a `Button`, where the `Element` path writes struct fields
+    /// and inserts once. That alone made direct lowering measurably slower
+    /// than the path it was supposed to beat.
+    pub(crate) open: Vec<(NodeIndex, Meta)>,
 }
 
 impl Default for TreeSink {
@@ -120,6 +144,12 @@ impl TreeSink {
             tree: Tree::new(),
             layout: LayoutTree::new(),
             meta: HashMap::new(),
+            styles: None,
+            visual: VisualState::default(),
+            desc_stack: Vec::new(),
+            pending_css: HashMap::new(),
+            disabled_depth: 0,
+            open: Vec::new(),
         }
     }
 
@@ -133,19 +163,35 @@ impl TreeSink {
             }
             Some(p) => self.tree.insert_child(p),
         };
-        self.meta.insert(
+        self.open.push((
             n,
             Meta {
                 role,
                 ..Meta::default()
             },
-        );
+        ));
         n
     }
 
-    /// The record under construction.
+    /// The record under construction. Innermost-last, so the common case is
+    /// the last slot and no hashing happens at all.
     fn at(&mut self, n: NodeIndex) -> &mut Meta {
-        self.meta.get_mut(&n).expect("node begun")
+        let i = self
+            .open
+            .iter()
+            .rposition(|(k, _)| *k == n)
+            .expect("node begun but not ended");
+        &mut self.open[i].1
+    }
+
+    /// Read the record under construction.
+    fn peek(&self, n: NodeIndex) -> &Meta {
+        let i = self
+            .open
+            .iter()
+            .rposition(|(k, _)| *k == n)
+            .expect("node begun but not ended");
+        &self.open[i].1
     }
 
     /// Accessible name.
@@ -180,6 +226,18 @@ impl TreeSink {
     pub fn elide(&mut self, n: NodeIndex, yes: bool) {
         self.at(n).elide = yes;
     }
+    /// Mark the node disabled (inert, and matched by `:disabled`).
+    pub fn disabled(&mut self, n: NodeIndex, yes: bool) {
+        self.at(n).disabled = yes;
+    }
+    /// Enter a disabled subtree, so descendants match `:disabled` too (W1).
+    pub fn enter_disabled(&mut self) {
+        self.disabled_depth += 1;
+    }
+    /// Leave a disabled subtree.
+    pub fn exit_disabled(&mut self) {
+        self.disabled_depth = self.disabled_depth.saturating_sub(1);
+    }
     /// Click handler.
     pub fn on_click(&mut self, n: NodeIndex, h: crate::Handler) {
         self.at(n).on_click = Some(h);
@@ -212,7 +270,7 @@ impl TreeSink {
         children: &[LayoutNode],
         disabled: bool,
     ) -> LayoutNode {
-        let m = self.meta.get(&n).expect("node begun");
+        let m = self.peek(n);
         let interactive = m.background.is_some()
             || m.on_click.is_some()
             || !matches!(m.content, NodeContent::None)
@@ -228,12 +286,33 @@ impl TreeSink {
             flags |= NodeFlags::DISABLED;
         }
         self.tree.set_flags(n, flags);
+        // Fold the cascade's layout properties onto the widget's own style —
+        // composition, where `build_node` mutated the element in place.
+        let mut styled;
+        let style = match self.pending_css.remove(&n) {
+            None => style,
+            Some(css) => {
+                styled = style.clone();
+                apply_css_layout(&mut styled, &css);
+                self.desc_stack.pop();
+                &styled
+            }
+        };
+        self.at(n).layout_style = style.clone();
         let lnode = if children.is_empty() {
             self.layout.leaf_ref(style)
         } else {
             self.layout.container_ref(style, children)
         };
         self.tree.set_lnode(n, lnode.raw());
+        // The record moves into the map exactly once, when the node closes.
+        let i = self
+            .open
+            .iter()
+            .rposition(|(k, _)| *k == n)
+            .expect("node begun but not ended");
+        let (_, meta) = self.open.remove(i);
+        self.meta.insert(n, meta);
         lnode
     }
 }
@@ -293,7 +372,12 @@ pub fn lower_element(
         m.border = border;
         m.corner_radius = corner_radius;
         m.content = content;
+        m.disabled = disabled;
     }
+
+    // The Element path resolves at the same point `build_node` does: after the
+    // node's own props are known, before its children become descendants.
+    out.resolve(n);
 
     let mut child_lnodes = Vec::with_capacity(children.len());
     for c in children {
@@ -383,6 +467,9 @@ impl Direct for crate::Label {
         out.label(n, s.clone());
         out.text(n, s, style);
         let disabled = apply_common(out, n, common);
+        // The cascade runs here: after the widget has declared everything a
+        // selector can match on, and before it would lower any children.
+        out.resolve(n);
         let mut ls = LayoutStyle::default();
         if let Some(px) = width {
             ls.width = Dim::px(px);
@@ -416,6 +503,7 @@ impl Direct for crate::Button {
             },
         );
         let disabled = apply_common(out, n, common);
+        out.resolve(n);
         let ls = LayoutStyle {
             padding: Edges {
                 left: Dim::px(16.0),
@@ -437,15 +525,20 @@ impl Direct for crate::ProgressBar {
         out.value(n, format!("{:.0}%", frac * 100.0));
         out.background(n, Color::srgb8(0xe3, 0xe6, 0xeb, 0xff));
         out.corner_radius(n, 5.0);
+        // The `Common` lands BEFORE `resolve`, or a caller's `.id()`/`.class()`
+        // is invisible to the cascade — a silent miss, not an error. This
+        // ordering is the obligation the direct design moves from the engine
+        // onto each widget author; `direct_cascade.rs` pins it.
+        let disabled = apply_common(out, n, common);
+        out.resolve(n);
 
-        // the fill child
+        // The fill child, lowered while this bar is on the ancestor stack.
         let f = out.begin(Some(n), Role::Generic);
         out.elide(f, true);
-        // `.part("fill")` on the Element path is a class; the sink must agree
-        // or `lowered_eq` rejects the comparison — which it did, first run.
         out.class(f, "fill".to_string());
         out.background(f, ink);
         out.corner_radius(f, 5.0);
+        out.resolve(f);
         let fill_ln = out.end(
             f,
             &LayoutStyle {
@@ -457,7 +550,6 @@ impl Direct for crate::ProgressBar {
             false,
         );
 
-        let disabled = apply_common(out, n, common);
         let ls = LayoutStyle {
             width: Dim::px(width),
             height: Dim::px(height),
@@ -487,5 +579,176 @@ pub fn row_style(gap: f32, padding: f32) -> LayoutStyle {
         column_gap: Dim::px(gap),
         align_items: Some(Align::Center),
         ..LayoutStyle::default()
+    }
+}
+
+// --- the .lss cascade, composed instead of mutated -------------------------
+//
+// This is the part the first prototype dodged. Today the cascade runs inside
+// `build_node` and *writes into* the element — `apply_css_to_element(&mut el,
+// &css)` — because `el` is sitting right there between the widget and taffy.
+// With no element there is nothing to write into, so the question is whether
+// the cascade can compose instead: resolve, then fold the result onto the
+// style handed to taffy and the paint props handed to the side table.
+//
+// It can, and `apply_css_to_element` was already the shape of the answer — a
+// pure function from `Style` onto a target. Splitting the target into
+// `(LayoutStyle, Meta)` is mechanical; nothing about it needed an `Element`.
+//
+// The one real constraint deferral imposes: the cascade's *inputs* (id,
+// classes, role, semantic states, disabled) must be declared before the node's
+// children are lowered, because this node's `NodeDesc` becomes their ancestor
+// for descendant and `>` selectors. That is a natural fit for a builder —
+// `resolve()` sits between the widget declaring itself and its children being
+// written — but it is a rule a widget author can now break, where before the
+// element made the ordering impossible to get wrong.
+
+use lumen_style::{MediaContext, NodeDesc, Style, StyleSource, Tokens};
+
+/// The stylesheet environment a [`TreeSink`] resolves against.
+pub struct StyleEnv {
+    /// Parsed sheets, in cascade order.
+    pub sources: Vec<StyleSource>,
+    /// `--token` values.
+    pub tokens: Tokens,
+    /// Window/container context for `@media`.
+    pub media: MediaContext,
+}
+
+/// Engine-side visual state the cascade needs but the widget does not own.
+#[derive(Default)]
+pub struct VisualState {
+    /// The focused node's id, if any.
+    pub focused: Option<StableId>,
+    /// The hovered node's id, if any.
+    pub hovered: Option<StableId>,
+}
+
+/// Fold a resolved [`Style`]'s layout properties onto a [`LayoutStyle`].
+///
+/// The layout half of `apply_css_to_element`, with the element taken out of it.
+pub fn apply_css_layout(ls: &mut LayoutStyle, css: &Style) {
+    if let Some(d) = css.display {
+        ls.display = d;
+    }
+    if let Some(f) = css.flex_direction {
+        ls.flex_direction = f;
+    }
+    if let Some(w) = css.width {
+        ls.width = w;
+    }
+    if let Some(h) = css.height {
+        ls.height = h;
+    }
+    if let Some(g) = css.gap {
+        ls.row_gap = g;
+        ls.column_gap = g;
+    }
+    if let Some(g) = css.row_gap {
+        ls.row_gap = g;
+    }
+    if let Some(g) = css.column_gap {
+        ls.column_gap = g;
+    }
+    if let Some(a) = css.justify_content {
+        ls.justify_content = Some(a);
+    }
+    if let Some(a) = css.align_items {
+        ls.align_items = Some(a);
+    }
+    if let Some(a) = css.align_self {
+        ls.align_self = Some(a);
+    }
+    if let Some(w) = css.flex_wrap {
+        ls.flex_wrap = w;
+    }
+    if let Some(n) = css.flex_grow {
+        ls.flex_grow = n;
+    }
+    if let Some(n) = css.flex_shrink {
+        ls.flex_shrink = n;
+    }
+}
+
+/// Fold a resolved [`Style`]'s paint properties onto a node's record.
+///
+/// The paint half. Text properties reach the node's own `TextStyle`, which is
+/// why the widget must have declared its content before `resolve` runs —
+/// measurement happens after this, and it has to measure the styled text.
+pub fn apply_css_paint(m: &mut Meta, css: &Style) {
+    if let Some(c) = css.background {
+        m.background = Some(c);
+    }
+    if let Some(r) = css.border_radius {
+        m.corner_radius = r as f64;
+    }
+    if let NodeContent::Text(_, ts) = &mut m.content {
+        if let Some(c) = css.color {
+            ts.color = c;
+        }
+        if let Some(px) = css.font_size {
+            ts.font_size = px;
+        }
+        if let Some(w) = css.font_weight {
+            ts.weight = w as f32;
+        }
+    }
+}
+
+impl TreeSink {
+    /// Attach a stylesheet environment; nodes resolved after this participate
+    /// in the cascade.
+    pub fn with_styles(mut self, env: StyleEnv, visual: VisualState) -> TreeSink {
+        self.styles = Some(env);
+        self.visual = visual;
+        self
+    }
+
+    /// Resolve `n`'s `.lss` rules and push it as an ancestor for its children.
+    ///
+    /// Called after the widget has declared itself and **before** it lowers its
+    /// children. The resolved paint lands immediately; the resolved layout is
+    /// held until [`end`](TreeSink::end) folds it onto the widget's own style.
+    pub fn resolve(&mut self, n: NodeIndex) {
+        let Some(env) = &self.styles else {
+            self.desc_stack.push(NodeDesc::default());
+            return;
+        };
+        let m = self.peek(n);
+
+        // B.6a: interaction states carry their CSS-familiar aliases, and the
+        // widget's semantic states are style-matchable too.
+        let mut states = Vec::new();
+        if m.id.is_some() && m.id == self.visual.focused {
+            states.push("focused".to_string());
+            states.push("focus".to_string());
+        }
+        if m.id.is_some() && m.id == self.visual.hovered {
+            states.push("hovered".to_string());
+            states.push("hover".to_string());
+        }
+        states.extend(m.states.iter().map(|s| s.as_str().to_string()));
+        // W1: `disabled` is inherited, so a control inside a disabled
+        // container matches `:disabled` too.
+        if m.disabled || self.disabled_depth > 0 {
+            states.push("disabled".to_string());
+        }
+        let desc = NodeDesc {
+            id: m.id.as_ref().map(|i| i.as_str().to_string()),
+            classes: m.classes.clone(),
+            states,
+            ty: m.role.as_str().to_string(),
+        };
+
+        let computed =
+            lumen_style::resolve_with_ancestors(&env.sources, &desc, &self.desc_stack, &env.media);
+        let mut css = Style::new();
+        for (prop, c) in &computed {
+            lumen_style::apply(&mut css, prop, &c.value, &env.tokens);
+        }
+        apply_css_paint(self.at(n), &css);
+        self.pending_css.insert(n, css);
+        // B.1: this node is now an ancestor for its children's matching.
+        self.desc_stack.push(desc);
     }
 }
