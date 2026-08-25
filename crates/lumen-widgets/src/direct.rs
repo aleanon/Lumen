@@ -65,6 +65,8 @@ pub struct Meta {
     pub elide: bool,
     /// Disabled — inert, and matched by `:disabled`.
     pub disabled: bool,
+    /// Mid-transition, so a span containing it must not be spliced.
+    pub animating: bool,
     /// Click handler.
     pub on_click: Option<crate::Handler>,
     /// Background fill.
@@ -92,6 +94,7 @@ impl Default for Meta {
             focusable: false,
             elide: false,
             disabled: false,
+            animating: false,
             on_click: None,
             background: None,
             border: None,
@@ -129,6 +132,10 @@ pub struct TreeSink {
     pub(crate) old_root: Option<NodeIndex>,
     /// What this frame did.
     pub(crate) stats: FrameStats,
+    /// Animation clock, ms.
+    pub(crate) clock_ms: f64,
+    /// Running transitions by node id.
+    pub(crate) anims: HashMap<StableId, Anim>,
     /// Depth of the enclosing overlay subtree.
     pub(crate) overlay_depth: usize,
     /// The text engine, when text leaves should be measured.
@@ -166,6 +173,8 @@ impl TreeSink {
             old_root: None,
             stats: FrameStats::default(),
             overlay_depth: 0,
+            clock_ms: 0.0,
+            anims: HashMap::new(),
             text: None,
             open: Vec::new(),
         }
@@ -762,6 +771,8 @@ impl TreeSink {
         self.mark_resolved(n);
         let Some(env) = &self.styles else {
             self.desc_stack.push(NodeDesc::default());
+            // A transition does not require a stylesheet to be running.
+            self.apply_transition(n);
             return;
         };
         let m = self.peek(n);
@@ -797,6 +808,9 @@ impl TreeSink {
             lumen_style::apply(&mut css, prop, &c.value, &env.tokens);
         }
         apply_css_paint(self.at(n), &css);
+        // B.5: substitute the mid-flight blend before anything consumes the
+        // style — the same point, and the same reason, as `build_node`.
+        self.apply_transition(n);
         self.pending_css.insert(n, css);
         // B.1: this node is now an ancestor for its children's matching.
         self.desc_stack.push(desc);
@@ -1143,7 +1157,14 @@ impl TreeSink {
             // Both must match: the scope's own data AND the surroundings that
             // feed the cascade. Checking `dep` alone reuses a span whose
             // styling would now resolve differently.
-            if rec.dep == dep && rec.ctx == ctx && self.tree.is_alive(rec.root) {
+            // AN1: refuse to splice a span containing an animating node — its
+            // styles are mid-interpolation, so the retained work is stale and
+            // reusing it freezes the transition at this frame.
+            if rec.dep == dep
+                && rec.ctx == ctx
+                && self.tree.is_alive(rec.root)
+                && !self.span_has_running_anim(rec.root)
+            {
                 if let Some(raw) = self.tree.lnode(rec.root) {
                     // The whole memo hit: two pointer updates and a record.
                     self.tree.detach(rec.root);
@@ -1342,5 +1363,126 @@ impl TreeSink {
         self.in_overlay().hash(&mut h);
         (self.disabled_depth > 0).hash(&mut h);
         h.finish128()
+    }
+}
+
+
+// --- P3: transitions, and their coupling to memoization --------------------
+//
+// `apply_transitions(&el.id, &mut css)` blends a mid-flight transition into the
+// resolved style, and `splice_span` **refuses any span containing an animating
+// node** because its styles are mid-interpolation. So animation and memoization
+// are coupled, and getting it wrong is a silent, visual-only bug: the node
+// freezes at the frame it was first spliced and never finishes its transition.
+//
+// The blending itself composes exactly like the cascade — it is a function from
+// (id, clock) onto the resolved `Style`, and never needed an element. The part
+// that needs care is the refusal.
+//
+// This models the transition source directly rather than reimplementing the
+// `.lss` `transition:` parser: the unknown here is the *interaction* with
+// splicing, not the property syntax.
+
+/// A running transition on one node.
+#[derive(Clone, Copy)]
+pub struct Anim {
+    /// Start colour.
+    pub from: Color,
+    /// End colour.
+    pub to: Color,
+    /// Clock reading when it began, ms.
+    pub start_ms: f64,
+    /// Duration, ms.
+    pub dur_ms: f64,
+}
+
+impl Anim {
+    /// The blended value at `now`, and whether the transition is still running.
+    fn at(&self, now: f64) -> (Color, bool) {
+        let t = ((now - self.start_ms) / self.dur_ms).clamp(0.0, 1.0);
+        let lerp = |a: f32, b: f32| a + (b - a) * t as f32;
+        (
+            Color::new_linear(
+                lerp(self.from.r, self.to.r),
+                lerp(self.from.g, self.to.g),
+                lerp(self.from.b, self.to.b),
+                lerp(self.from.a, self.to.a),
+            ),
+            t < 1.0,
+        )
+    }
+}
+
+impl TreeSink {
+    /// Advance the animation clock.
+    pub fn set_clock(&mut self, ms: f64) {
+        self.clock_ms = ms;
+    }
+
+    /// Start a background transition on the node with this id.
+    pub fn start_transition(&mut self, id: impl Into<StableId>, a: Anim) {
+        self.anims.insert(id.into(), a);
+    }
+
+    /// Whether any transition is running — the gate the engine uses so a frame
+    /// with no animation never pays for the span scan.
+    pub fn animating(&self) -> bool {
+        !self.anims.is_empty()
+    }
+
+    /// Blend any running transition into a node's resolved paint.
+    ///
+    /// Called from `resolve`, where the cascade's result is still in hand —
+    /// the same point `build_node` calls `apply_transitions`.
+    fn apply_transition(&mut self, n: NodeIndex) {
+        if self.anims.is_empty() {
+            return;
+        }
+        let Some(id) = self.peek(n).id.clone() else {
+            return;
+        };
+        let Some(anim) = self.anims.get(&id).copied() else {
+            return;
+        };
+        let (c, running) = anim.at(self.clock_ms);
+        self.at(n).background = Some(c);
+        // The flag is introspection only — `span_has_running_anim` reads the
+        // registry, for the reason documented there.
+        self.at(n).animating = running;
+        if !running {
+            self.anims.remove(&id);
+        }
+    }
+
+    /// Whether a retained span contains a node mid-transition.
+    ///
+    /// # Why this consults the registry and not a per-node flag
+    ///
+    /// The first cut marked nodes `animating` during `resolve` and tested that
+    /// flag here. It deadlocked on itself: a node is only marked while it is
+    /// being resolved, a node is only resolved if its span was *not* spliced,
+    /// and the span is only refused if the node is marked. So the very first
+    /// memoized frame spliced the animating node, it never resolved again, and
+    /// the transition froze at frame zero — the failure this check exists to
+    /// prevent, caused by the check.
+    ///
+    /// The engine's `span_has_running_anim` avoids it by testing the *retained
+    /// meta's id* against the animation registry, which lives in engine state
+    /// and is populated by whatever started the transition — never by the build.
+    /// That breaks the cycle: the registry is knowable before the span is
+    /// examined. This mirrors it.
+    ///
+    /// Gated on an animation actually running, as the engine gates it: with
+    /// none — the overwhelmingly common case — a memo hit touches one node.
+    fn span_has_running_anim(&self, root: NodeIndex) -> bool {
+        if self.anims.is_empty() {
+            return false;
+        }
+        self.tree.subtree_preorder(root).into_iter().any(|n| {
+            self.meta
+                .get(&n)
+                .and_then(|m| m.id.as_ref())
+                .is_some_and(|id| self.anims.contains_key(id))
+        })
     }
 }
