@@ -221,6 +221,25 @@ fn main() {
     println!("  RSS at end    : {rss_after:>7} KiB   (+{} KiB)", rss_after.saturating_sub(rss_before));
     println!();
 
+    // --- 4. the prize on the table: peak TRANSIENT Element memory ----------
+    // `Element` is not the retained node — `build_node` consumes it and writes
+    // into the SoA `Tree`. But the whole Element tree is alive at once, between
+    // the view function returning and the lowering finishing. That peak is what
+    // a `Box<dyn Widget>` node would be trading against.
+    let stats = h.pump();
+    let nodes = stats.node_count;
+    let el = std::mem::size_of::<Element>();
+    println!("\nWT-EXP — peak transient Element tree (500 rows)");
+    println!("──────────────────────────────────────────────────────────────");
+    println!("  nodes in the frame        : {nodes:>9}");
+    println!("  size_of::<Element>()      : {el:>9} B");
+    println!("  peak inline Element bytes : {:>9.2} MB", (nodes * el) as f64 / 1048576.0);
+    println!("  …as a share of app RSS    : {:>8.1}%", (nodes * el) as f64 / ((rss_live - rss_before) * 1024) as f64 * 100.0);
+    println!("  if each node were Box<dyn Widget> (16 B inline + ~150 B heap):");
+    println!("    peak bytes              : {:>9.2} MB", (nodes * 166) as f64 / 1048576.0);
+    println!("    extra allocations/frame : {:>9}  (+{:.1}% on {} today)",
+        nodes, nodes as f64 / frame_a as f64 * 100.0, frame_a);
+
     std::hint::black_box(&h);
 }
 
