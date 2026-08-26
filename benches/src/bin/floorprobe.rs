@@ -107,6 +107,60 @@ fn main() {
         std::hint::black_box(s.tree.len());
     });
 
+    // 3b. A STATIC id — no `format!` at the call site. Isolates how much of
+    // the id cost is the caller minting a String versus the sink storing it.
+    let (stat_a, stat_b) = cost(|| {
+        let mut s = TreeSink::new();
+        let mut root = s.node(None, Role::Group).resolve();
+        let rn = root.index();
+        let mut lns = Vec::with_capacity(N);
+        for _ in 0..N {
+            let c = root.sink().node(Some(rn), Role::Group).id("static").resolve();
+            lns.push(c.end(&LayoutStyle::default(), &[], false));
+        }
+        root.end(&LayoutStyle::default(), &lns, false);
+        std::hint::black_box(s.tree.len());
+    });
+
+    // 3c. A LONG static id — past SmolStr's inline capacity (22 bytes), so the
+    // storage itself must heap-allocate even with no `format!`.
+    let (long_a, long_b) = cost(|| {
+        let mut s = TreeSink::new();
+        let mut root = s.node(None, Role::Group).resolve();
+        let rn = root.index();
+        let mut lns = Vec::with_capacity(N);
+        for _ in 0..N {
+            let c = root
+                .sink()
+                .node(Some(rn), Role::Group)
+                .id("a-considerably-longer-identifier-than-smolstr-inlines")
+                .resolve();
+            lns.push(c.end(&LayoutStyle::default(), &[], false));
+        }
+        root.end(&LayoutStyle::default(), &lns, false);
+        std::hint::black_box(s.tree.len());
+    });
+
+    // 5. The allocation-free identity: a structured id and an interned class,
+    // neither of which mints a string per node.
+    let (sym_a, sym_b) = cost(|| {
+        let mut s = TreeSink::new();
+        let mut root = s.node(None, Role::Group).resolve();
+        let rn = root.index();
+        let mut lns = Vec::with_capacity(N);
+        for i in 0..N {
+            let c = root
+                .sink()
+                .node(Some(rn), Role::Group)
+                .id_at("n", i as u32)
+                .class_static("row")
+                .resolve();
+            lns.push(c.end(&LayoutStyle::default(), &[], false));
+        }
+        root.end(&LayoutStyle::default(), &lns, false);
+        std::hint::black_box(s.tree.len());
+    });
+
     // 4. A real text widget: label string + content + measurement.
     let (lbl_a, lbl_b) = cost(|| {
         let mut s = TreeSink::new();
@@ -128,12 +182,21 @@ fn main() {
     println!("  {:<26}{:>9}{:>12.2}{:>10}", "bare node (floor)", bare_a, per(bare_a), bare_b / 1024);
     println!("  {:<26}{:>9}{:>12.2}{:>10}", "+ stable id", id_a, per(id_a), id_b / 1024);
     println!("  {:<26}{:>9}{:>12.2}{:>10}", "+ one class", cls_a, per(cls_a), cls_b / 1024);
+    println!("  {:<26}{:>9}{:>12.2}{:>10}", "+ STATIC short id", stat_a, per(stat_a), stat_b / 1024);
+    println!("  {:<26}{:>9}{:>12.2}{:>10}", "+ STATIC long id", long_a, per(long_a), long_b / 1024);
     println!("  {:<26}{:>9}{:>12.2}{:>10}", "full Label widget", lbl_a, per(lbl_a), lbl_b / 1024);
+    println!("  {:<26}{:>9}{:>12.2}{:>10}", "id_at + class_static", sym_a, per(sym_a), sym_b / 1024);
     println!("──────────────────────────────────────────────────────────────");
     println!("  attribution per node:");
     println!("    tree slot + taffy + record : {:>5.2} allocs", per(bare_a));
-    println!("    the id string              : {:>5.2}", per(id_a) - per(bare_a));
+    println!("    a format!()-minted id      : {:>5.2}", per(id_a) - per(bare_a));
+    println!("      …of which the caller's String : {:>5.2}", per(id_a) - per(stat_a));
+    println!("      …of which the sink storing it : {:>5.2}", per(stat_a) - per(bare_a));
+    println!("    a long id (past SmolStr inline) : {:>5.2}", per(long_a) - per(bare_a));
     println!("    the class string + Vec     : {:>5.2}", per(cls_a) - per(id_a));
+    println!("\n  string id + class : {:>5.2} allocs/node", per(cls_a));
+    println!("  structured + interned : {:>5.2} allocs/node   ({:.0}x less)",
+        per(sym_a), per(cls_a) / per(sym_a).max(0.0001));
     println!("\n  size_of::<Meta>()           : {:>5} B", std::mem::size_of::<lumen_widgets::direct::Meta>());
     println!();
 }

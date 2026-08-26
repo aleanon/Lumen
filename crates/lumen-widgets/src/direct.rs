@@ -55,6 +55,11 @@ pub struct Meta {
     pub value: Option<String>,
     /// `.lss` classes.
     pub classes: Vec<String>,
+    /// Interned classes — the allocation-free form. Four bytes each, inline up
+    /// to three, and a `&'static str` class costs nothing after its first use.
+    pub class_syms: ClassSet,
+    /// Structured identity — eight bytes, no string minted.
+    pub node_id: Option<NodeId>,
     /// Advertised actions.
     pub actions: Vec<Action>,
     /// Semantic states.
@@ -89,6 +94,8 @@ impl Default for Meta {
             label: String::new(),
             value: None,
             classes: Vec::new(),
+            class_syms: ClassSet::default(),
+            node_id: None,
             actions: Vec::new(),
             states: Vec::new(),
             focusable: false,
@@ -132,6 +139,8 @@ pub struct TreeSink {
     pub(crate) old_root: Option<NodeIndex>,
     /// What this frame did.
     pub(crate) stats: FrameStats,
+    /// The interning table for classes and id names.
+    pub symbols: Symbols,
     /// Animation clock, ms.
     pub(crate) clock_ms: f64,
     /// Running transitions by node id.
@@ -173,6 +182,7 @@ impl TreeSink {
             old_root: None,
             stats: FrameStats::default(),
             overlay_depth: 0,
+            symbols: Symbols::default(),
             clock_ms: 0.0,
             anims: HashMap::new(),
             text: None,
@@ -260,9 +270,21 @@ impl TreeSink {
     pub fn id(&mut self, n: NodeIndex, id: StableId) {
         self.at(n).id = Some(id);
     }
-    /// Append a class.
+    /// Append a class (string form).
     pub fn class(&mut self, n: NodeIndex, c: String) {
         self.at(n).classes.push(c);
+    }
+    /// Append an interned class — no allocation for a `&'static str`.
+    pub fn class_sym(&mut self, n: NodeIndex, c: Sym) {
+        self.at(n).class_syms.push(c);
+    }
+    /// Set the structured identity — no string minted.
+    pub fn node_id(&mut self, n: NodeIndex, id: NodeId) {
+        self.at(n).node_id = Some(id);
+    }
+    /// Intern a `&'static str`.
+    pub fn sym(&mut self, s: &'static str) -> Sym {
+        self.symbols.intern_static(s)
     }
     /// Advertise actions.
     pub fn actions(&mut self, n: NodeIndex, a: Vec<Action>) {
@@ -826,9 +848,20 @@ impl TreeSink {
         if m.disabled || self.disabled_depth > 0 {
             states.push("disabled".to_string());
         }
+        // Selector matching still needs strings; they are materialized here,
+        // once per resolve, instead of being carried on every node all frame.
+        let mut classes = m.classes.clone();
+        for k in m.class_syms.iter() {
+            classes.push(self.symbols.text(k).to_string());
+        }
+        let id = match (&m.id, m.node_id) {
+            (Some(i), _) => Some(i.as_str().to_string()),
+            (None, Some(nid)) => Some(nid.to_string_in(&self.symbols)),
+            (None, None) => None,
+        };
         let desc = NodeDesc {
-            id: m.id.as_ref().map(|i| i.as_str().to_string()),
-            classes: m.classes.clone(),
+            id,
+            classes,
             states,
             ty: m.role.as_str().to_string(),
         };
@@ -968,6 +1001,30 @@ impl<'a> Declaring<'a> {
     pub fn class(self, c: impl Into<String>) -> Self {
         let v = c.into();
         self.sink.class(self.n, v);
+        self
+    }
+    /// A `.lss` class from an already-interned symbol.
+    pub fn class_sym(self, c: Sym) -> Self {
+        self.sink.class_sym(self.n, c);
+        self
+    }
+    /// A `.lss` class, interned. The allocation-free form: a `&'static str`
+    /// costs nothing after its first use anywhere in the app.
+    pub fn class_static(self, c: &'static str) -> Self {
+        let k = self.sink.sym(c);
+        self.sink.class_sym(self.n, k);
+        self
+    }
+    /// Structured identity — `("row", 5)` with no `format!`.
+    pub fn id_at(self, name: &'static str, index: u32) -> Self {
+        let k = self.sink.sym(name);
+        self.sink.node_id(self.n, NodeId::at(k, index));
+        self
+    }
+    /// Structured identity, unindexed.
+    pub fn id_static(self, name: &'static str) -> Self {
+        let k = self.sink.sym(name);
+        self.sink.node_id(self.n, NodeId::name(k));
         self
     }
     /// Advertised actions.
@@ -1552,5 +1609,184 @@ impl TreeSink {
     /// costs nothing.
     pub fn set_stylesheet(&mut self, env: StyleEnv) {
         self.styles = Some(env);
+    }
+}
+
+// --- Step 2: identity without allocation -----------------------------------
+//
+// Attribution said where the remaining per-node cost is, and it was not where
+// "intern the strings" assumes:
+//
+//     bare node (floor)      0.09 allocs/node
+//     + STATIC short id      0.09          ← the sink stores it for free
+//     + format!()-minted id  2.09          ← all 2.00 is the CALLER's String
+//     + one class            4.09          ← 2.00 for the class
+//
+// A short `StableId` inlines into its `SmolStr` and costs nothing to store, so
+// interning the id table would buy exactly zero. The 2.00 allocations are
+// `format!("row{i}")` at the call site — made before the sink ever sees them.
+//
+// So the two halves need different fixes:
+//
+//   * **Ids** need a *structured* form, so no string is minted at all. This is
+//     the shape ADR-021 already uses for scope keys — a name and an index —
+//     and it renders to `"row5"` only when something asks, which is exactly
+//     when the agent or a test is looking.
+//   * **Classes** genuinely do want interning: `.class("row")` allocates a
+//     `String` plus the `Vec` that holds it, on every node, forever, for a
+//     string that is almost always one of a handful of `&'static str`s.
+
+/// An interned string, 4 bytes.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]
+pub struct Sym(pub u32);
+
+/// The interning table: `Sym` in, `&str` out.
+///
+/// Deliberately not a global. A sink owns its table so the framework can be
+/// tuned per app — a small one keeps a tiny table, a large one can pre-size it
+/// — and so nothing leaks between tests.
+#[derive(Default)]
+pub struct Symbols {
+    by_text: HashMap<&'static str, Sym>,
+    text: Vec<&'static str>,
+    /// Strings that were not `'static` and had to be kept alive.
+    owned: Vec<Box<str>>,
+}
+
+impl Symbols {
+    /// Intern a `&'static str` — the common case, and the free one.
+    pub fn intern_static(&mut self, s: &'static str) -> Sym {
+        if let Some(k) = self.by_text.get(s) {
+            return *k;
+        }
+        let k = Sym(self.text.len() as u32);
+        self.text.push(s);
+        self.by_text.insert(s, k);
+        k
+    }
+
+    /// Intern a borrowed string, allocating once the first time it is seen.
+    ///
+    /// A dynamic class name still costs one allocation, but only on its *first*
+    /// use — not once per node per frame, which is what `Vec<String>` did.
+    pub fn intern(&mut self, s: &str) -> Sym {
+        if let Some(k) = self.by_text.get(s) {
+            return *k;
+        }
+        let boxed: Box<str> = s.into();
+        // Safe: `owned` keeps the allocation alive for the table's lifetime and
+        // is never mutated or shrunk, so the slice stays valid.
+        let leaked: &'static str = unsafe { &*(&*boxed as *const str) };
+        self.owned.push(boxed);
+        let k = Sym(self.text.len() as u32);
+        self.text.push(leaked);
+        self.by_text.insert(leaked, k);
+        k
+    }
+
+    /// The text behind a symbol.
+    pub fn text(&self, s: Sym) -> &str {
+        self.text.get(s.0 as usize).copied().unwrap_or("")
+    }
+
+    /// How many distinct strings are interned.
+    pub fn len(&self) -> usize {
+        self.text.len()
+    }
+
+    /// Whether nothing is interned.
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+}
+
+/// A node's class list, inline up to three.
+///
+/// Interning got the *strings* to zero allocations, and then the `Vec<Sym>`
+/// holding them became the whole remaining cost — one buffer per node, per
+/// frame, to store a single 4-byte symbol. Real nodes carry nought to two
+/// classes, so three inline covers them and the spill keeps the rare case
+/// correct rather than merely fast.
+#[derive(Default, Clone)]
+pub struct ClassSet {
+    inline: [Sym; 3],
+    len: u8,
+    spill: Option<Vec<Sym>>,
+}
+
+impl ClassSet {
+    /// Add a class.
+    pub fn push(&mut self, s: Sym) {
+        if (self.len as usize) < self.inline.len() {
+            self.inline[self.len as usize] = s;
+            self.len += 1;
+        } else {
+            self.spill.get_or_insert_with(Vec::new).push(s);
+        }
+    }
+
+    /// Iterate every class, inline then spilled.
+    pub fn iter(&self) -> impl Iterator<Item = Sym> + '_ {
+        self.inline[..self.len as usize]
+            .iter()
+            .copied()
+            .chain(self.spill.iter().flat_map(|v| v.iter().copied()))
+    }
+
+    /// How many classes.
+    pub fn len(&self) -> usize {
+        self.len as usize + self.spill.as_ref().map_or(0, |v| v.len())
+    }
+
+    /// Whether there are none.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Default for Sym {
+    fn default() -> Sym {
+        Sym(u32::MAX)
+    }
+}
+
+/// A node's identity, 8 bytes and no allocation.
+///
+/// A name plus an optional index, so `("row", 5)` needs no `format!`. The
+/// string form is produced on demand — which is when a test, a selector or the
+/// agent asks, not on every node of every frame.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct NodeId {
+    /// The interned name.
+    pub name: Sym,
+    /// The index, or `u32::MAX` for a bare name.
+    pub index: u32,
+}
+
+impl NodeId {
+    /// A bare name, no index.
+    pub const NONE_INDEX: u32 = u32::MAX;
+
+    /// `name`, unindexed.
+    pub fn name(name: Sym) -> NodeId {
+        NodeId {
+            name,
+            index: Self::NONE_INDEX,
+        }
+    }
+
+    /// `name` at `index` — the `("row", 5)` shape, with no string minted.
+    pub fn at(name: Sym, index: u32) -> NodeId {
+        NodeId { name, index }
+    }
+
+    /// Render to the string form a selector or the agent expects.
+    pub fn to_string_in(&self, syms: &Symbols) -> String {
+        let base = syms.text(self.name);
+        if self.index == Self::NONE_INDEX {
+            base.to_string()
+        } else {
+            format!("{base}{}", self.index)
+        }
     }
 }
