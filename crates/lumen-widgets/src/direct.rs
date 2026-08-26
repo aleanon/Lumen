@@ -1790,3 +1790,262 @@ impl NodeId {
         }
     }
 }
+
+// --- Step 3: the side table, columnar --------------------------------------
+//
+// `Element` was 1072 bytes of uniform record per node, and removing it was the
+// point of this whole exercise. `Meta` is 656 bytes of uniform record per node,
+// held in a `HashMap<NodeIndex, Meta>`. It is the same shape of problem moved
+// one layer down, and it is now the largest single per-node cost left.
+//
+// Two costs, not one:
+//
+//   * **Hashing.** Every property read hashes a `NodeIndex`. The semantics walk
+//     the agent performs does this per node per field.
+//   * **Uniformity.** A node pays for `caret_byte`, `selection`, twelve handler
+//     slots and a `label` `String` whether or not it is a text field. Almost
+//     none of them are ever set.
+//
+// Columns fix both. A dense `Vec<T>` indexed by the node's arena index is a
+// bounds-checked array read, and a column nobody touches is never grown — the
+// framework can size itself to what an app actually uses, which is the tuning
+// the project is after.
+
+/// The per-node side table, stored as columns rather than records.
+///
+/// Indexed densely by `NodeIndex::index()`, so a lookup is an array read.
+#[derive(Default)]
+pub struct MetaStore {
+    /// Highest slot in use, so a scan knows where to stop.
+    len: usize,
+    /// Generation per slot, so a stale `NodeIndex` reads as absent rather than
+    /// as whatever now occupies its slot.
+    generation: Vec<u32>,
+    /// Whether the slot holds a live record.
+    live: Vec<bool>,
+
+    // --- hot: read for every node, every frame ---
+    role: Vec<Role>,
+    node_id: Vec<Option<NodeId>>,
+    class_syms: Vec<ClassSet>,
+    background: Vec<Option<Color>>,
+    corner_radius: Vec<f32>,
+    layout_style: Vec<LayoutStyle>,
+    flags: Vec<MetaFlags>,
+
+    // --- cold: set by a minority of nodes ---
+    /// Everything rare, allocated only for the nodes that use it.
+    cold: HashMap<u32, Box<ColdMeta>>,
+}
+
+/// The booleans, packed into one byte instead of five.
+///
+/// Hand-rolled rather than pulling in `bitflags`: four flags do not justify a
+/// dependency, and ADR-003 keeps that list deliberately short.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct MetaFlags(u8);
+
+impl MetaFlags {
+    /// Keyboard focusable.
+    pub const FOCUSABLE: MetaFlags = MetaFlags(1 << 0);
+    /// Elided from semantics.
+    pub const ELIDE: MetaFlags = MetaFlags(1 << 1);
+    /// Disabled.
+    pub const DISABLED: MetaFlags = MetaFlags(1 << 2);
+    /// Mid-transition.
+    pub const ANIMATING: MetaFlags = MetaFlags(1 << 3);
+
+    /// No flags.
+    pub const fn empty() -> MetaFlags {
+        MetaFlags(0)
+    }
+    /// Whether every bit in `f` is set.
+    pub const fn contains(self, f: MetaFlags) -> bool {
+        self.0 & f.0 == f.0
+    }
+    /// Set or clear `f`.
+    pub fn set(&mut self, f: MetaFlags, on: bool) {
+        if on {
+            self.0 |= f.0;
+        } else {
+            self.0 &= !f.0;
+        }
+    }
+}
+
+/// The rarely-set half of a node's record.
+#[derive(Default)]
+pub struct ColdMeta {
+    /// String id, when the author used the string API rather than `id_at`.
+    pub id: Option<StableId>,
+    /// Accessible name.
+    pub label: String,
+    /// Current value.
+    pub value: Option<String>,
+    /// String classes.
+    pub classes: Vec<String>,
+    /// Advertised actions.
+    pub actions: Vec<Action>,
+    /// Semantic states.
+    pub states: Vec<SemState>,
+    /// Click handler.
+    pub on_click: Option<crate::Handler>,
+    /// Border.
+    pub border: Option<Border>,
+    /// Leaf content.
+    pub content: NodeContent,
+}
+
+impl MetaStore {
+    /// Grow the columns to cover `slot`.
+    fn reserve(&mut self, slot: usize) {
+        if slot < self.generation.len() {
+            return;
+        }
+        let n = slot + 1;
+        self.generation.resize(n, 0);
+        self.live.resize(n, false);
+        self.role.resize(n, Role::Generic);
+        self.node_id.resize(n, None);
+        self.class_syms.resize(n, ClassSet::default());
+        self.background.resize(n, None);
+        self.corner_radius.resize(n, 0.0);
+        self.layout_style.resize(n, LayoutStyle::default());
+        self.flags.resize(n, MetaFlags::empty());
+    }
+
+    /// Start a record for `n`.
+    pub fn insert(&mut self, n: NodeIndex, role: Role) {
+        let i = n.index() as usize;
+        self.reserve(i);
+        self.generation[i] = n.generation();
+        self.live[i] = true;
+        self.role[i] = role;
+        self.node_id[i] = None;
+        self.class_syms[i] = ClassSet::default();
+        self.background[i] = None;
+        self.corner_radius[i] = 0.0;
+        self.layout_style[i] = LayoutStyle::default();
+        self.flags[i] = MetaFlags::empty();
+        self.cold.remove(&(i as u32));
+        self.len = self.len.max(i + 1);
+    }
+
+    /// Whether `n`'s record is live *and* current — a stale index reads absent.
+    pub fn contains(&self, n: NodeIndex) -> bool {
+        let i = n.index() as usize;
+        i < self.live.len() && self.live[i] && self.generation[i] == n.generation()
+    }
+
+    /// Drop `n`'s record.
+    pub fn remove(&mut self, n: NodeIndex) {
+        let i = n.index() as usize;
+        if i < self.live.len() {
+            self.live[i] = false;
+            self.cold.remove(&(i as u32));
+        }
+    }
+
+    /// The node's role.
+    pub fn role(&self, n: NodeIndex) -> Role {
+        self.role[n.index() as usize]
+    }
+    /// The node's structured id.
+    pub fn node_id(&self, n: NodeIndex) -> Option<NodeId> {
+        self.node_id[n.index() as usize]
+    }
+    /// The node's background.
+    pub fn background(&self, n: NodeIndex) -> Option<Color> {
+        self.background[n.index() as usize]
+    }
+    /// The node's corner radius.
+    pub fn corner_radius(&self, n: NodeIndex) -> f64 {
+        self.corner_radius[n.index() as usize] as f64
+    }
+    /// The style handed to taffy.
+    pub fn layout_style(&self, n: NodeIndex) -> &LayoutStyle {
+        &self.layout_style[n.index() as usize]
+    }
+    /// The packed booleans.
+    pub fn flags(&self, n: NodeIndex) -> MetaFlags {
+        self.flags[n.index() as usize]
+    }
+    /// The interned classes.
+    pub fn class_syms(&self, n: NodeIndex) -> &ClassSet {
+        &self.class_syms[n.index() as usize]
+    }
+    /// The rare half, if this node has any.
+    pub fn cold(&self, n: NodeIndex) -> Option<&ColdMeta> {
+        self.cold.get(&n.index()).map(|b| &**b)
+    }
+    /// Set the corner radius.
+    pub fn set_corner_radius(&mut self, n: NodeIndex, r: f64) {
+        self.corner_radius[n.index() as usize] = r as f32;
+    }
+    /// Set or clear a flag.
+    pub fn set_flags(&mut self, n: NodeIndex, f: MetaFlags, on: bool) {
+        self.flags[n.index() as usize].set(f, on);
+    }
+    /// Set the background.
+    pub fn set_background(&mut self, n: NodeIndex, c: Option<Color>) {
+        self.background[n.index() as usize] = c;
+    }
+    /// Set the structured id.
+    pub fn set_node_id(&mut self, n: NodeIndex, id: NodeId) {
+        self.node_id[n.index() as usize] = Some(id);
+    }
+    /// Append an interned class.
+    pub fn push_class(&mut self, n: NodeIndex, c: Sym) {
+        self.class_syms[n.index() as usize].push(c);
+    }
+    /// Set the style handed to taffy.
+    pub fn set_layout_style(&mut self, n: NodeIndex, s: LayoutStyle) {
+        self.layout_style[n.index() as usize] = s;
+    }
+
+    /// The rare half, created on first use.
+    pub fn cold_mut(&mut self, n: NodeIndex) -> &mut ColdMeta {
+        self.cold.entry(n.index()).or_default()
+    }
+
+    /// How many slots the columns cover.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    /// Whether nothing is stored.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+    /// How many nodes carry a cold record.
+    pub fn cold_count(&self) -> usize {
+        self.cold.len()
+    }
+
+    /// Bytes the columns occupy, for measurement.
+    pub fn column_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.generation.capacity() * size_of::<u32>()
+            + self.live.capacity()
+            + self.role.capacity() * size_of::<Role>()
+            + self.node_id.capacity() * size_of::<Option<NodeId>>()
+            + self.class_syms.capacity() * size_of::<ClassSet>()
+            + self.background.capacity() * size_of::<Option<Color>>()
+            + self.corner_radius.capacity() * size_of::<f32>()
+            + self.layout_style.capacity() * size_of::<LayoutStyle>()
+            + self.flags.capacity() * size_of::<MetaFlags>()
+    }
+
+    /// Per-node bytes in the hot columns.
+    pub fn hot_bytes_per_node() -> usize {
+        use std::mem::size_of;
+        size_of::<u32>()
+            + 1
+            + size_of::<Role>()
+            + size_of::<Option<NodeId>>()
+            + size_of::<ClassSet>()
+            + size_of::<Option<Color>>()
+            + size_of::<f32>()
+            + size_of::<LayoutStyle>()
+            + size_of::<MetaFlags>()
+    }
+}
