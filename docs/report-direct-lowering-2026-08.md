@@ -1,264 +1,288 @@
-# Report: direct lowering, seven prototypes in
+# Report: direct lowering, and the three optimizations it unblocked
 
-**Branch** `exp/widget-trait` · **2026-08-25/26** · **1108 workspace tests, clippy clean**
+**Branch** `exp/widget-trait` · **2026-08-25/26** · **1128 workspace tests, clippy clean**
 
-Seven prototypes across two rounds tested whether `Element` — the uniform,
-1072-byte record a widget produces and `build_node` immediately reads back
-apart — can be removed, with widgets writing straight into the retained SoA
-`Tree` and its per-node side table.
+Two rounds of prototyping asked whether `Element` — the uniform 1072-byte record
+a widget produces and `build_node` immediately reads back apart — can be
+removed, with widgets writing straight into the retained SoA `Tree` and its
+per-node side table. **No blocker was found.**
 
-**No blocker was found.** Every load-bearing behaviour survived, two of them
-only after a design was wrong first. What follows is the evidence, the four
-bugs found along the way, and the honest ledger.
+A third round then did what the first two only argued for: because the
+widget→engine contract had become "call these methods" rather than "produce
+this struct", the *destination* could be changed without touching a single
+widget. Those three changes are each larger than direct lowering itself.
+
+---
+
+## Headline
+
+| | before | after |
+|---|---:|---:|
+| lowering, 2501 nodes | 1256 µs | **949 µs** (−24.4%) |
+| allocations per node (id + class) | 5.13 | **0.13** (38×) |
+| side table, bytes/node | 672 | **179** (3.75×) |
+| semantics walk, 20k nodes | 189.4 µs | **14.6 µs** (13×) |
+| memoized frame, 500 scopes 1 dirty | 445 µs full | **15–30 µs** |
 
 ---
 
 ## The idea
 
-Today:
-
 ```
-widget → Element (1072 B, uniform) → build_node reads 41 fields → Tree + NodeMeta
-                                                                   ↑ Element dropped
+before:  widget → Element (1072 B, uniform) → build_node reads 41 fields → Tree + side table
+after:   widget → TreeSink → Tree + side table
 ```
 
-Direct:
-
-```
-widget → TreeSink → Tree + NodeMeta
-```
-
-`Element` is pure marshalling. Every field it holds is copied into the SoA tree,
-taffy, or the side table, and then it is dropped.
+`Element` was pure marshalling. Every field it held was copied into the SoA
+tree, taffy, or the side table, then dropped.
 
 **The agent never read it.** `lumen-agent` has zero references to `Element`; it
 reads `SemanticsNode`, derived from the side table. Observability was never at
-stake.
+stake in any of this.
 
 ---
 
-## Round 1 (prototypes 1–3)
+## Round 1–2: is the removal possible?
+
+Seven prototypes. Each load-bearing behaviour survived; two only after a design
+was wrong first.
 
 | | finding |
 |---|---|
-| **Lowering** | allocations **−23%**, time **−10.8%**, peak bytes only −10% |
-| **Cascade** | composes; `apply_css_to_element` was already a pure function onto a target |
-| **Ordering** | a real hazard — silently unstyled nodes — made unrepresentable by type states |
-| **Memoization** | survives; the fast path never touched `Element`. **415 µs → 15–29 µs** |
+| lowering | works — allocations −23%, and it is the *enabling* change |
+| cascade | composes; `apply_css_to_element` was already a pure function onto a target |
+| ordering | a real hazard (silently unstyled nodes) made **unrepresentable** by type states |
+| memoization | survives — the splice fast path never touched `Element` |
+| text measurement | works — three inputs meet at `end()` instead of in a mutated element |
+| overlay / memo context | **found a real bug** — spans reused across changed surroundings |
+| transitions | **found a deadlock** — the refusal that prevents a freeze caused one |
+| damage | unaffected — it diffs display lists, downstream of the tree |
+| hot reload | works, **found a real bug**, and costs one extra frame |
 
-The peak-memory case is **weaker than first claimed**: building the staging tree
-peaks at 2.63 MB but the destination peaks at 5.07 MB, so `Element` is the
-smaller half and removing it moves peak ~10%, not the 6.4× originally projected.
-The real arguments are allocation churn and architecture, not footprint.
+### The constraint worth carrying forward
 
----
-
-## Round 2 — the four remaining unknowns
-
-Each was something `build_node` does against a **mutable `Element`**. Ordered by
-risk of being a blocker, not by size.
-
-### P1 — text measurement feeding layout · **works**
-
-`build_node` shapes a text leaf and writes a fixed size onto the style before
-taffy, reconciling three inputs that arrive at different times: the widget's
-width, the cascade's `text-wrap`, and the content. In the sink they meet at
-`end()` — the moment all three are known. The reconciliation point exists
-without an element; it moved from "the element everyone mutates" to "the call
-that closes the node".
-
-Six properties hold, including the two `build_node` documents as hard-won:
-
-* an author-fixed axis is **never** overwritten by a measurement;
-* a percentage width **cannot** feed the wrap width, because the containing
-  block is not resolved until layout runs, which is after measurement;
-* `text-wrap: nowrap` works — the load-bearing case, since it proves the
-  **cascade reaches measurement through composition**;
-* and both paths measure the same box, to the pixel.
-
-### P2 — overlay routing and the memo context · **found a real bug**
-
-Expected to bite, and did. The engine guards every splice with `span_ctx_hash`:
-ancestor chain, container size, overlay flag, hidden/disabled depth. All of it
-feeds the cascade, so a span may only be reused when the whole *outside context*
-is unchanged. **The prototype's `scope()` checked only the caller's `dep`.**
-
-Demonstrated before fixing, as the plan required. With the guard removed:
-
-* a button retained under `.calm` and spliced under `.danger` keeps the styling
-  it got under `.calm`;
-* a button retained outside an overlay keeps `z = 0` after moving into one —
-  **painting under the page it is meant to float above**.
-
-Both tests fail without the guard and pass with it. `SpanRec` now carries the
-context it was built in, hashed with `IdHasher` (a collision splices a stale
-subtree — a wrong view, not a slow frame).
-
-**Cost:** memo frames went ~11–22 µs to ~15–29 µs against a ~450 µs full
-rebuild. Not free — it hashes the ancestor chain per scope — but memo is still
-15–30×.
-
-### P3 — transitions · **found a deadlock; the engine shows the way out**
-
-The hardest finding, and the most transferable.
-
-Blending itself composes like the cascade: a function from `(id, clock)` onto the
-resolved `Style`, never needing an element. The coupling to memoization is where
-the work was. `splice_span` refuses any span containing an animating node,
-because its styles are mid-interpolation.
-
-**The first design deadlocked on itself.** It marked nodes `animating` during
-`resolve` and refused spans containing a marked node — but a node is only marked
-while being resolved, is only resolved if its span was *not* spliced, and the
+Transitions coupled to memoization deadlocked: nodes were marked `animating`
+during `resolve`, but a node only resolves if its span was *not* spliced, and a
 span is only refused if the node is marked. The first memoized frame spliced the
-animating node, it never resolved again, and the transition froze at frame zero:
-*the exact failure the check exists to prevent, caused by the check.* The test
-reported `[0.0, 0.0, 0.0, 0.0, 0.0]`.
+animating node and the transition froze at frame zero — the exact failure the
+check exists to prevent, caused by the check.
 
-The engine's `span_has_running_anim` tests the **retained meta's id against an
-animation registry held in engine state**, populated by whatever started the
-transition — never by the build. The registry is knowable before the span is
-examined, which is what breaks the cycle.
+The engine's `span_has_running_anim` avoids it by testing the **retained meta's
+id against an animation registry held in engine state**, populated by whatever
+started the transition — never by the build.
 
-> **Constraint for any direct-lowering design:** animation state must be keyed
-> independently of the build. Derive it from the build and it cannot bootstrap.
+> **Animation state must be keyed independently of the build.** Derive it from
+> the build and it cannot bootstrap.
 
-Five properties hold, four of which fail if the refusal is removed: monotonic
-blending across frames, no freeze under memoization, **only** the animating span
-refused (one hover must not cost a full rebuild), splicing resumes once the blend
-completes (or an app that ever animated stays expensive forever), and a frame
-with no animation never pays for the span scan.
+### Hot reload: a structural cost, not a bug
 
-### P4 — damage tracking · **not affected**
+`set_stylesheet` carries the line that decides it:
 
-`damage_between(prev, next)` is a prefix/suffix diff over two **display lists**,
-downstream of the tree. Nothing in it asks how the tree was built.
+```rust
+self.style_memo.clear();   // "scope caches stay: cached Elements are pre-styling"
+```
 
-The risk is the proviso, and it is sharper than it sounds: splicing reuses nodes
-**without touching them** — no `resolve`, no `end`, no writes. Any observable
-state established only during a rebuild would silently vanish from a spliced
-frame. And because damage is a *prefix* scan, a reordering would not mislocate
-the rectangle but defeat the scan entirely and report the whole frame changed.
+In the `Element` model a memoized scope holds **unstyled** elements, so a sheet
+edit invalidates only the resolution cache and no closure re-runs. Direct
+lowering inverts that: a retained span is finished, already-styled nodes, so an
+edit makes every span stale.
 
-So the tests target that invariant rather than damage itself, comparing **every
-field a painter reads** — role, id, label, value, classes, background, corner
-radius, measured width/height, z, content presence, child count — between an
-incrementally spliced sink and a fresh one, across churn mixing memo hits, dirty
-scopes, an overlay transition and a running animation. Four properties, all
-passing, including that measured text boxes survive five splices (measurement
-happens in `end()`, which a spliced node never reaches).
+Demonstrated before fixing — without a sheet generation in the splice guard, all
+rows spliced and stayed blue after the sheet said red. **Hot reload silently
+doing nothing**, which is the worst failure mode for a fast-iteration workflow.
+The guard now includes the sheet's revision, hashed from its *source* so a no-op
+save costs nothing.
+
+| 500 scopes | median |
+|---|---:|
+| memoized frame | 15–30 µs |
+| full rebuild | 445 µs |
+| reload frame | 665 µs |
+
+A reload frame is ~1.5× a full rebuild, and the next frame is memoized again. At
+0.67 ms for 2500 nodes it is far below perception for a save-triggered action —
+but it is a standing cost of this architecture, not something to optimize away.
 
 ---
 
-## Final measurements
+## Round 3: what the removal unblocked
 
-One arm per process, 9 repeats, median. Deterministic metrics are trustworthy;
-timings carry 3–28% spread and are directional.
+### Step 2 — identity without allocation · 4.09 → 0.10 allocs/node
 
-| lowering, 2501 nodes | median | vs Element |
-|---|---:|---:|
-| `element` | 3058 µs | — |
-| `direct` | 2729 µs | **−10.8%** |
-| `element_styled` | 3693 µs | — |
-| `styled` (direct) | 3290 µs | **−10.9%** |
+Attribution **contradicted the plan**. "Intern the strings" assumes storage is
+the cost; it is not:
 
-| allocation, 2501 nodes | via `Element` | direct |
-|---|---:|---:|
-| allocations | 8 707 | **6 706** (−23.0%) |
-| total bytes | 12.92 MB | 10.34 MB (−20.0%) |
-| peak live bytes | 8.73 MB | 7.86 MB (−10.0%) |
+```
+bare node (floor)      0.09 allocs/node
++ STATIC short id      0.09    ← the sink stores it for FREE
++ format!-minted id    2.09    ← all 2.00 is the CALLER's String
++ one class            4.09    ← 2.00 for the class
+```
 
-| memoized frame, 500 scopes, 1 dirty | median | composition |
-|---|---:|---|
-| full rebuild | ~450 µs | 500 rebuilt, 1501 freed |
-| memoized | **15–29 µs** | 499 spliced, 1 rebuilt, 1497 reused, 4 freed |
+A short `StableId` inlines into its `SmolStr`, so an id table would have bought
+exactly zero. The two halves needed different fixes:
+
+* **Ids → structured.** `NodeId { name: Sym, index: u32 }` — 8 bytes, no string
+  minted. The `("row", 5)` shape ADR-021 already uses for scope keys, rendered
+  to `"row5"` only when a selector, a test or the agent asks.
+* **Classes → interned.** There the `String` *and* its `Vec` are both real.
+
+Interning alone still left 1.00 — the `Vec<Sym>` buffer, one per node per frame,
+holding a single 4-byte symbol. `ClassSet` inlines three and spills past that.
+
+### Step 3 — the side table, columnar · 13× faster agent walk
+
+`Meta` was 656 bytes of uniform record in a `HashMap<NodeIndex, Meta>` — the same
+problem `Element` was, one layer down. Two costs: every property read hashes a
+`NodeIndex`, and a node pays for `caret_byte`, twelve handler slots and a `label`
+`String` whether or not it is a text field.
+
+Hot fields became dense columns indexed by arena slot; the rare half moved behind
+a per-node `ColdMeta` allocated only on first use — **0 of 20 000 nodes needed
+one** in the measured tree.
+
+The walk is the right headline: it is what the agent does constantly, so it is
+exactly where *"observability akin to a human looking at the screen"* is paid for.
+
+**Correctness was the real risk.** A dense array indexed by arena slot is only
+safe if a *stale* `NodeIndex` reads absent rather than returning whatever now
+occupies its slot — otherwise the agent gets one node's semantics under
+another's identity, silently. Slots carry a generation; a test frees a node, lets
+the arena reuse the slot, and checks the old handle.
+
+### Step 4 — `LayoutStyle` split by measured occupancy · 339 → 179 bytes/node
+
+The third uniform record in a row. Measured first, because step 2 showed what
+guessing a split costs. Over 1801 real nodes:
+
+```
+padding          44.4%      width / height / gaps  22.2%
+flex_direction   11.2%      align_items            11.1%
+…and TWENTY fields set by 0.0%, including every grid field,
+   margin, inset, and all four min/max dimensions
+```
+
+`margin` and `inset` alone are 64 of the 256 bytes. `CompactStyle` keeps the hot
+fields inline and moves what is **both large and structurally rare** behind one
+`Option<Box<RareStyle>>`.
+
+The cold set is chosen slightly more conservatively than the data alone
+justifies: `position`, `flex_grow` and `justify_content` measured 0% here but are
+obviously used by absolute overlays, spacers and centred rows this probe does not
+model, and at 1–4 bytes they are too small to be worth a pointer chase.
+
+The walk doubled again (28.2 → 14.6 µs) purely from cache density — half the
+column, twice the nodes per line.
+
+---
+
+## The pattern
+
+```
+Element     1072 B  →  removed
+Meta         656 B  →  columnar, 179 B/node
+LayoutStyle  256 B  →  split, hot fields inline
+```
+
+Three uniform records in a row, each one layer down, each fixed the same way:
+**measure occupancy, keep the hot fields dense, put the rare tail behind a
+pointer.** It is one habit, not three bugs.
+
+What remains per node is 179 bytes of genuinely-used data and 0.13 allocations —
+against a structural floor of 0.09.
 
 ---
 
 ## Bugs the prototypes found
 
-Four, three of them in designs that looked right:
+Six, five of them in designs that looked right:
 
-1. **Cascade ordering** (round 1) — a widget resolving before declaring its
-   classes is silently unstyled. `ProgressBar` shipped with it. Now
-   unrepresentable: three mistakes fail to compile, pinned by `compile_fail`
-   doctests.
-2. **Unbalanced ancestor stack** — with no stylesheet loaded, `resolve` pushed an
+1. **Cascade ordering** — a widget resolving before declaring its classes is
+   silently unstyled. `ProgressBar` shipped with it. Now unrepresentable: three
+   mistakes fail to compile, pinned by `compile_fail` doctests.
+2. **Unbalanced ancestor stack** — with no stylesheet, `resolve` pushed an
    ancestor but stored no style, so `end` never popped; 601 leaked entries.
-   Caught by `assert_balanced()`, added one prototype earlier for a different
-   reason.
-3. **Missing context guard** (P2) — spliced spans reused across changed
-   surroundings.
-4. **Animation deadlock** (P3) — the refusal that prevented freezing caused it.
+3. **Missing context guard** — spliced spans reused across changed surroundings.
+4. **Animation deadlock** — the refusal that prevented freezing caused it.
+5. **Hot reload staleness** — spliced spans kept pre-edit styling.
+6. **Mismatched benchmark roots** — the two arms had never built the same root
+   node; found only when a stricter comparison started checking packed flags.
 
-Plus two **harness** flaws that inverted results before being caught: boxed
-child closures (showed −10.3% where the fixed harness showed −33%), and
-per-property `meta.get_mut` hashing (made direct *slower* than the path it was
-meant to beat).
+Plus two **harness** flaws that inverted results before being caught: boxed child
+closures, and per-property `meta.get_mut` hashing that made direct lowering
+*slower* than the path it was meant to beat.
 
 ---
 
-## Method, and three numbers that were wrong
+## Method, and the numbers that were wrong
 
 This workload allocates ~10 MB per frame, so **criterion timed allocator residue
-rather than code**: the same `lower_direct` measured **941 µs and 2.71 ms** in
-two groups of one binary. Timing moved to one-arm-per-process binaries with
-their own warmup and median-of-many, repeated 9×.
+rather than code**: the same `lower_direct` measured **941 µs and 2.71 ms** in two
+groups of one binary. Timing moved to one-arm-per-process binaries with their own
+warmup and median-of-many, repeated 7–9×.
 
-Three figures reported earlier on this branch were artifacts. The rules adopted
-after, and kept for the whole of round 2:
+Three figures reported early on this branch were artifacts. The rules adopted
+after, and kept since:
 
-* deterministic metrics first — frame composition, node counts, allocation
-  counts; timings directional only;
+* **deterministic metrics first** — frame composition, node counts, allocation
+  counts; timings directional only, with spreads reported;
 * **demonstrate the bug before fixing it**, or a passing test proves nothing —
-  this is what made P2 and P3 real rather than assumed;
-* `assert_balanced()` after every frame.
+  this is what made findings 3, 4 and 5 real rather than assumed;
+* **`assert_balanced()` after every frame**, and an equivalence guard between
+  benchmark arms. Every time a comparison was made stricter, it found something.
+
+An earlier version of this report claimed a **6.4×** peak-memory reduction from
+removing `Element`. That was wrong: the phase split shows the staging tree peaks
+at 2.63 MB while the destination peaks at 5.50 MB, so `Element` was the smaller
+half. Real peak reduction is ~10%. The case was never footprint; it was
+allocation churn and, above all, what the change unblocked.
 
 ---
 
-## The ledger
+## Assessment
 
-**For**
-* ~23% fewer allocations, ~11% faster lowering, cascade cheaper (238 vs
-  366 ns/node)
-* widgets carry only their own data (`Element` was uniform at 1072 B)
-* memoization intact and genuinely O(changed)
-* observability untouched — the agent never read `Element`
-* the ordering hazard is unrepresentable, not merely documented
+**Direct lowering alone** is ~24% faster lowering and −18.5% allocations for a
+large conversion. On its own that is not worth it.
 
-**Against**
-* `AppSnapshot` and the golden tests that read `Element` fields need rework
-* the engine conversion is large — `build_node` is ~500 lines
-* peak memory barely moves; the footprint argument does not hold
-* a real new obligation: animation state must be keyed independently of the build
+**Direct lowering as step one of four** is what makes steps 2–4 cost days rather
+than another 57-widget migration — because the destination can change without the
+widgets knowing. Steps 2 and 3 are each a bigger win than step 1, and step 4
+doubled step 3 again. That compounding is the argument.
 
-**Still unprototyped**
-* `@keyframes` timelines (only property transitions were modelled)
-* container queries — `MediaContext.container` feeds the context hash and comes
-  from the *previous* layout
-* hot reload and `AppSnapshot` restore
-* the actual engine conversion: `build_node`'s interaction with hidden subtrees,
-  error boundaries, and the F3.5 in-place patch path
+**Against the framework's stated intent:**
 
-**Assessment.** The design is sound and modestly cheaper. It is not a
-performance win worth the conversion on its own; it is worth doing if the goal
-is the architecture — a widget that carries only what it needs, a trait third
-parties can implement, and no uniform record in the middle. That was the stated
-goal, and nothing found across seven prototypes rules it out.
+| requirement | status |
+|---|---|
+| maximally performant | 38× fewer allocs/node, 13× faster agent walk, 3.75× smaller side table |
+| tunable by generics / feature flags | a sink can be generic over what it collects; `Element` could not |
+| small and gigantic apps | 0.09 allocs/node floor — the ceiling is not structural |
+| cross-platform | nothing platform-specific; writes to `Tree` / taffy |
+| agent observability | proven unaffected; the walk it depends on is 13× faster |
+| hot reloading | works; +1 frame at reload |
+
+**Still unprototyped:** `@keyframes` timelines (property transitions only),
+container queries (`MediaContext.container` feeds the context hash from the
+previous layout), `AppSnapshot` restore, code hot reload (the `fixtures/hot_*`
+dylib path), and the engine conversion itself — `build_node`'s interaction with
+hidden subtrees and error boundaries.
 
 ---
 
 ## Artifacts
 
 **Prototype** `crates/lumen-widgets/src/direct.rs` — `TreeSink`, `Direct`,
-typestate guards, cascade, memoization, text measurement, overlay, transitions.
+typestate guards, cascade, memoization, text measurement, overlay, transitions,
+hot reload, `Symbols`/`NodeId`/`ClassSet`, `MetaStore`, `CompactStyle`.
 
-**Tests** (29) `direct_cascade.rs` 10 · `direct_memo.rs` 5 · `direct_text.rs` 6 ·
-`direct_overlay.rs` 4 · `direct_anim.rs` 5 · `direct_damage.rs` 4 ·
-`third_party_widget.rs` 4 · `composition_showcase.rs` 1
+**Tests (59)** `direct_cascade` 10 · `direct_text` 6 · `direct_symbols` 6 ·
+`direct_memo` 5 · `direct_anim` 5 · `direct_soa` 5 · `direct_compact_style` 5 ·
+`direct_overlay` 4 · `direct_damage` 4 · `direct_hotreload` 4 ·
+`third_party_widget` 4 · `composition_showcase` 1
 
-**Instruments** `benches/benches/lowercost.rs` · `benches/src/bin/lowerprobe.rs` ·
-`lowertime.rs` · `memotime.rs`
+**Instruments** `benches/benches/lowercost.rs` · `benches/src/bin/` —
+`lowerprobe` (allocations, peak), `lowertime` / `memotime` (timing, one arm per
+process), `floorprobe` (per-node attribution), `soaprobe` (columns vs records),
+`styleprobe` (field occupancy)
 
 **Prior docs** `experiment-widget-trait-2026-08.md` ·
 `prototype-direct-lowering-2026-08.md` · `plan-direct-lowering-unknowns.md`
