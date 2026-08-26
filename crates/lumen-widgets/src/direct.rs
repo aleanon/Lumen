@@ -1852,7 +1852,7 @@ pub struct MetaStore {
     class_syms: Vec<ClassSet>,
     background: Vec<Option<Color>>,
     corner_radius: Vec<f32>,
-    layout_style: Vec<LayoutStyle>,
+    layout_style: Vec<CompactStyle>,
     flags: Vec<MetaFlags>,
 
     // --- cold: set by a minority of nodes ---
@@ -1932,7 +1932,7 @@ impl MetaStore {
         self.class_syms.resize(n, ClassSet::default());
         self.background.resize(n, None);
         self.corner_radius.resize(n, 0.0);
-        self.layout_style.resize(n, LayoutStyle::default());
+        self.layout_style.resize(n, CompactStyle::default());
         self.flags.resize(n, MetaFlags::empty());
     }
 
@@ -1947,7 +1947,7 @@ impl MetaStore {
         self.class_syms[i] = ClassSet::default();
         self.background[i] = None;
         self.corner_radius[i] = 0.0;
-        self.layout_style[i] = LayoutStyle::default();
+        self.layout_style[i] = CompactStyle::default();
         self.flags[i] = MetaFlags::empty();
         self.cold.remove(&(i as u32));
         self.len = self.len.max(i + 1);
@@ -1984,9 +1984,14 @@ impl MetaStore {
     pub fn corner_radius(&self, n: NodeIndex) -> f64 {
         self.corner_radius[n.index() as usize] as f64
     }
-    /// The style handed to taffy.
-    pub fn layout_style(&self, n: NodeIndex) -> &LayoutStyle {
+    /// The compact style as stored.
+    pub fn style(&self, n: NodeIndex) -> &CompactStyle {
         &self.layout_style[n.index() as usize]
+    }
+    /// The full style, materialized. Transient — one on the stack at a time,
+    /// which is the trade the split makes.
+    pub fn layout_style(&self, n: NodeIndex) -> LayoutStyle {
+        self.layout_style[n.index() as usize].to_layout()
     }
     /// The packed booleans.
     pub fn flags(&self, n: NodeIndex) -> MetaFlags {
@@ -2022,7 +2027,7 @@ impl MetaStore {
     }
     /// Set the style handed to taffy.
     pub fn set_layout_style(&mut self, n: NodeIndex, s: LayoutStyle) {
-        self.layout_style[n.index() as usize] = s;
+        self.layout_style[n.index() as usize] = CompactStyle::from_layout(&s);
     }
 
     /// The rare half, created on first use.
@@ -2107,7 +2112,7 @@ impl MetaStore {
         self.class_syms[i] = m.class_syms;
         self.background[i] = m.background;
         self.corner_radius[i] = m.corner_radius as f32;
-        self.layout_style[i] = m.layout_style;
+        self.layout_style[i] = CompactStyle::from_layout(&m.layout_style);
         let mut f = MetaFlags::empty();
         f.set(MetaFlags::FOCUSABLE, m.focusable);
         f.set(MetaFlags::ELIDE, m.elide);
@@ -2172,7 +2177,7 @@ impl MetaStore {
             + self.class_syms.capacity() * size_of::<ClassSet>()
             + self.background.capacity() * size_of::<Option<Color>>()
             + self.corner_radius.capacity() * size_of::<f32>()
-            + self.layout_style.capacity() * size_of::<LayoutStyle>()
+            + self.layout_style.capacity() * size_of::<CompactStyle>()
             + self.flags.capacity() * size_of::<MetaFlags>()
     }
 
@@ -2186,7 +2191,217 @@ impl MetaStore {
             + size_of::<ClassSet>()
             + size_of::<Option<Color>>()
             + size_of::<f32>()
-            + size_of::<LayoutStyle>()
+            + size_of::<CompactStyle>()
             + size_of::<MetaFlags>()
+    }
+}
+
+// --- Step 4: LayoutStyle, split by measured occupancy ----------------------
+//
+// The third uniform record in a row, and the dominant column at 256 of the 339
+// bytes a node costs. Element 1072 -> Meta 656 -> LayoutStyle 256: the same
+// habit one layer down each time, so the same fix applies — but only after
+// measuring, because step 2 showed what guessing the split costs.
+//
+// Occupancy over 1801 real nodes:
+//
+//     padding          44.4%      width/height/gaps  22.2%
+//     flex_direction   11.2%      align_items        11.1%
+//     ...and TWENTY fields set by 0.0% of them, including every grid field,
+//        margin, inset, and all four min/max dimensions.
+//
+// So the layout knobs a node actually turns are a handful of small ones, and
+// the bulk of the record is grid tracks and box offsets that a typical node
+// never touches. `margin` and `inset` alone are 64 bytes of the 256.
+//
+// The cold set is chosen a little more conservatively than the measurement
+// alone would justify: `position`, `flex_grow` and `justify_content` measured
+// 0% here but are obviously used by absolute overlays, spacers and centred
+// rows in apps this probe does not model, and they are 1-4 bytes each — too
+// small to be worth a pointer chase. What moves out is what is both large and
+// structurally rare: grid, the two `Edges` a normal flow node never sets, the
+// min/max box, and the aspect ratio.
+
+/// The rarely-set half of a layout style — 168 bytes that most nodes skip.
+#[derive(Clone, PartialEq)]
+pub struct RareStyle {
+    /// Outer offsets.
+    pub margin: Edges,
+    /// Absolute-positioning offsets.
+    pub inset: Edges,
+    /// Minimum width.
+    pub min_width: Dim,
+    /// Minimum height.
+    pub min_height: Dim,
+    /// Maximum width.
+    pub max_width: Dim,
+    /// Maximum height.
+    pub max_height: Dim,
+    /// Width / height ratio.
+    pub aspect_ratio: Option<f32>,
+    /// Grid column tracks.
+    pub grid_template_columns: Vec<lumen_layout::GridTrack>,
+    /// Grid row tracks.
+    pub grid_template_rows: Vec<lumen_layout::GridTrack>,
+    /// Grid column placement.
+    pub grid_column: (lumen_layout::GridLine, lumen_layout::GridLine),
+    /// Grid row placement.
+    pub grid_row: (lumen_layout::GridLine, lumen_layout::GridLine),
+}
+
+impl Default for RareStyle {
+    fn default() -> RareStyle {
+        // Taken from `LayoutStyle`'s own default rather than restated, so the
+        // two cannot drift — `Dim` has no `Default` on purpose, since `Auto`
+        // and `Px(0)` are both defensible and the layout crate picks per field.
+        let d = LayoutStyle::default();
+        RareStyle {
+            margin: d.margin,
+            inset: d.inset,
+            min_width: d.min_width,
+            min_height: d.min_height,
+            max_width: d.max_width,
+            max_height: d.max_height,
+            aspect_ratio: d.aspect_ratio,
+            grid_template_columns: d.grid_template_columns,
+            grid_template_rows: d.grid_template_rows,
+            grid_column: d.grid_column,
+            grid_row: d.grid_row,
+        }
+    }
+}
+
+/// A node's layout style, with the rare bulk behind a pointer.
+#[derive(Clone)]
+pub struct CompactStyle {
+    /// Display mode.
+    pub display: Display,
+    /// Positioning scheme.
+    pub position: lumen_layout::Position,
+    /// Flex main-axis direction.
+    pub flex_direction: FlexDirection,
+    /// Flex wrapping.
+    pub flex_wrap: lumen_layout::FlexWrap,
+    /// Flex grow factor.
+    pub flex_grow: f32,
+    /// Flex shrink factor.
+    pub flex_shrink: f32,
+    /// Flex basis.
+    pub flex_basis: Dim,
+    /// Cross-axis item alignment.
+    pub align_items: Option<Align>,
+    /// Per-item cross-axis override.
+    pub align_self: Option<Align>,
+    /// Multi-line cross-axis alignment.
+    pub align_content: Option<Align>,
+    /// Main-axis distribution.
+    pub justify_content: Option<Align>,
+    /// Row gap.
+    pub row_gap: Dim,
+    /// Column gap.
+    pub column_gap: Dim,
+    /// Width.
+    pub width: Dim,
+    /// Height.
+    pub height: Dim,
+    /// Inner offsets — the most-set field of all, at 44%.
+    pub padding: Edges,
+    /// The rare bulk, allocated only when something in it is set.
+    pub rare: Option<Box<RareStyle>>,
+}
+
+impl Default for CompactStyle {
+    fn default() -> CompactStyle {
+        CompactStyle::from_layout(&LayoutStyle::default())
+    }
+}
+
+impl CompactStyle {
+    /// Compact a `LayoutStyle`, allocating the rare half only if it is used.
+    pub fn from_layout(s: &LayoutStyle) -> CompactStyle {
+        let d = LayoutStyle::default();
+        let needs_rare = s.margin != d.margin
+            || s.inset != d.inset
+            || s.min_width != d.min_width
+            || s.min_height != d.min_height
+            || s.max_width != d.max_width
+            || s.max_height != d.max_height
+            || s.aspect_ratio != d.aspect_ratio
+            || !s.grid_template_columns.is_empty()
+            || !s.grid_template_rows.is_empty()
+            || s.grid_column != d.grid_column
+            || s.grid_row != d.grid_row;
+        CompactStyle {
+            display: s.display,
+            position: s.position,
+            flex_direction: s.flex_direction,
+            flex_wrap: s.flex_wrap,
+            flex_grow: s.flex_grow,
+            flex_shrink: s.flex_shrink,
+            flex_basis: s.flex_basis,
+            align_items: s.align_items,
+            align_self: s.align_self,
+            align_content: s.align_content,
+            justify_content: s.justify_content,
+            row_gap: s.row_gap,
+            column_gap: s.column_gap,
+            width: s.width,
+            height: s.height,
+            padding: s.padding,
+            rare: needs_rare.then(|| {
+                Box::new(RareStyle {
+                    margin: s.margin,
+                    inset: s.inset,
+                    min_width: s.min_width,
+                    min_height: s.min_height,
+                    max_width: s.max_width,
+                    max_height: s.max_height,
+                    aspect_ratio: s.aspect_ratio,
+                    grid_template_columns: s.grid_template_columns.clone(),
+                    grid_template_rows: s.grid_template_rows.clone(),
+                    grid_column: s.grid_column,
+                    grid_row: s.grid_row,
+                })
+            }),
+        }
+    }
+
+    /// Materialize the full style taffy consumes.
+    ///
+    /// Transient — one on the stack at a time, not one per node retained. That
+    /// is the whole trade: the bulk exists while a node is being laid out and
+    /// not for the rest of the frame.
+    pub fn to_layout(&self) -> LayoutStyle {
+        let d = LayoutStyle::default();
+        let r = self.rare.as_deref();
+        LayoutStyle {
+            display: self.display,
+            position: self.position,
+            flex_direction: self.flex_direction,
+            flex_wrap: self.flex_wrap,
+            flex_grow: self.flex_grow,
+            flex_shrink: self.flex_shrink,
+            flex_basis: self.flex_basis,
+            align_items: self.align_items,
+            align_self: self.align_self,
+            align_content: self.align_content,
+            justify_content: self.justify_content,
+            row_gap: self.row_gap,
+            column_gap: self.column_gap,
+            width: self.width,
+            height: self.height,
+            padding: self.padding,
+            margin: r.map_or(d.margin, |r| r.margin),
+            inset: r.map_or(d.inset, |r| r.inset),
+            min_width: r.map_or(d.min_width, |r| r.min_width),
+            min_height: r.map_or(d.min_height, |r| r.min_height),
+            max_width: r.map_or(d.max_width, |r| r.max_width),
+            max_height: r.map_or(d.max_height, |r| r.max_height),
+            aspect_ratio: r.and_then(|r| r.aspect_ratio),
+            grid_template_columns: r.map(|r| r.grid_template_columns.clone()).unwrap_or_default(),
+            grid_template_rows: r.map(|r| r.grid_template_rows.clone()).unwrap_or_default(),
+            grid_column: r.map_or(d.grid_column, |r| r.grid_column),
+            grid_row: r.map_or(d.grid_row, |r| r.grid_row),
+        }
     }
 }
