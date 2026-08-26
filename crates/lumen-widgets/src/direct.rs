@@ -145,6 +145,14 @@ pub struct TreeSink {
     pub(crate) stats: FrameStats,
     /// The interning table for classes and id names.
     pub symbols: Symbols,
+    /// B.2b: the `.container()` nodes built this frame, in build order.
+    pub(crate) container_nodes: Vec<NodeIndex>,
+    /// Their sizes from the previous layout, by the same order.
+    pub(crate) container_prev: Vec<(f64, f64)>,
+    /// Build-time stack of the nearest enclosing container's size.
+    pub(crate) container_stack: Vec<Option<(f64, f64)>>,
+    /// Bumped by a tier-2 code swap; invalidates every retained span.
+    pub(crate) build_gen: u64,
     /// Parsed `@keyframes` timelines by name.
     pub(crate) keyframes: HashMap<String, Timeline>,
     /// Running timelines: id -> (start_ms, finished).
@@ -203,6 +211,10 @@ impl TreeSink {
             stats: FrameStats::default(),
             overlay_depth: 0,
             symbols: Symbols::default(),
+            container_nodes: Vec::new(),
+            container_prev: Vec::new(),
+            container_stack: Vec::new(),
+            build_gen: 0,
             keyframes: HashMap::new(),
             key_anims: HashMap::new(),
             reduced_motion: false,
@@ -874,14 +886,28 @@ impl TreeSink {
         };
         let m = self.peek(n);
 
+        // The node's identity as a string, whichever API produced it. Focus and
+        // hover are held as `StableId` (that is what `AppSnapshot` restores and
+        // what the agent addresses), while a structured `NodeId` renders on
+        // demand — so the comparison has to be made on the rendered form or a
+        // node built with `id_at` could never be focused at all.
+        let id_str: Option<String> = match (&m.id, m.node_id) {
+            (Some(i), _) => Some(i.as_str().to_string()),
+            (None, Some(nid)) => Some(nid.to_string_in(&self.symbols)),
+            (None, None) => None,
+        };
+
         // B.6a: interaction states carry their CSS-familiar aliases, and the
         // widget's semantic states are style-matchable too.
         let mut states = Vec::new();
-        if m.id.is_some() && m.id == self.visual.focused {
+        let matches_visual = |v: &Option<StableId>| {
+            matches!((id_str.as_deref(), v.as_ref()), (Some(a), Some(b)) if a == b.as_str())
+        };
+        if matches_visual(&self.visual.focused) {
             states.push("focused".to_string());
             states.push("focus".to_string());
         }
-        if m.id.is_some() && m.id == self.visual.hovered {
+        if matches_visual(&self.visual.hovered) {
             states.push("hovered".to_string());
             states.push("hover".to_string());
         }
@@ -897,20 +923,24 @@ impl TreeSink {
         for k in m.class_syms.iter() {
             classes.push(self.symbols.text(k).to_string());
         }
-        let id = match (&m.id, m.node_id) {
-            (Some(i), _) => Some(i.as_str().to_string()),
-            (None, Some(nid)) => Some(nid.to_string_in(&self.symbols)),
-            (None, None) => None,
-        };
         let desc = NodeDesc {
-            id,
+            id: id_str,
             classes,
             states,
             ty: m.role.as_str().to_string(),
         };
 
+        // B.2b: inside a `.container()`, container queries test that
+        // ancestor's size instead of the window's.
+        let media = match self.container_size() {
+            Some(size) => std::borrow::Cow::Owned(MediaContext {
+                container: Some(size),
+                ..env.media.clone()
+            }),
+            None => std::borrow::Cow::Borrowed(&env.media),
+        };
         let computed =
-            lumen_style::resolve_with_ancestors(&env.sources, &desc, &self.desc_stack, &env.media);
+            lumen_style::resolve_with_ancestors(&env.sources, &desc, &self.desc_stack, &media);
         let mut css = Style::new();
         for (prop, c) in &computed {
             lumen_style::apply(&mut css, prop, &c.value, &env.tokens);
@@ -1506,6 +1536,16 @@ impl TreeSink {
         }
         self.in_overlay().hash(&mut h);
         (self.disabled_depth > 0).hash(&mut h);
+        // B.2b: the enclosing container's size. A container that resized makes
+        // its descendants' `@media container()` rules resolve differently with
+        // no change to their own data — the P2 hazard in another guise.
+        if let Some((cw, ch)) = self.container_size() {
+            cw.to_bits().hash(&mut h);
+            ch.to_bits().hash(&mut h);
+        }
+        // P8: the build generation. A tier-2 swap replaced the code that
+        // produced every retained span.
+        self.build_gen.hash(&mut h);
         // P5: the live stylesheet's revision. A retained span is already-styled
         // nodes, so an edit makes every one of them stale — where the Element
         // model's scope cache is pre-styling and survives a reload untouched.
@@ -2634,5 +2674,79 @@ impl TreeSink {
         if self.key_anims.len() != before {
             self.anim_epoch += 1;
         }
+    }
+}
+
+// --- P7: container queries -------------------------------------------------
+//
+// `@media container(...)` tests the nearest enclosing `.container()` node's
+// size rather than the window's. Two things make it awkward, and both are
+// about *when* the size is known:
+//
+//   * The size comes from the **previous** layout, because this node is being
+//     built and has not been laid out yet. On the first pass there is none, and
+//     queries fail closed.
+//   * It feeds `span_ctx_hash`. A container that resized changes what its
+//     descendants' rules resolve to **without any of their own data changing**
+//     — so a memo hit inside a resized container is stale in exactly the way
+//     P2's ancestor-class case was.
+//
+// The sink therefore has to carry a container stack, seed it from the previous
+// frame's laid-out sizes, and fold the current entry into the context hash.
+
+// --- P8: code hot reload ---------------------------------------------------
+//
+// A tier-2 swap replaces a component's `build()` in place; host state survives
+// and an ABI-incompatible component falls back to tier 3. For the sink the
+// consequence is the same as a stylesheet edit: every span that component
+// produced was built by code that no longer exists, so all of them are stale.
+// One generation counter covers it, exactly as `StyleEnv::gen` does.
+
+impl TreeSink {
+    /// Enter a `.container()` subtree, seeding the query size from the previous
+    /// frame's layout.
+    ///
+    /// `seq` is the container's index in build order, which is how the engine
+    /// pairs a container with its own size across frames — node indices are not
+    /// stable, but build order is.
+    pub fn enter_container(&mut self, n: NodeIndex, seq: usize) {
+        self.container_nodes.push(n);
+        self.container_stack
+            .push(self.container_prev.get(seq).copied());
+    }
+
+    /// Leave a container subtree.
+    pub fn exit_container(&mut self) {
+        self.container_stack.pop();
+    }
+
+    /// The query size in force, if inside a container that has been laid out.
+    pub fn container_size(&self) -> Option<(f64, f64)> {
+        self.container_stack.last().copied().flatten()
+    }
+
+    /// Record this frame's container sizes, for the next frame's queries.
+    ///
+    /// Called after layout. Until it has run once, queries fail closed — which
+    /// is the correct answer, not a missing feature: a container's size is not
+    /// knowable while the thing inside it is still being built.
+    pub fn record_container_sizes(&mut self, sizes: Vec<(f64, f64)>) {
+        self.container_prev = sizes;
+        self.container_nodes.clear();
+    }
+
+    /// The containers built this frame, in build order.
+    pub fn container_nodes(&self) -> &[NodeIndex] {
+        &self.container_nodes
+    }
+
+    /// Bump the build generation — a tier-2 code swap replaced a `build()`.
+    ///
+    /// Every retained span was produced by code that no longer exists, so all
+    /// of them must be rebuilt. Same shape as a stylesheet edit, and for the
+    /// same reason: the memo holds *output*, and the thing that produced it
+    /// changed.
+    pub fn set_build_generation(&mut self, gen: u64) {
+        self.build_gen = gen;
     }
 }
