@@ -145,6 +145,22 @@ pub struct TreeSink {
     pub(crate) stats: FrameStats,
     /// The interning table for classes and id names.
     pub symbols: Symbols,
+    /// Parsed `@keyframes` timelines by name.
+    pub(crate) keyframes: HashMap<String, Timeline>,
+    /// Running timelines: id -> (start_ms, finished).
+    pub(crate) key_anims: HashMap<StableId, (f64, bool)>,
+    /// Suppress animation (accessibility).
+    pub(crate) reduced_motion: bool,
+    /// Bumped whenever a timeline starts or finishes.
+    ///
+    /// The span scan that decides whether a memo hit is refused is O(span), and
+    /// it runs for *every* span the moment any animation is live — so one
+    /// spinner made five hundred scopes each walk their subtree, every frame.
+    /// Measured, that took a fully-animated frame to **1.8x the cost of not
+    /// memoizing at all**: the scan plus the rebuild. The verdict only changes
+    /// when the registry does, so it is cached against this counter and the
+    /// steady state costs one comparison.
+    pub(crate) anim_epoch: u64,
     /// Animation clock, ms.
     pub(crate) clock_ms: f64,
     /// Running transitions by node id.
@@ -187,6 +203,10 @@ impl TreeSink {
             stats: FrameStats::default(),
             overlay_depth: 0,
             symbols: Symbols::default(),
+            keyframes: HashMap::new(),
+            key_anims: HashMap::new(),
+            reduced_motion: false,
+            anim_epoch: 0,
             clock_ms: 0.0,
             anims: HashMap::new(),
             text: None,
@@ -899,6 +919,7 @@ impl TreeSink {
         // B.5: substitute the mid-flight blend before anything consumes the
         // style — the same point, and the same reason, as `build_node`.
         self.apply_transition(n);
+        self.apply_keyframes(n, &css);
         self.pending_css.insert(n, css);
         // B.1: this node is now an ancestor for its children's matching.
         self.desc_stack.push(desc);
@@ -1221,6 +1242,10 @@ pub struct SpanRec {
     /// The outside context the span was built in. A splice into a different
     /// one would reuse a subtree the cascade would now resolve differently.
     pub ctx: u128,
+    /// The animation-registry epoch when `had_anim` was determined.
+    pub anim_epoch: u64,
+    /// Whether the span contained a running animation at that epoch.
+    pub had_anim: bool,
 }
 
 /// What a frame did, for the benchmark to assert on.
@@ -1272,11 +1297,14 @@ impl TreeSink {
             // AN1: refuse to splice a span containing an animating node — its
             // styles are mid-interpolation, so the retained work is stale and
             // reusing it freezes the transition at this frame.
-            if rec.dep == dep
-                && rec.ctx == ctx
-                && self.tree.is_alive(rec.root)
-                && !self.span_has_running_anim(rec.root)
-            {
+            let animated = if rec.anim_epoch == self.anim_epoch {
+                // Nothing started or finished since this span was judged, so
+                // the verdict still holds — no subtree walk.
+                rec.had_anim
+            } else {
+                self.span_has_running_anim(rec.root)
+            };
+            if rec.dep == dep && rec.ctx == ctx && self.tree.is_alive(rec.root) && !animated {
                 if let Some(raw) = self.tree.lnode(rec.root) {
                     // The whole memo hit: two pointer updates and a record.
                     self.tree.detach(rec.root);
@@ -1284,6 +1312,9 @@ impl TreeSink {
                         Some(p) => self.tree.attach_last_child(p, rec.root),
                         None => self.tree.set_root(rec.root),
                     }
+                    let mut rec = rec;
+                    rec.anim_epoch = self.anim_epoch;
+                    rec.had_anim = false;
                     self.spans.insert(key, rec);
                     self.stats.spliced += 1;
                     self.stats.nodes_reused += rec.count;
@@ -1294,6 +1325,7 @@ impl TreeSink {
         let before = self.tree.len();
         let (n, ln) = f(self, parent);
         let count = self.tree.len().saturating_sub(before);
+        let had_anim = self.span_has_running_anim(n);
         self.spans.insert(
             key,
             SpanRec {
@@ -1301,6 +1333,8 @@ impl TreeSink {
                 dep,
                 count,
                 ctx,
+                anim_epoch: self.anim_epoch,
+                had_anim,
             },
         );
         self.stats.rebuilt += 1;
@@ -1537,6 +1571,7 @@ impl TreeSink {
     /// Start a background transition on the node with this id.
     pub fn start_transition(&mut self, id: impl Into<StableId>, a: Anim) {
         self.anims.insert(id.into(), a);
+        self.anim_epoch += 1;
     }
 
     /// Whether any transition is running — the gate the engine uses so a frame
@@ -1566,6 +1601,7 @@ impl TreeSink {
         self.at(n).animating = running;
         if !running {
             self.anims.remove(&id);
+            self.anim_epoch += 1;
         }
     }
 
@@ -1590,13 +1626,16 @@ impl TreeSink {
     /// Gated on an animation actually running, as the engine gates it: with
     /// none — the overwhelmingly common case — a memo hit touches one node.
     fn span_has_running_anim(&self, root: NodeIndex) -> bool {
-        if self.anims.is_empty() {
+        let any_keyframes = self.keyframes_running();
+        if self.anims.is_empty() && !any_keyframes {
             return false;
         }
         self.tree.subtree_preorder(root).into_iter().any(|n| {
-            self.meta
-                .string_id(n)
-                .is_some_and(|id| self.anims.contains_key(id))
+            let Some(id) = self.meta.string_id(n) else {
+                return false;
+            };
+            self.anims.contains_key(id)
+                || self.key_anims.get(id).is_some_and(|(_, done)| !done)
         })
     }
 }
@@ -2402,6 +2441,198 @@ impl CompactStyle {
             grid_template_rows: r.map(|r| r.grid_template_rows.clone()).unwrap_or_default(),
             grid_column: r.map_or(d.grid_column, |r| r.grid_column),
             grid_row: r.map_or(d.grid_row, |r| r.grid_row),
+        }
+    }
+}
+
+// --- P6: @keyframes --------------------------------------------------------
+//
+// The architectural question was already settled by the transition prototype:
+// animation state must live in a registry keyed independently of the build, or
+// the refusal that prevents a frozen animation causes one. `key_anims` has the
+// same shape as `anims`, so that lesson transfers unchanged.
+//
+// What is new is arithmetic and lifetime:
+//
+//   * **Multi-stop interpolation.** A transition is one `from -> to`; a
+//     timeline is N stops and the phase must land between the *bracketing*
+//     pair, not the endpoints.
+//   * **Iteration.** Delay before the first frame, `fract()` for looping,
+//     a finite `count` that ends and latches, and `alternate` reversing every
+//     other pass.
+//   * **Collection.** A timeline whose node vanished must not leak; the engine
+//     does `key_anims.retain(|id, _| live.contains(id))` after each build.
+//
+// And one consequence that transitions never had, because a transition always
+// ends: **an infinite timeline never finishes**, so a span containing one is
+// refused forever. `Spinner` and `Skeleton` both animate continuously, so a
+// loading screen is exactly the case where memoization would quietly stop
+// working. That is the thing this prototype exists to measure.
+
+/// One `@keyframes` stop's paint values.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct KeyStop {
+    /// `background` at this stop.
+    pub background: Option<Color>,
+    /// `color` at this stop.
+    pub color: Option<Color>,
+    /// `opacity` at this stop.
+    pub opacity: Option<f32>,
+    /// `border-radius` at this stop.
+    pub border_radius: Option<f32>,
+}
+
+/// A parsed timeline: stops sorted by percentage.
+pub type Timeline = Vec<(f32, KeyStop)>;
+
+/// Blend two stops.
+fn lerp_stop(a: &KeyStop, b: &KeyStop, t: f32) -> KeyStop {
+    let lc = |x: Option<Color>, y: Option<Color>| match (x, y) {
+        (Some(x), Some(y)) => Some(Color::new_linear(
+            x.r + (y.r - x.r) * t,
+            x.g + (y.g - x.g) * t,
+            x.b + (y.b - x.b) * t,
+            x.a + (y.a - x.a) * t,
+        )),
+        // A property present at only one end holds that value rather than
+        // snapping to nothing — the same rule the engine's stops follow.
+        (Some(x), None) => Some(x),
+        (None, y) => y,
+    };
+    let lf = |x: Option<f32>, y: Option<f32>| match (x, y) {
+        (Some(x), Some(y)) => Some(x + (y - x) * t),
+        (Some(x), None) => Some(x),
+        (None, y) => y,
+    };
+    KeyStop {
+        background: lc(a.background, b.background),
+        color: lc(a.color, b.color),
+        opacity: lf(a.opacity, b.opacity),
+        border_radius: lf(a.border_radius, b.border_radius),
+    }
+}
+
+/// The stop pair bracketing `phase`, blended.
+///
+/// Separate from the scheduling so it can be tested on its own — the bracketing
+/// is where an off-by-one silently produces a plausible-but-wrong colour.
+pub fn sample_timeline(stops: &Timeline, phase: f32) -> KeyStop {
+    if stops.is_empty() {
+        return KeyStop::default();
+    }
+    let phase = phase.clamp(0.0, 1.0);
+    if phase <= stops[0].0 {
+        return stops[0].1;
+    }
+    if phase >= stops[stops.len() - 1].0 {
+        return stops[stops.len() - 1].1;
+    }
+    let i = stops.partition_point(|(p, _)| *p <= phase).max(1) - 1;
+    let (p0, a) = &stops[i];
+    let (p1, b) = &stops[i + 1];
+    let span = (p1 - p0).max(f32::EPSILON);
+    lerp_stop(a, b, (phase - p0) / span)
+}
+
+impl TreeSink {
+    /// Register a timeline the sheet declared.
+    pub fn add_keyframes(&mut self, name: &str, stops: Timeline) {
+        let mut stops = stops;
+        stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+        self.keyframes.insert(name.to_string(), stops);
+    }
+
+    /// Suppress animation for users who asked for less motion.
+    pub fn set_reduced_motion(&mut self, on: bool) {
+        self.reduced_motion = on;
+    }
+
+    /// Whether any timeline is still running.
+    pub fn keyframes_running(&self) -> bool {
+        self.key_anims.values().any(|(_, done)| !done)
+    }
+
+    /// Play a node's `animation:` timeline into its resolved paint.
+    ///
+    /// Called from `resolve`, after the cascade and the transition blend — the
+    /// same order `build_node` uses.
+    fn apply_keyframes(&mut self, n: NodeIndex, css: &Style) {
+        let Some(spec) = css.animation.clone() else {
+            return;
+        };
+        if self.reduced_motion && !css.animation_force {
+            return;
+        }
+        let Some(id) = self.peek(n).id.clone() else {
+            return;
+        };
+        let Some(stops) = self.keyframes.get(&spec.name).cloned() else {
+            return;
+        };
+        if stops.is_empty() {
+            return;
+        }
+
+        let now = self.clock_ms;
+        let fresh = !self.key_anims.contains_key(&id);
+        let entry = self.key_anims.entry(id).or_insert((now, false));
+        let elapsed = now - entry.0 - spec.delay_ms as f64;
+        if elapsed < 0.0 {
+            return; // still in the delay
+        }
+        let iter = elapsed / spec.duration_ms.max(1.0) as f64;
+        let mut phase = iter.fract() as f32;
+        if let Some(count) = spec.count {
+            if iter >= count as f64 && !entry.1 {
+                // Finite timelines latch on their last stop rather than
+                // snapping back, and stop refusing their span.
+                entry.1 = true;
+                phase = 1.0;
+                self.anim_epoch += 1;
+            } else if entry.1 {
+                phase = 1.0;
+            }
+        }
+        if fresh {
+            self.anim_epoch += 1;
+        }
+        if spec.alternate && (iter as u64) % 2 == 1 {
+            phase = 1.0 - phase;
+        }
+
+        let stop = sample_timeline(&stops, phase);
+        let m = self.at(n);
+        if let Some(c) = stop.background {
+            m.background = Some(c);
+        }
+        if let Some(r) = stop.border_radius {
+            m.corner_radius = r as f64;
+        }
+        if let Some(c) = stop.color {
+            if let NodeContent::Text(_, ts) = &mut m.content {
+                ts.color = c;
+            }
+        }
+    }
+
+    /// Drop timelines whose nodes are no longer in the view.
+    ///
+    /// Without this an app that churns animated nodes leaks a registry entry
+    /// per node, forever — and every one of them keeps refusing splices.
+    pub fn collect_animations(&mut self) {
+        if self.key_anims.is_empty() {
+            return;
+        }
+        let mut live: HashMap<StableId, ()> = HashMap::new();
+        for n in self.tree.iter_live() {
+            if let Some(id) = self.meta.string_id(n) {
+                live.insert(id.clone(), ());
+            }
+        }
+        let before = self.key_anims.len();
+        self.key_anims.retain(|id, _| live.contains_key(id));
+        if self.key_anims.len() != before {
+            self.anim_epoch += 1;
         }
     }
 }

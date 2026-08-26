@@ -18,10 +18,15 @@ const WARMUP: usize = 10;
 const SAMPLES: usize = 60;
 
 fn row(sink: &mut TreeSink, parent: Option<NodeIndex>, i: usize, ver: u64) -> (NodeIndex, LayoutNode) {
-    let mut open = sink
+    let animated = ANIM_ROWS.with(|c| c.get()) > i;
+    let mut d = sink
         .node(parent, lumen_core::semantics::Role::Group)
-        .elide(true)
-        .resolve();
+        .id(format!("r{i}"))
+        .elide(true);
+    if animated {
+        d = d.class("anim");
+    }
+    let mut open = d.resolve();
     let a = open.child(Label::new(format!("row {i} v{ver}")));
     let b = open.child(Button::new("Open"));
     let n = open.index();
@@ -51,6 +56,34 @@ fn sheet(rev: u64) -> lumen_widgets::direct::StyleEnv {
     .expect("parses")
 }
 
+/// A timeline that never ends, on `spinners` of the rows — the Spinner /
+/// Skeleton shape. Every span containing one is refused for the life of the
+/// app, so this measures what a loading screen costs a memoized frame.
+fn animated_sink(spinners: usize) -> TreeSink {
+    use lumen_widgets::direct::KeyStop;
+    let mut s = TreeSink::new().with_styles(
+        lumen_widgets::direct::StyleEnv::from_source(
+            ".anim { animation: pulse 800ms linear 0ms infinite; }",
+        )
+        .expect("parses"),
+        lumen_widgets::direct::VisualState::default(),
+    );
+    s.add_keyframes(
+        "pulse",
+        vec![
+            (0.0, KeyStop { background: Some(lumen_core::Color::srgb8(0,0,0,255)), ..KeyStop::default() }),
+            (1.0, KeyStop { background: Some(lumen_core::Color::srgb8(255,255,255,255)), ..KeyStop::default() }),
+        ],
+    );
+    ANIM_ROWS.with(|c| c.set(spinners));
+    s
+}
+
+thread_local! {
+    /// How many leading rows carry the timeline.
+    static ANIM_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "memo".into());
     let dirty_all = mode == "full";
@@ -59,7 +92,11 @@ fn main() {
     // styled nodes rather than the Element model's pre-styling cache.
     let reload = mode == "reload";
 
-    let mut sink = if reload {
+    // `anim<N>`: N rows carry an infinite timeline; the rest are memoizable.
+    let anim_n = mode.strip_prefix("anim").and_then(|n| n.parse::<usize>().ok());
+    let mut sink = if let Some(k) = anim_n {
+        animated_sink(k)
+    } else if reload {
         TreeSink::new().with_styles(sheet(0), lumen_widgets::direct::VisualState::default())
     } else {
         TreeSink::new()
@@ -78,6 +115,10 @@ fn main() {
         } else if reload {
             // The data is untouched; the developer saved the stylesheet.
             sink.set_stylesheet(sheet(bump));
+        } else if anim_n.is_some() {
+            // Nothing changes but the clock — the steady state of a loading
+            // screen.
+            sink.set_clock(bump as f64 * 16.0);
         } else {
             // Exactly one row changes.
             versions[(bump as usize) % ROWS] = bump;
