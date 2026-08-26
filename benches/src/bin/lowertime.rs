@@ -54,7 +54,11 @@ fn direct(styles: Option<StyleEnv>) -> usize {
         None => TreeSink::new(),
         Some(env) => TreeSink::new().with_styles(env, VisualState::default()),
     };
-    let root = sink.begin(None, lumen_core::semantics::Role::Group);
+    let root = sink
+        .node(None, lumen_core::semantics::Role::Group)
+        .elide(true)
+        .resolve()
+        .index();
     sink.resolve(root);
     let style = row_style(8.0, 4.0);
     let mut lns = Vec::with_capacity(ROWS);

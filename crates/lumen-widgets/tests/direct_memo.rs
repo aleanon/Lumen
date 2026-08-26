@@ -51,7 +51,8 @@ fn snapshot(sink: &TreeSink) -> Vec<(Role, String)> {
         .subtree_preorder(sink.tree.root())
         .into_iter()
         .filter(|n| sink.tree.is_alive(*n))
-        .filter_map(|n| sink.meta.get(&n).map(|m| (m.role, m.label.clone())))
+        .filter(|n| sink.meta.contains(*n))
+        .map(|n| (sink.meta.role(n), sink.meta.label(n).to_string()))
         .collect()
 }
 

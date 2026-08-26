@@ -61,10 +61,9 @@ fn backgrounds(s: &TreeSink) -> Vec<Option<Color>> {
         .subtree_preorder(s.tree.root())
         .into_iter()
         .filter(|n| s.tree.is_alive(*n))
-        .filter_map(|n| {
-            let m = s.meta.get(&n)?;
-            (m.role == Role::Button).then_some(m.background)
-        })
+        .filter(|n| s.meta.contains(*n))
+        .filter(|&n| s.meta.role(n) == Role::Button)
+        .map(|n| s.meta.background(n))
         .collect()
 }
 

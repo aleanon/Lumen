@@ -31,14 +31,14 @@ fn styled_sink(src: &str) -> TreeSink {
 fn direct_label(s: &mut TreeSink, label: Label) -> LayoutStyle {
     use lumen_widgets::direct::Direct;
     let (n, _) = label.lower(s, None);
-    s.meta[&n].layout_style.clone()
+    s.meta.layout_style(n).clone()
 }
 
 /// Lower the same `Label` through the Element path.
 fn element_label(s: &mut TreeSink, label: Label) -> LayoutStyle {
     let el: Element = label.into();
     let (n, _) = lower_element(el, s, None);
-    s.meta[&n].layout_style.clone()
+    s.meta.layout_style(n).clone()
 }
 
 #[test]
@@ -139,7 +139,7 @@ fn a_percentage_width_does_not_feed_the_wrap_width() {
     use lumen_widgets::direct::Direct;
     let (n, _) = Label::new("word ".repeat(20))
         .lower(&mut s, None);
-    let auto_h = match s.meta[&n].layout_style.height {
+    let auto_h = match s.meta.layout_style(n).height {
         Dim::Px(v) => v,
         _ => panic!(),
     };
@@ -156,7 +156,7 @@ fn a_percentage_width_does_not_feed_the_wrap_width() {
         &[],
         false,
     );
-    let pct_h = match s2.meta[&idx].layout_style.height {
+    let pct_h = match s2.meta.layout_style(idx).height {
         Dim::Px(v) => v,
         _ => panic!(),
     };
@@ -165,7 +165,7 @@ fn a_percentage_width_does_not_feed_the_wrap_width() {
         "a percentage width shapes one unwrapped line, same as auto"
     );
     assert_eq!(
-        s2.meta[&idx].layout_style.width,
+        s2.meta.layout_style(idx).width,
         Dim::pct(1.0),
         "and the percentage survives for the box"
     );

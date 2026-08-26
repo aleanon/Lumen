@@ -49,9 +49,10 @@ fn background_of(s: &TreeSink, id: &str) -> Option<Color> {
         .subtree_preorder(s.tree.root())
         .into_iter()
         .filter(|n| s.tree.is_alive(*n))
+        .filter(|n| s.meta.contains(*n))
         .find_map(|n| {
-            let m = s.meta.get(&n)?;
-            (m.id.as_ref().map(|i| i.as_str()) == Some(id)).then_some(m.background)
+            let is_it = s.meta.string_id(n).map(|i| i.as_str()) == Some(id);
+            is_it.then(|| s.meta.background(n))
         })
         .flatten()
 }

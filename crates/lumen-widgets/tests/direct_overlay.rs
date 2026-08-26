@@ -49,10 +49,8 @@ fn button_background(s: &TreeSink) -> Option<lumen_core::Color> {
         .subtree_preorder(s.tree.root())
         .into_iter()
         .filter(|n| s.tree.is_alive(*n))
-        .find_map(|n| {
-            let m = s.meta.get(&n)?;
-            (m.role == Role::Button).then_some(m.background)
-        })
+        .filter(|n| s.meta.contains(*n))
+        .find_map(|n| (s.meta.role(n) == Role::Button).then(|| s.meta.background(n)))
         .flatten()
 }
 
@@ -163,7 +161,7 @@ fn a_scope_moved_into_an_overlay_is_not_wrongly_reused() {
         .tree
         .subtree_preorder(s.tree.root())
         .into_iter()
-        .find(|n| s.meta.get(n).map(|m| m.role) == Some(Role::Button))
+        .find(|n| s.meta.contains(*n) && s.meta.role(*n) == Role::Button)
         .expect("button exists");
     assert_eq!(s.tree.z(flat), 0);
 
@@ -173,7 +171,7 @@ fn a_scope_moved_into_an_overlay_is_not_wrongly_reused() {
         .tree
         .subtree_preorder(s.tree.root())
         .into_iter()
-        .find(|n| s.meta.get(n).map(|m| m.role) == Some(Role::Button))
+        .find(|n| s.meta.contains(*n) && s.meta.role(*n) == Role::Button)
         .expect("button exists");
     assert_eq!(
         s.tree.z(inside),

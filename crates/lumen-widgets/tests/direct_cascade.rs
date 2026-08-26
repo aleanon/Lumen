@@ -35,7 +35,7 @@ fn a_rule_reaches_the_layout_style_through_composition() {
     // The width reached taffy, so it came through `end`'s fold rather than a
     // mutation of some element in between.
     let _ = ln;
-    assert_eq!(s.meta[&n].layout_style.width, lumen_layout::Dim::px(320.0));
+    assert_eq!(s.meta.layout_style(n).width, lumen_layout::Dim::px(320.0));
 }
 
 #[test]
@@ -46,10 +46,9 @@ fn a_rule_reaches_the_paint_side_table() {
     s.resolve(n);
     s.end(n, &Default::default(), &[], false);
 
-    let m = &s.meta[&n];
-    let bg = m.background.expect("background from the sheet");
+    let bg = s.meta.background(n).expect("background from the sheet");
     assert!(bg.r > 0.9 && bg.g < 0.1, "red reached the node: {bg:?}");
-    assert_eq!(m.corner_radius, 3.0);
+    assert_eq!(s.meta.corner_radius(n), 3.0);
 }
 
 #[test]
@@ -71,11 +70,11 @@ fn descendant_selectors_survive_the_builder() {
     s.end(dialog, &Default::default(), &[ln], false);
 
     assert!(
-        s.meta[&inside].background.is_some(),
+        s.meta.background(inside).is_some(),
         "a button inside a dialog matches `dialog button`"
     );
     assert!(
-        s.meta[&outside].background.is_none(),
+        s.meta.background(outside).is_none(),
         "a button outside it does not — the ancestor chain is real, not a \
          rightmost-compound match"
     );
@@ -97,7 +96,7 @@ fn disabled_is_inherited_by_descendants() {
     s.end(group, &Default::default(), &[ln], true);
 
     assert!(
-        s.meta[&child].background.is_some(),
+        s.meta.background(child).is_some(),
         "a button inside a disabled group matches `:disabled` even though the \
          button itself was never marked disabled"
     );
@@ -112,7 +111,7 @@ fn an_id_rule_beats_a_class_rule() {
     s.resolve(n);
     let _ln = s.end(n, &Default::default(), &[], false);
     assert_eq!(
-        s.meta[&n].layout_style.width,
+        s.meta.layout_style(n).width,
         lumen_layout::Dim::px(200.0),
         "specificity is the cascade's job and survives composition unchanged"
     );
@@ -130,8 +129,8 @@ fn the_sheet_overrides_what_the_widget_asked_for() {
         (n, ln)
     };
     let _ = ln;
-    assert_eq!(s.meta[&n].layout_style.width, lumen_layout::Dim::px(500.0));
-    let bg = s.meta[&n].background.expect("sheet background");
+    assert_eq!(s.meta.layout_style(n).width, lumen_layout::Dim::px(500.0));
+    let bg = s.meta.background(n).expect("sheet background");
     assert!(bg.b > 0.9, "sheet fill wins over the widget's own: {bg:?}");
 }
 
@@ -145,7 +144,7 @@ fn a_real_widget_lowers_through_the_cascade() {
     s.end(root, &row_style(8.0, 0.0), &[a, b], false);
 
     assert_eq!(
-        s.meta[&btn].corner_radius, 2.0,
+        s.meta.corner_radius(btn), 2.0,
         "the sheet overrode Button's own 8px radius"
     );
     let _ = lab;
@@ -171,7 +170,7 @@ fn a_caller_supplied_class_is_visible_to_the_cascade() {
         .class("metered")
         .lower(&mut s, None);
     assert_eq!(
-        s.meta[&n].layout_style.width,
+        s.meta.layout_style(n).width,
         lumen_layout::Dim::px(640.0),
         "a class set by the caller must reach the cascade; if this fails the \
          widget resolved before applying its Common"

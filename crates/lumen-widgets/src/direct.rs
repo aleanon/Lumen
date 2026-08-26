@@ -119,8 +119,12 @@ pub struct TreeSink {
     pub tree: Tree,
     /// The taffy layout tree.
     pub layout: LayoutTree,
-    /// Per-node semantics/handlers/paint.
-    pub meta: HashMap<NodeIndex, Meta>,
+    /// Per-node semantics/handlers/paint, stored as columns.
+    ///
+    /// The in-flight record on the `open` stack is still an AoS `Meta` — it is
+    /// a builder buffer, not storage, and one node is in flight at a time. It
+    /// is committed into the columns when the node closes.
+    pub meta: MetaStore,
     /// The stylesheet environment, if any.
     pub(crate) styles: Option<StyleEnv>,
     /// Engine-side focus/hover, which the cascade matches on.
@@ -171,7 +175,7 @@ impl TreeSink {
         TreeSink {
             tree: Tree::new(),
             layout: LayoutTree::new(),
-            meta: HashMap::new(),
+            meta: MetaStore::default(),
             styles: None,
             visual: VisualState::default(),
             desc_stack: Vec::new(),
@@ -390,14 +394,14 @@ impl TreeSink {
             self.layout.container_ref(style, children)
         };
         self.tree.set_lnode(n, lnode.raw());
-        // The record moves into the map exactly once, when the node closes.
+        // The record moves into the columns exactly once, when the node closes.
         let i = self
             .open
             .iter()
             .rposition(|(k, _, _)| *k == n)
             .expect("node begun but not ended");
         let (_, meta, _) = self.open.remove(i);
-        self.meta.insert(n, meta);
+        self.meta.commit(n, meta);
         lnode
     }
 }
@@ -479,37 +483,56 @@ pub fn lowered_eq(a: &TreeSink, b: &TreeSink) -> Result<(), String> {
     if a.tree.len() != b.tree.len() {
         return Err(format!("node count {} vs {}", a.tree.len(), b.tree.len()));
     }
-    for (n, ma) in &a.meta {
-        let mb = b.meta.get(n).ok_or_else(|| format!("missing node {n:?}"))?;
-        if ma.role != mb.role {
-            return Err(format!("{n:?} role {:?} vs {:?}", ma.role, mb.role));
+    // Walk the tree's live nodes rather than a map's arbitrary order, so a
+    // mismatch names the node it happened at.
+    for n in a.tree.iter_live() {
+        if !a.meta.contains(n) {
+            continue;
         }
-        if ma.label != mb.label {
-            return Err(format!("{n:?} label {:?} vs {:?}", ma.label, mb.label));
+        if !b.meta.contains(n) {
+            return Err(format!("{n:?} missing from the other lowering"));
         }
-        if ma.value != mb.value {
-            return Err(format!("{n:?} value {:?} vs {:?}", ma.value, mb.value));
+        if a.meta.role(n) != b.meta.role(n) {
+            return Err(format!("{n:?} role {:?} vs {:?}", a.meta.role(n), b.meta.role(n)));
         }
-        if ma.classes != mb.classes {
-            return Err(format!("{n:?} classes {:?} vs {:?}", ma.classes, mb.classes));
+        if a.meta.label(n) != b.meta.label(n) {
+            return Err(format!(
+                "{n:?} label {:?} vs {:?}",
+                a.meta.label(n),
+                b.meta.label(n)
+            ));
         }
-        if ma.actions != mb.actions {
+        if a.meta.value(n) != b.meta.value(n) {
+            return Err(format!("{n:?} value differs"));
+        }
+        if a.meta.classes(n) != b.meta.classes(n) {
+            return Err(format!(
+                "{n:?} classes {:?} vs {:?}",
+                a.meta.classes(n),
+                b.meta.classes(n)
+            ));
+        }
+        if a.meta.actions(n) != b.meta.actions(n) {
             return Err(format!("{n:?} actions differ"));
         }
-        if ma.states != mb.states {
+        if a.meta.states(n) != b.meta.states(n) {
             return Err(format!("{n:?} states differ"));
         }
-        if ma.focusable != mb.focusable {
-            return Err(format!("{n:?} focusable differs"));
-        }
-        if ma.on_click.is_some() != mb.on_click.is_some() {
-            return Err(format!("{n:?} on_click presence differs"));
-        }
-        if a.tree.flags(*n) != b.tree.flags(*n) {
+        if a.meta.flags(n) != b.meta.flags(n) {
             return Err(format!(
                 "{n:?} flags {:?} vs {:?}",
-                a.tree.flags(*n),
-                b.tree.flags(*n)
+                a.meta.flags(n),
+                b.meta.flags(n)
+            ));
+        }
+        if a.meta.on_click(n).is_some() != b.meta.on_click(n).is_some() {
+            return Err(format!("{n:?} on_click presence differs"));
+        }
+        if a.tree.flags(n) != b.tree.flags(n) {
+            return Err(format!(
+                "{n:?} tree flags {:?} vs {:?}",
+                a.tree.flags(n),
+                b.tree.flags(n)
             ));
         }
     }
@@ -1309,7 +1332,7 @@ impl TreeSink {
             if let Some(raw) = self.tree.lnode(n) {
                 self.layout.remove(LayoutNode::from_raw(raw));
             }
-            self.meta.remove(&n);
+            self.meta.remove(n);
             self.pending_css.remove(&n);
             self.tree.free_one(n);
             self.stats.nodes_freed += 1;
@@ -1572,8 +1595,7 @@ impl TreeSink {
         }
         self.tree.subtree_preorder(root).into_iter().any(|n| {
             self.meta
-                .get(&n)
-                .and_then(|m| m.id.as_ref())
+                .string_id(n)
                 .is_some_and(|id| self.anims.contains_key(id))
         })
     }
@@ -2006,6 +2028,125 @@ impl MetaStore {
     /// The rare half, created on first use.
     pub fn cold_mut(&mut self, n: NodeIndex) -> &mut ColdMeta {
         self.cold.entry(n.index()).or_default()
+    }
+
+    // --- cold-half accessors, so the store is a complete replacement --------
+    //
+    // Each reads through the per-node `ColdMeta` when there is one and returns
+    // the empty value otherwise, so a caller never has to know whether a node
+    // happened to allocate its rare half.
+
+    /// Accessible name.
+    pub fn label(&self, n: NodeIndex) -> &str {
+        self.cold(n).map(|c| c.label.as_str()).unwrap_or("")
+    }
+    /// Current value.
+    pub fn value(&self, n: NodeIndex) -> Option<&str> {
+        self.cold(n).and_then(|c| c.value.as_deref())
+    }
+    /// String classes (the non-interned form).
+    pub fn classes(&self, n: NodeIndex) -> &[String] {
+        self.cold(n).map(|c| c.classes.as_slice()).unwrap_or(&[])
+    }
+    /// Advertised actions.
+    pub fn actions(&self, n: NodeIndex) -> &[Action] {
+        self.cold(n).map(|c| c.actions.as_slice()).unwrap_or(&[])
+    }
+    /// Semantic states.
+    pub fn states(&self, n: NodeIndex) -> &[SemState] {
+        self.cold(n).map(|c| c.states.as_slice()).unwrap_or(&[])
+    }
+    /// Click handler.
+    pub fn on_click(&self, n: NodeIndex) -> Option<&crate::Handler> {
+        self.cold(n).and_then(|c| c.on_click.as_ref())
+    }
+    /// Border.
+    pub fn border(&self, n: NodeIndex) -> Option<Border> {
+        self.cold(n).and_then(|c| c.border)
+    }
+    /// Leaf content, or `None` for a node that is not a leaf.
+    ///
+    /// Returns an `Option` rather than a borrowed `NodeContent::None`: the
+    /// variant holds `Rc`s, so it is not `Sync` and cannot be a `static`.
+    pub fn content(&self, n: NodeIndex) -> Option<&NodeContent> {
+        self.cold(n)
+            .map(|c| &c.content)
+            .filter(|c| !matches!(c, NodeContent::None))
+    }
+    /// The string id, when the author used the string API.
+    pub fn string_id(&self, n: NodeIndex) -> Option<&StableId> {
+        self.cold(n).and_then(|c| c.id.as_ref())
+    }
+
+    /// The node's identity as a string, whichever API produced it.
+    ///
+    /// The structured form is rendered here rather than being carried — which
+    /// is the point of `NodeId`: the cost lands on whoever asks, and the only
+    /// things that ask are selectors, tests and the agent.
+    pub fn id_string(&self, n: NodeIndex, syms: &Symbols) -> Option<String> {
+        if let Some(id) = self.string_id(n) {
+            return Some(id.as_str().to_string());
+        }
+        self.node_id(n).map(|i| i.to_string_in(syms))
+    }
+
+    /// Store a finished in-flight record.
+    ///
+    /// Hot fields go to the columns; the rare half is allocated **only** if the
+    /// node actually set something in it, which is what keeps a plain layout box
+    /// from paying for a text field's twelve handler slots.
+    pub fn commit(&mut self, n: NodeIndex, m: Meta) {
+        let i = n.index() as usize;
+        self.reserve(i);
+        self.generation[i] = n.generation();
+        self.live[i] = true;
+        self.len = self.len.max(i + 1);
+
+        self.role[i] = m.role;
+        self.node_id[i] = m.node_id;
+        self.class_syms[i] = m.class_syms;
+        self.background[i] = m.background;
+        self.corner_radius[i] = m.corner_radius as f32;
+        self.layout_style[i] = m.layout_style;
+        let mut f = MetaFlags::empty();
+        f.set(MetaFlags::FOCUSABLE, m.focusable);
+        f.set(MetaFlags::ELIDE, m.elide);
+        f.set(MetaFlags::DISABLED, m.disabled);
+        f.set(MetaFlags::ANIMATING, m.animating);
+        self.flags[i] = f;
+
+        let needs_cold = m.id.is_some()
+            || !m.label.is_empty()
+            || m.value.is_some()
+            || !m.classes.is_empty()
+            || !m.actions.is_empty()
+            || !m.states.is_empty()
+            || m.on_click.is_some()
+            || m.border.is_some()
+            || !matches!(m.content, NodeContent::None);
+        if needs_cold {
+            self.cold.insert(
+                i as u32,
+                Box::new(ColdMeta {
+                    id: m.id,
+                    label: m.label,
+                    value: m.value,
+                    classes: m.classes,
+                    actions: m.actions,
+                    states: m.states,
+                    on_click: m.on_click,
+                    border: m.border,
+                    content: m.content,
+                }),
+            );
+        } else {
+            self.cold.remove(&(i as u32));
+        }
+    }
+
+    /// Every live node, in slot order — the shape a semantics walk wants.
+    pub fn iter_live(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..self.len).filter(move |i| self.live[*i])
     }
 
     /// How many slots the columns cover.

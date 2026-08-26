@@ -54,28 +54,28 @@ fn paintable(s: &TreeSink) -> Vec<Paintable> {
         .subtree_preorder(s.tree.root())
         .into_iter()
         .filter(|n| s.tree.is_alive(*n))
-        .filter_map(|n| {
-            let m = s.meta.get(&n)?;
+        .filter(|n| s.meta.contains(*n))
+        .map(|n| {
             let mut kids = 0;
             let mut c = s.tree.first_child(n);
             while c.is_some() {
                 kids += 1;
                 c = s.tree.next_sibling(c);
             }
-            Some(Paintable {
-                role: m.role,
-                id: m.id.as_ref().map(|i| i.as_str().to_string()),
-                label: m.label.clone(),
-                value: m.value.clone(),
-                classes: m.classes.clone(),
-                background: m.background.map(rgba),
-                corner_radius: m.corner_radius,
-                width: m.layout_style.width,
-                height: m.layout_style.height,
+            Paintable {
+                role: s.meta.role(n),
+                id: s.meta.id_string(n, &s.symbols),
+                label: s.meta.label(n).to_string(),
+                value: s.meta.value(n).map(str::to_string),
+                classes: s.meta.classes(n).to_vec(),
+                background: s.meta.background(n).map(rgba),
+                corner_radius: s.meta.corner_radius(n),
+                width: s.meta.layout_style(n).width,
+                height: s.meta.layout_style(n).height,
                 z: s.tree.z(n),
-                has_text: !matches!(m.content, lumen_widgets::NodeContent::None),
+                has_text: s.meta.content(n).is_some(),
                 child_count: kids,
-            })
+            }
         })
         .collect()
 }

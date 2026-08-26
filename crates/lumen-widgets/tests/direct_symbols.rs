@@ -39,9 +39,9 @@ fn an_interned_class_matches_the_same_rules_as_a_string_one() {
         i
     };
 
-    assert_eq!(a.meta[&n1].layout_style.width, Dim::px(300.0));
+    assert_eq!(a.meta.layout_style(n1).width, Dim::px(300.0));
     assert_eq!(
-        b.meta[&n2].layout_style.width,
+        b.meta.layout_style(n2).width,
         Dim::px(300.0),
         "the interned class matched the same rule"
     );
@@ -64,9 +64,9 @@ fn a_structured_id_matches_an_id_selector() {
         d.end(&LayoutStyle::default(), &[], false);
         i
     };
-    assert_eq!(s.meta[&hit].layout_style.width, Dim::px(220.0));
+    assert_eq!(s.meta.layout_style(hit).width, Dim::px(220.0));
     assert_eq!(
-        s.meta[&miss].layout_style.width,
+        s.meta.layout_style(miss).width,
         Dim::Auto,
         "row7 matched nothing, so the index is really part of the identity"
     );
@@ -115,7 +115,7 @@ fn the_class_set_spills_correctly_past_its_inline_capacity() {
         d.end(&LayoutStyle::default(), &[], false);
         i
     };
-    let got: Vec<Sym> = s.meta[&n].class_syms.iter().collect();
+    let got: Vec<Sym> = s.meta.class_syms(n).iter().collect();
     assert_eq!(got.len(), 5, "all five survived the spill");
     for (i, k) in syms.iter().enumerate() {
         assert_eq!(got[i], *k, "and in order");

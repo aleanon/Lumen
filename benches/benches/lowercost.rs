@@ -53,7 +53,11 @@ fn lower_via_element(rows: Vec<Element>) -> TreeSink {
 
 fn lower_direct() -> TreeSink {
     let mut sink = TreeSink::new();
-    let root = sink.begin(None, lumen_core::semantics::Role::Group);
+    let root = sink
+        .node(None, lumen_core::semantics::Role::Group)
+        .elide(true)
+        .resolve()
+        .index();
     let style = row_style(8.0, 4.0);
     let mut lns = Vec::with_capacity(ROWS);
     for i in 0..ROWS {
@@ -119,7 +123,11 @@ fn env() -> StyleEnv {
 
 fn lower_direct_styled() -> TreeSink {
     let mut sink = TreeSink::new().with_styles(env(), VisualState::default());
-    let root = sink.begin(None, lumen_core::semantics::Role::Group);
+    let root = sink
+        .node(None, lumen_core::semantics::Role::Group)
+        .elide(true)
+        .resolve()
+        .index();
     sink.resolve(root);
     let style = row_style(8.0, 4.0);
     let mut lns = Vec::with_capacity(ROWS);
