@@ -43,11 +43,27 @@ fn frame(sink: &mut TreeSink, versions: &[u64]) {
     sink.end_frame();
 }
 
+/// A sheet whose revision changes each reload, as a developer's edits do.
+fn sheet(rev: u64) -> lumen_widgets::direct::StyleEnv {
+    lumen_widgets::direct::StyleEnv::from_source(&format!(
+        ".row {{ border-radius: {rev}px; }} button {{ font-weight: 600; }}"
+    ))
+    .expect("parses")
+}
+
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "memo".into());
     let dirty_all = mode == "full";
+    // `reload` measures the frame after a stylesheet edit: every span is stale,
+    // so it is a full rebuild. That is the standing cost of a memo that holds
+    // styled nodes rather than the Element model's pre-styling cache.
+    let reload = mode == "reload";
 
-    let mut sink = TreeSink::new();
+    let mut sink = if reload {
+        TreeSink::new().with_styles(sheet(0), lumen_widgets::direct::VisualState::default())
+    } else {
+        TreeSink::new()
+    };
     let mut versions = vec![1u64; ROWS];
     frame(&mut sink, &versions);
 
@@ -59,6 +75,9 @@ fn main() {
             for v in versions.iter_mut() {
                 *v = bump;
             }
+        } else if reload {
+            // The data is untouched; the developer saved the stylesheet.
+            sink.set_stylesheet(sheet(bump));
         } else {
             // Exactly one row changes.
             versions[(bump as usize) % ROWS] = bump;

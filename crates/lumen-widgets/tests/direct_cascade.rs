@@ -12,21 +12,11 @@
 //! specificity between a class and an id.
 
 use lumen_core::semantics::Role;
-use lumen_style::{MediaContext, StyleSource, Tokens};
 use lumen_widgets::direct::{begin_row, row_style, Direct, StyleEnv, TreeSink, VisualState};
 use lumen_widgets::{Button, Label};
 
 fn env(src: &str) -> StyleEnv {
-    let (sheet, diags) = lumen_style::parse("test.lss", src);
-    assert!(diags.is_empty(), "stylesheet has diagnostics: {diags:?}");
-    StyleEnv {
-        sources: vec![StyleSource {
-            sheet,
-            origin: lumen_style::Origin::App,
-        }],
-        tokens: Tokens::default(),
-        media: MediaContext::default(),
-    }
+    StyleEnv::from_source(src).expect("parses")
 }
 
 fn sink(src: &str) -> TreeSink {

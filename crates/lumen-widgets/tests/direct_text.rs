@@ -11,7 +11,6 @@
 
 use lumen_core::semantics::Role;
 use lumen_layout::{Dim, LayoutStyle};
-use lumen_style::{MediaContext, StyleSource, Tokens};
 use lumen_widgets::direct::{lower_element, StyleEnv, TreeSink, VisualState};
 use lumen_widgets::{Element, Label};
 
@@ -20,19 +19,10 @@ fn sink() -> TreeSink {
 }
 
 fn styled_sink(src: &str) -> TreeSink {
-    let (sheet, diags) = lumen_style::parse("t.lss", src);
-    assert!(diags.is_empty(), "{diags:?}");
     TreeSink::new()
         .with_text(lumen_text::TextEngine::new())
         .with_styles(
-            StyleEnv {
-                sources: vec![StyleSource {
-                    sheet,
-                    origin: lumen_style::Origin::App,
-                }],
-                tokens: Tokens::default(),
-                media: MediaContext::default(),
-            },
+            StyleEnv::from_source(src).expect("parses"),
             VisualState::default(),
         )
 }

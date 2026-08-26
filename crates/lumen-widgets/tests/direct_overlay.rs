@@ -12,21 +12,11 @@
 use lumen_core::semantics::Role;
 use lumen_core::NodeIndex;
 use lumen_layout::LayoutStyle;
-use lumen_style::{MediaContext, StyleSource, Tokens};
 use lumen_widgets::direct::{StyleEnv, TreeSink, VisualState};
 
 fn styled(src: &str) -> TreeSink {
-    let (sheet, diags) = lumen_style::parse("t.lss", src);
-    assert!(diags.is_empty(), "{diags:?}");
     TreeSink::new().with_styles(
-        StyleEnv {
-            sources: vec![StyleSource {
-                sheet,
-                origin: lumen_style::Origin::App,
-            }],
-            tokens: Tokens::default(),
-            media: MediaContext::default(),
-        },
+        StyleEnv::from_source(src).expect("parses"),
         VisualState::default(),
     )
 }

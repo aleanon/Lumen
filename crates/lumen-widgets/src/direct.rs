@@ -665,12 +665,44 @@ use lumen_style::{MediaContext, NodeDesc, Style, StyleSource, Tokens};
 
 /// The stylesheet environment a [`TreeSink`] resolves against.
 pub struct StyleEnv {
+    /// A hash of the sheet's *source*, identifying this revision.
+    ///
+    /// Content-addressed on purpose: keying the splice guard on "someone called
+    /// `set_stylesheet`" would make a no-op save cost a full rebuild, and a file
+    /// watcher that fires twice cost two.
+    pub gen: u128,
     /// Parsed sheets, in cascade order.
     pub sources: Vec<StyleSource>,
     /// `--token` values.
     pub tokens: Tokens,
     /// Window/container context for `@media`.
     pub media: MediaContext,
+}
+
+impl StyleEnv {
+    /// Parse `src` into an environment, or return its diagnostics.
+    ///
+    /// Mirrors `set_stylesheet`'s contract: a rejected edit yields nothing and
+    /// the caller keeps the previous sheet live, so a typo mid-edit cannot
+    /// blank the screen.
+    pub fn from_source(src: &str) -> Result<StyleEnv, Vec<lumen_core::Diagnostic>> {
+        use std::hash::Hash;
+        let (sheet, diags) = lumen_style::parse("app.lss", src);
+        if lumen_style::has_errors(&diags) {
+            return Err(diags);
+        }
+        let mut h = lumen_core::identity::IdHasher::new();
+        src.hash(&mut h);
+        Ok(StyleEnv {
+            gen: h.finish128(),
+            sources: vec![StyleSource {
+                sheet,
+                origin: lumen_style::Origin::App,
+            }],
+            tokens: Tokens::default(),
+            media: MediaContext::default(),
+        })
+    }
 }
 
 /// Engine-side visual state the cascade needs but the widget does not own.
@@ -1360,6 +1392,11 @@ impl TreeSink {
         }
         self.in_overlay().hash(&mut h);
         (self.disabled_depth > 0).hash(&mut h);
+        // P5: the live stylesheet's revision. A retained span is already-styled
+        // nodes, so an edit makes every one of them stale — where the Element
+        // model's scope cache is pre-styling and survives a reload untouched.
+        // Content-addressed, so a no-op save costs nothing.
+        self.styles.as_ref().map(|e| e.gen).hash(&mut h);
         h.finish128()
     }
 }
@@ -1482,5 +1519,38 @@ impl TreeSink {
                 .and_then(|m| m.id.as_ref())
                 .is_some_and(|id| self.anims.contains_key(id))
         })
+    }
+}
+
+
+// --- P5: hot reload --------------------------------------------------------
+//
+// `set_stylesheet` in the engine carries the line that makes this interesting:
+//
+//     // A.5b: resolution results embed the sheet — invalidate the memo
+//     // (scope caches stay: cached Elements are pre-styling).
+//
+// In the `Element` model a memoized scope holds **unstyled** elements — the
+// cascade runs later, in `build_node` — so a stylesheet edit invalidates the
+// resolution cache and nothing else. Every scope stays memoized and no closure
+// re-runs; the cached elements are simply re-styled on the way down.
+//
+// Direct lowering inverts that. A retained span is finished, already-styled
+// nodes in the tree, so a sheet edit makes every span stale and there is no
+// pre-styling form to re-style. **A reload frame is a full rebuild.**
+//
+// That is a genuine, permanent cost of this architecture and not a bug to fix
+// away. What must not happen is the *silent* version: splicing across a sheet
+// change and keeping the old colours, so hot reload appears to do nothing.
+
+impl TreeSink {
+    /// Swap the live stylesheet, as a hot reload does.
+    ///
+    /// The sheet's content hash joins the splice guard, so every retained span
+    /// is invalidated by an edit — and by an edit *only*. An editor that saves
+    /// an unchanged file, or a watcher that fires twice, hashes the same and
+    /// costs nothing.
+    pub fn set_stylesheet(&mut self, env: StyleEnv) {
+        self.styles = Some(env);
     }
 }

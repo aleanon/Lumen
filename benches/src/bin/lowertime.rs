@@ -83,15 +83,7 @@ button:disabled { background: #cccccc; }
 ";
 
 fn env() -> StyleEnv {
-    let (sheet, _) = lumen_style::parse("bench.lss", SHEET);
-    StyleEnv {
-        sources: vec![lumen_style::StyleSource {
-            sheet,
-            origin: lumen_style::Origin::App,
-        }],
-        tokens: lumen_style::Tokens::default(),
-        media: lumen_style::MediaContext::default(),
-    }
+    StyleEnv::from_source(SHEET).expect("parses")
 }
 
 fn main() {
