@@ -1176,7 +1176,7 @@ pub struct Headless<
     /// B.1: the ancestor descriptors of the element currently being lowered
     /// (root-first), fed to `resolve_with_ancestors` so descendant/`>`
     /// selectors match correctly. Maintained by `build_node`'s recursion.
-    desc_stack: Vec<lumen_style::NodeDesc>,
+    desc_stack: Vec<std::rc::Rc<lumen_style::NodeDesc>>,
     /// O0.8: `desc_hash_stack[i]`, once computed, is an [`IdHasher`] that has
     /// absorbed `desc_stack[0..i]` — the ancestor-chain prefix of
     /// `span_ctx_hash`, memoized per depth so siblings share it.
@@ -1429,10 +1429,11 @@ type Computeds = std::rc::Rc<HashMap<String, lumen_style::Computed>>;
 /// fork can be gated on "will anything actually write".
 type Styled = std::rc::Rc<lumen_style::Style>;
 
-/// A resolved style pair: the typed style + the computed-value map
-/// (`get_styles` form). The unit the A.5b resolution memo caches. Both halves
-/// are `Rc`, so caching and reading a pair is two refcount bumps.
-type StylePair = (Styled, Computeds);
+/// What the A.5b resolution memo caches: the node descriptor, the typed style,
+/// and the computed-value map. All three are `Rc`, so a hit is three refcount
+/// bumps and no allocation at all — O0.11 folded the descriptor in because it
+/// is a pure function of the same identity the key already collapses.
+type StylePair = (std::rc::Rc<lumen_style::NodeDesc>, Styled, Computeds);
 
 /// A node's re-resolved style pair, pending commit (A.5 two-pass restyle).
 type PendingStyle = (NodeIndex, Styled, Computeds);
@@ -5419,7 +5420,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         })
     }
 
-    fn push_desc(&mut self, desc: lumen_style::NodeDesc) {
+    fn push_desc(&mut self, desc: std::rc::Rc<lumen_style::NodeDesc>) {
         self.desc_stack.push(desc);
         // Not computed here — see `desc_hash_stack`. A node that turns out to
         // be a leaf never has its descriptor hashed at all.
@@ -6063,32 +6064,33 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // their CSS-familiar aliases (spec examples write `:hover`), and
             // the widget's semantic states (checked/disabled/expanded/…)
             // are style-matchable, so `checkbox:checked { … }` just works.
-            let mut states = Vec::new();
+            // O0.11: `&str`, not `String`. Every entry here is either a
+            // literal or already owned by the element, and the only consumer
+            // that needs owned data is the `NodeDesc` built on a memo MISS —
+            // which is the rare path. The `Vec` itself still allocates when
+            // non-empty, but the overwhelmingly common node has no states at
+            // all and now allocates nothing for them.
+            let mut states: Vec<&str> = Vec::new();
             if flags.contains(NodeFlags::FOCUSED) {
-                states.push("focused".to_string());
-                states.push("focus".to_string());
+                states.push("focused");
+                states.push("focus");
             }
             if flags.contains(NodeFlags::HOVERED) {
-                states.push("hovered".to_string());
-                states.push("hover".to_string());
+                states.push("hovered");
+                states.push("hover");
             }
             if el.id.is_some() && self.pressed.as_ref().is_some_and(|(_, id)| *id == el.id) {
-                states.push("pressed".to_string());
-                states.push("active".to_string());
+                states.push("pressed");
+                states.push("active");
             }
-            states.extend(el.states.iter().map(|s| s.as_str().to_string()));
+            states.extend(el.states.iter().map(|s| s.as_str()));
             // W1: `disabled` is its own Element field (not a semantic state the
             // author writes), so fold it in here — inherited, so a control
             // inside a disabled container matches `:disabled` too.
             if el.disabled || self.disabled_count > 0 {
-                states.push("disabled".to_string());
+                states.push("disabled");
             }
-            let desc = lumen_style::NodeDesc {
-                id: el.id.as_ref().map(|i| i.as_str().to_string()),
-                classes: el.classes.clone(),
-                states,
-                ty: el.role.as_str().to_string(),
-            };
+            let node_ty = el.role.as_str();
             // B.1: the recursion's ancestor chain makes descendant/`>`
             // selectors real (previously only the rightmost compound was
             // checked — `dialog button` matched every button). B.2: the live
@@ -6104,30 +6106,58 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             };
             // A.5b: resolution is a pure function of (desc, ancestor chain,
             // container size) for a fixed sheet/theme/media — memoize it.
+            // O0.11: hashed from the PARTS, so the descriptor itself need not
+            // exist yet. Building it costs three allocations (the id string,
+            // the class vector, the role string) for a value that is identical
+            // across every node with the same style identity — which is
+            // exactly the set this key already collapses. So the descriptor
+            // joins the memo entry and a hit returns it as a refcount bump.
             let style_key = {
                 use std::hash::Hash;
                 // F2.4: same swap, same reasoning as `span_ctx_hash` — this
                 // one runs per node per build whenever a stylesheet is loaded,
                 // and a collision hands a node another node's resolved style.
+                // The stream is length-prefixed per field so that
+                // `["a","b"]` and `["ab"]` cannot collide.
                 let mut h = lumen_core::identity::IdHasher::new();
-                desc.id.hash(&mut h);
-                desc.classes.hash(&mut h);
-                desc.states.hash(&mut h);
-                desc.ty.hash(&mut h);
+                match el.id.as_ref() {
+                    Some(i) => {
+                        1u8.hash(&mut h);
+                        i.as_str().hash(&mut h);
+                    }
+                    None => 0u8.hash(&mut h),
+                }
+                el.classes.len().hash(&mut h);
+                for c in &el.classes {
+                    c.as_str().hash(&mut h);
+                }
+                states.len().hash(&mut h);
+                for st in &states {
+                    st.hash(&mut h);
+                }
+                node_ty.hash(&mut h);
                 self.span_ctx_hash(this_overlay).hash(&mut h);
                 h.finish128()
             };
-            let (mut css, mut resolved) = if let Some(pair) = self.style_memo.get(&style_key) {
+            let (desc, mut css, mut resolved) = if let Some(e) = self.style_memo.get(&style_key) {
                 self.style_memo_hits += 1;
-                pair.clone()
+                e.clone()
             } else {
                 self.style_memo_misses += 1;
-                let computed = lumen_style::resolve_with_ancestors(
-                    &env.sources,
-                    &desc,
-                    &self.desc_stack,
-                    &media,
-                );
+                let desc = std::rc::Rc::new(lumen_style::NodeDesc {
+                    id: el.id.as_ref().map(|i| i.as_str().to_string()),
+                    classes: el.classes.clone(),
+                    states: states.iter().map(|s| s.to_string()).collect(),
+                    ty: node_ty.to_string(),
+                });
+                // The ancestor chain is held as `Rc`s; `resolve_with_ancestors`
+                // wants a plain slice. Materializing it here rather than
+                // changing that signature keeps the cost on the miss path,
+                // which is O(depth) and rare, instead of on every node.
+                let ancestors: Vec<lumen_style::NodeDesc> =
+                    self.desc_stack.iter().map(|d| (**d).clone()).collect();
+                let computed =
+                    lumen_style::resolve_with_ancestors(&env.sources, &desc, &ancestors, &media);
                 let mut css = lumen_style::Style::new();
                 let mut resolved = HashMap::default();
                 for (prop, c) in &computed {
@@ -6148,9 +6178,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 let css: Styled = std::rc::Rc::new(css);
                 self.style_memo.insert(
                     style_key,
-                    (std::rc::Rc::clone(&css), std::rc::Rc::clone(&resolved)),
+                    (
+                        std::rc::Rc::clone(&desc),
+                        std::rc::Rc::clone(&css),
+                        std::rc::Rc::clone(&resolved),
+                    ),
                 );
-                (css, resolved)
+                (desc, css, resolved)
             };
             // B.6b: the typed inline style is the `Origin::Inline` tier —
             // merged after the (memoized) sheet resolution, field-wise, and

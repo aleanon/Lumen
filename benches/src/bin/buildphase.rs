@@ -52,6 +52,7 @@ fn app() -> App {
     let sheet = std::env::var("SHEET").is_ok();
     let d = depth();
     let defsize = std::env::var("DEFSIZE").is_ok();
+    let ids = std::env::var("IDS").is_ok();
     let a = App::new(move |cx| {
         let bump = cx.signal("n", || 0i64).get(cx.runtime());
         let n = rows();
@@ -63,6 +64,12 @@ fn app() -> App {
                     widgets::text(format!("row {i}"))
                 };
                 let mut e: Element = t.class("row");
+                // IDS=1: a unique id per row, so every node has a distinct
+                // style identity and the A.5b memo misses on all of them —
+                // the shape a real keyed list has.
+                if ids {
+                    e = e.id(format!("r{i}"));
+                }
                 for k in 0..d {
                     let mut w: Element = widgets::column(vec![e]).class(if k % 2 == 0 {
                         "wrap-a"
