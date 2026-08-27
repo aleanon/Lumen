@@ -50,7 +50,11 @@ Run against the live window (`just run-agent <name>` +
    Each finding is logged once when it appears and again if it is fixed
    and reintroduced.
 3. **`ui.lint`** — the same findings on demand (layout/contrast audits:
-   W0103/W0104/W0105, W0303 unreadable text contrast).
+   W0103/W0104/W0105, W0303 unreadable text contrast). Capped at 50 per
+   code, with a `… more suppressed` line carrying the true total; pass
+   `{"all": true}` when you want every one (e.g. you are looking for a
+   specific node and the cap may have hidden it). The reply's `capped`
+   field says which you got.
 4. **`agent_client.py tree`** — one line per node: role, id, label,
    states, actions, bounds. Most "invisible/unclickable/wrong place" bugs
    are obvious here.

@@ -109,3 +109,59 @@ fn a_capped_pass_does_not_hide_other_codes() {
         all.len()
     );
 }
+
+/// O0.7: the cap belongs to the **ambient** pass, not to the check.
+///
+/// `lint()` runs on a frame budget, so a long page must not spend a
+/// millisecond formatting one fact a thousand times. A caller who explicitly
+/// asked for a lint and is waiting for the answer is in the opposite position
+/// — the cost is bounded by the one call, and a cap could hide the very node
+/// they are hunting. `lint_all()` is that path.
+#[test]
+fn lint_all_reports_every_finding() {
+    let mut h = tall_page(1000).run_headless(Size::new(200.0, 60.0));
+    h.pump();
+
+    let offscreen = |ds: Vec<lumen_core::Diagnostic>| -> Vec<_> {
+        ds.into_iter()
+            .filter(|d| d.code == lumen_core::codes::W0112)
+            .collect::<Vec<_>>()
+    };
+    let capped = offscreen(h.lint());
+    let full = offscreen(h.lint_all());
+
+    // Non-vacuous: the capped arm really did suppress something here, so the
+    // two arms are being compared on a page where the cap is load-bearing.
+    assert!(
+        capped.iter().any(|d| d.message.contains("suppressed")),
+        "the capped arm must have suppressed findings on a 1000-row page"
+    );
+    assert!(
+        full.len() > capped.len() * 5,
+        "uncapped must report far more than the cap: {} vs {}",
+        full.len(),
+        capped.len()
+    );
+    assert!(
+        !full.iter().any(|d| d.message.contains("suppressed")),
+        "an uncapped pass has nothing to summarise, so no summary line"
+    );
+
+    // The capped arm's summary states the true total, so the two agree about
+    // how many findings exist — the cap is a display bound, not a count bound.
+    let note = capped
+        .iter()
+        .find(|d| d.message.contains("suppressed"))
+        .expect("checked above");
+    let total: usize = note
+        .message
+        .split_whitespace()
+        .nth(2)
+        .and_then(|w| w.parse().ok())
+        .expect("summary reads `{shown} of {total} …`");
+    assert_eq!(
+        total,
+        full.len(),
+        "the cap's summary total must equal what lint_all actually reports"
+    );
+}

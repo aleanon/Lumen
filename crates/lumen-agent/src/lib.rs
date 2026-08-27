@@ -695,11 +695,22 @@ fn handle<R: Renderer, E: Spawner, P: PlatformConfig>(
             Ok(out)
         }
         "app.diagnostics" => Ok(json!({ "diagnostics": app.diagnostics() })),
-        "ui.lint" => Ok(json!({
-            "findings": app.lint().iter()
-                .map(|d| json!({ "code": d.code, "message": d.message }))
-                .collect::<Vec<_>>()
-        })),
+        // O0.5/O0.7: capped by default (a long page can produce thousands of
+        // findings of one code, and fifty is well past what anyone acts on);
+        // `{"all": true}` asks for every one. The cap is a property of the
+        // per-frame ambient audit's budget, not of the check — an agent that
+        // deliberately asked and is waiting for the answer should be able to
+        // see the whole list.
+        "ui.lint" => {
+            let all = params.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            let findings = if all { app.lint_all() } else { app.lint() };
+            Ok(json!({
+                "findings": findings.iter()
+                    .map(|d| json!({ "code": d.code, "message": d.message }))
+                    .collect::<Vec<_>>(),
+                "capped": !all,
+            }))
+        }
         "ui.probe" => {
             // Pixel color at (x, y) in physical screenshot px.
             let x = params.get("x").and_then(|v| v.as_u64()).unwrap_or(0) as u32;

@@ -2392,7 +2392,34 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// interactive) over the current tree — see [`audit::lint`](crate::audit::lint).
     /// Unlike goldens, catches first-time layout/render defects; usable in tests
     /// and via the agent (`ui.lint`).
+    ///
+    /// Capped at [`MAX_PER_CODE`](Self::MAX_PER_CODE) findings per code, with
+    /// the remainder summarised — see [`lint_all`](Self::lint_all) when the
+    /// caller genuinely wants every one.
     pub fn lint(&mut self) -> Vec<lumen_core::Diagnostic> {
+        self.lint_capped(Self::MAX_PER_CODE)
+    }
+
+    /// [`lint`](Self::lint) with **no per-code cap** — every finding, however
+    /// many.
+    ///
+    /// O0.5 capped the ambient audit because it runs on a frame budget and a
+    /// long page produced thousands of findings a frame, which is a formatting
+    /// cost paid to say one thing repeatedly. A caller who asked for a lint and
+    /// is waiting for the answer is in the opposite position: the cost is
+    /// bounded by the one call, and a cap could hide the node they are looking
+    /// for. So the cap belongs to the *ambient* pass, not to the check — this
+    /// is the explicit, pull-mode path (`ui.lint {"all": true}`).
+    ///
+    /// Note the cap was never the expensive half. O0.3a made the underlying
+    /// scans cheap (cached shaping, borrowed semantics root); the cap only
+    /// bounds message *formatting*, which is why removing it for a single call
+    /// is affordable and removing it for every frame was not.
+    pub fn lint_all(&mut self) -> Vec<lumen_core::Diagnostic> {
+        self.lint_capped(usize::MAX)
+    }
+
+    fn lint_capped(&mut self, cap: usize) -> Vec<lumen_core::Diagnostic> {
         // See `diagnostics()`: borrow the memoized root, don't clone the tree.
         let mut out = crate::audit::lint(&self.sem_root());
         // What the renderer actually clamped this frame (W0110). The CPU
@@ -2493,7 +2520,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // not a thousand defects. The scan itself still visits every
                 // run — its cost is the (cached) shape lookup, not the
                 // reporting, and skipping runs would miss real tofu.
-                if tofu_reported >= Self::MAX_PER_CODE {
+                if tofu_reported >= cap {
                     tofu_suppressed += 1;
                     continue;
                 }
@@ -2529,11 +2556,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // A LEGIBILITY floor, not a design opinion: `ContrastLevel` keeps the
         // graded tiers for callers grading a palette. Below `LEGIBILITY_FLOOR`
         // the text is invisible, which is a defect on any design.
-        out.extend(self.invisible_findings());
-        out.extend(self.offscreen_findings());
+        out.extend(self.invisible_findings(cap));
+        out.extend(self.offscreen_findings(cap));
         out.extend(self.blank_frame_findings());
         out.extend(self.occlusion_findings());
-        out.extend(self.truncation_findings());
+        out.extend(self.truncation_findings(cap));
         out.extend(self.stuck_animation_findings());
         out.extend(self.contrast_findings());
         out
@@ -2587,7 +2614,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// `Diagnostic::new` infers severity from the code's leading letter and a
     /// `W` code cannot be `info`; the advisory nature lives in the wording, not
     /// in a severity the type system cannot express.
-    fn truncation_findings(&self) -> Vec<lumen_core::Diagnostic> {
+    fn truncation_findings(&self, cap: usize) -> Vec<lumen_core::Diagnostic> {
         let mut out = Vec::new();
         // O0.5: see MAX_PER_CODE — count past the cap, stop formatting.
         let mut suppressed = 0usize;
@@ -2605,7 +2632,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 m.id.as_ref()
                     .map(|i| format!("`#{}`", i.as_str()))
                     .unwrap_or_else(|| "a text node".to_string());
-            if out.len() >= Self::MAX_PER_CODE {
+            if out.len() >= cap {
                 suppressed += 1;
                 continue;
             }
@@ -3025,7 +3052,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         )
     }
 
-    fn offscreen_findings(&self) -> Vec<lumen_core::Diagnostic> {
+    fn offscreen_findings(&self, cap: usize) -> Vec<lumen_core::Diagnostic> {
         let viewport = Rect::new(0.0, 0.0, self.size.width, self.size.height);
         let mut out = Vec::new();
         // O0.5: keep counting past the cap — the predicate is cheap, the
@@ -3055,7 +3082,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             if overlaps {
                 continue;
             }
-            if out.len() >= Self::MAX_PER_CODE {
+            if out.len() >= cap {
                 suppressed += 1;
                 continue;
             }
@@ -3134,7 +3161,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// Lives here rather than in `audit.rs` for the same reason W0110 and
     /// W0402 do: it needs style data keyed by `NodeIndex`, and a
     /// `SemanticsNode` walk cannot see it.
-    fn invisible_findings(&self) -> Vec<lumen_core::Diagnostic> {
+    fn invisible_findings(&self, cap: usize) -> Vec<lumen_core::Diagnostic> {
         let mut out = Vec::new();
         // O0.5: see MAX_PER_CODE — count past the cap, stop formatting.
         let mut suppressed = 0usize;
@@ -3189,7 +3216,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             } else {
                 String::new()
             };
-            if out.len() >= Self::MAX_PER_CODE {
+            if out.len() >= cap {
                 suppressed += 1;
                 continue;
             }

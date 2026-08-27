@@ -138,7 +138,7 @@ The ones you'll actually use:
 | `ui.getTree {raw?}` | roles/labels/bounds/states/actions/ids |
 | `ui.getLayout {selector}` | bounds + **ink** + `clipped` + text metrics |
 | `ui.screenshot {}` / `{selector, scale}` | full frame / zoomed element crop with box+ink overlay |
-| `ui.lint` / `app.diagnostics` | overflow W0103, clip W0104, zero-area W0105, contrast W0303 |
+| `ui.lint` / `app.diagnostics` | overflow W0103, clip W0104, zero-area W0105, contrast W0303. `ui.lint` caps at 50 findings per code (`{"all": true}` lifts it) |
 | `ui.lastDamage` | what repainted last frame — the rect plus the nodes inside it |
 | `ui.getCursor` | the pointer shape under the cursor (`pointer`/`text`/`col-resize`/…, `default` when no rule applies) — user-visible state no screenshot captures |
 | `ui.getDeps` / `ui.whatDependsOn` / `ui.lastChange` | *why* did it update — predict, act, confirm idle/patch/rebuild |
