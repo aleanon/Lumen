@@ -96,3 +96,51 @@ fn inline_style_survives_the_restyle_only_hover_path() {
     );
     h.assert_view_coherent();
 }
+
+/// O0.6: the computed-value map is SHARED between nodes that resolve alike
+/// (an `Rc` out of the A.5b memo instead of a per-node deep clone). An inline
+/// style is the one thing that writes into it after the fact, so it must fork
+/// its own copy first — otherwise the write lands in the map every sibling
+/// with the same cascade identity is holding, and `ui.getStyles` reports one
+/// node's inline declaration on all of them.
+///
+/// The two rows here are deliberately id-less and identically classed, which
+/// is exactly what makes their memo key equal (the key hashes id, classes,
+/// states and type — never the inline style). `:nth()` addresses them apart.
+#[test]
+fn an_inline_style_does_not_leak_through_the_shared_computed_map() {
+    let sheet = ".row { background: #0000ffff; }";
+    let mut h = App::new(|_cx| {
+        let mut a: Element = widgets::button("", |_| {}).class("row");
+        a.style.width = Dim::px(100.0);
+        let mut b: Element = widgets::button("", |_| {}).class("row");
+        b.style.width = Dim::px(100.0);
+        col![a.css(Style::new().background(red())), b]
+    })
+    .stylesheet(sheet)
+    .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+
+    // Non-vacuous: the second row must have HIT the memo entry the first one
+    // filled, i.e. the two really are sharing one map.
+    let (hits, _) = h.style_memo_stats();
+    assert!(hits > 0, "the two rows must share one memo entry");
+
+    let bg = |h: &lumen_widgets::Headless, sel: &str| {
+        h.get_styles(sel)["background"]["value"]
+            .as_str()
+            .map(str::to_string)
+    };
+    assert_eq!(
+        bg(&h, ".row:nth(1)").as_deref(),
+        Some("#ff0000ff"),
+        "the inline row reports its own declaration"
+    );
+    assert_eq!(
+        bg(&h, ".row:nth(2)").as_deref(),
+        Some("#0000ffff"),
+        "its sibling still reports the SHEET value — the inline write must \
+         not have landed in the shared map"
+    );
+    h.assert_view_coherent();
+}

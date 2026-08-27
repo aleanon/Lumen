@@ -1098,7 +1098,7 @@ pub struct Headless<
     app_sheet: Option<lumen_style::Stylesheet>,
     theme: lumen_style::ThemeKind,
     node_style: HashMap<NodeIndex, lumen_style::Style>,
-    node_computed: HashMap<NodeIndex, HashMap<String, lumen_style::Computed>>,
+    node_computed: HashMap<NodeIndex, Computeds>,
     /// A.2: per-rebuild cascade env (None when no stylesheet is attached).
     style_env: Option<StyleEnv>,
     /// A.3.1: per-rebuild scope→node-span map (scope key → subtree root +
@@ -1390,16 +1390,25 @@ type VisualState = (
     Option<(NodeIndex, Option<StableId>)>,
 );
 
+/// The computed-value map (`get_styles` form), SHARED rather than copied.
+///
+/// O0.6: this map is the observability half of the cascade — its only reader
+/// is `get_styles`, the agent introspection call — and it was deep-cloned out
+/// of the A.5b memo for every node of every rebuild. Because the memo key is
+/// the node's *whole* style identity, every node that resolves alike wants the
+/// same map, so the copies were byte-identical: a 2000-row styled frame paid
+/// ~172 us re-allocating one String key per declaration per node for a map
+/// that is only ever read on demand. `Rc` makes the common path a refcount
+/// bump; the two writers that really do mutate (an inline style, a restyle)
+/// take a private copy through `Rc::make_mut`.
+type Computeds = std::rc::Rc<HashMap<String, lumen_style::Computed>>;
+
 /// A resolved style pair: the typed style + the computed-value map
 /// (`get_styles` form). The unit the A.5b resolution memo caches.
-type StylePair = (lumen_style::Style, HashMap<String, lumen_style::Computed>);
+type StylePair = (lumen_style::Style, Computeds);
 
 /// A node's re-resolved style pair, pending commit (A.5 two-pass restyle).
-type PendingStyle = (
-    NodeIndex,
-    lumen_style::Style,
-    HashMap<String, lumen_style::Computed>,
-);
+type PendingStyle = (NodeIndex, lumen_style::Style, Computeds);
 
 /// What a `pump` did, for change attribution (F4.3).
 #[derive(Clone, Default)]
@@ -4588,7 +4597,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         if layout_affecting_differ(old, &css) {
             return false;
         }
-        pending.push((node, css, resolved));
+        pending.push((node, css, std::rc::Rc::new(resolved)));
         ancestors.push(desc);
         let mut c = self.tree.first_child(node);
         while c.is_some() {
@@ -5558,7 +5567,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         };
         let mut map = serde_json::Map::new();
         if let Some(computed) = self.node_computed.get(&node) {
-            for (prop, c) in computed {
+            for (prop, c) in computed.iter() {
                 map.insert(
                     prop.clone(),
                     lumen_style::computed_json_spanned(&c.value, c.origin, c.span),
@@ -5988,8 +5997,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                         },
                     );
                 }
-                self.style_memo
-                    .insert(style_key, std::rc::Rc::new((css.clone(), resolved.clone())));
+                let resolved: Computeds = std::rc::Rc::new(resolved);
+                self.style_memo.insert(
+                    style_key,
+                    std::rc::Rc::new((css.clone(), std::rc::Rc::clone(&resolved))),
+                );
                 (css, resolved)
             };
             // B.6b: the typed inline style is the `Origin::Inline` tier —
@@ -5998,7 +6010,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // runs before the layout override below, so inline layout
             // properties win there too.
             if let Some(inline) = el.css_inline.as_deref() {
-                merge_inline_style(&mut css, &mut resolved, inline);
+                // O0.6: an inline style is this node's alone — fork the shared
+                // map before writing into it.
+                merge_inline_style(&mut css, std::rc::Rc::make_mut(&mut resolved), inline);
             }
             // B.5: substitute mid-flight transition blends (and start/retarget
             // segments) before anything consumes the style; then play any
@@ -6036,6 +6050,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             let mut css = lumen_style::Style::new();
             let mut resolved = HashMap::default();
             merge_inline_style(&mut css, &mut resolved, &inline);
+            let resolved: Computeds = std::rc::Rc::new(resolved);
             apply_css_to_element(&mut el, &css);
             if css.visibility == Some(false) {
                 self.hidden_count += 1;

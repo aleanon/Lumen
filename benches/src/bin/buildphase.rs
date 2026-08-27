@@ -14,17 +14,49 @@ fn rows() -> i64 {
     std::env::var("ROWS").ok().and_then(|v| v.parse().ok()).unwrap_or(2000)
 }
 
+/// `churn` = every row's string is new every frame (100% shape-cache miss).
+/// `stable` = every row re-lowers with the SAME string, so shaping is cached
+/// and what remains is the lowering work itself. Real frames sit between them;
+/// `stable` is the closer analogue of "a filter/hover re-ran the view".
+fn mode() -> String {
+    std::env::var("MODE").unwrap_or_else(|_| "churn".into())
+}
+
 /// Flat rows all reading one root signal, so a write re-runs the whole closure
 /// and every node is lowered fresh. The `nodecost.rs` `flat_app` shape.
+/// A small but realistic sheet: type rules, a class rule, a state rule and a
+/// descendant selector, so the cascade does real matching work per node.
+const SHEET: &str = "
+column { padding: 4px; }
+text { color: #202020; font-size: 14px; }
+.row { padding: 2px; }
+.row:hover { color: #0055cc; }
+column .row { margin: 1px; }
+";
+
 fn app() -> App {
-    App::new(move |cx| {
+    let churn = mode() == "churn";
+    let sheet = std::env::var("SHEET").is_ok();
+    let a = App::new(move |cx| {
         let bump = cx.signal("n", || 0i64).get(cx.runtime());
         let n = rows();
         let rows: Vec<_> = (0..n)
-            .map(|i| widgets::text(format!("row {i} · {bump}")))
+            .map(|i| {
+                let t = if churn {
+                    widgets::text(format!("row {i} · {bump}"))
+                } else {
+                    widgets::text(format!("row {i}"))
+                };
+                t.class("row")
+            })
             .collect();
         widgets::column(rows)
-    })
+    });
+    if sheet {
+        a.stylesheet(SHEET)
+    } else {
+        a
+    }
 }
 
 fn main() {
@@ -32,7 +64,7 @@ fn main() {
     for _ in 0..5 {
         h.pump();
     }
-    let mut bump = |h: &mut lumen_widgets::Headless| {
+    let bump = |h: &mut lumen_widgets::Headless| {
         let s: Signal<i64> = h.runtime().signal("n", || 0);
         s.update(h.runtime(), |v| *v += 1);
         h.pump()
@@ -51,7 +83,9 @@ fn main() {
     us.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let st = last.unwrap();
     println!(
-        "changed-frame\t{:.1}\t{:.1}\tnodes={} rebuilt={} copied={}",
+        "changed-frame[{}{}]\t{:.1}\t{:.1}\tnodes={} rebuilt={} copied={}",
+        mode(),
+        if std::env::var("SHEET").is_ok() { "+sheet" } else { "" },
         us[0],
         us[us.len() / 2],
         st.node_count,
