@@ -110,3 +110,49 @@ fn widget_symbols_are_covered_no_tofu() {
         "widget symbol set fully covered: {findings:?}"
     );
 }
+
+/// O0.12: the T.4 walk is gated on "has anything ever shaped with uncovered
+/// glyphs", because asking the shape cache about every text node cost 32% of a
+/// 4000-row frame to conclude that nothing was wrong.
+///
+/// The hazard the gate creates is tofu that appears *later*: an app that starts
+/// clean latches `false`, and if that answer were cached rather than re-derived
+/// the lint would be silently retired for the rest of the session. It is not —
+/// the flag is set on the shaping path, and a newly-shaped bad run sets it
+/// before the audit next reads it.
+#[test]
+fn tofu_appearing_after_a_clean_frame_is_still_reported() {
+    use lumen_core::state::Signal;
+    let mut h = lumen_widgets::App::new(|cx| {
+        let bad = cx.signal("bad", || false).get(cx.runtime());
+        lumen_widgets::col![lumen_widgets::widgets::text(if bad {
+            "now \u{E312} broken"
+        } else {
+            "all latin here"
+        })
+        .id("t")]
+    })
+    .run_headless(kurbo::Size::new(300.0, 200.0));
+    h.pump();
+
+    let tofu = |h: &mut lumen_widgets::Headless| {
+        h.lint().into_iter().filter(|d| d.code == "W0402").count()
+    };
+    assert_eq!(tofu(&mut h), 0, "the clean frame reports nothing");
+
+    // Non-vacuous: several clean frames first, so the fast path is definitely
+    // the one being taken when the bad text arrives.
+    for _ in 0..5 {
+        h.pump();
+    }
+    assert_eq!(tofu(&mut h), 0, "still clean after five frames");
+
+    let s: Signal<bool> = h.runtime().signal("bad", || false);
+    s.update(h.runtime(), |v| *v = true);
+    h.pump();
+    assert_eq!(
+        tofu(&mut h),
+        1,
+        "tofu introduced after a clean run must still be found"
+    );
+}

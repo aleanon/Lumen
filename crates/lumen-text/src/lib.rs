@@ -498,6 +498,18 @@ pub trait TextEngineApi {
         (0, 0, 0, 0)
     }
 
+    /// O0.12: has this engine ever shaped a run with uncovered (`.notdef`)
+    /// glyphs?
+    ///
+    /// The gate for the T.4 tofu audit. Answering "no" here lets that audit
+    /// skip a per-text-node walk of the whole tree — which is what it cost
+    /// before, every frame, to conclude nothing was wrong. Conservative by
+    /// construction: an engine that cannot tell says `true` and gets the full
+    /// walk, exactly as today.
+    fn tofu_seen(&self) -> bool {
+        true
+    }
+
     /// Register a font, returning its family name.
     fn register_font(&mut self, bytes: Vec<u8>) -> Option<String>;
 
@@ -645,6 +657,9 @@ impl TextEngineApi for TextEngine {
             self.run_cap,
         )
     }
+    fn tofu_seen(&self) -> bool {
+        self.tofu_seen
+    }
     fn register_font(&mut self, bytes: Vec<u8>) -> Option<String> {
         TextEngine::register_font(self, bytes)
     }
@@ -735,6 +750,11 @@ pub struct TextEngine {
     /// this crate has no `Runtime` handle; the GPU backend's `atlas_overflow`
     /// uses the same shape.
     thrashing: std::cell::Cell<bool>,
+    /// O0.12: has any run ever shaped with uncovered glyphs? Set on the
+    /// shaping path, never cleared — a false negative would silently retire
+    /// the W0402 lint, while a false positive only costs the scan that used to
+    /// run unconditionally.
+    tofu_seen: bool,
 }
 
 impl Default for TextEngine {
@@ -801,6 +821,7 @@ impl TextEngine {
             shape_cap: SHAPE_CACHE_CAP,
             run_cap: RUN_CACHE_CAP,
             thrashing: std::cell::Cell::new(false),
+            tofu_seen: false,
         }
     }
 
@@ -874,6 +895,16 @@ impl TextEngine {
             entry.epoch = self.epoch;
         } else {
             let block = self.layout(text, base.clone(), &[], max_width, align);
+            // O0.12: a run's tofu-ness is decided here, once, when it is
+            // actually shaped — and `missing_glyphs` is already on the block.
+            // The T.4 audit used to re-derive it by looking every text node up
+            // in this cache on every frame; a hit is ~286 ns because the values
+            // are large and the lookup is memory-bound, so that walk cost 32%
+            // of a 4000-row frame to answer "no" 4000 times. Latching it here
+            // lets the audit skip the walk entirely while the answer is no.
+            if block.missing_glyphs() > 0 {
+                self.tofu_seen = true;
+            }
             if self.shape_cache.len() >= self.shape_cap {
                 let o = sweep(
                     &mut self.shape_cache,

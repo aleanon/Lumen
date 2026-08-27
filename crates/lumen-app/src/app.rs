@@ -1584,7 +1584,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // animating?
             let _ = anims_running;
             self.allow_copy_forward = !visual_changed && !full_rebuild_forced();
-            self.rebuild(); // baselines force_rebuild + last_build_gen
+            self.rebuild(); //  baselines force_rebuild + last_build_gen
         } else if restyle_only {
             // restyle_visual already updated flags/styles/semantics/paint.
             //
@@ -2509,62 +2509,73 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
         }
         // T.4 tofu: any text node whose shaped block contains `.notdef`
-        // glyphs (chars no registered face covers). Shaping hits the cache,
-        // so this is a cheap walk on an already-rendered tree.
-        // Carry the node identity through the collect: without it a tofu
-        // finding named the offending *string* but not which element drew it,
-        // so two labels with the same missing glyph were indistinguishable.
-        type TofuTarget = (
-            NodeIndex,
-            Option<StableId>,
-            String,
-            lumen_text::TextStyle,
-            Option<f32>,
-        );
-        let texts: Vec<TofuTarget> = self
-            .meta
-            .iter()
-            .filter_map(|(node, m)| match &m.content {
-                NodeContent::Text(t, ts) if !t.is_empty() => {
-                    Some((*node, m.id.clone(), t.clone(), ts.clone(), m.wrap_width))
-                }
-                _ => None,
-            })
-            .collect();
-        let mut tofu_reported = 0usize;
-        let mut tofu_suppressed = 0usize;
-        for (node, id, t, ts, wrap) in texts {
-            // `shaped`, NOT `layout`. `layout` bypasses the cache entirely —
-            // it is the uncached primitive `shaped_by_key` calls on a miss — so
-            // this loop used to re-shape every text node in the tree from
-            // scratch on every `lint()`, under a comment claiming the
-            // opposite ("Shaping hits the cache, so this is a cheap walk").
-            // `ShapeKey` hashes exactly (text, style, wrap, align), which is
-            // what we hold here, so build/paint have already populated this
-            // entry for the current frame and this is an O(1) hit.
-            let missing = self.text.shaped(&t, &ts, wrap, ts.align).missing_glyphs();
-            if missing > 0 {
-                // O0.5: a page in an unsupported script is one missing font,
-                // not a thousand defects. The scan itself still visits every
-                // run — its cost is the (cached) shape lookup, not the
-                // reporting, and skipping runs would miss real tofu.
-                if tofu_reported >= cap {
-                    tofu_suppressed += 1;
+        // glyphs (chars no registered face covers).
+        //
+        // O0.12: this used to clone every text node's string, `TextStyle` and
+        // id into a `Vec` before looking any of them up — 4000 `String`
+        // allocations a frame on a 4000-row page — purely to release the
+        // `&self.meta` borrow before calling `&mut self.text`. The two are
+        // disjoint *fields*, so destructuring lets both borrows live at once
+        // and the staging vector disappears. What survives the scan is only
+        // the offenders, which is nearly always nothing, and the second pass
+        // formats those against `&self` (it needs `handle_for_index`).
+        let mut offenders: Vec<(NodeIndex, Option<StableId>, String, usize)> = Vec::new();
+        // O0.12: the walk below asks the shape cache about every text node, and
+        // a hit is ~286 ns because the cached values are large and the lookup
+        // is memory-bound — 32% of a 4000-row frame spent concluding that
+        // nothing was wrong. Whether anything IS wrong is decided once, when a
+        // run is shaped, so ask that instead and skip the walk entirely while
+        // the answer is no. `tofu_seen` is never cleared, so the walk returns
+        // the moment a real offender exists and stays exact from then on.
+        if self.text.tofu_seen() {
+            let Self { meta, text, .. } = self;
+            for (node, m) in meta.iter() {
+                let NodeContent::Text(t, ts) = &m.content else {
+                    continue;
+                };
+                if t.is_empty() {
                     continue;
                 }
-                tofu_reported += 1;
-                let d = lumen_core::Diagnostic::new(
-                    lumen_core::diagnostics::codes::W0402,
-                    format!(
-                        "tofu: {missing} glyph(s) in {t:?} not covered by any                          registered font — register a wider face                          (`App::font(bytes)`) or enable `pan-unicode`"
-                    ),
-                );
-                let d = match self.handle_for_index(node.index()) {
-                    Some(h) => d.with_target(h.to_wire(), id.as_ref()),
-                    None => d,
-                };
-                out.push(d);
+                // `shaped`, NOT `layout`. `layout` bypasses the cache entirely
+                // — it is the uncached primitive `shaped_by_key` calls on a
+                // miss — so this loop used to re-shape every text node in the
+                // tree from scratch on every `lint()`, under a comment claiming
+                // the opposite ("Shaping hits the cache, so this is a cheap
+                // walk"). `ShapeKey` hashes exactly (text, style, wrap, align),
+                // which is what we hold here, so build/paint have already
+                // populated this entry for the current frame and this is an
+                // O(1) hit.
+                let missing = text.shaped(t, ts, m.wrap_width, ts.align).missing_glyphs();
+                if missing > 0 {
+                    offenders.push((*node, m.id.clone(), t.clone(), missing));
+                }
             }
+        }
+        let mut tofu_reported = 0usize;
+        let mut tofu_suppressed = 0usize;
+        for (node, id, t, missing) in offenders {
+            // O0.5: a page in an unsupported script is one missing font,
+            // not a thousand defects. The scan itself still visits every
+            // run — its cost is the (cached) shape lookup, not the
+            // reporting, and skipping runs would miss real tofu.
+            if tofu_reported >= cap {
+                tofu_suppressed += 1;
+                continue;
+            }
+            tofu_reported += 1;
+            let d = lumen_core::Diagnostic::new(
+                lumen_core::diagnostics::codes::W0402,
+                format!(
+                    "tofu: {missing} glyph(s) in {t:?} not covered by any \
+                     registered font — register a wider face \
+                     (`App::font(bytes)`) or enable `pan-unicode`"
+                ),
+            );
+            let d = match self.handle_for_index(node.index()) {
+                Some(h) => d.with_target(h.to_wire(), id.as_ref()),
+                None => d,
+            };
+            out.push(d);
         }
         if tofu_suppressed > 0 {
             out.push(Self::suppressed_note(
