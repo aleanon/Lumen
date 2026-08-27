@@ -609,6 +609,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             node_text_metrics: HashMap::default(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
             sem_root: RefCell::new(None),
+            handle_index: RefCell::new(None),
             build_panic: None,
             focused_id: focused,
             hovered_id: None,
@@ -1047,6 +1048,18 @@ pub struct Headless<
     /// A rebuild now invalidates this; the first reader builds it and the rest
     /// share the `Rc`.
     sem_root: RefCell<Option<Rc<SemanticsNode>>>,
+    /// O0.4: node index → handle, built once per semantic tree.
+    ///
+    /// `handle_for_index` used to walk the whole semantic tree per call, and
+    /// every lint finding calls it once to attach a target handle. That is
+    /// O(nodes) per finding, so a frame with many findings is O(nodes^2) — and
+    /// findings are not rare: a column laid out taller than the window makes
+    /// **every** row an offscreen finding, which is the normal shape of a long
+    /// page. Measured on a 6600-node view: 35 ms in `offscreen_findings`
+    /// alone, 82% of the frame, on a frame whose memo was hitting perfectly.
+    ///
+    /// Derived from `sem_root`, so it is invalidated with it.
+    handle_index: RefCell<Option<Rc<HashMap<u32, lumen_core::identity::NodeHandle>>>>,
     /// If the last build panicked, the contained diagnostic (the previous good
     /// frame is kept). Cleared on the next successful build (C2 / T7.3).
     build_panic: Option<lumen_core::Diagnostic>,
@@ -3388,6 +3401,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         #[cfg(feature = "dev-observability")]
         self.sem_gen.set(self.sem_gen.get() + 1);
         self.elided_cache.borrow_mut().take();
+        // O0.4: derived from the tree, so it dies with it.
+        self.handle_index.borrow_mut().take();
         #[cfg(feature = "snapshot")]
         {
             *self.json_cache.borrow_mut() = [None, None];
@@ -5127,14 +5142,35 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             self.propagate_disabled(root, false);
         }
         // B.5: drop animations whose node id left the tree.
-        if !self.prop_anims.is_empty() {
-            let live: std::collections::HashSet<StableId> =
-                self.meta.values().filter_map(|m| m.id.clone()).collect();
+        //
+        // This sweep used to build a `HashSet` of *every node's* id, cloned,
+        // and it did it TWICE — once per registry — on every frame in which any
+        // animation was live. That is O(nodes) string clones and hash inserts
+        // to answer a question about one or two ids, and it was the dominant
+        // cost of an animated frame: measured at ~6.5 us per node on a 6600-node
+        // view whose memo was hitting perfectly (rebuilt=2, copied=6600), which
+        // is a dropped frame at 60 Hz caused by a single spinner.
+        //
+        // The registries are tiny, so the membership test is inverted: clone
+        // the few animating ids, then walk the nodes once and keep the ones
+        // still present. Same answer, one pass, no per-node clone.
+        if !self.prop_anims.is_empty() || !self.key_anims.is_empty() {
+            let animating: std::collections::HashSet<StableId> = self
+                .prop_anims
+                .keys()
+                .map(|(id, _)| id.clone())
+                .chain(self.key_anims.keys().cloned())
+                .collect();
+            let mut live: std::collections::HashSet<StableId> =
+                std::collections::HashSet::with_capacity(animating.len());
+            for m in self.meta.values() {
+                if let Some(id) = &m.id {
+                    if live.len() < animating.len() && animating.contains(id) {
+                        live.insert(id.clone());
+                    }
+                }
+            }
             self.prop_anims.retain(|(id, _), _| live.contains(id));
-        }
-        if !self.key_anims.is_empty() {
-            let live: std::collections::HashSet<StableId> =
-                self.meta.values().filter_map(|m| m.id.clone()).collect();
             self.key_anims.retain(|id, _| live.contains(id));
         }
         self.last_damage = self.paint();
@@ -7103,16 +7139,30 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
 
     /// ID1: arena index -> agent handle, via the semantic tree that holds both.
     fn handle_for_index(&self, index: u32) -> Option<lumen_core::identity::NodeHandle> {
+        self.handle_index_map().get(&index).copied()
+    }
+
+    /// O0.4: the index → handle map for the current semantic tree, built once.
+    ///
+    /// One walk per tree instead of one walk per lookup. See `handle_index`.
+    fn handle_index_map(&self) -> Rc<HashMap<u32, lumen_core::identity::NodeHandle>> {
+        if let Some(m) = self.handle_index.borrow().as_ref() {
+            return Rc::clone(m);
+        }
         fn walk(
             n: &lumen_core::semantics::SemanticsNode,
-            index: u32,
-        ) -> Option<lumen_core::identity::NodeHandle> {
-            if n.index == index {
-                return Some(n.node);
+            out: &mut HashMap<u32, lumen_core::identity::NodeHandle>,
+        ) {
+            out.insert(n.index, n.node);
+            for c in &n.children {
+                walk(c, out);
             }
-            n.children.iter().find_map(|c| walk(c, index))
         }
-        walk(&self.sem_root(), index)
+        let mut map = HashMap::default();
+        walk(&self.sem_root(), &mut map);
+        let built = Rc::new(map);
+        *self.handle_index.borrow_mut() = Some(Rc::clone(&built));
+        built
     }
 
     // --- semantics ----------------------------------------------------------
