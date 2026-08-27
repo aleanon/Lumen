@@ -2467,6 +2467,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 _ => None,
             })
             .collect();
+        let mut tofu_reported = 0usize;
+        let mut tofu_suppressed = 0usize;
         for (node, id, t, ts, wrap) in texts {
             // `shaped`, NOT `layout`. `layout` bypasses the cache entirely —
             // it is the uncached primitive `shaped_by_key` calls on a miss — so
@@ -2478,6 +2480,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // entry for the current frame and this is an O(1) hit.
             let missing = self.text.shaped(&t, &ts, wrap, ts.align).missing_glyphs();
             if missing > 0 {
+                // O0.5: a page in an unsupported script is one missing font,
+                // not a thousand defects. The scan itself still visits every
+                // run — its cost is the (cached) shape lookup, not the
+                // reporting, and skipping runs would miss real tofu.
+                if tofu_reported >= Self::MAX_PER_CODE {
+                    tofu_suppressed += 1;
+                    continue;
+                }
+                tofu_reported += 1;
                 let d = lumen_core::Diagnostic::new(
                     lumen_core::diagnostics::codes::W0402,
                     format!(
@@ -2490,6 +2501,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 };
                 out.push(d);
             }
+        }
+        if tofu_suppressed > 0 {
+            out.push(Self::suppressed_note(
+                lumen_core::diagnostics::codes::W0402,
+                tofu_reported,
+                tofu_suppressed,
+                "text runs with uncovered glyphs",
+            ));
         }
         // W0303: text that cannot be read at all. `contrast_report` already
         // measures APCA against the *composited* backdrop and binds each
@@ -2561,6 +2580,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// in a severity the type system cannot express.
     fn truncation_findings(&self) -> Vec<lumen_core::Diagnostic> {
         let mut out = Vec::new();
+        // O0.5: see MAX_PER_CODE — count past the cap, stop formatting.
+        let mut suppressed = 0usize;
         for (node, m) in self.meta.iter() {
             let Some(painted) = &m.display_text else {
                 continue;
@@ -2575,6 +2596,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 m.id.as_ref()
                     .map(|i| format!("`#{}`", i.as_str()))
                     .unwrap_or_else(|| "a text node".to_string());
+            if out.len() >= Self::MAX_PER_CODE {
+                suppressed += 1;
+                continue;
+            }
             let d = lumen_core::Diagnostic::new(
                 lumen_core::codes::W0403,
                 format!(
@@ -2591,6 +2616,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             out.push(d);
         }
         out.sort_by(|a, b| a.message.cmp(&b.message));
+        if suppressed > 0 {
+            out.push(Self::suppressed_note(
+                lumen_core::codes::W0403,
+                out.len(),
+                suppressed,
+                "truncated text runs",
+            ));
+        }
         out
     }
 
@@ -2946,9 +2979,50 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     ///
     /// In `lint()` rather than `audit.rs` because the window rect is runtime
     /// state, not something a `SemanticsNode` walk can see.
+    /// O0.5: how many findings of one code a frame reports before the rest are
+    /// summarised.
+    ///
+    /// A lint pass that walks every node can produce a finding per node, and
+    /// several do: a column laid out taller than the window makes *every* row
+    /// an offscreen finding, which is the ordinary shape of a long page. On a
+    /// 6600-node view that was 6372 diagnostics a frame, each with its own
+    /// formatted message — 10 ms of string building, every frame, describing
+    /// one fact 6372 times.
+    ///
+    /// Nobody can act on 6372 of anything. Fifty is well past the point of
+    /// diminishing returns for a human or an agent, and the summary keeps the
+    /// true total visible so a cap never reads as "only 50 of these exist".
+    const MAX_PER_CODE: usize = 50;
+
+    /// The line that replaces the findings a cap suppressed.
+    ///
+    /// Carries the real count, so the cap is transparent rather than silent —
+    /// a truncation the reader cannot see is worse than the flood.
+    fn suppressed_note(
+        code: &'static str,
+        shown: usize,
+        suppressed: usize,
+        what: &str,
+    ) -> lumen_core::Diagnostic {
+        lumen_core::Diagnostic::new(
+            code,
+            format!(
+                "{shown} of {} {what} reported; {suppressed} more suppressed. \
+                 A finding repeated this many times is one fact about the view, \
+                 not {} separate defects — fix the shared cause.",
+                shown + suppressed,
+                shown + suppressed
+            ),
+        )
+    }
+
     fn offscreen_findings(&self) -> Vec<lumen_core::Diagnostic> {
         let viewport = Rect::new(0.0, 0.0, self.size.width, self.size.height);
         let mut out = Vec::new();
+        // O0.5: keep counting past the cap — the predicate is cheap, the
+        // `format!` and handle lookup are not — so the summary stays accurate
+        // while the cost stops growing.
+        let mut suppressed = 0usize;
         for (node, m) in self.meta.iter() {
             // Same "claims to be for something" filter as W0111: a decorative
             // spacer parked off-canvas is not a defect worth interrupting for.
@@ -2970,6 +3044,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 && b.y0 < viewport.y1
                 && b.y1 > viewport.y0;
             if overlaps {
+                continue;
+            }
+            if out.len() >= Self::MAX_PER_CODE {
+                suppressed += 1;
                 continue;
             }
             let who =
@@ -2997,6 +3075,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             out.push(d);
         }
         out.sort_by(|a, b| a.message.cmp(&b.message));
+        if suppressed > 0 {
+            out.push(Self::suppressed_note(
+                lumen_core::codes::W0112,
+                out.len(),
+                suppressed,
+                "nodes laid out entirely offscreen",
+            ));
+        }
         out
     }
 
@@ -3041,6 +3127,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// `SemanticsNode` walk cannot see it.
     fn invisible_findings(&self) -> Vec<lumen_core::Diagnostic> {
         let mut out = Vec::new();
+        // O0.5: see MAX_PER_CODE — count past the cap, stop formatting.
+        let mut suppressed = 0usize;
         for (node, m) in self.meta.iter() {
             // Decorative fades must stay quiet, or the check gets ignored. Only
             // a node that claims to be *for* something is worth reporting:
@@ -3092,6 +3180,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             } else {
                 String::new()
             };
+            if out.len() >= Self::MAX_PER_CODE {
+                suppressed += 1;
+                continue;
+            }
             let d = lumen_core::Diagnostic::new(
                 lumen_core::codes::W0111,
                 format!(
@@ -3111,6 +3203,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // `self.meta` is a HashMap, so iteration order is unspecified —
         // without this the finding order would churn between runs.
         out.sort_by(|a, b| a.message.cmp(&b.message));
+        if suppressed > 0 {
+            out.push(Self::suppressed_note(
+                lumen_core::codes::W0111,
+                out.len(),
+                suppressed,
+                "invisible nodes",
+            ));
+        }
         out
     }
 
