@@ -629,7 +629,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             style_env: None,
             scope_spans: HashMap::default(),
             prev_spans: HashMap::default(),
-            node_layout_style: HashMap::default(),
             layout_scratch: P::Layout::default(),
             layout_reuse: false,
             allow_copy_forward: false,
@@ -1121,7 +1120,6 @@ pub struct Headless<
     prev_spans: HashMap<IdHash, SpanRec>,
     /// Final (post-css-merge) layout style per node — retained across frames
     /// so a spliced span never re-derives it from the element.
-    node_layout_style: HashMap<NodeIndex, LayoutStyle>,
     /// Whether this rebuild may copy spans forward (false on visual-state
     /// rebuilds: hover/focus/pressed styling must re-resolve).
     /// R6: the layout engine, retained across frames as scratch.
@@ -5122,7 +5120,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             meta.clear();
             self.node_style.clear();
             self.node_computed.clear();
-            self.node_layout_style.clear();
             // Every span record now names a dead node, so `splice_span` bails
             // and each scope is lowered normally — a mispredicted frame is
             // slower, never wrong.
@@ -5177,7 +5174,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             meta.remove(&n);
             self.node_style.remove(&n);
             self.node_computed.remove(&n);
-            self.node_layout_style.remove(&n);
             tree.free_one(n);
         }
         debug_assert_eq!(
@@ -6368,9 +6364,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         if pushed_disabled {
             self.disabled_count -= 1;
         }
-        // A.3.2: retain the final (post-css) layout style so a copied-forward
-        // span can rebuild its taffy nodes without re-deriving it.
-        self.node_layout_style.insert(node, style.clone());
+        // O0.9: the post-css `LayoutStyle` used to be retained here, for
+        // A.3.2's copy-forward path — a memo-hit span rebuilt its taffy nodes
+        // and wanted the derived style back rather than re-deriving it. F2.2
+        // replaced copy-forward with splice-in-place: a spliced span KEEPS its
+        // taffy nodes, so nothing rebuilds them and nothing read the map. It
+        // was still written for every node of every frame — a 598-byte clone
+        // plus a hash insert, and a hash remove per freed node — with no
+        // reader anywhere in the workspace.
         let lnode = if child_lnodes.is_empty() {
             layout.leaf(&style)
         } else {
