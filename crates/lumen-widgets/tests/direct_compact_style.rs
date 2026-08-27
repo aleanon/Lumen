@@ -11,8 +11,9 @@
 //! three screens away from the cause. So the round trip is exhaustive rather
 //! than illustrative: every field, set to a non-default value, at once.
 
-use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, FlexWrap, GridLine, GridTrack,
-                   LayoutStyle, Position};
+use lumen_layout::{
+    Align, Dim, Display, Edges, FlexDirection, FlexWrap, GridLine, GridTrack, LayoutStyle, Position,
+};
 use lumen_widgets::direct::CompactStyle;
 
 /// A style with **every** field moved off its default.
@@ -71,11 +72,33 @@ fn assert_same(a: &LayoutStyle, b: &LayoutStyle) {
         )*};
     }
     same!(
-        display, position, flex_direction, flex_wrap, flex_grow, flex_shrink,
-        flex_basis, align_items, align_self, align_content, justify_content,
-        row_gap, column_gap, width, height, min_width, min_height, max_width,
-        max_height, aspect_ratio, padding, margin, inset,
-        grid_template_columns, grid_template_rows, grid_column, grid_row,
+        display,
+        position,
+        flex_direction,
+        flex_wrap,
+        flex_grow,
+        flex_shrink,
+        flex_basis,
+        align_items,
+        align_self,
+        align_content,
+        justify_content,
+        row_gap,
+        column_gap,
+        width,
+        height,
+        min_width,
+        min_height,
+        max_width,
+        max_height,
+        aspect_ratio,
+        padding,
+        margin,
+        inset,
+        grid_template_columns,
+        grid_template_rows,
+        grid_column,
+        grid_row,
     );
 }
 
@@ -127,17 +150,83 @@ fn each_rare_field_alone_triggers_the_allocation() {
     // would be silently dropped for a node that set only it.
     let d = LayoutStyle::default();
     let cases: Vec<(&str, LayoutStyle)> = vec![
-        ("margin", LayoutStyle { margin: Edges::all(Dim::px(1.0)), ..d.clone() }),
-        ("inset", LayoutStyle { inset: Edges::all(Dim::px(1.0)), ..d.clone() }),
-        ("min_width", LayoutStyle { min_width: Dim::px(1.0), ..d.clone() }),
-        ("min_height", LayoutStyle { min_height: Dim::px(1.0), ..d.clone() }),
-        ("max_width", LayoutStyle { max_width: Dim::px(1.0), ..d.clone() }),
-        ("max_height", LayoutStyle { max_height: Dim::px(1.0), ..d.clone() }),
-        ("aspect_ratio", LayoutStyle { aspect_ratio: Some(2.0), ..d.clone() }),
-        ("grid_template_columns", LayoutStyle { grid_template_columns: vec![GridTrack::Fr(1.0)], ..d.clone() }),
-        ("grid_template_rows", LayoutStyle { grid_template_rows: vec![GridTrack::Fr(1.0)], ..d.clone() }),
-        ("grid_column", LayoutStyle { grid_column: (GridLine::Line(1), GridLine::Line(2)), ..d.clone() }),
-        ("grid_row", LayoutStyle { grid_row: (GridLine::Line(1), GridLine::Line(2)), ..d.clone() }),
+        (
+            "margin",
+            LayoutStyle {
+                margin: Edges::all(Dim::px(1.0)),
+                ..d.clone()
+            },
+        ),
+        (
+            "inset",
+            LayoutStyle {
+                inset: Edges::all(Dim::px(1.0)),
+                ..d.clone()
+            },
+        ),
+        (
+            "min_width",
+            LayoutStyle {
+                min_width: Dim::px(1.0),
+                ..d.clone()
+            },
+        ),
+        (
+            "min_height",
+            LayoutStyle {
+                min_height: Dim::px(1.0),
+                ..d.clone()
+            },
+        ),
+        (
+            "max_width",
+            LayoutStyle {
+                max_width: Dim::px(1.0),
+                ..d.clone()
+            },
+        ),
+        (
+            "max_height",
+            LayoutStyle {
+                max_height: Dim::px(1.0),
+                ..d.clone()
+            },
+        ),
+        (
+            "aspect_ratio",
+            LayoutStyle {
+                aspect_ratio: Some(2.0),
+                ..d.clone()
+            },
+        ),
+        (
+            "grid_template_columns",
+            LayoutStyle {
+                grid_template_columns: vec![GridTrack::Fr(1.0)],
+                ..d.clone()
+            },
+        ),
+        (
+            "grid_template_rows",
+            LayoutStyle {
+                grid_template_rows: vec![GridTrack::Fr(1.0)],
+                ..d.clone()
+            },
+        ),
+        (
+            "grid_column",
+            LayoutStyle {
+                grid_column: (GridLine::Line(1), GridLine::Line(2)),
+                ..d.clone()
+            },
+        ),
+        (
+            "grid_row",
+            LayoutStyle {
+                grid_row: (GridLine::Line(1), GridLine::Line(2)),
+                ..d.clone()
+            },
+        ),
     ];
     for (name, style) in cases {
         let c = CompactStyle::from_layout(&style);

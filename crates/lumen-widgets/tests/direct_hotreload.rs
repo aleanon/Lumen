@@ -48,7 +48,9 @@ fn frame(s: &mut TreeSink) {
     let mut lns = Vec::with_capacity(ROWS);
     for i in 0..ROWS {
         // The scope's own dependency never changes — only the stylesheet does.
-        let (_, ln) = root.sink().scope(Some(rn), i as u64, 1, move |s, p| row(s, p, i));
+        let (_, ln) = root
+            .sink()
+            .scope(Some(rn), i as u64, 1, move |s, p| row(s, p, i));
         lns.push(ln);
     }
     root.end(&LayoutStyle::default(), &lns, false);
@@ -72,7 +74,8 @@ fn a_stylesheet_edit_reaches_memoized_scopes() {
     // The bug: every scope's dep is unchanged, so without a sheet generation in
     // the splice guard all twelve rows splice and keep the OLD colour. That is
     // hot reload silently not reloading.
-    let mut s = TreeSink::new().with_styles(env(".row { background: #0000ff; }"), VisualState::default());
+    let mut s =
+        TreeSink::new().with_styles(env(".row { background: #0000ff; }"), VisualState::default());
     frame(&mut s);
     for bg in backgrounds(&s) {
         let c = bg.expect("styled");
@@ -105,7 +108,8 @@ fn an_unchanged_sheet_still_splices() {
     // The guard must key on the sheet's *content*, not on "someone called
     // set_stylesheet" — an editor that saves an unchanged file, or a watcher
     // that fires twice, must not cost a full rebuild.
-    let mut s = TreeSink::new().with_styles(env(".row { background: #0000ff; }"), VisualState::default());
+    let mut s =
+        TreeSink::new().with_styles(env(".row { background: #0000ff; }"), VisualState::default());
     frame(&mut s);
     s.set_stylesheet(env(".row { background: #0000ff; }"));
     frame(&mut s);
@@ -122,7 +126,8 @@ fn a_rejected_edit_leaves_the_live_styling_alone() {
     // `set_stylesheet` returns Failed and keeps the previous sheet live. The
     // sink must not invalidate anything on a rejected parse, or a typo mid-edit
     // would blank the screen.
-    let mut s = TreeSink::new().with_styles(env(".row { background: #0000ff; }"), VisualState::default());
+    let mut s =
+        TreeSink::new().with_styles(env(".row { background: #0000ff; }"), VisualState::default());
     frame(&mut s);
     let before = backgrounds(&s);
 
@@ -140,7 +145,8 @@ fn reload_cost_is_a_full_rebuild_and_that_is_the_honest_price() {
     // Direct lowering makes a sheet edit strictly more expensive than the
     // Element model, which re-styles cached elements without re-running
     // closures. This test states the cost rather than hiding it.
-    let mut s = TreeSink::new().with_styles(env(".row { background: #0000ff; }"), VisualState::default());
+    let mut s =
+        TreeSink::new().with_styles(env(".row { background: #0000ff; }"), VisualState::default());
     frame(&mut s);
     frame(&mut s);
     assert_eq!(s.stats().spliced, ROWS, "steady state is memoized");

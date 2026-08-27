@@ -36,7 +36,9 @@ fn frame(s: &mut TreeSink, now: f64) {
     let rn = root.index();
     let mut lns = Vec::with_capacity(ROWS);
     for i in 0..ROWS {
-        let (_, ln) = root.sink().scope(Some(rn), i as u64, 1, move |s, p| row(s, p, i));
+        let (_, ln) = root
+            .sink()
+            .scope(Some(rn), i as u64, 1, move |s, p| row(s, p, i));
         lns.push(ln);
     }
     root.end(&LayoutStyle::default(), &lns, false);
@@ -74,13 +76,14 @@ fn a_transition_blends_across_frames() {
     let mut seen = Vec::new();
     for t in [0.0, 25.0, 50.0, 75.0, 100.0] {
         frame(&mut s, t);
-        seen.push(background_of(&s, &format!("row{ANIMATED}")).expect("row exists").r);
+        seen.push(
+            background_of(&s, &format!("row{ANIMATED}"))
+                .expect("row exists")
+                .r,
+        );
     }
     for w in seen.windows(2) {
-        assert!(
-            w[1] >= w[0],
-            "the blend advances monotonically: {seen:?}"
-        );
+        assert!(w[1] >= w[0], "the blend advances monotonically: {seen:?}");
     }
     assert!(seen[0] < 0.1, "starts at the `from` colour: {seen:?}");
     assert!(seen[4] > 0.9, "reaches the `to` colour: {seen:?}");
@@ -133,7 +136,11 @@ fn only_the_animating_span_is_refused() {
     frame(&mut s, 20.0);
     let st = s.stats();
     assert_eq!(st.rebuilt, 1, "only the animating scope re-ran: {st:?}");
-    assert_eq!(st.spliced, ROWS - 1, "every other scope still spliced: {st:?}");
+    assert_eq!(
+        st.spliced,
+        ROWS - 1,
+        "every other scope still spliced: {st:?}"
+    );
 }
 
 #[test]

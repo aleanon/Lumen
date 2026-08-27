@@ -54,14 +54,26 @@ fn main() {
         ("height", count(&|s| s.height != d.height), 8),
         ("padding", count(&|s| s.padding != d.padding), 32),
         ("display", count(&|s| s.display != d.display), 1),
-        ("flex_direction", count(&|s| s.flex_direction != d.flex_direction), 1),
+        (
+            "flex_direction",
+            count(&|s| s.flex_direction != d.flex_direction),
+            1,
+        ),
         ("flex_grow", count(&|s| s.flex_grow != d.flex_grow), 4),
         ("flex_shrink", count(&|s| s.flex_shrink != d.flex_shrink), 4),
         ("flex_basis", count(&|s| s.flex_basis != d.flex_basis), 8),
         ("align_items", count(&|s| s.align_items != d.align_items), 2),
         ("align_self", count(&|s| s.align_self != d.align_self), 2),
-        ("align_content", count(&|s| s.align_content != d.align_content), 2),
-        ("justify_content", count(&|s| s.justify_content != d.justify_content), 2),
+        (
+            "align_content",
+            count(&|s| s.align_content != d.align_content),
+            2,
+        ),
+        (
+            "justify_content",
+            count(&|s| s.justify_content != d.justify_content),
+            2,
+        ),
         ("row_gap", count(&|s| s.row_gap != d.row_gap), 8),
         ("column_gap", count(&|s| s.column_gap != d.column_gap), 8),
         ("position", count(&|s| s.position != d.position), 1),
@@ -71,23 +83,49 @@ fn main() {
         ("min_height", count(&|s| s.min_height != d.min_height), 8),
         ("max_width", count(&|s| s.max_width != d.max_width), 8),
         ("max_height", count(&|s| s.max_height != d.max_height), 8),
-        ("aspect_ratio", count(&|s| s.aspect_ratio != d.aspect_ratio), 8),
+        (
+            "aspect_ratio",
+            count(&|s| s.aspect_ratio != d.aspect_ratio),
+            8,
+        ),
         ("flex_wrap", count(&|s| s.flex_wrap != d.flex_wrap), 1),
-        ("grid_template_columns", count(&|s| !s.grid_template_columns.is_empty()), 24),
-        ("grid_template_rows", count(&|s| !s.grid_template_rows.is_empty()), 24),
+        (
+            "grid_template_columns",
+            count(&|s| !s.grid_template_columns.is_empty()),
+            24,
+        ),
+        (
+            "grid_template_rows",
+            count(&|s| !s.grid_template_rows.is_empty()),
+            24,
+        ),
         ("grid_column", count(&|s| s.grid_column != d.grid_column), 8),
         ("grid_row", count(&|s| s.grid_row != d.grid_row), 8),
     ];
     rows.sort_by_key(|(_, c, _)| std::cmp::Reverse(*c));
-    println!("  {:<24}{:>8}{:>9}{:>8}", "field", "set", "of nodes", "bytes");
+    println!(
+        "  {:<24}{:>8}{:>9}{:>8}",
+        "field", "set", "of nodes", "bytes"
+    );
     for (name, c, b) in &rows {
         println!("  {:<24}{:>8}{:>8.1}%{:>8}", name, c, pct(*c), b);
     }
 
-    let cold: usize = rows.iter().filter(|(_, c, _)| pct(*c) < 5.0).map(|(_, _, b)| b).sum();
-    let hot: usize = rows.iter().filter(|(_, c, _)| pct(*c) >= 5.0).map(|(_, _, b)| b).sum();
+    let cold: usize = rows
+        .iter()
+        .filter(|(_, c, _)| pct(*c) < 5.0)
+        .map(|(_, _, b)| b)
+        .sum();
+    let hot: usize = rows
+        .iter()
+        .filter(|(_, c, _)| pct(*c) >= 5.0)
+        .map(|(_, _, b)| b)
+        .sum();
     println!("──────────────────────────────────────────────────────────────");
-    println!("  size_of::<LayoutStyle>()   : {:>5} B", std::mem::size_of::<LayoutStyle>());
+    println!(
+        "  size_of::<LayoutStyle>()   : {:>5} B",
+        std::mem::size_of::<LayoutStyle>()
+    );
     println!("  fields set by >=5% of nodes: {hot:>5} B");
     println!("  fields set by  <5% of nodes: {cold:>5} B   <- the split");
     println!();

@@ -101,10 +101,7 @@ fn a_dynamic_class_still_works_and_costs_once() {
 fn the_class_set_spills_correctly_past_its_inline_capacity() {
     // Three inline covers real nodes; the spill has to be right, not just fast.
     let mut s = TreeSink::new();
-    let syms: Vec<_> = ["a", "b", "c", "d", "e"]
-        .iter()
-        .map(|t| s.sym(t))
-        .collect();
+    let syms: Vec<_> = ["a", "b", "c", "d", "e"].iter().map(|t| s.sym(t)).collect();
     let n = {
         let mut d = s.node(None, Role::Group);
         for k in &syms {

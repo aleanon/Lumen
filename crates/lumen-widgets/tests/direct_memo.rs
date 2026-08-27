@@ -19,7 +19,12 @@ use lumen_widgets::{Button, Label};
 const ROWS: usize = 200;
 
 /// One row: a label whose text is its version, plus a button.
-fn row(sink: &mut TreeSink, parent: Option<lumen_core::NodeIndex>, i: usize, ver: u64) -> (lumen_core::NodeIndex, lumen_layout::LayoutNode) {
+fn row(
+    sink: &mut TreeSink,
+    parent: Option<lumen_core::NodeIndex>,
+    i: usize,
+    ver: u64,
+) -> (lumen_core::NodeIndex, lumen_layout::LayoutNode) {
     let mut open = sink.node(parent, Role::Group).elide(true).resolve();
     let a = open.child(Label::new(format!("row {i} v{ver}")));
     let b = open.child(Button::new("Open"));

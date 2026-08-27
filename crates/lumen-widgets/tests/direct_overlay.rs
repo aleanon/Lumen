@@ -75,7 +75,11 @@ fn a_scope_under_a_changed_ancestor_is_not_wrongly_reused() {
          the bug `span_ctx_hash` exists to prevent",
     );
     assert!(bg.r > 0.9 && bg.g < 0.1, "the button is red: {bg:?}");
-    assert_eq!(s.stats().rebuilt, 1, "the scope re-ran because its context changed");
+    assert_eq!(
+        s.stats().rebuilt,
+        1,
+        "the scope re-ran because its context changed"
+    );
 }
 
 #[test]
@@ -166,7 +170,11 @@ fn a_scope_moved_into_an_overlay_is_not_wrongly_reused() {
     assert_eq!(s.tree.z(flat), 0);
 
     build(&mut s, true);
-    assert_eq!(s.stats().rebuilt, 1, "moving into an overlay re-ran the scope");
+    assert_eq!(
+        s.stats().rebuilt,
+        1,
+        "moving into an overlay re-ran the scope"
+    );
     let inside = s
         .tree
         .subtree_preorder(s.tree.root())

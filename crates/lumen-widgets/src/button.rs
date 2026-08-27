@@ -61,10 +61,7 @@ impl Emphasis {
     /// `(fill, label)` for this emphasis.
     fn colors(self) -> (Color, Color) {
         match self {
-            Emphasis::Primary => (
-                Color::srgb8(0x1a, 0x73, 0xe8, 0xff),
-                Color::WHITE,
-            ),
+            Emphasis::Primary => (Color::srgb8(0x1a, 0x73, 0xe8, 0xff), Color::WHITE),
             Emphasis::Ghost => (
                 Color::srgb8(0xe9, 0xeb, 0xef, 0xff),
                 Color::srgb8(0x1f, 0x23, 0x29, 0xff),

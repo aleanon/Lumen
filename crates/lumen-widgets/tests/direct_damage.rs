@@ -148,7 +148,13 @@ fn a_spliced_frame_is_indistinguishable_from_a_fresh_one() {
     frame(&mut scratch, &versions, 18, 80.0);
 
     let (a, b) = (paintable(&inc), paintable(&scratch));
-    assert_eq!(a.len(), b.len(), "node counts differ: {} vs {}", a.len(), b.len());
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "node counts differ: {} vs {}",
+        a.len(),
+        b.len()
+    );
     for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
         assert_eq!(x, y, "node {i} differs after splicing");
     }

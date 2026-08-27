@@ -11,7 +11,10 @@ use lumen_widgets::{widgets, App};
 use std::time::Instant;
 
 fn rows() -> i64 {
-    std::env::var("ROWS").ok().and_then(|v| v.parse().ok()).unwrap_or(2000)
+    std::env::var("ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2000)
 }
 
 /// `churn` = every row's string is new every frame (100% shape-cache miss).
@@ -85,7 +88,11 @@ fn main() {
     println!(
         "changed-frame[{}{}]\t{:.1}\t{:.1}\tnodes={} rebuilt={} copied={}",
         mode(),
-        if std::env::var("SHEET").is_ok() { "+sheet" } else { "" },
+        if std::env::var("SHEET").is_ok() {
+            "+sheet"
+        } else {
+            ""
+        },
         us[0],
         us[us.len() / 2],
         st.node_count,

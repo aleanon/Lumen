@@ -161,7 +161,11 @@ impl Widget for Metric {
             common,
         } = self;
         let mut kids = vec![
-            Label::new(caption).size(13.0).color(ink()).width(96.0).into(),
+            Label::new(caption)
+                .size(13.0)
+                .color(ink())
+                .width(96.0)
+                .into(),
             gauge.build(),
         ];
         if let Some(button) = action {
@@ -189,7 +193,10 @@ fn view(cx: &mut BuildCx) -> Element {
     let card = Card::new(vec![
         // Ordinary composition — unchanged by the trait. `.into()` still works
         // because `From<W> for Element` is now a call to `Widget::build`.
-        Metric::new("api", 0.34).action("Restart", |_| {}).id("m-api").into(),
+        Metric::new("api", 0.34)
+            .action("Restart", |_| {})
+            .id("m-api")
+            .into(),
         Metric::new("queue", 0.91)
             .action("Drain", |_| {})
             .critical()
@@ -215,13 +222,19 @@ fn the_composition_builds_and_is_addressable() {
     h.pump();
 
     // Foreign widgets and composites are addressable exactly like built-ins.
-    assert!(h.node_bounds_by_id("m-api").is_some(), "composite is in the tree");
+    assert!(
+        h.node_bounds_by_id("m-api").is_some(),
+        "composite is in the tree"
+    );
     assert!(h.node_bounds_by_id("m-queue").is_some());
     h.assert_view_coherent();
 
     // `.critical()` reached into the held Gauge before it lowered.
     let doc = format!("{:?}", h.semantics_doc());
-    assert!(doc.contains("91%"), "the escalated gauge reports its value: {doc}");
+    assert!(
+        doc.contains("91%"),
+        "the escalated gauge reports its value: {doc}"
+    );
 
     if std::env::var_os("LUMEN_WRITE_SHOWCASE").is_some() {
         std::fs::write("/tmp/composition.png", h.screenshot().to_png()).unwrap();

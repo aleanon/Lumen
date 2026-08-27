@@ -144,7 +144,8 @@ fn a_real_widget_lowers_through_the_cascade() {
     s.end(root, &row_style(8.0, 0.0), &[a, b], false);
 
     assert_eq!(
-        s.meta.corner_radius(btn), 2.0,
+        s.meta.corner_radius(btn),
+        2.0,
         "the sheet overrode Button's own 8px radius"
     );
     let _ = lab;
@@ -166,9 +167,7 @@ fn a_real_widget_lowers_through_the_cascade() {
 fn a_caller_supplied_class_is_visible_to_the_cascade() {
     use lumen_widgets::ProgressBar;
     let mut s = sink(".metered { width: 640px; }");
-    let (n, _) = ProgressBar::new(0.5)
-        .class("metered")
-        .lower(&mut s, None);
+    let (n, _) = ProgressBar::new(0.5).class("metered").lower(&mut s, None);
     assert_eq!(
         s.meta.layout_style(n).width,
         lumen_layout::Dim::px(640.0),
@@ -176,7 +175,6 @@ fn a_caller_supplied_class_is_visible_to_the_cascade() {
          widget resolved before applying its Common"
     );
 }
-
 
 /// The one ordering mistake the type states cannot reject at compile time —
 /// beginning a node and never ending it — is caught positively instead.

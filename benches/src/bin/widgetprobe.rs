@@ -63,7 +63,12 @@ fn cost_of<T>(f: impl FnOnce() -> T) -> (T, usize, usize) {
 /// Resident set size in KiB, straight from the kernel.
 fn rss_kib() -> usize {
     let s = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
-    let pages: usize = s.split_whitespace().nth(1).unwrap_or("0").parse().unwrap_or(0);
+    let pages: usize = s
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or(0);
     pages * 4096 / 1024
 }
 
@@ -74,7 +79,10 @@ fn main() {
     println!("\nWT-EXP — widget value sizes (bytes)");
     println!("──────────────────────────────────────────────");
     println!("  Element        : {:>6}", std::mem::size_of::<Element>());
-    println!("  LayoutStyle    : {:>6}", std::mem::size_of::<lumen_layout::LayoutStyle>());
+    println!(
+        "  LayoutStyle    : {:>6}",
+        std::mem::size_of::<lumen_layout::LayoutStyle>()
+    );
     println!("  ---");
     println!("  Button         : {:>6}", std::mem::size_of::<Button>());
     println!("  Label          : {:>6}", std::mem::size_of::<Label>());
@@ -82,7 +90,10 @@ fn main() {
     println!("  Card           : {:>6}", std::mem::size_of::<Card>());
     println!("  Chip           : {:>6}", std::mem::size_of::<Chip>());
     println!("  CheckBox       : {:>6}", std::mem::size_of::<CheckBox>());
-    println!("  ProgressBar    : {:>6}", std::mem::size_of::<ProgressBar>());
+    println!(
+        "  ProgressBar    : {:>6}",
+        std::mem::size_of::<ProgressBar>()
+    );
 
     // --- 2. allocations, pure construction ---------------------------------
     // Warm the allocator arena first so first-touch growth isn't attributed.
@@ -149,12 +160,31 @@ fn main() {
 
     println!("\nWT-EXP — allocations to build {N} widgets");
     println!("──────────────────────────────────────────────────────────────");
-    println!("  button_1k   : {btn_a:>7} allocs  {:>7} KiB   ({:.1}/widget)", btn_b / 1024, btn_a as f64 / N as f64);
-    println!("  label_1k    : {lbl_a:>7} allocs  {:>7} KiB   ({:.1}/widget)", lbl_b / 1024, lbl_a as f64 / N as f64);
-    println!("  card_1k     : {card_a:>7} allocs  {:>7} KiB   ({:.1}/widget)", card_b / 1024, card_a as f64 / N as f64);
-    println!("  progress_1k : {prog_a:>7} allocs  {:>7} KiB   ({:.1}/widget)", prog_b / 1024, prog_a as f64 / N as f64);
-    println!("  mixed_1k    : {mix_a:>7} allocs  {:>7} KiB   ({:.1}/row)", mix_b / 1024, mix_a as f64 / N as f64);
-
+    println!(
+        "  button_1k   : {btn_a:>7} allocs  {:>7} KiB   ({:.1}/widget)",
+        btn_b / 1024,
+        btn_a as f64 / N as f64
+    );
+    println!(
+        "  label_1k    : {lbl_a:>7} allocs  {:>7} KiB   ({:.1}/widget)",
+        lbl_b / 1024,
+        lbl_a as f64 / N as f64
+    );
+    println!(
+        "  card_1k     : {card_a:>7} allocs  {:>7} KiB   ({:.1}/widget)",
+        card_b / 1024,
+        card_a as f64 / N as f64
+    );
+    println!(
+        "  progress_1k : {prog_a:>7} allocs  {:>7} KiB   ({:.1}/widget)",
+        prog_b / 1024,
+        prog_a as f64 / N as f64
+    );
+    println!(
+        "  mixed_1k    : {mix_a:>7} allocs  {:>7} KiB   ({:.1}/row)",
+        mix_b / 1024,
+        mix_a as f64 / N as f64
+    );
 
     // The universal modifiers, priced separately. `.class()`/`.style()`/`.css()`
     // are the ones the deferred model routes through a boxed `Rare` record, so
@@ -166,7 +196,9 @@ fn main() {
         v.len()
     });
     let (_, id_a, id_b) = cost_of(|| {
-        let v: Vec<Element> = (0..N).map(|_| Button::new("Save").id("btn").into()).collect();
+        let v: Vec<Element> = (0..N)
+            .map(|_| Button::new("Save").id("btn").into())
+            .collect();
         v.len()
     });
     let (_, sty_a, sty_b) = cost_of(|| {
@@ -185,10 +217,22 @@ fn main() {
     });
     println!("\nWT-EXP — universal modifiers, allocations per {N} buttons");
     println!("──────────────────────────────────────────────────────────────");
-    println!("  no modifier   : {bare_a:>7} allocs  {:>7} KiB", bare_b / 1024);
-    println!("  .id(\"btn\")    : {id_a:>7} allocs  {:>7} KiB", id_b / 1024);
-    println!("  .class(\"x\")   : {cls_a:>7} allocs  {:>7} KiB", cls_b / 1024);
-    println!("  .style(..)     : {sty_a:>7} allocs  {:>7} KiB", sty_b / 1024);
+    println!(
+        "  no modifier   : {bare_a:>7} allocs  {:>7} KiB",
+        bare_b / 1024
+    );
+    println!(
+        "  .id(\"btn\")    : {id_a:>7} allocs  {:>7} KiB",
+        id_b / 1024
+    );
+    println!(
+        "  .class(\"x\")   : {cls_a:>7} allocs  {:>7} KiB",
+        cls_b / 1024
+    );
+    println!(
+        "  .style(..)     : {sty_a:>7} allocs  {:>7} KiB",
+        sty_b / 1024
+    );
 
     // --- 3. allocations + RSS for a real frame ------------------------------
     let rss_before = rss_kib();
@@ -214,11 +258,23 @@ fn main() {
 
     println!("\nWT-EXP — 500 typed-widget rows (1500 widgets, ~3500 nodes)");
     println!("──────────────────────────────────────────────────────────────");
-    println!("  changed frame : {frame_a:>7} allocs  {:>7} KiB", frame_b / 1024);
-    println!("  idle pump     : {idle_a:>7} allocs  {:>7} KiB", idle_b / 1024);
+    println!(
+        "  changed frame : {frame_a:>7} allocs  {:>7} KiB",
+        frame_b / 1024
+    );
+    println!(
+        "  idle pump     : {idle_a:>7} allocs  {:>7} KiB",
+        idle_b / 1024
+    );
     println!("  RSS at start  : {rss_before:>7} KiB");
-    println!("  RSS with app  : {rss_live:>7} KiB   (+{} KiB)", rss_live.saturating_sub(rss_before));
-    println!("  RSS at end    : {rss_after:>7} KiB   (+{} KiB)", rss_after.saturating_sub(rss_before));
+    println!(
+        "  RSS with app  : {rss_live:>7} KiB   (+{} KiB)",
+        rss_live.saturating_sub(rss_before)
+    );
+    println!(
+        "  RSS at end    : {rss_after:>7} KiB   (+{} KiB)",
+        rss_after.saturating_sub(rss_before)
+    );
     println!();
 
     // --- 4. the prize on the table: peak TRANSIENT Element memory ----------
@@ -233,12 +289,25 @@ fn main() {
     println!("──────────────────────────────────────────────────────────────");
     println!("  nodes in the frame        : {nodes:>9}");
     println!("  size_of::<Element>()      : {el:>9} B");
-    println!("  peak inline Element bytes : {:>9.2} MB", (nodes * el) as f64 / 1048576.0);
-    println!("  …as a share of app RSS    : {:>8.1}%", (nodes * el) as f64 / ((rss_live - rss_before) * 1024) as f64 * 100.0);
+    println!(
+        "  peak inline Element bytes : {:>9.2} MB",
+        (nodes * el) as f64 / 1048576.0
+    );
+    println!(
+        "  …as a share of app RSS    : {:>8.1}%",
+        (nodes * el) as f64 / ((rss_live - rss_before) * 1024) as f64 * 100.0
+    );
     println!("  if each node were Box<dyn Widget> (16 B inline + ~150 B heap):");
-    println!("    peak bytes              : {:>9.2} MB", (nodes * 166) as f64 / 1048576.0);
-    println!("    extra allocations/frame : {:>9}  (+{:.1}% on {} today)",
-        nodes, nodes as f64 / frame_a as f64 * 100.0, frame_a);
+    println!(
+        "    peak bytes              : {:>9.2} MB",
+        (nodes * 166) as f64 / 1048576.0
+    );
+    println!(
+        "    extra allocations/frame : {:>9}  (+{:.1}% on {} today)",
+        nodes,
+        nodes as f64 / frame_a as f64 * 100.0,
+        frame_a
+    );
 
     std::hint::black_box(&h);
 }

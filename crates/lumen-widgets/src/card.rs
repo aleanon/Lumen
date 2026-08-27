@@ -108,7 +108,11 @@ impl Widget for Card {
 
         let activatable = on_press.is_some();
         let mut el = Element {
-            role: if activatable { Role::Button } else { Role::Group },
+            role: if activatable {
+                Role::Button
+            } else {
+                Role::Group
+            },
             label,
             focusable: activatable,
             actions: if activatable {

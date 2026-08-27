@@ -525,7 +525,11 @@ pub fn lowered_eq(a: &TreeSink, b: &TreeSink) -> Result<(), String> {
             return Err(format!("{n:?} missing from the other lowering"));
         }
         if a.meta.role(n) != b.meta.role(n) {
-            return Err(format!("{n:?} role {:?} vs {:?}", a.meta.role(n), b.meta.role(n)));
+            return Err(format!(
+                "{n:?} role {:?} vs {:?}",
+                a.meta.role(n),
+                b.meta.role(n)
+            ));
         }
         if a.meta.label(n) != b.meta.label(n) {
             return Err(format!(
@@ -900,9 +904,7 @@ impl TreeSink {
         // B.6a: interaction states carry their CSS-familiar aliases, and the
         // widget's semantic states are style-matchable too.
         let mut states = Vec::new();
-        let matches_visual = |v: &Option<StableId>| {
-            matches!((id_str.as_deref(), v.as_ref()), (Some(a), Some(b)) if a == b.as_str())
-        };
+        let matches_visual = |v: &Option<StableId>| matches!((id_str.as_deref(), v.as_ref()), (Some(a), Some(b)) if a == b.as_str());
         if matches_visual(&self.visual.focused) {
             states.push("focused".to_string());
             states.push("focus".to_string());
@@ -1220,7 +1222,10 @@ impl TreeSink {
             "{} node(s) were begun and never ended; they are in the tree with \
              no semantics record: {:?}",
             self.open.len(),
-            self.open.iter().map(|(n, m, _)| (*n, m.role)).collect::<Vec<_>>()
+            self.open
+                .iter()
+                .map(|(n, m, _)| (*n, m.role))
+                .collect::<Vec<_>>()
         );
         assert!(
             self.desc_stack.is_empty(),
@@ -1409,7 +1414,6 @@ impl TreeSink {
     }
 }
 
-
 // --- P1: text measurement feeding layout -----------------------------------
 //
 // `build_node` shapes a text leaf and writes a fixed size onto the style before
@@ -1483,7 +1487,6 @@ fn dim_px(d: Dim) -> f64 {
     }
 }
 
-
 // --- P2: overlay routing, and the context a splice must match --------------
 //
 // The engine guards every splice with `span_ctx_hash`: the ancestor chain, the
@@ -1554,7 +1557,6 @@ impl TreeSink {
         h.finish128()
     }
 }
-
 
 // --- P3: transitions, and their coupling to memoization --------------------
 //
@@ -1674,12 +1676,10 @@ impl TreeSink {
             let Some(id) = self.meta.string_id(n) else {
                 return false;
             };
-            self.anims.contains_key(id)
-                || self.key_anims.get(id).is_some_and(|(_, done)| !done)
+            self.anims.contains_key(id) || self.key_anims.get(id).is_some_and(|(_, done)| !done)
         })
     }
 }
-
 
 // --- P5: hot reload --------------------------------------------------------
 //
@@ -2477,7 +2477,9 @@ impl CompactStyle {
             max_width: r.map_or(d.max_width, |r| r.max_width),
             max_height: r.map_or(d.max_height, |r| r.max_height),
             aspect_ratio: r.and_then(|r| r.aspect_ratio),
-            grid_template_columns: r.map(|r| r.grid_template_columns.clone()).unwrap_or_default(),
+            grid_template_columns: r
+                .map(|r| r.grid_template_columns.clone())
+                .unwrap_or_default(),
             grid_template_rows: r.map(|r| r.grid_template_rows.clone()).unwrap_or_default(),
             grid_column: r.map_or(d.grid_column, |r| r.grid_column),
             grid_row: r.map_or(d.grid_row, |r| r.grid_row),

@@ -17,7 +17,12 @@ const ROWS: usize = 500;
 const WARMUP: usize = 10;
 const SAMPLES: usize = 60;
 
-fn row(sink: &mut TreeSink, parent: Option<NodeIndex>, i: usize, ver: u64) -> (NodeIndex, LayoutNode) {
+fn row(
+    sink: &mut TreeSink,
+    parent: Option<NodeIndex>,
+    i: usize,
+    ver: u64,
+) -> (NodeIndex, LayoutNode) {
     let animated = ANIM_ROWS.with(|c| c.get()) > i;
     let mut d = sink
         .node(parent, lumen_core::semantics::Role::Group)
@@ -35,7 +40,9 @@ fn row(sink: &mut TreeSink, parent: Option<NodeIndex>, i: usize, ver: u64) -> (N
 
 fn frame(sink: &mut TreeSink, versions: &[u64]) {
     sink.begin_frame();
-    let mut root = sink.node(None, lumen_core::semantics::Role::Group).resolve();
+    let mut root = sink
+        .node(None, lumen_core::semantics::Role::Group)
+        .resolve();
     let rn = root.index();
     let mut lns = Vec::with_capacity(ROWS);
     for (i, &ver) in versions.iter().enumerate().take(ROWS) {
@@ -71,8 +78,20 @@ fn animated_sink(spinners: usize) -> TreeSink {
     s.add_keyframes(
         "pulse",
         vec![
-            (0.0, KeyStop { background: Some(lumen_core::Color::srgb8(0,0,0,255)), ..KeyStop::default() }),
-            (1.0, KeyStop { background: Some(lumen_core::Color::srgb8(255,255,255,255)), ..KeyStop::default() }),
+            (
+                0.0,
+                KeyStop {
+                    background: Some(lumen_core::Color::srgb8(0, 0, 0, 255)),
+                    ..KeyStop::default()
+                },
+            ),
+            (
+                1.0,
+                KeyStop {
+                    background: Some(lumen_core::Color::srgb8(255, 255, 255, 255)),
+                    ..KeyStop::default()
+                },
+            ),
         ],
     );
     ANIM_ROWS.with(|c| c.set(spinners));
@@ -93,7 +112,9 @@ fn main() {
     let reload = mode == "reload";
 
     // `anim<N>`: N rows carry an infinite timeline; the rest are memoizable.
-    let anim_n = mode.strip_prefix("anim").and_then(|n| n.parse::<usize>().ok());
+    let anim_n = mode
+        .strip_prefix("anim")
+        .and_then(|n| n.parse::<usize>().ok());
     let mut sink = if let Some(k) = anim_n {
         animated_sink(k)
     } else if reload {

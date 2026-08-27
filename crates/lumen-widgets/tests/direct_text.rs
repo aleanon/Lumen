@@ -74,7 +74,10 @@ fn an_explicit_width_is_never_overwritten_by_measurement() {
     // `build_node` documents this as costing real bugs: a fixed width must
     // survive, and only the wrapped height comes from the block.
     let mut s = sink();
-    let st = direct_label(&mut s, Label::new("a long paragraph that will wrap").width(120.0));
+    let st = direct_label(
+        &mut s,
+        Label::new("a long paragraph that will wrap").width(120.0),
+    );
     assert_eq!(st.width, Dim::px(120.0), "the author's width survived");
     match st.height {
         Dim::Px(h) => assert!(h > 5.0, "height came from the wrapped block"),
@@ -98,10 +101,7 @@ fn wrapping_makes_a_paragraph_taller_than_one_line() {
             _ => panic!(),
         },
     );
-    assert!(
-        h2 > h1,
-        "a narrower box wraps to more lines: {h1} vs {h2}"
-    );
+    assert!(h2 > h1, "a narrower box wraps to more lines: {h1} vs {h2}");
 }
 
 #[test]
@@ -137,15 +137,16 @@ fn a_percentage_width_does_not_feed_the_wrap_width() {
     // measurement — so a percentage-width label lays out as one unwrapped line.
     let mut s = sink();
     use lumen_widgets::direct::Direct;
-    let (n, _) = Label::new("word ".repeat(20))
-        .lower(&mut s, None);
+    let (n, _) = Label::new("word ".repeat(20)).lower(&mut s, None);
     let auto_h = match s.meta.layout_style(n).height {
         Dim::Px(v) => v,
         _ => panic!(),
     };
 
     let mut s2 = sink();
-    let pct = s2.node(None, Role::Text).text("word ".repeat(20), Default::default());
+    let pct = s2
+        .node(None, Role::Text)
+        .text("word ".repeat(20), Default::default());
     let node = pct.resolve();
     let idx = node.index();
     node.end(

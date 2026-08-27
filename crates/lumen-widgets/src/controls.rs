@@ -661,10 +661,12 @@ impl Widget for Stepper {
         // W4: child ids are namespaced under `name` — hardcoded "dec"/"inc"/
         // "value" made two steppers on one screen collide (W0001), and the
         // agent would drive whichever came first.
-        let dec = crate::widgets::button("-", move |rt| value.update(rt, |x| *x = (*x - 1).max(min)))
-            .id(format!("{name}-dec"));
-        let inc = crate::widgets::button("+", move |rt| value.update(rt, |x| *x = (*x + 1).min(max)))
-            .id(format!("{name}-inc"));
+        let dec =
+            crate::widgets::button("-", move |rt| value.update(rt, |x| *x = (*x - 1).max(min)))
+                .id(format!("{name}-dec"));
+        let inc =
+            crate::widgets::button("+", move |rt| value.update(rt, |x| *x = (*x + 1).min(max)))
+                .id(format!("{name}-inc"));
         let mut el = Element {
             role: Role::Group,
             label: format!("{v}"),

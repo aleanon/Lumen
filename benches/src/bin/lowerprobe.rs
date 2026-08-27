@@ -78,7 +78,9 @@ fn lower_direct() -> TreeSink {
     let mut lns = Vec::with_capacity(ROWS);
     for i in 0..ROWS {
         let n = begin_row(&mut sink, Some(root));
-        let (_, a) = Label::new(format!("row {i}")).size(14.0).lower(&mut sink, Some(n));
+        let (_, a) = Label::new(format!("row {i}"))
+            .size(14.0)
+            .lower(&mut sink, Some(n));
         let (_, b) = ProgressBar::new(i as f64 / ROWS as f64).lower(&mut sink, Some(n));
         let (_, c) = Button::new("Open")
             .ghost()
@@ -146,27 +148,50 @@ fn main() {
         sink
     });
     println!("\n  phase split (Element path)");
-    println!("    peak while BUILDING the staging tree : {:>6.2} MB", peak_build as f64 / 1048576.0);
-    println!("    peak while WALKING it into the sink  : {:>6.2} MB", peak_walk as f64 / 1048576.0);
-    println!("    sum if both were alive at once       : {:>6.2} MB", (peak_build + peak_walk) as f64 / 1048576.0);
+    println!(
+        "    peak while BUILDING the staging tree : {:>6.2} MB",
+        peak_build as f64 / 1048576.0
+    );
+    println!(
+        "    peak while WALKING it into the sink  : {:>6.2} MB",
+        peak_walk as f64 / 1048576.0
+    );
+    println!(
+        "    sum if both were alive at once       : {:>6.2} MB",
+        (peak_build + peak_walk) as f64 / 1048576.0
+    );
 
     let el = std::mem::size_of::<Element>();
     println!("──────────────────────────────────────────────────────────────");
     println!("  size_of::<Element>()       : {el:>9} B");
-    println!("  staging cost if materialized: {:>8.2} MB   ({nodes} x {el} B)",
-        (nodes * el) as f64 / 1048576.0);
+    println!(
+        "  staging cost if materialized: {:>8.2} MB   ({nodes} x {el} B)",
+        (nodes * el) as f64 / 1048576.0
+    );
     println!();
     println!("  {:<26}{:>12}{:>12}", "", "via_element", "direct");
     println!("  {:<26}{:>12}{:>12}", "allocations", alloc_a, alloc_b);
-    println!("  {:<26}{:>11.2}{:>11.2}", "total bytes (MB)",
-        bytes_a as f64 / 1048576.0, bytes_b as f64 / 1048576.0);
-    println!("  {:<26}{:>11.2}{:>11.2}", "PEAK live bytes (MB)",
-        peak_a as f64 / 1048576.0, peak_b as f64 / 1048576.0);
+    println!(
+        "  {:<26}{:>11.2}{:>11.2}",
+        "total bytes (MB)",
+        bytes_a as f64 / 1048576.0,
+        bytes_b as f64 / 1048576.0
+    );
+    println!(
+        "  {:<26}{:>11.2}{:>11.2}",
+        "PEAK live bytes (MB)",
+        peak_a as f64 / 1048576.0,
+        peak_b as f64 / 1048576.0
+    );
     println!("──────────────────────────────────────────────────────────────");
-    println!("  peak reduction            : {:>8.2}x   ({:+.1}%)",
+    println!(
+        "  peak reduction            : {:>8.2}x   ({:+.1}%)",
         peak_a as f64 / peak_b.max(1) as f64,
-        (peak_b as f64 - peak_a as f64) / peak_a as f64 * 100.0);
-    println!("  allocation change         : {:>+8.1}%", 
-        (alloc_b as f64 - alloc_a as f64) / alloc_a as f64 * 100.0);
+        (peak_b as f64 - peak_a as f64) / peak_a as f64 * 100.0
+    );
+    println!(
+        "  allocation change         : {:>+8.1}%",
+        (alloc_b as f64 - alloc_a as f64) / alloc_a as f64 * 100.0
+    );
     println!();
 }

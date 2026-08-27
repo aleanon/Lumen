@@ -106,7 +106,10 @@ fn the_cold_half_is_allocated_only_when_used() {
     s.cold_mut(rich).label = "Name".to_string();
     assert_eq!(s.cold_count(), 1, "only the node that needed it pays");
     assert_eq!(s.cold(rich).map(|c| c.label.as_str()), Some("Name"));
-    assert!(s.cold(plain).is_none(), "and the plain node still pays nothing");
+    assert!(
+        s.cold(plain).is_none(),
+        "and the plain node still pays nothing"
+    );
 }
 
 #[test]

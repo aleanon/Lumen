@@ -2,9 +2,9 @@
 //! built-ins on equal terms? That is the extensibility question the trait
 //! exists to answer, so it gets a test rather than an assurance.
 
-use lumen_widgets::{impl_widget, widgets, App, Button, Common, Container, Element, Label, Widget};
 use lumen_core::geometry::Size;
 use lumen_core::semantics::Role;
+use lumen_widgets::{impl_widget, widgets, App, Button, Common, Container, Element, Label, Widget};
 
 /// A widget defined here, not in `lumen-widgets`: a labelled statistic.
 /// It stores only what it needs — two strings and a flag — and lowers on demand.
@@ -63,9 +63,15 @@ fn a_foreign_widget_composes_with_the_built_ins() {
     h.pump();
 
     let text = format!("{:?}", h.semantics_doc());
-    assert!(text.contains("Requests"), "foreign widget reached semantics: {text}");
+    assert!(
+        text.contains("Requests"),
+        "foreign widget reached semantics: {text}"
+    );
     assert!(text.contains("1,204"));
-    assert!(text.contains("Refresh"), "built-in still present alongside it");
+    assert!(
+        text.contains("Refresh"),
+        "built-in still present alongside it"
+    );
     h.assert_view_coherent();
 }
 
@@ -100,7 +106,6 @@ fn a_foreign_widget_can_defer_built_in_widgets() {
     let text = format!("{:?}", h.semantics_doc());
     assert!(text.contains("Name") && text.contains("Edit"), "{text}");
 }
-
 
 /// A foreign widget that opts into the shared vocabulary via `impl_widget!`.
 ///
@@ -151,8 +156,14 @@ fn a_foreign_widget_inherits_the_universal_modifiers() {
     // `disabled` also dims — the behaviour a hand-rolled widget would have to
     // reimplement, and would probably forget.
     let bg = el.background.expect("background applied");
-    assert!(bg.r > 0.5 && bg.g > 0.5, "disabled washed the fill toward the page");
-    assert_eq!(el.cursor, None, "a disabled control advertises no pointer shape");
+    assert!(
+        bg.r > 0.5 && bg.g > 0.5,
+        "disabled washed the fill toward the page"
+    );
+    assert_eq!(
+        el.cursor, None,
+        "a disabled control advertises no pointer shape"
+    );
 }
 
 #[test]

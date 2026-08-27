@@ -33,12 +33,29 @@ fn blue() -> Color {
 /// `red -> green -> blue` at 0 / 50 / 100 percent.
 fn three_stops() -> Vec<(f32, KeyStop)> {
     vec![
-        (0.0, KeyStop { background: Some(red()), ..KeyStop::default() }),
-        (0.5, KeyStop { background: Some(green()), ..KeyStop::default() }),
-        (1.0, KeyStop { background: Some(blue()), ..KeyStop::default() }),
+        (
+            0.0,
+            KeyStop {
+                background: Some(red()),
+                ..KeyStop::default()
+            },
+        ),
+        (
+            0.5,
+            KeyStop {
+                background: Some(green()),
+                ..KeyStop::default()
+            },
+        ),
+        (
+            1.0,
+            KeyStop {
+                background: Some(blue()),
+                ..KeyStop::default()
+            },
+        ),
     ]
 }
-
 
 /// A sheet that plays `pulse` on `.anim`.
 fn sheet(count: Option<f32>) -> String {
@@ -75,7 +92,9 @@ fn frame(s: &mut TreeSink, now: f64) {
     let rn = root.index();
     let mut lns = Vec::with_capacity(ROWS);
     for i in 0..ROWS {
-        let (_, ln) = root.sink().scope(Some(rn), i as u64, 1, move |s, p| row(s, p, i));
+        let (_, ln) = root
+            .sink()
+            .scope(Some(rn), i as u64, 1, move |s, p| row(s, p, i));
         lns.push(ln);
     }
     root.end(&LayoutStyle::default(), &lns, false);
@@ -101,9 +120,15 @@ fn sampling_lands_between_the_bracketing_pair() {
     // at 25% the value is between stop 0 and stop 1, never stop 0 and stop 2.
     let s = three_stops();
     let q = sample_timeline(&s, 0.25).background.unwrap();
-    assert!(q.r > 0.4 && q.r < 0.6, "halfway from red toward green: {q:?}");
+    assert!(
+        q.r > 0.4 && q.r < 0.6,
+        "halfway from red toward green: {q:?}"
+    );
     assert!(q.g > 0.4 && q.g < 0.6, "{q:?}");
-    assert!(q.b < 0.01, "blue is the FAR stop and must not leak in: {q:?}");
+    assert!(
+        q.b < 0.01,
+        "blue is the FAR stop and must not leak in: {q:?}"
+    );
 
     let q = sample_timeline(&s, 0.75).background.unwrap();
     assert!(q.r < 0.01, "red is now the far stop: {q:?}");
@@ -137,11 +162,7 @@ fn a_timeline_advances_across_frames() {
     }
     assert!(seen[0].r > 0.9, "starts red: {:?}", seen[0]);
     assert!(seen[2].g > 0.9, "green at the midpoint: {:?}", seen[2]);
-    assert!(
-        seen[3].b > 0.4,
-        "heading toward blue by 75%: {:?}",
-        seen[3]
-    );
+    assert!(seen[3].b > 0.4, "heading toward blue by 75%: {:?}", seen[3]);
 }
 
 #[test]

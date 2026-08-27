@@ -363,9 +363,8 @@ impl Widget for Chip {
             };
         }
 
-        let mut children = Vec::with_capacity(
-            1 + usize::from(icon.is_some()) + usize::from(on_remove.is_some()),
-        );
+        let mut children =
+            Vec::with_capacity(1 + usize::from(icon.is_some()) + usize::from(on_remove.is_some()));
         if let Some(glyph) = icon {
             let mut ic: Element = crate::Icon::new(&glyph).into();
             ic.style.width = Dim::px(14.0);

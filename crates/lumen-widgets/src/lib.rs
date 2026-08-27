@@ -53,17 +53,17 @@ pub mod sheet;
 pub mod slider;
 pub mod space;
 pub use lumen_app::system;
-pub mod text_field;
-pub mod text_input;
-pub mod theme;
-pub mod undo;
-pub mod wcag;
 /// The [`Widget`] trait: a typed widget is data, lowered to an `Element` on
 /// demand. See the module docs for why the previous eager model was replaced.
 /// **WT-EXP prototype**: lowering a widget straight into the tree, with no
 /// `Element` staging record. See the module docs for the experiment it serves.
 #[doc(hidden)]
 pub mod direct;
+pub mod text_field;
+pub mod text_input;
+pub mod theme;
+pub mod undo;
+pub mod wcag;
 pub mod widget;
 // ShaderWidget needs the wgpu GPU backend (`wgpu` feature), which is not built on
 // wasm; on the web, shaders are a WebGPU presenter concern.
@@ -100,9 +100,6 @@ pub use app::{center, App, FrameStats, Headless, ReloadResult};
 #[cfg(feature = "snapshot")]
 pub use app::{AppSnapshot, Checkpoint};
 pub use element::{AbortHandle, BuildCx, Element, Handler, LeafWidget, NodeContent, Text};
-/// The typed-widget trait (`Widget::build`) and the universal-modifier record
-/// every widget embeds.
-pub use widget::{Common, Widget};
 /// The data layer: executors + the `Sink` background work pushes results through.
 pub use lumen_core::tasks::{CancelToken, InlineSpawner, ManualSpawner, Sink, Spawner, TaskHandle};
 /// Compile-time handler-currency check (F2): a handler may only capture stable
@@ -144,6 +141,9 @@ pub use lumen_macros::text;
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
 pub use lumen_render::{Damage, DefaultRenderer, Present, Renderer, RgbaImage, TinySkia};
 pub use tasks::{Resource, TaskError};
+/// The typed-widget trait (`Widget::build`) and the universal-modifier record
+/// every widget embeds.
+pub use widget::{Common, Widget};
 
 /// Render a widget doc-example `app` at `w`×`h` and verify it against the PNG
 /// at `src/doc_shots/<name>.png` — the SAME file the struct's doc `<img>`

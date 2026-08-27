@@ -98,19 +98,23 @@ fn build(cx: &mut BuildCx) -> Element {
     let count = cx.signal("count", || 0i32);
     let counter = section(
         "Button",
-        vec![row_full(vec![
-            Button::new("Add one")
-                .on_press(move |rt| count.update(rt, |c| *c += 1))
-                .id("add-one")
-                .into(),
-            Button::new("Reset")
-                .ghost()
-                .on_press(move |rt| count.set(rt, 0))
-                .id("reset")
-                .into(),
-            Space::new().into(),
-            result(format!("Count: {}", count.get(rt))),
-        ], 10.0, 0.0)],
+        vec![row_full(
+            vec![
+                Button::new("Add one")
+                    .on_press(move |rt| count.update(rt, |c| *c += 1))
+                    .id("add-one")
+                    .into(),
+                Button::new("Reset")
+                    .ghost()
+                    .on_press(move |rt| count.set(rt, 0))
+                    .id("reset")
+                    .into(),
+                Space::new().into(),
+                result(format!("Count: {}", count.get(rt))),
+            ],
+            10.0,
+            0.0,
+        )],
     );
 
     // --- slider → progress bar ---
@@ -133,39 +137,47 @@ fn build(cx: &mut BuildCx) -> Element {
     let notify = cx.signal("notify", || false);
     let checkbox = section(
         "CheckBox",
-        vec![row_full(vec![
-            CheckBox::new(cx, "notify", "Email me updates")
-                .color(pal.ink)
-                .id("notify")
-                .into(),
-            Space::new().into(),
-            result(format!(
-                "Notify: {}",
-                if notify.get(rt) { "on" } else { "off" }
-            )),
-        ], 0.0, 0.0)],
+        vec![row_full(
+            vec![
+                CheckBox::new(cx, "notify", "Email me updates")
+                    .color(pal.ink)
+                    .id("notify")
+                    .into(),
+                Space::new().into(),
+                result(format!(
+                    "Notify: {}",
+                    if notify.get(rt) { "on" } else { "off" }
+                )),
+            ],
+            0.0,
+            0.0,
+        )],
     );
 
     // --- radio group (re-themes the gallery) ---
     let cur_theme = theme.get(rt);
     let radios = section(
         "Radio (group) — switches theme",
-        vec![row_full(vec![
-            Radio::new(cx, "theme", "Light", "Light")
-                .color(pal.ink)
-                .id("r-light")
-                .into(),
-            Radio::new(cx, "theme", "Dark", "Dark")
-                .color(pal.ink)
-                .id("r-dark")
-                .into(),
-            Space::new().into(),
-            result(if cur_theme.is_empty() {
-                "Light".to_string()
-            } else {
-                cur_theme
-            }),
-        ], 16.0, 0.0)],
+        vec![row_full(
+            vec![
+                Radio::new(cx, "theme", "Light", "Light")
+                    .color(pal.ink)
+                    .id("r-light")
+                    .into(),
+                Radio::new(cx, "theme", "Dark", "Dark")
+                    .color(pal.ink)
+                    .id("r-dark")
+                    .into(),
+                Space::new().into(),
+                result(if cur_theme.is_empty() {
+                    "Light".to_string()
+                } else {
+                    cur_theme
+                }),
+            ],
+            16.0,
+            0.0,
+        )],
     );
 
     // --- pick list ---
@@ -173,48 +185,56 @@ fn build(cx: &mut BuildCx) -> Element {
     let cur_fruit = fruit.get(rt);
     let picker = section(
         "PickList",
-        vec![row_full(vec![
-            PickList::new(
-                cx,
-                "fruit",
-                "Pick a fruit",
-                ["Apple", "Banana", "Cherry", "Mango"],
-            )
-            .id("fruit")
-            .into(),
-            Space::new().into(),
-            result(if cur_fruit.is_empty() {
-                "—".to_string()
-            } else {
-                cur_fruit
-            }),
-        ], 0.0, 0.0)],
+        vec![row_full(
+            vec![
+                PickList::new(
+                    cx,
+                    "fruit",
+                    "Pick a fruit",
+                    ["Apple", "Banana", "Cherry", "Mango"],
+                )
+                .id("fruit")
+                .into(),
+                Space::new().into(),
+                result(if cur_fruit.is_empty() {
+                    "—".to_string()
+                } else {
+                    cur_fruit
+                }),
+            ],
+            0.0,
+            0.0,
+        )],
     );
 
     // --- text input → scrolling to-do list ---
     let items = cx.signal("items", Vec::<String>::new);
     let list = items.get(rt);
-    let add_input = row_full(vec![
-        {
-            let mut t: Element = TextInput::new(cx, "draft", "")
-                .id("draft")
-                .on_submit(move |rt, text| items.update(rt, |v| v.push(text.to_string())))
-                .into();
-            t.style.flex_grow = 1.0;
-            // W0301: an empty input still needs an accessible name.
-            t.label = "New to-do".to_string();
-            t
-        },
-        Button::new("Add")
-            .on_press(move |rt| {
-                let d = draft_text(rt);
-                if !d.is_empty() {
-                    items.update(rt, |v| v.push(d));
-                }
-            })
-            .id("add")
-            .into(),
-    ], 8.0, 0.0);
+    let add_input = row_full(
+        vec![
+            {
+                let mut t: Element = TextInput::new(cx, "draft", "")
+                    .id("draft")
+                    .on_submit(move |rt, text| items.update(rt, |v| v.push(text.to_string())))
+                    .into();
+                t.style.flex_grow = 1.0;
+                // W0301: an empty input still needs an accessible name.
+                t.label = "New to-do".to_string();
+                t
+            },
+            Button::new("Add")
+                .on_press(move |rt| {
+                    let d = draft_text(rt);
+                    if !d.is_empty() {
+                        items.update(rt, |v| v.push(d));
+                    }
+                })
+                .id("add")
+                .into(),
+        ],
+        8.0,
+        0.0,
+    );
     let rows: Vec<Element> = if list.is_empty() {
         vec![Label::new("No items yet — type and press Enter")
             .color(pal.muted)
@@ -245,8 +265,9 @@ fn build(cx: &mut BuildCx) -> Element {
                 let mut row = row_full(
                     vec![
                         {
-                            let mut l: Element =
-                                Label::new(format!("{}. {item}", i + 1)).color(pal.ink).into();
+                            let mut l: Element = Label::new(format!("{}. {item}", i + 1))
+                                .color(pal.ink)
+                                .into();
                             l.style.flex_grow = 1.0;
                             l
                         },
@@ -269,11 +290,7 @@ fn build(cx: &mut BuildCx) -> Element {
     scroll.style.width = Dim::pct(1.0);
     let todo = section(
         "TextInput adds to a list",
-        vec![
-            add_input,
-            result(format!("{} item(s)", list.len())),
-            scroll,
-        ],
+        vec![add_input, result(format!("{} item(s)", list.len())), scroll],
     );
 
     // --- multi-line text field ---
@@ -281,11 +298,13 @@ fn build(cx: &mut BuildCx) -> Element {
         "TextField (multi-line)",
         // `TextField` has a `width` modifier, so the escape hatch was never
         // needed here — reaching into the built node just predated it.
-        vec![TextField::new(cx, "notes", "Type notes…\nEnter adds a line")
-            .lines(3)
-            .width(INNER)
-            .id("notes")
-            .into()],
+        vec![
+            TextField::new(cx, "notes", "Type notes…\nEnter adds a line")
+                .lines(3)
+                .width(INNER)
+                .id("notes")
+                .into(),
+        ],
     );
 
     let mut card: Element = Container::new(vec![

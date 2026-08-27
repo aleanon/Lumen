@@ -107,7 +107,10 @@ fn main() {
         rec_bytes / 1024,
         col_bytes / 1024
     );
-    println!("  {:<24}{:>11.1} us{:>11.1} us", "semantics walk", t_rec, t_col);
+    println!(
+        "  {:<24}{:>11.1} us{:>11.1} us",
+        "semantics walk", t_rec, t_col
+    );
     println!("──────────────────────────────────────────────────────────────");
     println!(
         "  bytes  : {:.2}x less",

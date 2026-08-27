@@ -15,7 +15,10 @@ use lumen_widgets::{widgets, App};
 use std::time::Instant;
 
 fn scopes() -> i64 {
-    std::env::var("SCOPES").ok().and_then(|v| v.parse().ok()).unwrap_or(400)
+    std::env::var("SCOPES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(400)
 }
 const WARMUP: usize = 10;
 const SAMPLES: usize = 60;
@@ -80,7 +83,10 @@ fn main() {
     eprintln!(
         "  [{}] nodes={} rebuilt={} copied={} painted={}",
         if animated { "animated" } else { "static" },
-        st.node_count, st.nodes_rebuilt, st.nodes_copied, st.painted
+        st.node_count,
+        st.nodes_rebuilt,
+        st.nodes_copied,
+        st.painted
     );
     println!(
         "{}\t{:.1}\t{:.1}",

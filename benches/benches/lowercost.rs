@@ -62,7 +62,9 @@ fn lower_direct() -> TreeSink {
     let mut lns = Vec::with_capacity(ROWS);
     for i in 0..ROWS {
         let n = begin_row(&mut sink, Some(root));
-        let (_, a) = Label::new(format!("row {i}")).size(14.0).lower(&mut sink, Some(n));
+        let (_, a) = Label::new(format!("row {i}"))
+            .size(14.0)
+            .lower(&mut sink, Some(n));
         let (_, b) = ProgressBar::new(i as f64 / ROWS as f64).lower(&mut sink, Some(n));
         let (_, c) = Button::new("Open")
             .ghost()
@@ -134,7 +136,9 @@ fn lower_direct_styled() -> TreeSink {
     for i in 0..ROWS {
         let n = begin_row(&mut sink, Some(root));
         sink.resolve(n);
-        let (_, a) = Label::new(format!("row {i}")).size(14.0).lower(&mut sink, Some(n));
+        let (_, a) = Label::new(format!("row {i}"))
+            .size(14.0)
+            .lower(&mut sink, Some(n));
         let (_, b) = ProgressBar::new(i as f64 / ROWS as f64).lower(&mut sink, Some(n));
         let (_, c) = Button::new("Open")
             .ghost()
