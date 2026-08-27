@@ -522,7 +522,6 @@ Size-gate ceilings re-tightened so the saving cannot be given back silently: lea
 - [x] **O0.4 ☑ The ambient audit was O(n²) — 42.2 ms → 6.1 ms** on a 6602-node animated frame. `handle_for_index` walked the whole semantics tree *per call*, and the audit calls it once per finding candidate; a long page therefore paid a full tree walk thousands of times a frame. Memoized into a `handle_index_map`, invalidated with the rest of the semantics cache. **This one bug had been distorting every proportion measured off an animated frame** — including the "columnar `NodeMeta` is worth ≤5%" bound recorded in `docs/report-direct-lowering-2026-08.md`, which was computed against a frame that was 99% this walk.
 - [x] **O0.5 ☑ Findings are capped per code** (`MAX_PER_CODE = 50`, plus a `suppressed_note()` tail). A long page reported **6372 findings a frame**, all formatted into `String`s and immediately deduped away. The loops keep *counting* past the cap and stop *formatting*, so the suppressed tail is reported as a number rather than silently dropped. Applies to `offscreen_findings`, `invisible_findings`, `truncation_findings` and the tofu scan. Note this is a **default-on** cost: `dev-observability` is in `default`, so an ordinary `cargo build --release` runs the audit; only `--no-default-features` drops it.
 - [x] **O0.8 ☑ The ancestor-context hash is a lazy prefix, not a per-node walk.** `span_ctx_hash` hashed the whole ancestor descriptor stack — every ancestor's id, classes, states and role — **once per node**, making the per-node style key O(depth) of pure string traffic. It is now memoized per depth on `desc_hash_stack` and filled **lazily**, which is the load-bearing detail: a node is pushed onto the desc stack like any other, but nothing ever asks for the prefix *below a leaf*, so a flat list hashes its shared ancestor once instead of 2000 times. An eager version measured **worse than the walk it replaced** (descpush +62 µs against hash −22 µs) because at depth 1 the old walk was already O(1) with a smaller constant. Result, holding node count ~constant and using definite-size wrappers so the layout blowup below does not drown the signal: depth 0 +0.4%, depth 6 +1.2% (both noise), **depth 12 −4.2%, depth 20 −7.7%** — the monotonic curve an O(depth)→O(1) change should produce, and worth nothing on the flat shape. *Guarded by* a `#[cfg(debug_assertions)]` oracle inside `span_ctx_hash` that recomputes the pre-O0.8 walk and asserts equality on **every call**, because a hash that drifts is not a slow frame but a wrong view — the runtime splices on hash equality. All 687 tests run under it.
-- [ ] **L1 ✗ Nested auto-sized flex layout is exponential in depth — 1.8^depth.** Found while measuring O0.8. `layout.compute` (taffy 0.13) on rows wrapped in N auto-sized `column`s, 100 rows, measured per frame: d0 16 µs · d2 257 · d4 1451 · d6 6206 · d8 25377 · **d10 103410** — ~3.2× per +2 levels, while node count grows only linearly (101 → 1101). A depth-12 view of 6501 nodes takes **2.0 seconds a frame**. Independent of the stylesheet (identical with `--no-default-features`-equivalent, i.e. sheet absent), so it is not the cascade. **Giving every wrapper a definite `width`/`height` collapses it to linear** (d4 165 µs · d8 329 · d12 511), which identifies it as the intrinsic-sizing cascade: each auto-sized level re-measures its subtree and the results are not being reused across levels. At depth 8 that is a **77× difference**. This is far larger than anything in the lowering path and is the single most important open performance item; whether the fix is a taffy cache configuration, a Lumen-side measurement cache, or a taffy upgrade is not yet determined. Reproduce with `DEPTH=n [DEFSIZE=1] benches/src/bin/buildphase.rs`.
 - [x] **O0.7 ☑ `ui.lint {"all": true}` — the cap belongs to the ambient pass, not the check.** O0.5's per-code cap is correct for the *push* path, which runs on a frame budget; it is wrong for a caller who explicitly asked and is waiting, whose cost is bounded by the one request and who may be hunting the very node the cap hid. `lint()` (capped) and `lint_all()` (uncapped) now both delegate to `lint_capped(cap)`, and the reply carries `capped` so a reader can tell which it got. The cap was never the expensive half — O0.3a made the underlying scans cheap (cached shaping, borrowed semantics root) and the cap only bounds message *formatting*, which is why lifting it for one call is affordable and lifting it per-frame was not. *Guarded by* `lint_caps.rs::lint_all_reports_every_finding` — which also asserts the capped arm's summary total **equals** `lint_all().len()`, so the cap is proven a display bound rather than a count bound — and `lumen-agent/tests/lint_all.rs` for the wire shape, including that a non-boolean `all` does not silently uncap.
 - [x] **O0.6 ☑ The computed-value map is shared, not copied — −10.6% on a styled changed frame** (2000 rows, every node rebuilt, small sheet: 2905 → 2599 µs; at 4000 rows 6864 → 6076, −11.5%). `node_computed` is the *observability* half of the cascade — its only reader is `get_styles`, which is `#[cfg(feature = "snapshot")]` — and it was deep-cloned out of the A.5b memo for **every node of every rebuild**, re-allocating a `String` key per declaration per node. Since the memo key is the node's whole style identity, those copies were byte-identical. Now an `Rc` clone; the two writers that genuinely mutate (an inline style, a restyle) fork via `Rc::make_mut`. Measured breakdown of the 448 µs cascade phase it came from: 172 µs this map, 46 µs the `Style` clone, 101 µs `NodeDesc` construction + hashing. *Guarded by* `inline_style.rs::an_inline_style_does_not_leak_through_the_shared_computed_map` — two id-less identically-classed rows share one memo entry (asserted non-vacuously via `style_memo_stats`), one carries an inline style, and the sibling must still report the sheet value. Swapping `make_mut` for `get_mut` panics in all three inline tests, so the fork is load-bearing.
 - [x] **O2.1 ☑ Effectively-transparent nodes are reported (W0111).** `SemanticsNode` carries `bounds`, `ink`, `states`, `text_metrics` and **no opacity or colour at all**, so an `opacity: 0` button was invisible on screen, correctly sized in the tree, hit-testable, labelled, and reported as fine by every tool — while `visibility: hidden` is handled properly (flags cleared, node leaves paint *and* semantics). **Effective opacity did not exist as data**: paint emits nested `PushLayer` and lets the backend composite, so the product is emergent and never stored; `node_style.opacity` is only the node's own. Added `effective_opacity` walking ancestors, **resetting at overlay roots** — a sheet anchors to the window, so it must not inherit a dimmed page's alpha, or the one thing the user can see would report itself invisible. Exposed via `ui.getLayout` (beside `ink`/`text_metrics`, the other per-node visual facts deliberately kept out of the tree) rather than added to `SemanticsNode` — which also sidesteps the `additionalProperties: false` schema gate. Only fires for interactive-or-labelled nodes with real area, and exempts a running opacity animation. *Guarded by* `crates/lumen-widgets/tests/invisible_lint.rs`, incl. the 0.5-inside-0.5 → 0.25 product and the overlay-reset case.
@@ -575,6 +574,55 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 *No trait, deliberately.* A backend seam was designed and declined for now: publishing is a clean one-way interface, but action routing is not — an AT click arrives as `ShellEvent::AccessKit(accesskit_winit::Event)`, an accesskit-typed variant in the shell's own event enum, and the adapter needs `&ActiveEventLoop` plus a window handle at construction. A generic backend therefore needs either winit types in the trait or a pull-based `poll_actions`, and today there would be exactly one implementation — the one-implementation trap this codebase has already hit with `Prop<T>` and with `PlatformConfig` being headless-only. The feature is a prerequisite for the trait either way, since the trait would live under the gate.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
+
+## L1 ✗ Nested auto-sized flex layout is exponential in depth (open)
+
+Found 2026-08-27 while measuring O0.8, and deferred behind the rest of the
+lowering work rather than taken then: it is a different subsystem and a real
+investigation, not a follow-on edit.
+
+`layout.compute` (taffy 0.13) on rows wrapped in N auto-sized `column`s, 100
+rows, per frame — node count grows **linearly** across this table (101 → 1101):
+
+| depth | nodes | layout | µs/node |
+|---:|---:|---:|---:|
+| 0 | 101 | 16 µs | 0.16 |
+| 2 | 301 | 257 | 0.85 |
+| 4 | 501 | 1 451 | 2.9 |
+| 6 | 701 | 6 206 | 8.9 |
+| 8 | 901 | 25 377 | 28 |
+| 10 | 1 101 | 103 410 | 94 |
+
+**~3.2× per +2 levels ⇒ ~1.8^depth.** A depth-12 view of 6 501 nodes takes
+**2.0 seconds a frame**.
+
+What is already ruled in or out:
+
+* **Not the cascade** — identical with no stylesheet attached (d4 1422 µs,
+  d8 25523 µs against 1451 / 25377 with one).
+* **Not lowering** — the whole build phase is 2.1% of the d8 frame; layout is
+  97.2%.
+* **Linear in sibling count** at fixed depth (100/200/400 rows → 26/52/105 ms),
+  so it is depth alone.
+* **Definite sizes collapse it to linear**: giving every wrapper a `width` and
+  `height` gives d4 165 µs · d8 329 · d12 511. At depth 8 that is a **77×**
+  difference, which identifies the cause as the intrinsic-sizing cascade —
+  each auto-sized level re-measures its subtree and the results are not reused
+  across levels.
+
+Why it matters more than anything left in the lowering path: every optimization
+in the O0.4–O0.8 series was worth 4–14% of a frame; this is worth up to 77×.
+And the shape is not exotic — panel → section → card → row → label is five
+levels before any content, and none of them can be given a definite size by an
+author who wants content-sized boxes.
+
+Not yet determined: whether the fix is taffy cache configuration, a Lumen-side
+measurement cache keyed on `(node, known_dimensions, available_space)`, or a
+taffy upgrade. **Start by confirming whether taffy's per-node cache is being
+consulted at all** — 1.8^depth is the signature of no caching rather than of
+cache thrashing.
+
+Reproduce: `DEPTH=n [DEFSIZE=1] ROWS=n cargo run --release --bin buildphase`.
 
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
