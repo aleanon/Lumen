@@ -40,6 +40,11 @@ const K2: u64 = 0x9e37_79b9_7f4a_7c15;
 ///
 /// Not a general-purpose or DoS-resistant hasher; it exists only to give keys a
 /// stable identity.
+///
+/// `Copy` because the state is two words and callers hashing a *stack* want to
+/// carry a prefix forward rather than re-absorb it — see `span_ctx_hash`, which
+/// was re-hashing the whole ancestor chain once per node (O0.8).
+#[derive(Clone, Copy)]
 pub struct IdHasher {
     a: u64,
     b: u64,

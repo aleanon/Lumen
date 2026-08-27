@@ -7,7 +7,7 @@
 
 use lumen_core::geometry::Size;
 use lumen_core::state::Signal;
-use lumen_widgets::{widgets, App};
+use lumen_widgets::{widgets, App, Element};
 use std::time::Instant;
 
 fn rows() -> i64 {
@@ -37,9 +37,21 @@ text { color: #202020; font-size: 14px; }
 column .row { margin: 1px; }
 ";
 
+/// Nesting depth wrapped around each row. Real views are not flat lists of
+/// leaves — a row sits in a card in a section in a panel — and
+/// `span_ctx_hash` is O(depth) per node, so depth is the axis it lives on.
+fn depth() -> usize {
+    std::env::var("DEPTH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
 fn app() -> App {
     let churn = mode() == "churn";
     let sheet = std::env::var("SHEET").is_ok();
+    let d = depth();
+    let defsize = std::env::var("DEFSIZE").is_ok();
     let a = App::new(move |cx| {
         let bump = cx.signal("n", || 0i64).get(cx.runtime());
         let n = rows();
@@ -50,7 +62,22 @@ fn app() -> App {
                 } else {
                     widgets::text(format!("row {i}"))
                 };
-                t.class("row")
+                let mut e: Element = t.class("row");
+                for k in 0..d {
+                    let mut w: Element = widgets::column(vec![e]).class(if k % 2 == 0 {
+                        "wrap-a"
+                    } else {
+                        "wrap-b"
+                    });
+                    // DEFSIZE=1: give every wrapper a definite box, so no level
+                    // needs an intrinsic-size pass over its children.
+                    if defsize {
+                        w.style.width = lumen_layout::Dim::px(300.0);
+                        w.style.height = lumen_layout::Dim::px(20.0);
+                    }
+                    e = w;
+                }
+                e
             })
             .collect();
         widgets::column(rows)
@@ -86,13 +113,14 @@ fn main() {
     us.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let st = last.unwrap();
     println!(
-        "changed-frame[{}{}]\t{:.1}\t{:.1}\tnodes={} rebuilt={} copied={}",
+        "changed-frame[{}{} d{}]\t{:.1}\t{:.1}\tnodes={} rebuilt={} copied={}",
         mode(),
         if std::env::var("SHEET").is_ok() {
             "+sheet"
         } else {
             ""
         },
+        depth(),
         us[0],
         us[us.len() / 2],
         st.node_count,

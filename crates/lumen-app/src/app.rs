@@ -647,6 +647,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             key_anims: HashMap::default(),
             theme_anim_until: 0.0,
             desc_stack: Vec::new(),
+            desc_hash_stack: std::cell::RefCell::new(vec![Some(
+                lumen_core::identity::IdHasher::new(),
+            )]),
             container_nodes: Vec::new(),
             container_prev: Vec::new(),
             container_stack: Vec::new(),
@@ -1176,6 +1179,20 @@ pub struct Headless<
     /// (root-first), fed to `resolve_with_ancestors` so descendant/`>`
     /// selectors match correctly. Maintained by `build_node`'s recursion.
     desc_stack: Vec<lumen_style::NodeDesc>,
+    /// O0.8: `desc_hash_stack[i]`, once computed, is an [`IdHasher`] that has
+    /// absorbed `desc_stack[0..i]` — the ancestor-chain prefix of
+    /// `span_ctx_hash`, memoized per depth so siblings share it.
+    ///
+    /// Filled **lazily**, which is the whole point. A leaf is pushed onto
+    /// `desc_stack` like any other node, but nothing ever asks for the prefix
+    /// *below* a leaf, because only a child would — so a flat list of 2000
+    /// rows hashes its one shared ancestor once instead of hashing something
+    /// 2000 times. Eagerly absorbing on push measured *worse* than the walk it
+    /// replaced, for exactly that reason.
+    ///
+    /// Length is always `desc_stack.len() + 1`; the two are only mutated
+    /// together, through `push_desc`/`pop_desc`.
+    desc_hash_stack: std::cell::RefCell<Vec<Option<lumen_core::identity::IdHasher>>>,
     /// B.2b: container-query support. `container_nodes` — the `.container()`
     /// nodes of the current tree in build order; `container_prev` — their
     /// sizes from the last layout (what the build resolves against);
@@ -4979,6 +4996,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         self.nodes_rebuilt = 0;
         self.nodes_copied = 0;
         self.desc_stack.clear();
+        *self.desc_hash_stack.borrow_mut() = vec![Some(lumen_core::identity::IdHasher::new())];
         self.container_nodes.clear();
         self.container_stack.clear();
         self.hidden_count = 0;
@@ -5381,6 +5399,51 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         })
     }
 
+    fn push_desc(&mut self, desc: lumen_style::NodeDesc) {
+        self.desc_stack.push(desc);
+        // Not computed here — see `desc_hash_stack`. A node that turns out to
+        // be a leaf never has its descriptor hashed at all.
+        self.desc_hash_stack.borrow_mut().push(None);
+    }
+
+    fn pop_desc(&mut self) {
+        self.desc_stack.pop();
+        self.desc_hash_stack.borrow_mut().pop();
+        debug_assert_eq!(
+            self.desc_hash_stack.borrow().len(),
+            self.desc_stack.len() + 1,
+            "the prefix stack must stay paired with the desc stack"
+        );
+    }
+
+    /// The ancestor-chain prefix hash for the current `desc_stack` (O0.8),
+    /// filling in any depths not yet computed.
+    fn ancestor_prefix(&self) -> lumen_core::identity::IdHasher {
+        use std::hash::Hash;
+        let mut stack = self.desc_hash_stack.borrow_mut();
+        debug_assert_eq!(stack.len(), self.desc_stack.len() + 1);
+        if let Some(h) = stack[self.desc_stack.len()] {
+            return h;
+        }
+        // Walk down to the deepest computed prefix, then hash forward,
+        // memoizing each depth on the way back up. Amortized O(1) per node:
+        // each descriptor is absorbed at most once per time it is pushed.
+        let mut base = self.desc_stack.len();
+        while stack[base].is_none() {
+            base -= 1;
+        }
+        let mut h = stack[base].expect("loop exits on Some");
+        for i in base..self.desc_stack.len() {
+            let d = &self.desc_stack[i];
+            d.id.hash(&mut h);
+            d.classes.hash(&mut h);
+            d.states.hash(&mut h);
+            d.ty.hash(&mut h);
+            stack[i + 1] = Some(h);
+        }
+        h
+    }
+
     fn span_ctx_hash(&self, in_overlay: bool) -> IdHash {
         use std::hash::Hash;
         // F2.4: `IdHasher`, not `DefaultHasher`.
@@ -5402,6 +5465,43 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         //
         // The value is compared only in memory, never serialized, so it is not
         // bound by ADR-021's stability rule either way.
+        // O0.8: this walked the whole ancestor descriptor stack once per
+        // node, hashing every ancestor's id, classes, states and role — so the
+        // per-node style key was O(depth) of pure string traffic, 71 us/frame
+        // on a flat 2000-row page and worse as views nest.
+        //
+        // Every input is stack-scoped: it changes when the build descends or
+        // ascends, never between siblings. A list of 2000 rows therefore asked
+        // this question 2000 times and got one answer. Now it computes once
+        // per distinct context and the siblings read it back.
+        let mut h = self.ancestor_prefix();
+        if let Some(c) = self.container_stack.last().copied().flatten() {
+            c.0.to_bits().hash(&mut h);
+            c.1.to_bits().hash(&mut h);
+        }
+        in_overlay.hash(&mut h);
+        (self.hidden_count > 0).hash(&mut h);
+        (self.disabled_count > 0).hash(&mut h);
+        let fast = h.finish128();
+        // O0.8: an incremental hash that drifts from the one it replaced is
+        // not a slow frame, it is a wrong view — an equal hash makes the
+        // runtime splice a span instead of re-lowering it. So debug builds
+        // recompute it the old way and compare, which puts the invariant
+        // under every test in the suite rather than under the few that
+        // happen to nest deeply.
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            fast,
+            self.span_ctx_hash_from_scratch(in_overlay),
+            "incremental ancestor-prefix hash diverged from the full walk"
+        );
+        fast
+    }
+
+    /// The pre-O0.8 computation, kept as the debug oracle for `span_ctx_hash`.
+    #[cfg(debug_assertions)]
+    fn span_ctx_hash_from_scratch(&self, in_overlay: bool) -> IdHash {
+        use std::hash::Hash;
         let mut h = lumen_core::identity::IdHasher::new();
         for d in &self.desc_stack {
             d.id.hash(&mut h);
@@ -6070,7 +6170,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             self.node_computed.insert(node, resolved);
             // B.1: this node becomes an ancestor for its children's matching
             // (popped after the recursion below).
-            self.desc_stack.push(desc);
+            self.push_desc(desc);
         } else if let Some(inline) = el.css_inline.as_deref().cloned() {
             // B.6b without a stylesheet: the inline tier still applies (its
             // own layout/typography/visibility effects included).
@@ -6257,7 +6357,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             })
             .collect();
         if pushed_desc {
-            self.desc_stack.pop();
+            self.pop_desc();
         }
         if pushed_container {
             self.container_stack.pop();
