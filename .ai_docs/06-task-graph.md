@@ -580,6 +580,30 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## O0.14 / O0.15 ✗ Escalated — see `BLOCKED.md` (open)
+
+The two items left after O0.6–O0.13, both needing a call that is not the
+implementer's to make (`00-HANDOFF-README.md` §4).
+
+* **O0.14 — `view`, 384 µs/frame (12%).** `Element` is 1072 bytes and 304 of
+  them are the same fourteen rare fields O0.13 moved out of `NodeMeta`. The
+  same fix would shrink it ~28% for an estimated 3–4% of a frame, but
+  `Element`'s fields are `pub` and ~160 sites touch them, ~100 outside
+  `lumen-app`. **Blocked on a public-API decision, and on whether the full
+  direct-lowering migration is happening** — if it is, this change would be
+  rewritten by it.
+* **O0.15 — the ambient audit, 858 µs/frame (27%).** Measured with the audit
+  compiled out as the control (3220 → 2362 µs). Composition: `sem_root` 272,
+  `contrast` 161, `offscreen` 155, `invisible` 91. Unlike O0.12's tofu scan
+  these are genuine per-frame geometric work with no "told, not asked"
+  reformulation. `dev-observability` is default-on, so release builds pay it.
+  **Blocked on an observability-fidelity decision** — throttling the push pass
+  (the `Throttle` O0.2 built for exactly this) is ~6× cheaper at 60fps but can
+  miss a finding that appears and disappears inside the window.
+
+**Net of the landed series, 4000-row styled changed frame, every node rebuilt:
+5568 → 3218 µs, −42%.**
+
 ## L1 ✗ Nested auto-sized flex layout is exponential in depth (open)
 
 Found 2026-08-27 while measuring O0.8, and deferred behind the rest of the
