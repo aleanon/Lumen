@@ -1099,7 +1099,7 @@ pub struct Headless<
     fling_ms: f64,
     app_sheet: Option<lumen_style::Stylesheet>,
     theme: lumen_style::ThemeKind,
-    node_style: HashMap<NodeIndex, lumen_style::Style>,
+    node_style: HashMap<NodeIndex, Styled>,
     node_computed: HashMap<NodeIndex, Computeds>,
     /// A.2: per-rebuild cascade env (None when no stylesheet is attached).
     style_env: Option<StyleEnv>,
@@ -1156,7 +1156,7 @@ pub struct Headless<
     /// resolved pair. Most nodes share a handful of keys, so a rebuild does
     /// O(distinct keys) cascades instead of O(nodes). Cleared with the view
     /// caches (stylesheet/theme/resize force-rebuilds).
-    style_memo: HashMap<IdHash, std::rc::Rc<StylePair>>,
+    style_memo: HashMap<IdHash, StylePair>,
     style_memo_hits: u64,
     style_memo_misses: u64,
     /// B.5: running `transition:` animations keyed by (stable id, property).
@@ -1418,12 +1418,24 @@ type VisualState = (
 /// take a private copy through `Rc::make_mut`.
 type Computeds = std::rc::Rc<HashMap<String, lumen_style::Computed>>;
 
+/// The resolved typed style, SHARED rather than copied.
+///
+/// O0.10: `Style` is **1008 bytes**, and it was cloned out of the A.5b memo
+/// for every node and then moved into `node_style` — 4 MB of memcpy each way
+/// on a 4000-node frame, for a value that is byte-identical across every node
+/// resolving alike (the memo key is the node's whole style identity). The only
+/// writers after resolution are an inline style, a transition and a keyframe,
+/// each of which announces itself in the style it is about to modify, so the
+/// fork can be gated on "will anything actually write".
+type Styled = std::rc::Rc<lumen_style::Style>;
+
 /// A resolved style pair: the typed style + the computed-value map
-/// (`get_styles` form). The unit the A.5b resolution memo caches.
-type StylePair = (lumen_style::Style, Computeds);
+/// (`get_styles` form). The unit the A.5b resolution memo caches. Both halves
+/// are `Rc`, so caching and reading a pair is two refcount bumps.
+type StylePair = (Styled, Computeds);
 
 /// A node's re-resolved style pair, pending commit (A.5 two-pass restyle).
-type PendingStyle = (NodeIndex, lumen_style::Style, Computeds);
+type PendingStyle = (NodeIndex, Styled, Computeds);
 
 /// What a `pump` did, for change attribution (F4.3).
 #[derive(Clone, Default)]
@@ -4519,9 +4531,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             for (node, mut css, resolved) in pending {
                 // B.5: state flips (hover) are exactly what transitions
                 // animate — run the same retarget/blend on the restyle path.
+                // O0.10: same fork gate as the build path — the style says
+                // whether either call can do anything.
                 let id = self.meta.get(&node).and_then(|m| m.id.clone());
-                self.apply_transitions(&id, &mut css);
-                self.apply_keyframes(&id, &mut css);
+                let wants_transition =
+                    !css.transitions.is_empty() || self.clock_ms < self.theme_anim_until;
+                let wants_keyframes = css.animation.is_some();
+                if wants_transition || wants_keyframes {
+                    let owned = std::rc::Rc::make_mut(&mut css);
+                    if wants_transition {
+                        self.apply_transitions(&id, owned);
+                    }
+                    if wants_keyframes {
+                        self.apply_keyframes(&id, owned);
+                    }
+                }
                 self.node_style.insert(node, css);
                 self.node_computed.insert(node, resolved);
             }
@@ -4639,7 +4663,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         if layout_affecting_differ(old, &css) {
             return false;
         }
-        pending.push((node, css, std::rc::Rc::new(resolved)));
+        pending.push((node, std::rc::Rc::new(css), std::rc::Rc::new(resolved)));
         ancestors.push(desc);
         let mut c = self.tree.first_child(node);
         while c.is_some() {
@@ -6095,7 +6119,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             };
             let (mut css, mut resolved) = if let Some(pair) = self.style_memo.get(&style_key) {
                 self.style_memo_hits += 1;
-                (**pair).clone()
+                pair.clone()
             } else {
                 self.style_memo_misses += 1;
                 let computed = lumen_style::resolve_with_ancestors(
@@ -6121,9 +6145,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     );
                 }
                 let resolved: Computeds = std::rc::Rc::new(resolved);
+                let css: Styled = std::rc::Rc::new(css);
                 self.style_memo.insert(
                     style_key,
-                    std::rc::Rc::new((css.clone(), std::rc::Rc::clone(&resolved))),
+                    (std::rc::Rc::clone(&css), std::rc::Rc::clone(&resolved)),
                 );
                 (css, resolved)
             };
@@ -6133,15 +6158,37 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // runs before the layout override below, so inline layout
             // properties win there too.
             if let Some(inline) = el.css_inline.as_deref() {
-                // O0.6: an inline style is this node's alone — fork the shared
-                // map before writing into it.
-                merge_inline_style(&mut css, std::rc::Rc::make_mut(&mut resolved), inline);
+                // O0.6/O0.10: an inline style is this node's alone — fork both
+                // shared halves before writing into them.
+                merge_inline_style(
+                    std::rc::Rc::make_mut(&mut css),
+                    std::rc::Rc::make_mut(&mut resolved),
+                    inline,
+                );
             }
             // B.5: substitute mid-flight transition blends (and start/retarget
             // segments) before anything consumes the style; then play any
             // `animation:` timeline on top.
-            self.apply_transitions(&el.id, &mut css);
-            self.apply_keyframes(&el.id, &mut css);
+            //
+            // O0.10: both are no-ops unless the style *itself* says otherwise —
+            // `apply_transitions` returns immediately without `transitions` (or
+            // a theme window), `apply_keyframes` without an `animation`. Those
+            // are exactly the conditions under which the shared style would
+            // have to be forked, so testing them here keeps the overwhelmingly
+            // common node on a refcount bump instead of a 1008-byte copy.
+            // Re-read AFTER the inline merge, which can introduce either.
+            let wants_transition =
+                !css.transitions.is_empty() || self.clock_ms < self.theme_anim_until;
+            let wants_keyframes = css.animation.is_some();
+            if wants_transition || wants_keyframes {
+                let owned = std::rc::Rc::make_mut(&mut css);
+                if wants_transition {
+                    self.apply_transitions(&el.id, owned);
+                }
+                if wants_keyframes {
+                    self.apply_keyframes(&el.id, owned);
+                }
+            }
             apply_css_to_element(&mut el, &css);
             // B.3 visibility: a hidden node (or one inside a hidden
             // subtree) keeps its layout space but leaves hit-testing (flags)
@@ -6174,6 +6221,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             let mut resolved = HashMap::default();
             merge_inline_style(&mut css, &mut resolved, &inline);
             let resolved: Computeds = std::rc::Rc::new(resolved);
+            let css: Styled = std::rc::Rc::new(css);
             apply_css_to_element(&mut el, &css);
             if css.visibility == Some(false) {
                 self.hidden_count += 1;
@@ -7808,9 +7856,9 @@ fn full_rebuild_forced() -> bool {
 /// Whether two computed styles differ in any property that feeds layout or
 /// text measurement (A.5) — if so, a visual-state restyle must escalate to a
 /// full rebuild so the new geometry is real.
-fn layout_affecting_differ(old: Option<&lumen_style::Style>, new: &lumen_style::Style) -> bool {
+fn layout_affecting_differ(old: Option<&Styled>, new: &lumen_style::Style) -> bool {
     let d = lumen_style::Style::new();
-    let old = old.unwrap_or(&d);
+    let old = old.map(|o| &**o).unwrap_or(&d);
     old.display != new.display
         || old.flex_direction != new.flex_direction
         || old.width != new.width
