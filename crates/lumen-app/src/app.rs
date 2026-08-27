@@ -915,6 +915,70 @@ struct SpanRec {
     impure: bool,
 }
 
+/// The rare half of [`NodeMeta`] — see its `rare` field.
+#[derive(Default)]
+struct RareMeta {
+    on_wheel: Option<crate::element::WheelHandler>,
+    on_drag: Option<crate::element::DragHandler>,
+    on_drop: Option<crate::element::DropHandler>,
+    on_text: Option<crate::element::TextHandler>,
+    on_key: Option<crate::element::KeyHandler>,
+    on_caret_set: Option<crate::element::CaretHandler>,
+    on_dismiss: Option<Handler>,
+    on_increment: Option<Handler>,
+    on_decrement: Option<Handler>,
+    on_set_value: Option<crate::element::ValueHandler>,
+    caret_byte: Option<usize>,
+    selection: Option<(usize, usize)>,
+    scroll: Option<lumen_core::semantics::ScrollInfo>,
+    shadow: Option<crate::element::Shadow>,
+}
+
+impl NodeMeta {
+    fn on_wheel(&self) -> Option<&crate::element::WheelHandler> {
+        self.rare.as_ref().and_then(|r| r.on_wheel.as_ref())
+    }
+    fn on_drag(&self) -> Option<&crate::element::DragHandler> {
+        self.rare.as_ref().and_then(|r| r.on_drag.as_ref())
+    }
+    fn on_drop(&self) -> Option<&crate::element::DropHandler> {
+        self.rare.as_ref().and_then(|r| r.on_drop.as_ref())
+    }
+    fn on_text(&self) -> Option<&crate::element::TextHandler> {
+        self.rare.as_ref().and_then(|r| r.on_text.as_ref())
+    }
+    fn on_key(&self) -> Option<&crate::element::KeyHandler> {
+        self.rare.as_ref().and_then(|r| r.on_key.as_ref())
+    }
+    fn on_caret_set(&self) -> Option<&crate::element::CaretHandler> {
+        self.rare.as_ref().and_then(|r| r.on_caret_set.as_ref())
+    }
+    fn on_dismiss(&self) -> Option<&Handler> {
+        self.rare.as_ref().and_then(|r| r.on_dismiss.as_ref())
+    }
+    fn on_increment(&self) -> Option<&Handler> {
+        self.rare.as_ref().and_then(|r| r.on_increment.as_ref())
+    }
+    fn on_decrement(&self) -> Option<&Handler> {
+        self.rare.as_ref().and_then(|r| r.on_decrement.as_ref())
+    }
+    fn on_set_value(&self) -> Option<&crate::element::ValueHandler> {
+        self.rare.as_ref().and_then(|r| r.on_set_value.as_ref())
+    }
+    fn scroll(&self) -> Option<&lumen_core::semantics::ScrollInfo> {
+        self.rare.as_ref().and_then(|r| r.scroll.as_ref())
+    }
+    fn shadow(&self) -> Option<&crate::element::Shadow> {
+        self.rare.as_ref().and_then(|r| r.shadow.as_ref())
+    }
+    fn caret_byte(&self) -> Option<usize> {
+        self.rare.as_ref().and_then(|r| r.caret_byte)
+    }
+    fn selection(&self) -> Option<(usize, usize)> {
+        self.rare.as_ref().and_then(|r| r.selection)
+    }
+}
+
 struct NodeMeta {
     id: Option<StableId>,
     role: Role,
@@ -923,31 +987,17 @@ struct NodeMeta {
     classes: Vec<String>,
     actions: Vec<Action>,
     states: Vec<SemState>,
-    scroll: Option<lumen_core::semantics::ScrollInfo>,
     focusable: bool,
     autofocus: bool,
     elide: bool,
     /// Per-prop signal dependencies (F2 union → semantics; F4 breakdown).
     deps: NodeDeps,
     on_click: Option<Handler>,
-    on_wheel: Option<crate::element::WheelHandler>,
-    on_drag: Option<crate::element::DragHandler>,
-    on_drop: Option<crate::element::DropHandler>,
-    on_text: Option<crate::element::TextHandler>,
-    on_key: Option<crate::element::KeyHandler>,
-    on_caret_set: Option<crate::element::CaretHandler>,
-    caret_byte: Option<usize>,
-    selection: Option<(usize, usize)>,
-    on_dismiss: Option<Handler>,
-    on_increment: Option<Handler>,
-    on_decrement: Option<Handler>,
-    on_set_value: Option<crate::element::ValueHandler>,
     background: Option<Color>,
     border: Option<Border>,
     corner_radius: f64,
     clip: bool,
     overlay: bool,
-    shadow: Option<crate::element::Shadow>,
     /// Rust-side pointer shape (a `.lss` `cursor` rule overrides it).
     cursor: Option<lumen_core::CursorShape>,
     /// Typed inline style (B.6b) — retained so the A.5 restyle path can
@@ -968,6 +1018,15 @@ struct NodeMeta {
     /// `ui.getTree` report "Some long lab…", corrupting the observability
     /// surface to fix a visual one.
     display_text: Option<String>,
+    /// O0.13: the fields almost no node has — every event handler past
+    /// `on_click`, the caret/selection pair, scroll state and the shadow.
+    ///
+    /// Inline they were **304 of `NodeMeta`'s 816 bytes**, present as `None`
+    /// on every label in every list. `meta` is not only written once per node
+    /// per rebuild but *walked* several times a frame by the audit, so the
+    /// bytes are paid on both. Boxed, the common node carries one null
+    /// pointer and the map's working set shrinks by more than a third.
+    rare: Option<Box<RareMeta>>,
 }
 
 /// The px value of a [`Dim`] (0 for non-px / auto / percent).
@@ -2475,7 +2534,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // `bounds` but not `shadow`, so a semantics walk cannot see the cause.
         const PORTABLE_TEXTURE_LIMIT: f64 = 2048.0;
         for (node, m) in self.meta.iter() {
-            let Some(sh) = m.shadow else { continue };
+            let Some(sh) = m.shadow().copied() else {
+                continue;
+            };
             let b = self.tree.bounds(*node);
             // Mirrors the sprite sizing in `paint`: the 9-slice bounds each axis
             // by style, so only a shadow that is *itself* enormous can trip this
@@ -3165,7 +3226,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     fn is_in_scroll(&self, node: NodeIndex) -> bool {
         let mut n = node;
         loop {
-            if self.meta.get(&n).is_some_and(|m| m.scroll.is_some()) {
+            if self.meta.get(&n).is_some_and(|m| m.scroll().is_some()) {
                 return true;
             }
             let parent = self.tree.parent(n);
@@ -3669,10 +3730,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     let mut n = self.tree.hit_test(pe.pos);
                     while let Some(node) = n {
                         if let Some(m) = self.meta.get(&node) {
-                            if m.on_drag.is_some() {
+                            if m.on_drag().is_some() {
                                 break;
                             }
-                            if m.on_wheel.is_some() && wheel_can_take(m.scroll) {
+                            if m.on_wheel().is_some() && wheel_can_take(m.scroll().copied()) {
                                 self.pan = Some((node, pe.pos));
                                 break;
                             }
@@ -3701,14 +3762,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                             self.pending_click = Some((node, m.id.clone(), pe.pos));
                             did_click = true;
                         }
-                        if !did_drag && m.on_drag.is_some() {
+                        if !did_drag && m.on_drag().is_some() {
                             self.pressed = Some((node, m.id.clone()));
                             self.apply_drag(node, pe.pos);
                             did_drag = true;
                         }
                         // A text editor places its caret at the press and keeps
                         // `pressed` so a drag extends the selection.
-                        if caret_hit.is_none() && m.on_caret_set.is_some() {
+                        if caret_hit.is_none() && m.on_caret_set().is_some() {
                             self.pressed = Some((node, m.id.clone()));
                             caret_hit = Some(node);
                         }
@@ -3800,7 +3861,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
             Event::TextInput(te) => {
                 if let Some(node) = self.focused_node() {
-                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_text.clone()) {
+                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_text().cloned()) {
                         h(&self.rt, &te.text);
                     }
                 }
@@ -3892,7 +3953,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     if self
                         .meta
                         .get(&node)
-                        .is_some_and(|m| m.on_caret_set.is_some())
+                        .is_some_and(|m| m.on_caret_set().is_some())
                     {
                         self.place_caret(node, pe.pos, true);
                     } else {
@@ -3907,7 +3968,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // Bubble to the nearest ancestor (incl. target) with a drop handler.
                 let mut n = self.tree.hit_test(de.pos);
                 while let Some(node) = n {
-                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_drop.clone()) {
+                    if let Some(h) = self.meta.get(&node).and_then(|m| m.on_drop().cloned()) {
                         h(&self.rt, &de.data);
                         break;
                     }
@@ -3931,12 +3992,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     .filter(|_| {
                         self.meta
                             .get(&node)
-                            .is_some_and(|m| m.on_caret_set.is_some())
+                            .is_some_and(|m| m.on_caret_set().is_some())
                     });
                     if let Some(up) = vnav {
                         let extend = ke.modifiers.contains(lumen_core::events::Modifiers::SHIFT);
                         self.move_caret_vertical(node, up, extend);
-                    } else if let Some(h) = self.meta.get(&node).and_then(|m| m.on_key.clone()) {
+                    } else if let Some(h) = self.meta.get(&node).and_then(|m| m.on_key().cloned()) {
                         h(&self.rt, &ke);
                     }
                 }
@@ -3965,7 +4026,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             .document_order()
             .into_iter()
             .filter_map(|n| {
-                let h = self.meta.get(&n).and_then(|m| m.on_dismiss.clone())?;
+                let h = self.meta.get(&n).and_then(|m| m.on_dismiss().cloned())?;
                 (!self.dismiss_owner_contains(n, pos)).then_some(h)
             })
             .collect();
@@ -4008,7 +4069,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             .tree
             .document_order()
             .into_iter()
-            .filter_map(|n| self.meta.get(&n).and_then(|m| m.on_dismiss.clone()))
+            .filter_map(|n| self.meta.get(&n).and_then(|m| m.on_dismiss().cloned()))
             .collect();
         for h in hits {
             h(&self.rt);
@@ -4075,10 +4136,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 let missing = match a {
                     Action::Click => m.on_click.is_none(),
                     Action::Focus => !self.tree.flags(node).contains(NodeFlags::FOCUSABLE),
-                    Action::Dismiss => m.on_dismiss.is_none(),
-                    Action::Increment => m.on_increment.is_none(),
-                    Action::Decrement => m.on_decrement.is_none(),
-                    Action::SetValue => m.on_set_value.is_none(),
+                    Action::Dismiss => m.on_dismiss().is_none(),
+                    Action::Increment => m.on_increment().is_none(),
+                    Action::Decrement => m.on_decrement().is_none(),
+                    Action::SetValue => m.on_set_value().is_none(),
                     // Not routable yet — declaring them is informational, not a
                     // broken promise, so they are not flagged.
                     Action::Blur | Action::ScrollIntoView | Action::Expand | Action::Collapse => {
@@ -4243,8 +4304,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let mut n = self.tree.hit_test(pos);
         while let Some(node) = n {
             let m = self.meta.get(&node);
-            if let Some(h) = m.and_then(|m| m.on_wheel.clone()) {
-                if wheel_can_take(m.and_then(|m| m.scroll)) {
+            if let Some(h) = m.and_then(|m| m.on_wheel().cloned()) {
+                if wheel_can_take(m.and_then(|m| m.scroll().copied())) {
                     h(&self.rt, dx, dy, modifiers);
                     break;
                 }
@@ -4272,7 +4333,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         } else {
             0.0
         };
-        if let Some(h) = self.meta.get(&node).and_then(|m| m.on_drag.clone()) {
+        if let Some(h) = self.meta.get(&node).and_then(|m| m.on_drag().cloned()) {
             h(&self.rt, frac_x, frac_y, pos);
         }
     }
@@ -4283,7 +4344,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     fn place_caret(&mut self, node: NodeIndex, pos: Point, extend: bool) {
         let b = self.tree.bounds(node);
         let Some((text, ts, wrap, padx, pady, handler)) = self.meta.get(&node).and_then(|m| {
-            let h = m.on_caret_set.clone()?;
+            let h = m.on_caret_set().cloned()?;
             let NodeContent::Text(t, ts) = &m.content else {
                 return None;
             };
@@ -4305,8 +4366,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// calls the caret handler. `extend` keeps the selection anchor (Shift).
     fn move_caret_vertical(&mut self, node: NodeIndex, up: bool, extend: bool) {
         let Some((text, ts, wrap, caret, handler)) = self.meta.get(&node).and_then(|m| {
-            let h = m.on_caret_set.clone()?;
-            let c = m.caret_byte?;
+            let h = m.on_caret_set().cloned()?;
+            let c = m.caret_byte()?;
             let NodeContent::Text(t, ts) = &m.content else {
                 return None;
             };
@@ -5841,7 +5902,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
             "focus" => self.focused_id = m.and_then(|m| m.id.clone()),
             "dismiss" => {
-                let handler = m.and_then(|m| m.on_dismiss.clone());
+                let handler = m.and_then(|m| m.on_dismiss().cloned());
                 if let Some(h) = handler {
                     h(&self.rt);
                 }
@@ -5851,21 +5912,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // advertises a capability neither the agent nor a screen reader can
             // use, which is exactly the drift ADR-009 exists to prevent.
             "increment" => {
-                let handler = m.and_then(|m| m.on_increment.clone());
+                let handler = m.and_then(|m| m.on_increment().cloned());
                 match handler {
                     Some(h) => h(&self.rt),
                     None => return Err(format!("node `{selector}` has no increment handler")),
                 }
             }
             "decrement" => {
-                let handler = m.and_then(|m| m.on_decrement.clone());
+                let handler = m.and_then(|m| m.on_decrement().cloned());
                 match handler {
                     Some(h) => h(&self.rt),
                     None => return Err(format!("node `{selector}` has no decrement handler")),
                 }
             }
             "setValue" | "set_value" => {
-                let handler = m.and_then(|m| m.on_set_value.clone());
+                let handler = m.and_then(|m| m.on_set_value().cloned());
                 let v = value.ok_or_else(|| "`setValue` needs a `value`".to_string())?;
                 match handler {
                     Some(h) => h(&self.rt, v),
@@ -6477,9 +6538,47 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         tree.set_lnode(node, lnode.raw());
 
         // Move the remaining fields into the retained NodeMeta (no clones).
+        // O0.13: the rare half is allocated only when the node actually has
+        // one of these. A label in a list has none of them, so it carries a
+        // null pointer instead of 304 bytes of `None`.
+        let rare = if el.on_wheel.is_some()
+            || el.on_drag.is_some()
+            || el.on_drop.is_some()
+            || el.on_text.is_some()
+            || el.on_key.is_some()
+            || el.on_caret_set.is_some()
+            || el.on_dismiss.is_some()
+            || el.on_increment.is_some()
+            || el.on_decrement.is_some()
+            || el.on_set_value.is_some()
+            || el.caret_byte.is_some()
+            || el.selection.is_some()
+            || el.scroll.is_some()
+            || el.shadow.is_some()
+        {
+            Some(Box::new(RareMeta {
+                on_wheel: el.on_wheel,
+                on_drag: el.on_drag,
+                on_drop: el.on_drop,
+                on_text: el.on_text,
+                on_key: el.on_key,
+                on_caret_set: el.on_caret_set,
+                on_dismiss: el.on_dismiss,
+                on_increment: el.on_increment,
+                on_decrement: el.on_decrement,
+                on_set_value: el.on_set_value,
+                caret_byte: el.caret_byte,
+                selection: el.selection,
+                scroll: el.scroll,
+                shadow: el.shadow,
+            }))
+        } else {
+            None
+        };
         meta.insert(
             node,
             NodeMeta {
+                rare,
                 id: el.id,
                 role: el.role,
                 label: el.label,
@@ -6487,30 +6586,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 classes: el.classes,
                 actions: el.actions,
                 states: el.states,
-                scroll: el.scroll,
                 focusable: el.focusable,
                 autofocus: el.autofocus,
                 elide: el.elide_semantics,
                 deps: node_deps,
                 on_click: el.on_click,
-                on_wheel: el.on_wheel,
-                on_drag: el.on_drag,
-                on_drop: el.on_drop,
-                on_text: el.on_text,
-                on_key: el.on_key,
-                on_caret_set: el.on_caret_set,
-                caret_byte: el.caret_byte,
-                selection: el.selection,
-                on_dismiss: el.on_dismiss,
-                on_increment: el.on_increment,
-                on_decrement: el.on_decrement,
-                on_set_value: el.on_set_value,
                 background: el.background,
                 border: el.border,
                 corner_radius: el.corner_radius,
                 clip: el.clip,
                 overlay: el.overlay,
-                shadow: el.shadow,
                 cursor: el.cursor,
                 css_inline: el.css_inline.take(),
                 content: el.content,
@@ -6750,7 +6835,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     spread: ss.spread as f64,
                     color: ss.color,
                 })
-                .or(m.shadow);
+                .or(m.shadow().copied());
             if let Some(sh) = shadow {
                 let w = bounds.width();
                 let h = bounds.height();
@@ -6945,7 +7030,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // edge). It's the *default* — an explicit border (element or `.lss`)
             // wins; customize focus feedback via a `&:focused { border: … }` rule.
             let focused = self.tree.flags(node).contains(NodeFlags::FOCUSED);
-            let focus_border = (focused && m.on_caret_set.is_some()).then(|| Border {
+            let focus_border = (focused && m.on_caret_set().is_some()).then(|| Border {
                 width: 2.0,
                 color: crate::element::accent_color(),
             });
@@ -7099,7 +7184,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // move together. Gated on `clip_on` (an unclipped field already
                 // shows the caret past its edge); genuinely wrapped content keeps
                 // `caret_x <= avail`, so this is a no-op there.
-                let scroll_x = match m.caret_byte {
+                let scroll_x = match m.caret_byte() {
                     Some(caret) if focused && clip_on => {
                         let avail = (bounds.width() - 2.0 * m.pad.0).max(0.0);
                         let caret_x = self
@@ -7149,8 +7234,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 };
                 // Selection highlight (behind the glyphs) for a focused editor —
                 // re-shape (cached, cheap) for the selection geometry.
-                if focused && m.caret_byte.is_some() {
-                    if let Some((a, b)) = m.selection.filter(|(a, b)| a != b) {
+                if focused && m.caret_byte().is_some() {
+                    if let Some((a, b)) = m.selection().filter(|(a, b)| a != b) {
                         // PROP1: `.lss` `selection-color` overrides the
                         // built-in tint. The default keeps its own alpha
                         // (0x55) because the highlight paints BEHIND the
@@ -7217,7 +7302,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
                 // Caret (in front) for a focused editor — re-shape (cached) for
                 // the caret geometry.
-                if let Some(caret) = m.caret_byte.filter(|_| focused) {
+                if let Some(caret) = m.caret_byte().filter(|_| focused) {
                     let block = self.text.shaped(txt, &ts, m.wrap_width, ts.align);
                     let (cx, cy, ch) = block.caret_pos(caret);
                     let w = 1.5;
@@ -7540,7 +7625,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             s.type_name = m.role.type_name();
             s.elide = m.elide;
             s.overlay = m.overlay;
-            s.scroll = m.scroll;
+            s.scroll = m.scroll().copied();
             s.states = m.states.clone();
             let flags = self.tree.flags(node);
             if flags.contains(NodeFlags::FOCUSED) {
