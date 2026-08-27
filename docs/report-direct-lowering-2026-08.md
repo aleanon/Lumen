@@ -239,6 +239,73 @@ allocation churn and, above all, what the change unblocked.
 
 ---
 
+## Postscript (2026-08-27): what a *changed* frame actually costs
+
+This report's assessment was written against measurements that could not support
+it, and the correction runs the other way in one place and the same way in
+another. Both are worth recording, because the mistake was the same both times:
+**measuring a workload in which the thing under test cannot appear.**
+
+### The frame I should have measured
+
+`animmemo` is a memo-*hitting* frame — `rebuilt=2, copied=6600`. It lowers
+almost nothing, so it cannot say anything about the cost of lowering. Every
+proportion in the "wins don't transfer" conclusion came from it, or from a frame
+that was 99% the O(n²) audit walk later fixed as O0.4. `benches/src/bin/
+buildphase.rs` measures the opposite shape — every node rebuilt every frame —
+and there the build path is **56–89% of the frame**, rising with node count.
+`buildscale.rs` had said as much in its own opening line ("78% of a 3000-row
+changed frame is `build_node`") since before this branch started.
+
+### But the build path is not one cost, and the shape decides which
+
+Phase-instrumenting `build_node` (2000 rows, temporary, reverted):
+
+| phase | churn, no sheet | stable, no sheet | stable + sheet |
+|---|---:|---:|---:|
+| view (Element construction) | 183 µs | 144 | 176 |
+| insert (arena node + flags) | 94 | 67 | 73 |
+| **cascade** | 21 | 21 | **432** |
+| **text measurement** | **7431** | 120 | 144 |
+| layout (`LayoutStyle` + taffy) | 231 | 194 | 215 |
+| meta (`NodeMeta` insert) | 77 | 63 | 70 |
+| span records | 21 | 21 | 21 |
+
+Two workload properties swamp everything else, and neither is lowering:
+
+* **`churn`** gives every label a new string each frame, so the shape cache
+  misses on all 2000 nodes and **92% of `build_node` is parley**. Direct
+  lowering cannot touch that. This is `animmemo`'s mistake mirrored.
+* **`stable` + a stylesheet** is the shape that exercises the cascade — and a
+  stylesheet moves it from 3% of lowering to **38%**. The original `buildphase`
+  loaded no sheet, so the single largest addressable cost in a real app was
+  invisible in it. Real apps all load one.
+
+### What that made findable
+
+Splitting the 448 µs cascade three ways: 172 µs deep-cloning the computed-value
+map, 46 µs cloning `Style`, 101 µs building `NodeDesc` + hashing it. The first
+is pure waste — the map is read only by `get_styles` — and sharing it (**O0.6**)
+took ~25 lines and **−10.6%** off the whole frame.
+
+That is the honest calibration for this report's remaining steps. `NodeDesc`
+interning (step 2's `Symbols`/`ClassSet`) targets the 101 µs; `CompactStyle`
+(step 4) targets part of the 215 µs layout phase; columnar `NodeMeta` (step 3)
+targets the 70 µs meta phase. Each is real, each is single-digit percent of a
+changed frame, and — the actual finding — **none of them requires direct
+lowering to obtain.** O0.6 is the proof: the biggest single item in the phase
+table was fixed inside the existing `Element` path, with no migration at all.
+
+### Correction to the assessment below
+
+"Direct lowering as step one of four" overstates the coupling. Steps 2–4 are
+worth doing and are correctly sized here; what is now measured is that they are
+reachable *without* step 1. The case for direct lowering has to rest on the 176
+µs `view` phase (the `Element` construction it deletes) and on extensibility —
+not on unblocking steps 2–4, which are not blocked.
+
+---
+
 ## Assessment
 
 **Direct lowering alone** is ~24% faster lowering and −18.5% allocations for a
