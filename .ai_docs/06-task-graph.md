@@ -841,6 +841,45 @@ It also costs something real: a widget can no longer be held unbuilt in a
 value-form children are not the same expressive power, and the erased path is
 what preserves the latter.
 
+## O0.21 ◐ Context imposition replaces child editing (2026-08-28)
+
+The architecture agreed after O0.20: **context is the primary mechanism,
+monomorphic statement children the default, type erasure the escape hatch.**
+This is the framework-wide part that does not depend on removing `Element`.
+
+**`Sink` — the destination, separated from the source.** `build_node` *was* the
+only way to produce a node: the writes into the arena, the layout tree and the
+meta table were fused with the reads out of an `Element` in one 690-line
+function, so a widget could not write a node without first constructing an
+`Element` to be read out of. `Sink` bundles the four disjoint borrows a write
+needs and `build_node` is now a *client* of it. That is what makes the rest of
+the migration incremental rather than all-at-once.
+
+**Both hold-and-edit sites are gone.** A survey found exactly two in the whole
+widget library, and both were context impositions wearing an edit's clothes:
+
+* **z-stacks** walked `children` writing `position: absolute` + `inset` into
+  each one. Now `Element::stacks_children`, applied by the lowering as each
+  child is written (`Container::stack` and `widgets::stack` both).
+* **the disabled wash** was a recursive walk over the built tree run by
+  `Common::apply`. Now `element::mute_node`, applied per node using the
+  `disabled_count` depth the lowering already tracks.
+
+Both are **strictly more correct** as contexts, which was not the argument for
+making the change but is the better one: the walks only reached children
+already present in the vector at the moment they ran, so a child appended
+afterwards — or produced by a loop, or returned from a helper — was silently
+missed. A context reaches every child by construction.
+
+One test moved rather than broke: `third_party_widget` asserted the dimming on
+the intermediate `Element`, which is where it used to be applied. It now
+asserts it **on the painted pixels**, which is the actual contract; where in
+the pipeline the wash happens is not.
+
+Still open for the full removal: the `Sink` primitives a `Direct` widget writes
+through (`Declaring`/`Open` over the engine's structures rather than the
+prototype's), then the 57 widgets, then `fn build(cx) -> Element`.
+
 ## L1 ☑ Nested auto-sized flex layout — 117× (2026-08-28)
 
 Found 2026-08-27 while measuring O0.8, deferred behind the lowering work, taken

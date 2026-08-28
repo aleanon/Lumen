@@ -154,7 +154,7 @@ impl Container {
 impl Widget for Container {
     fn build(self) -> Element {
         let Container {
-            mut children,
+            children,
             direction,
             padding,
             gap,
@@ -166,18 +166,13 @@ impl Widget for Container {
             stack,
             common,
         } = self;
-        if stack {
-            for c in &mut children {
-                c.style.position = Position::Absolute;
-                c.style.inset = Edges {
-                    left: Dim::px(0.0),
-                    top: Dim::px(0.0),
-                    ..Edges::AUTO
-                };
-            }
-        }
+        // A z-stack declares that its children are absolutely positioned; the
+        // lowering imposes it as each child is written. It used to walk
+        // `children` and write into each one here, which is the pattern that
+        // forces a container to receive its children as values.
         let mut el = Element {
             role: Role::Group,
+            stacks_children: stack,
             elide_semantics: true,
             corner_radius,
             style: LayoutStyle {

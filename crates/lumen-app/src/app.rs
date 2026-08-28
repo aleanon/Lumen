@@ -6066,6 +6066,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             owned.scope_key = Some(key);
             el = owned;
         }
+        // The disabled wash, imposed as this node is written. `disabled_count`
+        // is the ancestors' depth; `el.disabled` is this node's own. Applied
+        // before the cascade, so a `.lss` `:disabled` rule still overrides it,
+        // which is the ordering the recursive walk had.
+        if el.disabled || self.app.disabled_count > 0 {
+            crate::element::mute_node(&mut el);
+        }
         let span_key = el.scope_key.take();
         let span_hash = span_key
             .map(|_| self.app.span_ctx_hash(in_overlay))
@@ -6601,10 +6608,27 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         if pushed_disabled {
             self.app.disabled_count += 1;
         }
+        // A context imposed on each child as it is written, rather than an
+        // edit applied to a vector of children before the fact. The difference
+        // matters: this reaches every child, including ones a loop or a helper
+        // produced, and it does not require the container to receive its
+        // children as values — which is what made the eager form incompatible
+        // with statement-form composition.
+        let stacks = el.stacks_children;
         let child_lnodes: Vec<LayoutNode> = el
             .children
             .into_iter()
-            .map(|c| self.build_node(c, Some(node), this_overlay).1)
+            .map(|mut c| {
+                if stacks {
+                    c.style.position = lumen_layout::Position::Absolute;
+                    c.style.inset = lumen_layout::Edges {
+                        left: Dim::px(0.0),
+                        top: Dim::px(0.0),
+                        ..lumen_layout::Edges::AUTO
+                    };
+                }
+                self.build_node(c, Some(node), this_overlay).1
+            })
             .collect();
         if pushed_desc {
             self.app.pop_desc();

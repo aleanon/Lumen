@@ -194,8 +194,11 @@ impl Common {
             el.css_inline = Some(s);
         }
         if disabled {
+            // The dimming is imposed by the lowering on every node inside the
+            // disabled subtree (`element::mute_node`), not written into the
+            // children here. See its doc comment for why that is also more
+            // correct than the walk it replaces.
             el.disabled = true;
-            mute(el);
         }
     }
 }
@@ -306,37 +309,3 @@ macro_rules! impl_widget {
 // `#[macro_export]` lands the macro at the crate root; this alias keeps the
 // in-crate `use crate::widget::impl_widget;` imports resolving.
 pub use crate::impl_widget;
-
-/// Wash a disabled subtree out toward the page.
-///
-/// Applied to the built element and its descendants, so a button's label fades
-/// with its fill rather than staying full-strength on a pale box. Blending
-/// toward white assumes a light surface, which is the framework's default
-/// theme; a `.lss` `:disabled` rule overrides it wherever that is wrong.
-pub(crate) fn mute(el: &mut crate::Element) {
-    /// How much of the original colour survives.
-    const KEEP: f32 = 0.38;
-    fn wash(c: lumen_core::Color) -> lumen_core::Color {
-        lumen_core::Color::new_linear(
-            c.r * KEEP + (1.0 - KEEP),
-            c.g * KEEP + (1.0 - KEEP),
-            c.b * KEEP + (1.0 - KEEP),
-            c.a,
-        )
-    }
-    // A disabled control must not advertise a hand or an I-beam: the pointer
-    // shape is a promise about what a click will do, and the answer is nothing.
-    el.cursor = None;
-    if let Some(bg) = el.background {
-        el.background = Some(wash(bg));
-    }
-    if let Some(b) = &mut el.border {
-        b.color = wash(b.color);
-    }
-    if let Some(ts) = el.text_style_mut() {
-        ts.color = wash(ts.color);
-    }
-    for c in &mut el.children {
-        mute(c);
-    }
-}

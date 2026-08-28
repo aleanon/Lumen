@@ -136,20 +136,12 @@ pub fn column(children: impl Into<Vec<Element>>) -> Element {
 
 /// A z-stack: children overlaid at the top-left, last on top.
 pub fn stack(children: impl Into<Vec<Element>>) -> Element {
-    let kids = children
-        .into()
-        .into_iter()
-        .map(|mut c| {
-            c.style.position = Position::Absolute;
-            c.style.inset = Edges {
-                left: Dim::px(0.0),
-                top: Dim::px(0.0),
-                ..Edges::AUTO
-            };
-            c
-        })
-        .collect();
+    // The absolute positioning is a context this node imposes on its children
+    // as they lower, not an edit made to them here — see
+    // `Element::stacks_children`.
+    let kids = children.into();
     Element {
+        stacks_children: true,
         role: Role::Group,
         elide_semantics: true,
         style: LayoutStyle {

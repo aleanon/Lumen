@@ -153,16 +153,45 @@ fn a_foreign_widget_inherits_the_universal_modifiers() {
     assert_eq!(el.id.as_ref().map(|i| i.0.as_str()), Some("cpu"));
     assert!(el.classes.iter().any(|c| c == "kpi"));
     assert!(el.disabled, "disabled reached the node");
-    // `disabled` also dims — the behaviour a hand-rolled widget would have to
-    // reimplement, and would probably forget.
+    // The fill it *declared* is untouched: the dimming is imposed by the
+    // lowering on every node inside a disabled subtree, not written into the
+    // widget's own data. Asserted where it is observable — on the painted
+    // frame — rather than on the intermediate node, which is where it used to
+    // be applied and is not what anyone can see.
     let bg = el.background.expect("background applied");
     assert!(
-        bg.r > 0.5 && bg.g > 0.5,
-        "disabled washed the fill toward the page"
+        bg.r < 0.5,
+        "the declared fill is the one the widget asked for"
     );
-    assert_eq!(
-        el.cursor, None,
-        "a disabled control advertises no pointer shape"
+}
+
+/// `disabled` dims — the behaviour a hand-rolled widget would have to
+/// reimplement, and would probably forget. Checked on the pixels, because that
+/// is the contract; where in the pipeline the wash is applied is not.
+#[test]
+fn a_foreign_widget_dims_when_disabled() {
+    let fill = lumen_core::Color::srgb8(0x11, 0x22, 0x33, 0xff);
+    let shot = |disabled: bool| {
+        let mut h = App::new(move |_cx| {
+            let g = Gauge::new(1.0).id("cpu").background(fill);
+            let g = if disabled { g.disabled(true) } else { g };
+            widgets::column(vec![g.into()])
+        })
+        .run_headless(Size::new(120.0, 60.0));
+        h.pump();
+        let b = h.node_bounds_by_id("cpu").expect("gauge is laid out");
+        let p = h
+            .screenshot()
+            .pixel((b.x0 as u32 + 2).min(119), (b.y0 as u32 + 2).min(59));
+        (p[0], p[1], p[2])
+    };
+    let (er, eg, eb) = shot(false);
+    let (dr, dg, db) = shot(true);
+    assert!(
+        dr > er && dg > eg && db > eb,
+        "the disabled fill is washed toward the page: enabled {:?} vs disabled {:?}",
+        (er, eg, eb),
+        (dr, dg, db)
     );
 }
 

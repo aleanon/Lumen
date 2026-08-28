@@ -551,6 +551,16 @@ pub struct Element {
     /// queries test this element's laid-out size. Set with
     /// [`container`](Self::container).
     pub container: bool,
+    /// This node positions its children absolutely (a z-stack).
+    ///
+    /// A **context**, not an edit. The eager form walked `children` and wrote
+    /// `position: absolute` into each one before building, which is the
+    /// "hold and edit your children" pattern — it only reaches children that
+    /// happen to be in that vector, and it forces a container to receive its
+    /// children as values. Recorded here instead, the lowering applies it as
+    /// each child is written, which also reaches children produced by a loop
+    /// or a nested helper.
+    pub stacks_children: bool,
     /// Optional drop shadow behind the box.
     /// Pointer shape while this node is hovered, as a Rust-side default.
     ///
@@ -631,6 +641,7 @@ impl Default for Element {
             clip: false,
             overlay: false,
             container: false,
+            stacks_children: false,
             cursor: None,
             css_inline: None,
             scope_deps: None,
@@ -1592,5 +1603,47 @@ impl<'a> BuildCx<'a> {
             commands: self.commands.into_inner(),
             menu: self.menu.into_inner(),
         }
+    }
+}
+
+/// Wash a disabled node out toward the page (per node, not per subtree).
+///
+/// Applied by the lowering to every node inside a disabled subtree, using the
+/// disabled depth it already tracks. It used to be a recursive walk over the
+/// built `Element` tree, run by `Common::apply` at the moment `.disabled(true)`
+/// was set — the second of the two "hold and edit your children" patterns in
+/// the widget library, and the deeper one, because it reached into each child's
+/// *content* rather than only its universal modifiers.
+///
+/// Imposed as context instead, it is strictly more correct as well as cheaper:
+/// the walk only reached children already present in the vector when
+/// `.disabled(true)` ran, so a child appended afterwards was silently left at
+/// full strength.
+///
+/// Blending toward white assumes a light surface, which is the framework's
+/// default theme; a `.lss` `:disabled` rule overrides it wherever that is
+/// wrong.
+pub(crate) fn mute_node(el: &mut Element) {
+    /// How much of the original colour survives.
+    const KEEP: f32 = 0.38;
+    fn wash(c: lumen_core::Color) -> lumen_core::Color {
+        lumen_core::Color::new_linear(
+            c.r * KEEP + (1.0 - KEEP),
+            c.g * KEEP + (1.0 - KEEP),
+            c.b * KEEP + (1.0 - KEEP),
+            c.a,
+        )
+    }
+    // A disabled control must not advertise a hand or an I-beam: the pointer
+    // shape is a promise about what a click will do, and the answer is nothing.
+    el.cursor = None;
+    if let Some(bg) = el.background {
+        el.background = Some(wash(bg));
+    }
+    if let Some(b) = &mut el.border {
+        b.color = wash(b.color);
+    }
+    if let Some(ts) = el.text_style_mut() {
+        ts.color = wash(ts.color);
     }
 }
