@@ -608,12 +608,17 @@ its children lower — the ordering the typestate guards exist for).
 are finally comparable on the shape real views have — 500 rows × 3 children,
 one process per arm:
 
-| arm | median | allocs/node | bytes | peak |
-|---|---:|---:|---:|---:|
-| element | 1195 µs | 4.32 | 14.73 MB | 9.33 MB |
-| boxed (dynamic children) | **1118 µs (−6.4%)** | **4.52** | 13.13 MB | 8.73 MB |
-| element, styled | 1692 µs | | | |
-| boxed, styled | **1588 µs (−6.1%)** | | | |
+| arm | median | allocs/node | bytes |
+|---|---:|---:|---:|
+| element | 1195 µs | 4.32 | 8.74 MB |
+| boxed (dynamic children) | **1118 µs (−6.4%)** | **4.52** | 7.15 MB |
+| element, styled | 1692 µs | | |
+| boxed, styled | **1588 µs (−6.1%)** | | |
+
+*Byte figures corrected 2026-08-28: the counting allocator did not implement
+`realloc`, so the default alloc+memcpy+dealloc double-counted every `Vec`
+growth. Originally recorded as 14.73 / 13.13 MB. The allocation **counts** were
+unaffected and stand.*
 
 **Removing `Element` is worth ~6%, not the ~24% this branch's report claims.**
 Both of that figure's premises are now false: it was measured against a
@@ -633,6 +638,62 @@ be costed before, not after, the migration.
 boxed arm is minimal where `Container` is not, so the boxed arm is doing
 slightly *less* work than the element arm. If anything the true gap is smaller
 than −6%.
+
+## O0.17 ☑ The arena experiment — bump-allocating the widget tree (2026-08-28)
+
+O0.16 left one question: is the per-node `Box` what stops `Element` removal
+from paying? `benches/src/bin/arenacost.rs` answers it. Widgets are placed in a
+bump region and handed back as a `Box` over arena memory; the global allocator
+recognises arena addresses and skips their `dealloc` — **the destructor still
+runs**, only the free is elided, so the measurement is not cheating on drop.
+Everything else keeps the system allocator, so the only difference between the
+`boxed` and `arena` arms is where widget nodes come from.
+
+500 rows × 3 children, one arm per process, min of 3 runs:
+
+| arm | min | vs element | allocs/node | bytes |
+|---|---:|---:|---:|---:|
+| element | 1131.6 µs | — | 4.32 | 8.74 MB |
+| boxed | 1029.3 µs | −9.0% | 4.52 | 7.15 MB |
+| **arena** | **944.3 µs** | **−16.6%** | **3.72** | 6.89 MB |
+
+**The arena roughly doubles the win**, and the mechanism is exactly the
+hypothesis: allocations per node fall from 4.52 to 3.72 — below the `Element`
+arm's 4.32 — because ~one `Box` per node disappears. So the ~6% of O0.16 was
+the boxing masking the structural gain, not the ceiling.
+
+### The harness bug that nearly produced a 52% result
+
+The first version of this experiment reported `element` at 2477 µs against
+`lowertime`'s 1193 for identical work, and was bimodal (min 1479, median 2562)
+— which would have read as a **−52%** win for direct lowering. The cause was
+that its `GlobalAlloc` did not implement `realloc`, so the default
+alloc + memcpy + dealloc turned every `Vec` growth into a full copy. The
+element arm's vectors hold 784-byte `Element`s and grow by doubling; the boxed
+arm's hold 16-byte pointers, so the bug hit one arm and not the other.
+
+It was caught by requiring the **control arm to reproduce an
+independently-established number** before reading any comparison. That check is
+the only reason the figure above is 16.6% and not 52%. `boxcost` had the same
+omission and its byte figures are corrected above.
+
+### What this does and does not license
+
+It does **not** make `Element` removal a decided question. Two costs are
+outside the measurement:
+
+* **The arena device is a benchmark device.** `Box` over arena memory works
+  here only because a custom global allocator skips the free. Stable Rust has
+  no `allocator_api`, so a production version needs something else — an
+  `&'arena mut dyn Direct` with `lower(&mut self)` (which forces widgets to
+  yield their data through `mem::take`), a `bumpalo`-style dependency, or typed
+  per-widget arenas. Each has its own cost, and **bump arenas do not run
+  destructors by default** while our widgets own `String`s and `Rc`s, so drop
+  tracking is mandatory, not optional.
+* This is the lowering path, not a frame. Extrapolating from the last
+  whole-frame split (`view` + `build_node` ≈ 1480 µs of a ~2300 µs frame),
+  −16.6% is on the order of **a tenth of a changed frame** — an estimate, not
+  a measured frame delta.
 
 ## L1 ✗ Nested auto-sized flex layout is exponential in depth (open)
 
