@@ -661,6 +661,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             sem_gen: std::cell::Cell::new(0),
             #[cfg(feature = "dev-observability")]
             last_audit_gen: u64::MAX,
+            last_audit_ms: f64::NEG_INFINITY,
             last_paint_damage: (Damage::None, 0),
             frame_ms: std::collections::VecDeque::new(),
             frame_ms_max: 0.0,
@@ -1276,10 +1277,12 @@ pub struct Headless<
     audit_diff: lumen_core::observe::FrameDiff<String>,
     /// O0.3: bumped whenever the semantic tree is replaced; compared against
     /// `last_audit_gen` to decide whether the ambient audit has work to do.
+    /// O0.15: `last_audit_ms` throttles how often it may act on that.
     #[cfg(feature = "dev-observability")]
     sem_gen: std::cell::Cell<u64>,
     #[cfg(feature = "dev-observability")]
     last_audit_gen: u64,
+    last_audit_ms: f64,
     /// O1.2: the last damage that actually painted, with its frame number.
     /// `last_damage` is per-pump and an idle frame clears it.
     last_paint_damage: (Damage, u64),
@@ -1524,6 +1527,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // it never feeds rendering, so the pure-function contract holds.
         #[cfg(not(target_arch = "wasm32"))]
         let pump_t0 = std::time::Instant::now();
+        // O0.15: the semantics generation on entry, so the ambient audit can
+        // tell "this pump moved the view" from "the view is at rest".
+        #[cfg(feature = "dev-observability")]
+        let gen_on_entry = self.sem_gen.get();
         // A.3.2 meters reflect *this* pump: idle/patch-only pumps report 0.
         self.nodes_rebuilt = 0;
         self.nodes_copied = 0;
@@ -1742,9 +1749,50 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // most wants to hear about a new finding.
         #[cfg(feature = "dev-observability")]
         self.rt.set_log_frame(self.frames_rendered);
+        // O0.15: …but not on *every* such pump. The audit is a push channel
+        // for a human or an agent, and its contract is "tell me promptly", not
+        // "tell me this exact frame" — while a 60 fps animation asked it 60
+        // times a second, at 858 µs a pass on a 4000-node page (27% of the
+        // frame, measured with the audit compiled out as the control).
+        //
+        // Two conditions still force a pass, and between them they cover the
+        // cases a plain interval would lose:
+        //
+        //  * the tree is at **rest** — stale, but this pump did not itself
+        //    move it. That covers two cases at once: a finding introduced
+        //    during an animation is reported the moment the animation stops,
+        //    and a rebuild that happened OUTSIDE `pump` (`set_stylesheet`,
+        //    `set_theme`, `resize`) is reported by the very next pump, which
+        //    is the case O0.3 exists for.
+        //
+        //    Two definitions of "settled" were wrong before this one, and both
+        //    failed loudly rather than quietly, which is the only reason they
+        //    were caught: `!stats.painted` fires on every frame of a rebuild
+        //    whose output is pixel-identical — precisely the workload being
+        //    throttled — and "same generation as the previous pump" misses the
+        //    out-of-band rebuild above, breaking the O0.3 case;
+        //  * nothing has been audited yet at this generation and the interval
+        //    has elapsed.
+        //
+        // What this genuinely gives up: a finding that appears *and
+        // disappears* entirely inside one interval, during continuous
+        // animation, is never seen. That is the trade, and it is why the
+        // interval is 100 ms rather than a frame budget — a defect that
+        // survives a tenth of a second is still caught, and one that does not
+        // was never actionable.
         #[cfg(feature = "dev-observability")]
-        if stats.painted || self.sem_gen.get() != self.last_audit_gen {
-            self.ambient_audit();
+        {
+            let gen = self.sem_gen.get();
+            // `stale` is the primary gate and is unchanged from O0.3: there is
+            // nothing to say unless the tree has moved since the last audit.
+            // A static app is never stale and never audits, throttle or not.
+            let stale = gen != self.last_audit_gen;
+            let settled = gen == gen_on_entry;
+            let due = self.clock_ms - self.last_audit_ms >= Self::AUDIT_MIN_INTERVAL_MS;
+            if stale && (settled || due) {
+                self.last_audit_ms = self.clock_ms;
+                self.ambient_audit();
+            }
         }
         stats
     }
@@ -1795,6 +1843,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     ///   from `Diagnostic.handle` (O0.1b) — path-derived and always present,
     ///   unlike `node`, which is the author's optional `#id`.
     #[cfg(feature = "dev-observability")]
+    /// O0.15: how long the ambient audit may go without running while the
+    /// view keeps changing.
+    ///
+    /// A tenth of a second is below the threshold at which a developer
+    /// notices a delay, and roughly 6× cheaper than per-frame at 60 fps. It is
+    /// a floor on *cadence*, not a cap on fidelity: `ui.lint` answers exactly
+    /// and immediately whenever asked, and a settled tree is audited at once.
+    const AUDIT_MIN_INTERVAL_MS: f64 = 100.0;
+
     fn ambient_audit(&mut self) {
         self.last_audit_gen = self.sem_gen.get();
         let findings = self.lint();

@@ -194,3 +194,48 @@ fn handler_written_entries_carry_no_code() {
         .unwrap_or_else(|| panic!("the handler's entry: {logs}"));
     assert!(e.get("code").is_none(), "no code on free text: {e}");
 }
+
+/// O0.15: the ambient pass is throttled to a 100 ms cadence, because at 858 µs
+/// on a 4000-node page it was 27% of every frame and was being asked 60 times a
+/// second for an answer nobody reads that often.
+///
+/// The property that makes the throttle safe is the settle rule: a finding
+/// introduced while the view is animating must be reported the moment the view
+/// stops, not up to an interval later. This drives exactly that — the finding
+/// appears mid-animation, the clock never advances far enough for the interval
+/// to elapse, and it must still be in the log once the tree settles.
+#[test]
+fn a_finding_introduced_mid_animation_is_reported_when_the_tree_settles() {
+    use lumen_core::state::Signal;
+    let mut h = App::new(|cx: &mut BuildCx| -> Element {
+        let broken = cx.signal("broken", || false).get(cx.runtime());
+        let mut e: Element = widgets::text("label").id("a");
+        e.style.width = lumen_layout::Dim::px(if broken { 900.0 } else { 100.0 });
+        widgets::column(vec![e]).id("root")
+    })
+    .run_headless(Size::new(400.0, 200.0));
+    h.set_stylesheet("#root { width: 400px; }");
+
+    // Animate: many painting pumps, each advancing the clock by one frame —
+    // far less than the throttle interval in total for the first stretch.
+    for _ in 0..3 {
+        h.advance(16.0);
+    }
+    assert!(
+        w0103_entries(&mut h).is_empty(),
+        "nothing wrong yet, so nothing logged"
+    );
+
+    let s: Signal<bool> = h.runtime().signal("broken", || false);
+    s.update(h.runtime(), |v| *v = true);
+    // One painting pump introduces it, then the tree settles.
+    h.advance(16.0);
+    h.pump();
+
+    assert_eq!(
+        w0103_entries(&mut h).len(),
+        1,
+        "an overflow introduced mid-animation must be reported once the view \
+         stops changing, whatever the throttle did in between"
+    );
+}
