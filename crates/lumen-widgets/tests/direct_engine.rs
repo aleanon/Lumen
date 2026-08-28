@@ -187,3 +187,78 @@ fn the_stack_context_survives_native_lowering() {
          {a:?} {b:?}"
     );
 }
+
+/// The authoring change: children as **statements**.
+///
+/// `Stack::column(|c| { … })` never collects its children — each is written as
+/// the body reaches it. The tree it produces must be the same one the vector
+/// form produces, because "cheaper" is only interesting if it is also "same".
+#[test]
+fn statement_form_and_vector_form_agree() {
+    use lumen_widgets::{Container, Stack};
+
+    let vector = {
+        let mut h = App::new(|_cx| {
+            Element::from(
+                Container::new(vec![
+                    widgets::text("alpha").id("a"),
+                    widgets::text("beta").id("b"),
+                    widgets::text("gamma").id("c"),
+                ])
+                .gap(4.0)
+                .id("box"),
+            )
+        })
+        .run_headless(Size::new(300.0, 200.0));
+        h.pump();
+        h.semantics_json().to_string()
+    };
+    let statements = {
+        let mut h = App::view(|_cx| {
+            Stack::column(|c| {
+                c.child(widgets::text("alpha").id("a"));
+                c.child(widgets::text("beta").id("b"));
+                c.child(widgets::text("gamma").id("c"));
+            })
+            .gap(4.0)
+            .id("box")
+        })
+        .run_headless(Size::new(300.0, 200.0));
+        h.pump();
+        h.semantics_json().to_string()
+    };
+    assert_eq!(vector, statements, "the two authoring forms lower alike");
+}
+
+/// Statement form is control flow, which is the whole reason it can replace a
+/// `Vec` without losing expressiveness: loops, conditionals and helpers all
+/// work, and none of them collects anything.
+#[test]
+fn statement_children_come_from_ordinary_control_flow() {
+    let mut h = App::view(|_cx| {
+        lumen_widgets::Stack::column(|c| {
+            for i in 0..4 {
+                if i % 2 == 0 {
+                    c.child(widgets::text(format!("even {i}")).id(format!("e{i}")));
+                } else {
+                    c.child(widgets::text(format!("odd {i}")).id(format!("o{i}")));
+                }
+            }
+        })
+        .id("loop")
+    })
+    .run_headless(Size::new(300.0, 300.0));
+    h.pump();
+
+    for id in ["e0", "o1", "e2", "o3"] {
+        assert!(
+            h.node_bounds_by_id(id).is_some(),
+            "{id} was emitted by the loop"
+        );
+    }
+    assert!(
+        h.node_bounds_by_id("e0").unwrap().y0 < h.node_bounds_by_id("o3").unwrap().y0,
+        "emission order is document order"
+    );
+    h.assert_view_coherent();
+}

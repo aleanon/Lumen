@@ -385,7 +385,12 @@ pub struct App<
     /// MOD1: `App` names the platform bundle only to hand it to the `Headless`
     /// it builds — it holds no layout or text state itself.
     _platform: std::marker::PhantomData<P>,
-    root: Box<dyn Fn(&mut BuildCx) -> Element>,
+    /// The root view.
+    ///
+    /// Returns a boxed `DirectDyn` rather than an `Element`: the *root* is the
+    /// one place a box is unavoidable, because the closure's return type is
+    /// erased by storage, and it is one box per frame rather than one per node.
+    root: RootView,
     #[allow(dead_code)]
     stylesheet: Option<String>,
     /// Extra fonts to register at boot (B1): app-provided bytes, selected by
@@ -404,9 +409,21 @@ impl App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner> {
     /// Create an app from its root build closure (02 §8), on the default CPU
     /// reference renderer and the deterministic inline executor.
     pub fn new(root: impl Fn(&mut BuildCx) -> Element + 'static) -> App {
+        App::view(root)
+    }
+
+    /// An app whose root view returns **anything [`Direct`]**.
+    ///
+    /// [`new`](Self::new) is this with `V = Element`, and stays that way on
+    /// purpose. Making `new` itself generic is a source-breaking change even
+    /// though it accepts strictly more: a view body ending in `.into()` has no
+    /// unique target type once more than one type is `Direct`, and ~25 call
+    /// sites across this repo alone stopped inferring. An additive door costs
+    /// nothing and breaks nobody.
+    pub fn view<V: Direct + 'static>(root: impl Fn(&mut BuildCx) -> V + 'static) -> App {
         App {
             _platform: std::marker::PhantomData,
-            root: Box::new(root),
+            root: Box::new(move |cx| Box::new(Some(root(cx)))),
             stylesheet: None,
             fonts: Vec::new(),
             windows: Vec::new(),
@@ -425,10 +442,10 @@ impl<P: PlatformConfig> App<lumen_render::TinySkia, lumen_core::tasks::InlineSpa
     /// parameter defaults do not apply to inference of a function's return, so
     /// generalising `new` would force every existing call site to name a
     /// platform.
-    pub fn with_platform(root: impl Fn(&mut BuildCx) -> Element + 'static) -> Self {
+    pub fn with_platform<V: Direct + 'static>(root: impl Fn(&mut BuildCx) -> V + 'static) -> Self {
         App {
             _platform: std::marker::PhantomData,
-            root: Box::new(root),
+            root: Box::new(move |cx| Box::new(Some(root(cx))) as Box<dyn DirectDyn>),
             stylesheet: None,
             fonts: Vec::new(),
             windows: Vec::new(),
@@ -462,7 +479,7 @@ impl<C: AppConfig> ConfiguredApp<C> {
     pub fn with_config(root: impl Fn(&mut BuildCx) -> Element + 'static) -> Self {
         App {
             _platform: std::marker::PhantomData,
-            root: Box::new(root),
+            root: Box::new(move |cx| Box::new(Some(root(cx))) as Box<dyn DirectDyn>),
             stylesheet: None,
             fonts: Vec::new(),
             windows: Vec::new(),
@@ -1045,7 +1062,12 @@ pub struct Headless<
     E = lumen_core::tasks::InlineSpawner,
     P: PlatformConfig = DefaultPlatform,
 > {
-    root: Box<dyn Fn(&mut BuildCx) -> Element>,
+    /// The root view.
+    ///
+    /// Returns a boxed `DirectDyn` rather than an `Element`: the *root* is the
+    /// one place a box is unavoidable, because the closure's return type is
+    /// erased by storage, and it is one box per frame rather than one per node.
+    root: RootView,
     /// P.3d: declared secondary windows (descriptor + root closure), realized
     /// on demand by [`open_window`](Self::open_window). `windows` (below)
     /// carries just the descriptors for the agent.
@@ -3557,7 +3579,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // geometry the owner cannot reason about.
         let app: App<R2, E2, P> = App {
             _platform: std::marker::PhantomData,
-            root: Box::new(move |cx| root(cx)),
+            root: Box::new(move |cx| Box::new(Some(root(cx))) as Box<dyn DirectDyn>),
             stylesheet: self.stylesheet_src.clone(),
             fonts: self.font_bytes.clone(),
             windows: Vec::new(),
@@ -5285,7 +5307,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             layout: &mut layout,
             meta: &mut meta,
         }
-        .build_node(root_el, None, false);
+        .lower_root(root_el);
         debug_assert_eq!(root_node, tree.root(), "build left the tree root unset");
 
         // F2.2: free the previous frame's spine — arena node, side-table
@@ -6067,6 +6089,30 @@ pub trait NodeWriter {
         })
     }
 
+    /// Write a node whose children are emitted by a **statement-form body**.
+    ///
+    /// The body runs during lowering, not during view construction, which is
+    /// what lets it write each child straight through and never collect them.
+    fn write_body(
+        &mut self,
+        el: Element,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+        body: &mut dyn FnMut(&mut Kids),
+    ) -> (NodeIndex, LayoutNode) {
+        self.write_with(el, parent, in_overlay, &mut |w, node, overlay| {
+            let mut lns = Vec::new();
+            let mut kids = Kids {
+                w,
+                node,
+                in_overlay: overlay,
+                lns: &mut lns,
+            };
+            body(&mut kids);
+            lns
+        })
+    }
+
     /// Write a node whose children are produced *while it is open*.
     ///
     /// `el.children` is ignored; the callback supplies them. This is what lets
@@ -6114,6 +6160,58 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         })
     }
 }
+
+impl Direct for Element {
+    /// An `Element` is itself a `Direct` widget — it writes its whole tree.
+    ///
+    /// This is what makes the authoring change additive rather than breaking:
+    /// every `fn build(cx) -> Element` view in existence is already a view
+    /// returning something `Direct`, so a signature that accepts `impl Direct`
+    /// accepts all of them unchanged, and statement-form views can be adopted
+    /// one call site at a time.
+    fn lower_owned(
+        self,
+        w: &mut dyn NodeWriter,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+    ) -> (NodeIndex, LayoutNode) {
+        w.write_tree(self, parent, in_overlay)
+    }
+}
+
+/// The handle a statement-form container's body writes children into.
+///
+/// Each `child` is lowered **immediately**, while the parent node is open —
+/// so the children of a container are never collected anywhere. That is the
+/// difference between `column(vec![a, b, c])`, which materializes a vector of
+/// nodes before any of them is written, and `column(|c| { c.child(a); … })`,
+/// which writes each one and moves on.
+pub struct Kids<'w, 'n> {
+    w: &'w mut dyn NodeWriter,
+    node: NodeIndex,
+    in_overlay: bool,
+    lns: &'n mut Vec<LayoutNode>,
+}
+
+impl Kids<'_, '_> {
+    /// Write one child, now.
+    ///
+    /// Monomorphic: a widget whose type is known here never becomes a trait
+    /// object, so this inlines and costs nothing beyond the write.
+    pub fn child<W: Direct>(&mut self, w: W) {
+        let (_, ln) = w.lower_owned(self.w, Some(self.node), self.in_overlay);
+        self.lns.push(ln);
+    }
+
+    /// The parent this is writing into, for a widget that needs the primitives
+    /// directly.
+    pub fn writer(&mut self) -> (&mut dyn NodeWriter, NodeIndex, bool) {
+        (self.w, self.node, self.in_overlay)
+    }
+}
+
+/// A stored root view: a closure producing the frame's root widget, erased.
+pub type RootView = Box<dyn Fn(&mut BuildCx) -> Box<dyn DirectDyn>>;
 
 /// A widget that writes itself into the tree, with no `Element` subtree.
 ///
@@ -6185,6 +6283,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// the only way to write a node. A [`Direct`] widget writes through the
     /// same primitives, which is what lets the two coexist while widgets
     /// migrate one at a time.
+    /// Lower the root view.
+    ///
+    /// The root arrives boxed — its concrete type was erased when the closure
+    /// was stored — so this is the one node per frame that goes through the
+    /// erased path. Everything below it is monomorphic.
+    pub(crate) fn lower_root(&mut self, mut root: Box<dyn DirectDyn>) -> (NodeIndex, LayoutNode) {
+        root.lower_dyn(self, None, false)
+    }
+
     /// Lower one `Element` and its subtree.
     pub(crate) fn build_node(
         &mut self,

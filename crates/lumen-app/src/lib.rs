@@ -24,6 +24,6 @@ pub mod tasks;
 pub(crate) use lumen_core::fxhash;
 
 pub use app::{
-    App, DefaultPlatform, Direct, DirectDyn, FrameStats, Headless, NodeWriter, PlatformConfig,
+    App, DefaultPlatform, Direct, DirectDyn, FrameStats, Headless, Kids, NodeWriter, PlatformConfig,
 };
 pub use element::{BuildCx, Element, Handler, NodeContent, Text};

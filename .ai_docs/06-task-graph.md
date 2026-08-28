@@ -841,6 +841,50 @@ It also costs something real: a widget can no longer be held unbuilt in a
 value-form children are not the same expressive power, and the erased path is
 what preserves the latter.
 
+## O0.24 ☑ The authoring API — statement-form views (2026-08-28)
+
+Children can now be **statements** rather than a vector, which is the change
+O0.20 measured at **−18.1%** against the `Element` staging tree. It is additive:
+nothing that compiled yesterday needs touching.
+
+**`impl Direct for Element`** is what makes it additive. Every
+`fn build(cx) -> Element` view in existence is already a view returning
+something `Direct`, so the new entry point accepts all of them unchanged and
+statement form can be adopted one call site at a time.
+
+**`App::view<V: Direct>`, and `App::new` left alone.** Making `new` itself
+generic was tried first and reverted: a view body ending in `.into()` has no
+unique target type once more than one type implements `Direct`, and **~25 call
+sites in this repo alone stopped inferring**. That is a source-breaking change
+even though the signature accepts strictly more, and no amount of it being
+"more general" makes it free. `App::new` is `App::view` with `V = Element`.
+
+**`Kids` and `NodeWriter::write_body`.** A statement-form body runs *during
+lowering*, not during view construction — that is the whole mechanism. Each
+`c.child(w)` is written the moment the body reaches it, monomorphically, so a
+list of *n* rows costs one node at a time instead of *n* at once.
+
+**`Stack::column(|c| …)` / `Stack::row(|c| …)`** is the first container in this
+form. Its modifiers are hand-written because `impl_widget!` takes a concrete
+type and `Stack` is generic over its body closure.
+
+*Guarded by* `direct_engine.rs`:
+`statement_form_and_vector_form_agree` requires the two authoring forms to
+produce **byte-identical semantics trees** — cheaper is only interesting if it
+is also the same — and `statement_children_come_from_ordinary_control_flow`
+holds the property that makes statement form a real replacement rather than a
+restriction: loops, conditionals and helpers all work, and none of them
+collects anything.
+
+### What is left of `Element`
+
+It is no longer the authoring type, no longer the only thing a view can return,
+and no longer how a container reaches its children. What remains is its use as
+the per-node parameter block that `write_leaf`/`write_children` take, and the
+~180 files that still *choose* to use the vector form. Those are now a
+migration anyone can do incrementally, file by file, with both forms compiling
+side by side — not a flag day.
+
 ## O0.23 ☑ Every widget is `Direct` (2026-08-28)
 
 All **57** widget types implement `Direct` and lower through the sink. *Guarded

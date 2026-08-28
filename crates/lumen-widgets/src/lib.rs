@@ -102,7 +102,7 @@ pub use app::{AppSnapshot, Checkpoint};
 pub use element::{AbortHandle, BuildCx, Element, Handler, LeafWidget, NodeContent, Text};
 /// The typed-widget trait (`Widget::build`) and the universal-modifier record
 /// every widget embeds.
-pub use lumen_app::{Direct, DirectDyn, NodeWriter};
+pub use lumen_app::{Direct, DirectDyn, Kids, NodeWriter};
 /// The data layer: executors + the `Sink` background work pushes results through.
 pub use lumen_core::tasks::{CancelToken, InlineSpawner, ManualSpawner, Sink, Spawner, TaskHandle};
 pub use lumen_core::NodeIndex;
@@ -318,7 +318,7 @@ pub use charts::{LineChart, PieChart, PieSlice};
 pub use check_box::CheckBox;
 pub use color_picker::ColorPicker;
 pub use combobox::Combobox;
-pub use container::Container;
+pub use container::{Container, Stack};
 pub use controls::{Avatar, Skeleton};
 pub use controls::{Icon, Stepper, Switch};
 pub use feedback::{Chip, Spinner, Toast, ToastKind};
