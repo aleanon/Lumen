@@ -1309,8 +1309,14 @@ impl<'a> Open<'a> {
     /// [`child`](Self::child) for a widget whose type is known here — boxes it
     /// for you. The static-arity case (a composite with two named fields)
     /// should use this; a `Vec` of mixed children needs [`Node`].
-    pub fn child_of<W: Direct + 'static>(&mut self, w: W) -> LayoutNode {
-        self.child(node(w))
+    pub fn child_of<W: Direct>(&mut self, w: W) -> LayoutNode {
+        // NOT `self.child(node(w))`. The whole point of the by-value half of
+        // `Direct` is that a widget whose type is known here never becomes a
+        // trait object at all — no box, no vtable, and the call inlines. The
+        // erased path exists for `Vec`s of mixed children, and nothing else
+        // should pay for it.
+        let (_, ln) = w.lower_owned(self.sink, Some(self.n));
+        ln
     }
 
     /// Lower a heterogeneous child list, returning their layout nodes in order.

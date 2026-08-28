@@ -796,6 +796,51 @@ credible thing to do *later*, and O0.16–O0.18 leave it fully costed rather tha
 speculative: the trait shape works, containers hold heterogeneous children, and
 the arena mechanism is stable-Rust and drop-safe.
 
+## O0.20 ☑ Never boxing at all — children as statements (2026-08-28)
+
+O0.16–O0.18 removed `Element` but kept a box per node: containers held
+`Vec<Node>` where `Node = Box<dyn DirectDyn>`, and the arena only moved where
+those boxes came from. The erasure was there to make `column(vec![…])` accept
+heterogeneous children.
+
+It is not needed. Hand the sink to the builder and children become
+**statements** rather than values — heterogeneity comes from control flow, and
+no widget is ever a trait object, boxed or arena'd. All four arms, same
+2501-node tree, min of 5 runs each:
+
+| representation | min | vs `Element` |
+|---|---:|---:|
+| `Element` staging tree | 1116.4 µs | — |
+| `Box<dyn DirectDyn>` children | 1038.9 | −7.0% |
+| arena `&mut dyn DirectDyn` | 955.3 | −14.4% |
+| **inline, never boxed** | **914.2** | **−18.1%** |
+
+`Open::child_of` was boxing (`self.child(node(w))`); it now calls `lower_owned`
+directly, so a widget whose type is known at the call site never becomes a
+trait object and the call inlines. The erased path remains for genuine
+`Vec`s of mixed children and nothing else pays for it.
+
+**The comparison is only meaningful because the arms were made to prove they
+build the same tree.** Each returns a preorder fingerprint of (role, depth) and
+all four report `4277b25d4ffdb592`. That check found a real defect first: the
+inline arm closed its root with `LayoutStyle::default()`, which is a flex
+**row**, so it had been laying out a different tree and winning the comparison
+on layout rather than on representation.
+
+**What this changes about the removal case.** The gap between arena and inline
+is small (955 → 914), which says the per-node allocation was most of what
+boxing cost and the rest is the lowering work itself. So the ceiling for
+removing `Element` is ~18% of lowering — call it **9–11% of a changed frame**
+by O0.19's shares — and it is reachable *without* an arena, a `bumpalo`
+dependency, or drop-list bookkeeping. That is a materially simpler design than
+O0.18's, for the same win.
+
+It also costs something real: a widget can no longer be held unbuilt in a
+`Vec` and edited before it lowers, which is one of the four patterns
+`composition_showcase.rs` demonstrates. Statement-form children and
+value-form children are not the same expressive power, and the erased path is
+what preserves the latter.
+
 ## L1 ☑ Nested auto-sized flex layout — 117× (2026-08-28)
 
 Found 2026-08-27 while measuring O0.8, deferred behind the lowering work, taken

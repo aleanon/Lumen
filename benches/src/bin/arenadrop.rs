@@ -109,13 +109,13 @@ fn element_tree() -> Element {
     lumen_widgets::widgets::column(rows)
 }
 
-fn via_element() -> usize {
+fn via_element() -> (usize, u64) {
     let mut sink = TreeSink::new();
     lower_element(element_tree(), &mut sink, None);
-    sink.tree.len()
+    (sink.tree.len(), shape(&sink))
 }
 
-fn via_boxed() -> usize {
+fn via_boxed() -> (usize, u64) {
     let rows: Vec<Node> = (0..ROWS)
         .map(|i| {
             let kids: Vec<Node> = vec![
@@ -128,10 +128,10 @@ fn via_boxed() -> usize {
         .collect();
     let mut sink = TreeSink::new();
     node(Column::new(rows)).lower_dyn(&mut sink, None);
-    sink.tree.len()
+    (sink.tree.len(), shape(&sink))
 }
 
-fn via_arena(a: &Arena) -> usize {
+fn via_arena(a: &Arena) -> (usize, u64) {
     let n = {
         let rows: Vec<&mut dyn DirectDyn> = (0..ROWS)
             .map(|i| {
@@ -145,7 +145,7 @@ fn via_arena(a: &Arena) -> usize {
             .collect();
         let mut sink = TreeSink::new();
         a.alloc(Column::new(rows)).lower_dyn(&mut sink, None);
-        sink.tree.len()
+        (sink.tree.len(), shape(&sink))
     };
     a.reset();
     n
@@ -207,6 +207,67 @@ fn verify_drops() {
     println!("drop check: {} destructors ran", 2 * N);
 }
 
+/// The shape this benchmark exists to test: children as **statements**, not
+/// values. The sink is handed to the builder and each widget is written
+/// straight into the SoA — no `Element`, no `Box`, no arena, no trait object.
+/// Heterogeneity comes from control flow rather than from type erasure, which
+/// is what the `Vec<Box<dyn ..>>` form was buying.
+fn via_inline() -> (usize, u64) {
+    use lumen_core::semantics::Role;
+    let mut sink = TreeSink::new();
+    let mut root = sink.node(None, Role::Group).elide(true).resolve();
+    let rn = root.index();
+    let mut row_lns = Vec::with_capacity(ROWS);
+    for i in 0..ROWS {
+        let mut row = root.begin_child(Role::Group).elide(true).resolve();
+        let n = row.index();
+        let a = row.child_of(Label::new(format!("row {i}")).size(14.0));
+        let b = row.child_of(ProgressBar::new(i as f64 / ROWS as f64));
+        let c = row.child_of(Button::new("Open").ghost().on_press(|_| {}));
+        let _ = n;
+        row_lns.push(row.end(&col_style(8.0, 4.0), &[a, b, c], false));
+    }
+    let _ = rn;
+    // `LayoutStyle::default()` is a flex ROW; `Column` closes with a column.
+    // Using the default here would have made this arm lay out a different tree
+    // from the others and quietly won the comparison on layout, not on
+    // representation.
+    root.end(&col_style(0.0, 0.0), &row_lns, false);
+    (sink.tree.len(), shape(&sink))
+}
+
+/// The same layout style `Column` closes with, so the arms are comparable.
+fn col_style(gap: f32, padding: f32) -> lumen_layout::LayoutStyle {
+    lumen_layout::LayoutStyle {
+        display: lumen_layout::Display::Flex,
+        flex_direction: lumen_layout::FlexDirection::Column,
+        row_gap: lumen_layout::Dim::px(gap),
+        padding: lumen_layout::Edges::all(lumen_layout::Dim::px(padding)),
+        ..Default::default()
+    }
+}
+
+/// Fingerprint the produced tree, so the arms are known to build the same
+/// thing rather than assumed to. Preorder over (role, depth) — structure and
+/// node kind, which is what differs if an arm quietly builds a cheaper tree.
+fn shape(sink: &TreeSink) -> u64 {
+    fn walk(sink: &TreeSink, n: lumen_core::NodeIndex, d: u64, h: &mut u64) {
+        *h = h
+            .wrapping_mul(1099511628211)
+            .wrapping_add(sink.meta.role(n) as u64)
+            .wrapping_mul(1099511628211)
+            .wrapping_add(d);
+        let mut c = sink.tree.first_child(n);
+        while c.is_some() {
+            walk(sink, c, d + 1, h);
+            c = sink.tree.next_sibling(c);
+        }
+    }
+    let mut h = 1469598103934665603u64;
+    walk(sink, sink.tree.root(), 0, &mut h);
+    h
+}
+
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "element".into());
     if mode == "verify" {
@@ -215,10 +276,11 @@ fn main() {
     }
     verify_drops();
     let arena = Arena::with_capacity(8 << 20);
-    let run: Box<dyn Fn() -> usize> = match mode.as_str() {
+    let run: Box<dyn Fn() -> (usize, u64)> = match mode.as_str() {
         "element" => Box::new(via_element),
         "boxed" => Box::new(via_boxed),
         "arena" => Box::new(|| via_arena(&arena)),
+        "inline" => Box::new(via_inline),
         other => {
             eprintln!("unknown mode {other}");
             std::process::exit(2);
@@ -229,14 +291,17 @@ fn main() {
     }
     let mut us: Vec<f64> = Vec::with_capacity(SAMPLES);
     let mut nodes = 0;
+    let mut fp = 0u64;
     for _ in 0..SAMPLES {
         let t = Instant::now();
-        nodes = std::hint::black_box(run());
+        let r = std::hint::black_box(run());
+        nodes = r.0;
+        fp = r.1;
         us.push(t.elapsed().as_secs_f64() * 1e6);
     }
     us.sort_by(|a, b| a.partial_cmp(b).unwrap());
     println!(
-        "{mode}\tmin={:.1}\tmedian={:.1}\tnodes={nodes}",
+        "{mode}\tmin={:.1}\tmedian={:.1}\tnodes={nodes}\tshape={fp:016x}",
         us[0],
         us[SAMPLES / 2]
     );
