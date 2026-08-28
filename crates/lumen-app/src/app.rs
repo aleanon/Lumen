@@ -918,7 +918,7 @@ struct SpanRec {
 
 /// The rare half of [`NodeMeta`] — see its `rare` field.
 #[derive(Default)]
-struct RareMeta {
+pub(crate) struct RareMeta {
     on_wheel: Option<crate::element::WheelHandler>,
     on_drag: Option<crate::element::DragHandler>,
     on_drop: Option<crate::element::DropHandler>,
@@ -980,7 +980,7 @@ impl NodeMeta {
     }
 }
 
-struct NodeMeta {
+pub(crate) struct NodeMeta {
     id: Option<StableId>,
     role: Role,
     label: String,
@@ -5279,8 +5279,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // slower, never wrong.
         }
         let old_root = tree.root();
-        let (root_node, root_lnode) =
-            self.build_node(root_el, &mut tree, &mut layout, &mut meta, None, false);
+        let (root_node, root_lnode) = Sink {
+            app: self,
+            tree: &mut tree,
+            layout: &mut layout,
+            meta: &mut meta,
+        }
+        .build_node(root_el, None, false);
         debug_assert_eq!(root_node, tree.root(), "build left the tree root unset");
 
         // F2.2: free the previous frame's spine — arena node, side-table
@@ -5995,34 +6000,63 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         self.pump();
         Ok(id)
     }
+}
 
-    #[allow(clippy::too_many_arguments)]
-    fn build_node(
+/// The destination a node is written into, plus the engine state a write needs.
+///
+/// Before this existed, `build_node` *was* the only way to produce a node: the
+/// writes and the `Element` reads were one 690-line function, so a widget could
+/// not write a node without first constructing an `Element` to be read out of.
+/// Splitting the destination from the source is what lets the two lowering
+/// paths coexist — the `Element` path and [`Direct`] widgets write through the
+/// same primitives, so widgets can migrate one at a time instead of all at
+/// once.
+///
+/// The four fields are disjoint borrows: `app` is the engine, and the tree,
+/// layout and meta are the per-rebuild destinations `rebuild_inner` holds
+/// locally while a build is in flight.
+pub struct Sink<'a, R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig> {
+    pub(crate) app: &'a mut Headless<R, E, P>,
+    pub(crate) tree: &'a mut Tree,
+    pub(crate) layout: &'a mut P::Layout,
+    pub(crate) meta: &'a mut HashMap<NodeIndex, NodeMeta>,
+}
+
+impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig>
+    Sink<'_, R, E, P>
+{
+    /// Lower one `Element` and its subtree.
+    ///
+    /// The `Element` path, now expressed as a client of [`Sink`] rather than as
+    /// the only way to write a node. A [`Direct`] widget writes through the
+    /// same primitives, which is what lets the two coexist while widgets
+    /// migrate one at a time.
+    pub(crate) fn build_node(
         &mut self,
         mut el: Element,
-        tree: &mut Tree,
-        layout: &mut P::Layout,
-        meta: &mut HashMap<NodeIndex, NodeMeta>,
         parent: Option<NodeIndex>,
         in_overlay: bool,
     ) -> (NodeIndex, LayoutNode) {
         // A.3.1: a scope-root element records its node span. Nodes allocate
         // preorder in the fresh per-rebuild tree, so a subtree is the
-        // contiguous range [span_start, tree.len()) once its children are
+        // contiguous range [span_start, self.tree.len()) once its children are
         // lowered — the anchor the retained-graph splice (A.3.3) replaces.
         // Taken before the children are consumed (partial-move below).
-        let span_start = tree.len();
+        let span_start = self.tree.len();
         // A.3.2: a memo-hit stub — either copy the scope's span forward from
         // the previous build (sound iff the recorded outside-context hash
         // matches and the span had no per-node side work), or materialize an
         // owned clone of the cached subtree and lower it normally.
         if let Some(rc) = el.shared.take() {
             let key = el.scope_key.expect("shared stub carries its key");
-            let hash = self.span_ctx_hash(in_overlay);
-            if self.allow_copy_forward {
-                if let Some(span) = self.prev_spans.get(&key).copied() {
+            let hash = self.app.span_ctx_hash(in_overlay);
+            if self.app.allow_copy_forward {
+                if let Some(span) = self.app.prev_spans.get(&key).copied() {
                     if !span.impure && span.ctx_hash == hash {
-                        if let Some(res) = self.splice_span(key, span, hash, tree, meta, parent) {
+                        if let Some(res) = self
+                            .app
+                            .splice_span(key, span, hash, self.tree, self.meta, parent)
+                        {
                             return res;
                         }
                     }
@@ -6034,9 +6068,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
         let span_key = el.scope_key.take();
         let span_hash = span_key
-            .map(|_| self.span_ctx_hash(in_overlay))
+            .map(|_| self.app.span_ctx_hash(in_overlay))
             .unwrap_or(lumen_core::identity::ROOT_ID);
-        let impure_at = self.impure_seen;
+        let impure_at = self.app.impure_seen;
         // F3.6: `dyn_text` and `dyn_bg` used to be listed here, which barred
         // every span containing one from the splice path. That was the right
         // rule while a binding could only be refreshed by re-lowering its node:
@@ -6059,21 +6093,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 NodeContent::Custom(..) | NodeContent::Canvas(..)
             )
         {
-            self.impure_seen += 1;
+            self.app.impure_seen += 1;
         }
-        self.nodes_rebuilt += 1;
-        self.nodes_rebuilt_total += 1;
+        self.app.nodes_rebuilt += 1;
+        self.app.nodes_rebuilt_total += 1;
         // F2.2: the tree is retained, so the previous frame's root is still
         // present while this one is being built — `insert_root` would assert.
         // The new node is created detached and claims the root afterwards; the
         // old root is freed by the walk at the end of the rebuild.
         let node = match parent {
             None => {
-                let n = tree.insert_orphan();
-                tree.set_root(n);
+                let n = self.tree.insert_orphan();
+                self.tree.set_root(n);
                 n
             }
-            Some(p) => tree.insert_child(p),
+            Some(p) => self.tree.insert_child(p),
         };
         // Overlay subtrees (dropdown menus, popovers, tooltips) paint in a final
         // top pass that escapes ancestor clips. Hit-testing keys on `z` first, so
@@ -6091,13 +6125,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let mut bg_deps: Vec<String> = Vec::new();
         let mut class_deps: Vec<String> = Vec::new();
         if el.dyn_text.is_some() || el.dyn_bg.is_some() || el.dyn_classes.is_some() {
-            let rt = self.rt.clone();
+            let rt = self.app.rt.clone();
             if let Some(d) = el.dyn_classes.clone() {
                 // Classes drive the `.lss` cascade (may change size) → NON-isolated
                 // (structural). Appended to the static classes.
                 let (classes, reads) = d.eval(&rt);
                 class_deps = reads.dep_keys(&rt);
-                self.structural_reads.extend(&reads);
+                self.app.structural_reads.extend(&reads);
                 el.classes.extend(classes);
             }
             if let Some(d) = el.dyn_text.clone() {
@@ -6112,7 +6146,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // F3.6 removed it, and the guarantee now comes from
                 // `settle_bindings_for_rebuild`, which refreshes every stale
                 // binding before a rebuild chooses what to splice — and drops
-                // the view caches outright when a refresh would move layout.
+                // the view caches outright when a refresh would move self.layout.
                 let (s, reads) = d.eval_isolated(&rt);
                 text_deps = reads.dep_keys(&rt);
                 pending_text = Some((d, reads));
@@ -6130,7 +6164,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 let (c, reads) = d.eval_isolated(&rt);
                 bg_deps = reads.dep_keys(&rt);
                 el.background = Some(c);
-                self.bg_bindings.push(BoundBg {
+                self.app.bg_bindings.push(BoundBg {
                     node,
                     dynamic: d,
                     deps: reads,
@@ -6164,15 +6198,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         if el.disabled {
             flags |= NodeFlags::DISABLED;
         }
-        if el.id.is_some() && el.id == self.focused_id {
+        if el.id.is_some() && el.id == self.app.focused_id {
             flags |= NodeFlags::FOCUSED;
         }
-        if el.id.is_some() && el.id == self.hovered_id {
+        if el.id.is_some() && el.id == self.app.hovered_id {
             flags |= NodeFlags::HOVERED;
         }
-        tree.set_flags(node, flags);
+        self.tree.set_flags(node, flags);
         if this_overlay {
-            tree.set_z(node, OVERLAY_Z);
+            self.tree.set_z(node, OVERLAY_Z);
         }
 
         // A.2: resolve this node's `.lss` rules *now*, before anything
@@ -6188,7 +6222,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // once memo hits become shared `Rc` subtrees the merge must move to a
         // per-node copy instead.
         let mut pushed_hidden = false;
-        if let Some(env) = &self.style_env {
+        if let Some(env) = &self.app.style_env {
             // B.6a: the full state vocabulary — interaction states carry
             // their CSS-familiar aliases (spec examples write `:hover`), and
             // the widget's semantic states (checked/disabled/expanded/…)
@@ -6208,7 +6242,13 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 states.push("hovered");
                 states.push("hover");
             }
-            if el.id.is_some() && self.pressed.as_ref().is_some_and(|(_, id)| *id == el.id) {
+            if el.id.is_some()
+                && self
+                    .app
+                    .pressed
+                    .as_ref()
+                    .is_some_and(|(_, id)| *id == el.id)
+            {
                 states.push("pressed");
                 states.push("active");
             }
@@ -6216,7 +6256,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // W1: `disabled` is its own Element field (not a semantic state the
             // author writes), so fold it in here — inherited, so a control
             // inside a disabled container matches `:disabled` too.
-            if el.disabled || self.disabled_count > 0 {
+            if el.disabled || self.app.disabled_count > 0 {
                 states.push("disabled");
             }
             let node_ty = el.role.as_str();
@@ -6226,7 +6266,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // media context gates `@media` blocks on the actual window.
             // B.2b: inside a `.container()`, container queries test that
             // ancestor's size (from the last layout) instead of the window.
-            let media = match self.container_stack.last().copied().flatten() {
+            let media = match self.app.container_stack.last().copied().flatten() {
                 Some(size) => std::borrow::Cow::Owned(lumen_style::MediaContext {
                     container: Some(size),
                     ..env.media.clone()
@@ -6265,14 +6305,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     st.hash(&mut h);
                 }
                 node_ty.hash(&mut h);
-                self.span_ctx_hash(this_overlay).hash(&mut h);
+                self.app.span_ctx_hash(this_overlay).hash(&mut h);
                 h.finish128()
             };
-            let (desc, mut css, mut resolved) = if let Some(e) = self.style_memo.get(&style_key) {
-                self.style_memo_hits += 1;
+            let (desc, mut css, mut resolved) = if let Some(e) = self.app.style_memo.get(&style_key)
+            {
+                self.app.style_memo_hits += 1;
                 e.clone()
             } else {
-                self.style_memo_misses += 1;
+                self.app.style_memo_misses += 1;
                 let desc = std::rc::Rc::new(lumen_style::NodeDesc {
                     id: el.id.as_ref().map(|i| i.as_str().to_string()),
                     classes: el.classes.clone(),
@@ -6284,7 +6325,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // changing that signature keeps the cost on the miss path,
                 // which is O(depth) and rare, instead of on every node.
                 let ancestors: Vec<lumen_style::NodeDesc> =
-                    self.desc_stack.iter().map(|d| (**d).clone()).collect();
+                    self.app.desc_stack.iter().map(|d| (**d).clone()).collect();
                 let computed =
                     lumen_style::resolve_with_ancestors(&env.sources, &desc, &ancestors, &media);
                 let mut css = lumen_style::Style::new();
@@ -6305,7 +6346,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
                 let resolved: Computeds = std::rc::Rc::new(resolved);
                 let css: Styled = std::rc::Rc::new(css);
-                self.style_memo.insert(
+                self.app.style_memo.insert(
                     style_key,
                     (
                         std::rc::Rc::clone(&desc),
@@ -6341,15 +6382,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // common node on a refcount bump instead of a 1008-byte copy.
             // Re-read AFTER the inline merge, which can introduce either.
             let wants_transition =
-                !css.transitions.is_empty() || self.clock_ms < self.theme_anim_until;
+                !css.transitions.is_empty() || self.app.clock_ms < self.app.theme_anim_until;
             let wants_keyframes = css.animation.is_some();
             if wants_transition || wants_keyframes {
                 let owned = std::rc::Rc::make_mut(&mut css);
                 if wants_transition {
-                    self.apply_transitions(&el.id, owned);
+                    self.app.apply_transitions(&el.id, owned);
                 }
                 if wants_keyframes {
-                    self.apply_keyframes(&el.id, owned);
+                    self.app.apply_keyframes(&el.id, owned);
                 }
             }
             apply_css_to_element(&mut el, &css);
@@ -6357,11 +6398,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // subtree) keeps its layout space but leaves hit-testing (flags)
             // and, via the paint partition, rendering + semantics.
             if css.visibility == Some(false) {
-                self.hidden_count += 1;
+                self.app.hidden_count += 1;
                 pushed_hidden = true;
             }
-            if self.hidden_count > 0 {
-                tree.set_flags(node, NodeFlags::empty());
+            if self.app.hidden_count > 0 {
+                self.tree.set_flags(node, NodeFlags::empty());
             }
             // PROP1 `z-index`: applied once the cascade has resolved.
             // Overlay roots keep OVERLAY_Z — they route to the overlay pass
@@ -6369,14 +6410,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // dropdown under the page.
             if !this_overlay {
                 if let Some(z) = css.z_index {
-                    tree.set_z(node, z.max(0) as u32);
+                    self.tree.set_z(node, z.max(0) as u32);
                 }
             }
-            self.node_style.insert(node, css);
-            self.node_computed.insert(node, resolved);
+            self.app.node_style.insert(node, css);
+            self.app.node_computed.insert(node, resolved);
             // B.1: this node becomes an ancestor for its children's matching
             // (popped after the recursion below).
-            self.push_desc(desc);
+            self.app.push_desc(desc);
         } else if let Some(inline) = el.css_inline.as_deref().cloned() {
             // B.6b without a stylesheet: the inline tier still applies (its
             // own layout/typography/visibility effects included).
@@ -6387,11 +6428,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             let css: Styled = std::rc::Rc::new(css);
             apply_css_to_element(&mut el, &css);
             if css.visibility == Some(false) {
-                self.hidden_count += 1;
+                self.app.hidden_count += 1;
                 pushed_hidden = true;
             }
-            if self.hidden_count > 0 {
-                tree.set_flags(node, NodeFlags::empty());
+            if self.app.hidden_count > 0 {
+                self.tree.set_flags(node, NodeFlags::empty());
             }
             // PROP1 `z-index`: applied once the cascade has resolved.
             // Overlay roots keep OVERLAY_Z — they route to the overlay pass
@@ -6399,23 +6440,24 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // dropdown under the page.
             if !this_overlay {
                 if let Some(z) = css.z_index {
-                    tree.set_z(node, z.max(0) as u32);
+                    self.tree.set_z(node, z.max(0) as u32);
                 }
             }
-            self.node_style.insert(node, css);
-            self.node_computed.insert(node, resolved);
+            self.app.node_style.insert(node, css);
+            self.app.node_computed.insert(node, resolved);
         }
-        let pushed_desc = self.style_env.is_some();
+        let pushed_desc = self.app.style_env.is_some();
         // B.2b: this node's own styles resolved against the *enclosing*
         // container (CSS semantics); its descendants query this one. Size
         // comes from the previous layout by build order (`None` until
         // measured — queries fail closed for that pass).
         let pushed_container = el.container;
         if pushed_container {
-            let seq = self.container_nodes.len();
-            self.container_nodes.push(node);
-            self.container_stack
-                .push(self.container_prev.get(seq).copied());
+            let seq = self.app.container_nodes.len();
+            self.app.container_nodes.push(node);
+            self.app
+                .container_stack
+                .push(self.app.container_prev.get(seq).copied());
         }
 
         // Text nodes get a fixed size from measurement.
@@ -6440,21 +6482,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // folding. Read back from `node_style` because `css` was moved there
             // above. Pair it with `overflow: hidden` to clip the overflow — this
             // property decides line breaking, not clipping.
-            if self.node_style.get(&node).and_then(|s| s.text_wrap) == Some(false) {
+            if self.app.node_style.get(&node).and_then(|s| s.text_wrap) == Some(false) {
                 wrap = None;
             }
             // PROP1 `text-overflow: ellipsis`. Only meaningful with a bounded
             // width AND no wrapping — a wrapping paragraph has no overflowing
             // line to truncate, it just gets taller.
-            if self.node_style.get(&node).and_then(|s| s.text_ellipsis) == Some(true)
+            if self.app.node_style.get(&node).and_then(|s| s.text_ellipsis) == Some(true)
                 && wrap.is_none()
             {
                 if let Dim::Px(w) = style.width {
                     let avail = (w - (pl + pr) as f32).max(0.0);
-                    ellipsized = self.text.ellipsized_text(txt, ts, avail);
+                    ellipsized = self.app.text.ellipsized_text(txt, ts, avail);
                 }
             }
-            let block = self.text.shaped(txt, ts, wrap, ts.align);
+            let block = self.app.text.shaped(txt, ts, wrap, ts.align);
             // Size the box to the glyphs ONLY when the author asked for nothing.
             // `== Dim::Auto` rather than `wrap.is_none()`, which clobbered two
             // widths the author *had* expressed:
@@ -6502,7 +6544,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // F3.5: retain the binding with what this build measured, so a
             // later update can ask "would the box change?" without rebuilding.
             if let Some((dynamic, deps)) = pending_text.take() {
-                self.text_bindings.push(BoundText {
+                self.app.text_bindings.push(BoundText {
                     node,
                     dynamic,
                     deps,
@@ -6547,7 +6589,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // them as structural, which is what they were before F3.5.
         if let Some((_, reads)) = pending_text.take() {
             debug_assert!(false, "text binding on a node that never measured text");
-            self.structural_reads.extend(&reads);
+            self.app.structural_reads.extend(&reads);
         }
 
         // O0.14: lift the rare half out before the children are moved — it is
@@ -6557,27 +6599,24 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // Consume the children (move, not clone) and recurse.
         let pushed_disabled = el.disabled;
         if pushed_disabled {
-            self.disabled_count += 1;
+            self.app.disabled_count += 1;
         }
         let child_lnodes: Vec<LayoutNode> = el
             .children
             .into_iter()
-            .map(|c| {
-                self.build_node(c, tree, layout, meta, Some(node), this_overlay)
-                    .1
-            })
+            .map(|c| self.build_node(c, Some(node), this_overlay).1)
             .collect();
         if pushed_desc {
-            self.pop_desc();
+            self.app.pop_desc();
         }
         if pushed_container {
-            self.container_stack.pop();
+            self.app.container_stack.pop();
         }
         if pushed_hidden {
-            self.hidden_count -= 1;
+            self.app.hidden_count -= 1;
         }
         if pushed_disabled {
-            self.disabled_count -= 1;
+            self.app.disabled_count -= 1;
         }
         // O0.9: the post-css `LayoutStyle` used to be retained here, for
         // A.3.2's copy-forward path — a memo-hit span rebuilt its taffy nodes
@@ -6588,15 +6627,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // plus a hash insert, and a hash remove per freed node — with no
         // reader anywhere in the workspace.
         let lnode = if child_lnodes.is_empty() {
-            layout.leaf(&style)
+            self.layout.leaf(&style)
         } else {
-            layout.container(&style, &child_lnodes)
+            self.layout.container(&style, &child_lnodes)
         };
         // F2.2: remember which taffy node laid this one out. Recorded here,
         // at creation, rather than in a post-pass over a `built` vector —
         // spliced spans are never enumerated, so there is no such vector any
         // more, and the bounds pass reads this back off the arena instead.
-        tree.set_lnode(node, lnode.raw());
+        self.tree.set_lnode(node, lnode.raw());
 
         // Move the remaining fields into the retained NodeMeta (no clones).
         // O0.13: the rare half is allocated only when the node actually has
@@ -6639,7 +6678,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         } else {
             None
         };
-        meta.insert(
+        self.meta.insert(
             node,
             NodeMeta {
                 rare,
@@ -6669,19 +6708,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             },
         );
         if let Some(key) = span_key {
-            self.scope_spans.insert(
+            self.app.scope_spans.insert(
                 key,
                 SpanRec {
                     root: node,
-                    count: (tree.len() - span_start) as u32,
+                    count: (self.tree.len() - span_start) as u32,
                     ctx_hash: span_hash,
-                    impure: self.impure_seen > impure_at,
+                    impure: self.app.impure_seen > impure_at,
                 },
             );
         }
         (node, lnode)
     }
+}
 
+impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig>
+    Headless<R, E, P>
+{
     // --- paint --------------------------------------------------------------
 
     fn build_display_list(&mut self) -> (DisplayList, Vec<lumen_render::TextTarget>) {
