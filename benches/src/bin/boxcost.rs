@@ -151,11 +151,46 @@ fn via_boxed() -> usize {
     sink.tree.len()
 }
 
+/// Children as statements: the sink is handed to the builder and each widget
+/// is written straight into the SoA. Nothing is held, so nothing is allocated
+/// per node.
+fn via_inline() -> usize {
+    use lumen_core::semantics::Role;
+    let mut sink = TreeSink::new();
+    let mut root = sink.node(None, Role::Group).elide(true).resolve();
+    let mut row_lns = Vec::with_capacity(ROWS);
+    for i in 0..ROWS {
+        let mut row = root.begin_child(Role::Group).elide(true).resolve();
+        let a = row.child_of(Label::new(format!("row {i}")).size(14.0));
+        let b = row.child_of(ProgressBar::new(i as f64 / ROWS as f64));
+        let c = row.child_of(Button::new("Open").ghost().on_press(|_| {}));
+        row_lns.push(row.end(&col_style(8.0, 4.0), &[a, b, c], false));
+    }
+    root.end(&col_style(0.0, 0.0), &row_lns, false);
+    sink.tree.len()
+}
+
+fn col_style(gap: f32, padding: f32) -> lumen_layout::LayoutStyle {
+    lumen_layout::LayoutStyle {
+        display: lumen_layout::Display::Flex,
+        flex_direction: lumen_layout::FlexDirection::Column,
+        row_gap: lumen_layout::Dim::px(gap),
+        padding: lumen_layout::Edges::all(lumen_layout::Dim::px(padding)),
+        ..Default::default()
+    }
+}
+
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "element".into());
     // Warm the allocator so the measured pass is not the first of its shape.
     arena_init();
     match mode.as_str() {
+        "inline" => {
+            std::hint::black_box(via_inline());
+            reset();
+            let n = via_inline();
+            report("inline ", n);
+        }
         "arena" => {
             std::hint::black_box(via_arena());
             reset();
