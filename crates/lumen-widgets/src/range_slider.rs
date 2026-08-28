@@ -162,7 +162,7 @@ impl Widget for RangeSlider {
         };
         // Drag: the x fraction sets whichever end is nearer (ties → the one
         // the pointer is beyond); ends clamp so they can't cross.
-        el.on_drag = Some(Rc::new(move |rt, fx, _fy, _pos| {
+        el.rare_mut().on_drag = Some(Rc::new(move |rt, fx, _fy, _pos| {
             let v = min + fx.clamp(0.0, 1.0) * span;
             let (l, h) = (lo.get(rt), hi.get(rt));
             if (v - l).abs() <= (v - h).abs() {
@@ -183,9 +183,9 @@ impl Widget for RangeSlider {
                 hi.set(rt, (h + delta).clamp(l, max));
             }
         };
-        el.on_increment = Some(Rc::new(move |rt| bump(rt, step, false)));
-        el.on_decrement = Some(Rc::new(move |rt| bump(rt, -step, false)));
-        el.on_set_value = Some(Rc::new(move |rt, v| {
+        el.rare_mut().on_increment = Some(Rc::new(move |rt| bump(rt, step, false)));
+        el.rare_mut().on_decrement = Some(Rc::new(move |rt| bump(rt, -step, false)));
+        el.rare_mut().on_set_value = Some(Rc::new(move |rt, v| {
             // "lo,hi" sets both ends; a bare number moves the nearer end.
             if let Some((a, b)) = v.split_once(',') {
                 if let (Ok(a), Ok(b)) = (a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
@@ -202,7 +202,7 @@ impl Widget for RangeSlider {
                 }
             }
         }));
-        el.on_key = Some(Rc::new(move |rt, ke| {
+        el.rare_mut().on_key = Some(Rc::new(move |rt, ke| {
             let lower = ke.modifiers.contains(lumen_core::events::Modifiers::SHIFT);
             match ke.key {
                 Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowUp) => {

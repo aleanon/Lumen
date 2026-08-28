@@ -123,11 +123,7 @@ impl Widget for Card {
             on_click: on_press,
             background: Some(Color::srgb8(0xff, 0xff, 0xff, 0xff)),
             corner_radius: 12.0,
-            shadow: if flat {
-                None
-            } else {
-                Some(crate::element::Shadow::soft())
-            },
+
             classes: vec!["card".to_string()],
             style: LayoutStyle {
                 display: Display::Flex,
@@ -138,7 +134,12 @@ impl Widget for Card {
             },
             children,
             ..Element::default()
-        };
+        }
+        .set_shadow(if flat {
+            None
+        } else {
+            Some(crate::element::Shadow::soft())
+        });
         common.apply(&mut el);
         el
     }

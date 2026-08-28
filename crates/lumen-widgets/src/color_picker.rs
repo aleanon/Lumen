@@ -293,7 +293,7 @@ impl Widget for ColorPicker {
             plane.value = Some(format!("s {:.2} v {:.2}", s_, v));
             plane.cursor = Some(lumen_core::CursorShape::Crosshair);
             plane.id = Some(format!("{name}-plane").into());
-            plane.on_drag = Some(Rc::new(move |rt, fx, fy, _| {
+            plane.rare_mut().on_drag = Some(Rc::new(move |rt, fx, fy, _| {
                 sat.set(rt, fx.clamp(0.0, 1.0));
                 val.set(rt, 1.0 - fy.clamp(0.0, 1.0));
                 publish(rt);
@@ -327,7 +327,7 @@ impl Widget for ColorPicker {
             hue_bar.label = "hue".to_string();
             hue_bar.value = Some(format!("{:.0}\u{b0}", h * 360.0));
             hue_bar.id = Some(format!("{name}-hue").into());
-            hue_bar.on_drag = Some(Rc::new(move |rt, fx, _, _| {
+            hue_bar.rare_mut().on_drag = Some(Rc::new(move |rt, fx, _, _| {
                 hue.set(rt, fx.clamp(0.0, 1.0));
                 publish(rt);
             }));
@@ -350,7 +350,7 @@ impl Widget for ColorPicker {
             alpha_bar.label = "alpha".to_string();
             alpha_bar.value = Some(format!("{:.0}%", a * 100.0));
             alpha_bar.id = Some(format!("{name}-alpha").into());
-            alpha_bar.on_drag = Some(Rc::new(move |rt, fx, _, _| {
+            alpha_bar.rare_mut().on_drag = Some(Rc::new(move |rt, fx, _, _| {
                 alpha.set(rt, fx.clamp(0.0, 1.0));
                 publish(rt);
             }));
@@ -429,9 +429,9 @@ impl Widget for ColorPicker {
             let mut panel = widgets::column(rows);
             panel.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
             panel.corner_radius = 8.0;
-            panel.shadow = Some(crate::element::Shadow::soft());
+            panel.rare_mut().shadow = Some(crate::element::Shadow::soft());
             panel.overlay = true;
-            panel.on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
+            panel.rare_mut().on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
             panel.style.position = Position::Absolute;
             panel.style.inset = Edges {
                 top: Dim::pct(1.0),

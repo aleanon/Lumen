@@ -86,13 +86,13 @@ impl Widget for Select {
             // W2: `SetValue` was advertised but unimplemented, so the agent
             // and assistive tech could only *cycle* the select one click at
             // a time. Setting the value by option text selects it directly.
-            on_set_value: Some(Rc::new(move |rt: &Runtime, v: &str| {
-                if let Some(k) = options.iter().position(|o| o == v) {
-                    idx.set(rt, k);
-                }
-            })),
             ..Element::default()
-        };
+        }
+        .set_on_set_value(Some(Rc::new(move |rt: &Runtime, v: &str| {
+            if let Some(k) = options.iter().position(|o| o == v) {
+                idx.set(rt, k);
+            }
+        })));
         common.apply(&mut el);
         el
     }

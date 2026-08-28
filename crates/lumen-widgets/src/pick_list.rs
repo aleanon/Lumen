@@ -145,11 +145,11 @@ impl PickList {
             };
             menu.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
             menu.corner_radius = 8.0;
-            menu.shadow = Some(crate::element::Shadow::soft());
+            menu.rare_mut().shadow = Some(crate::element::Shadow::soft());
             // Paint above sibling content below the trigger, and escape clips.
             menu.overlay = true;
             // Click-away / Escape closes the dropdown (light dismiss).
-            menu.on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
+            menu.rare_mut().on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
             menu.style.position = Position::Absolute;
             menu.style.inset = Edges {
                 top: Dim::px((TRIGGER_H + 4.0) as f32),
@@ -219,7 +219,7 @@ impl Widget for PickList {
         // W3: the WAI-ARIA combobox/listbox keys. ↑/↓ move the selection
         // directly (and open a closed list), Home/End jump to the ends, Escape
         // closes. Keyboard users no longer need the pointer to choose.
-        trigger.on_key = Some(Rc::new(move |rt, ke| {
+        trigger.rare_mut().on_key = Some(Rc::new(move |rt, ke| {
             if options.is_empty() {
                 return;
             }

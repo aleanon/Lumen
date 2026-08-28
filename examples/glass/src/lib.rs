@@ -86,7 +86,7 @@ fn build(cx: &mut BuildCx) -> Element {
     card.style.row_gap = Dim::px(16.0);
     card.style.padding = Edges::all(Dim::px(34.0));
     card.style.width = Dim::px(380.0);
-    card.shadow = Some(Shadow::soft());
+    card = card.shadow(Shadow::soft());
 
     // Card sits in normal flow, centred; backdrop is absolute behind it. The card
     // is painted after the backdrop (document order) so its filter can read it.

@@ -249,47 +249,49 @@ impl Widget for TextInput {
             content: NodeContent::Text(shown, ts),
             // A masked field's caret must be remapped: `caret_byte` indexes the
             // SHOWN text, and one plaintext byte is not one bullet.
-            caret_byte: Some(match mask {
-                Some(c) => caret_chars * c.len_utf8(),
-                None if showing_placeholder => 0,
-                None => caret_byte,
-            }),
+
             // Selection highlighting would leak the shape of a masked value's
             // sub-ranges; drop it while masked.
-            selection: if mask.is_some() { None } else { selection },
-            on_text: Some(on_text.unwrap_or_else(|| {
-                Rc::new(move |rt, t| {
-                    editor.update(rt, |e| e.insert(t));
-                    sync_mirror(rt, editor, mirror);
-                })
-            })),
-            on_caret_set: Some(Rc::new(move |rt, byte, extend| {
-                editor.update(rt, |e| e.place(byte, extend));
-            })),
+
             // W2: `SetValue` is declared, so implement it — replace the whole
             // contents (the AT/agent meaning of setting a field's value).
-            on_set_value: Some(Rc::new(move |rt, v| {
-                // Replace the contents via select-all + insert so the edit goes
-                // through the normal path (undo history stays coherent).
-                editor.update(rt, |e| {
-                    e.select_all();
-                    e.insert(v);
-                });
-                sync_mirror(rt, editor, mirror);
-            })),
-            on_key: Some(on_key.unwrap_or_else(|| {
-                Rc::new(move |rt, ke| {
-                    edit_key(rt, ke, editor, mirror, false);
-                })
-            })),
             ..Element::default()
-        };
+        }
+        .set_selection(if mask.is_some() { None } else { selection })
+        .set_caret_byte(Some(match mask {
+            Some(c) => caret_chars * c.len_utf8(),
+            None if showing_placeholder => 0,
+            None => caret_byte,
+        }))
+        .set_on_set_value(Some(Rc::new(move |rt, v| {
+            // Replace the contents via select-all + insert so the edit goes
+            // through the normal path (undo history stays coherent).
+            editor.update(rt, |e| {
+                e.select_all();
+                e.insert(v);
+            });
+            sync_mirror(rt, editor, mirror);
+        })))
+        .set_on_caret_set(Some(Rc::new(move |rt, byte, extend| {
+            editor.update(rt, |e| e.place(byte, extend));
+        })))
+        .set_on_key(Some(on_key.unwrap_or_else(|| {
+            Rc::new(move |rt, ke| {
+                edit_key(rt, ke, editor, mirror, false);
+            })
+        })))
+        .set_on_text(Some(on_text.unwrap_or_else(|| {
+            Rc::new(move |rt, t| {
+                editor.update(rt, |e| e.insert(t));
+                sync_mirror(rt, editor, mirror);
+            })
+        })));
 
         if read_only {
-            el.on_text = None;
-            el.on_set_value = None;
+            el.rare_mut().on_text = None;
+            el.rare_mut().on_set_value = None;
             // Keep caret movement, selection and copy; drop the mutating keys.
-            el.on_key = Some(Rc::new(move |rt, ke| {
+            el.rare_mut().on_key = Some(Rc::new(move |rt, ke| {
                 edit_key_readonly(rt, ke, editor);
             }));
             // Stop advertising the action that was just removed — the list is a

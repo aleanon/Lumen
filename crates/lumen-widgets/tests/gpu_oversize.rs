@@ -31,7 +31,7 @@ fn card(h: f32) -> impl Fn(&mut BuildCx) -> Element {
         el.style.height = Dim::px(h);
         el.background = Some(lumen_core::Color::srgb8(0xff, 0xff, 0xff, 0xff));
         el.corner_radius = 12.0;
-        el.shadow = Some(Shadow::soft());
+        el = el.shadow(Shadow::soft());
         // Inset so there is a strip to the LEFT of the card that only the
         // shadow can paint. Without it the strip sits under the card's own
         // opaque white fill, and "no ink" would mean "card", not "no shadow".

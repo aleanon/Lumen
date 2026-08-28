@@ -107,12 +107,7 @@ impl Widget for Scrollable {
         let mut el = Element {
             role: Role::ScrollArea,
             clip: true, // overflow:hidden — content outside the viewport is masked
-            scroll: Some(ScrollInfo {
-                x: 0.0,
-                y,
-                max_x: 0.0,
-                max_y,
-            }),
+
             actions: vec![Action::ScrollIntoView],
             style: LayoutStyle {
                 // Anchors the absolutely-positioned overlay scrollbar.
@@ -122,39 +117,47 @@ impl Widget for Scrollable {
             },
             // Positive wheel delta scrolls toward the end (the shell normalizes
             // the OS sign so wheel-down moves the content down).
-            on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
-                offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
-            })),
+
             // W3: keyboard scrolling. Focusable so Tab can reach the viewport —
             // a scroll region a keyboard user cannot move is a real a11y gap
             // (WAI-ARIA: a scrollable region must be keyboard operable).
             focusable: true,
-            on_key: Some(Rc::new(move |rt, ke| {
-                let line = lumen_core::events::WHEEL_LINE_PX;
-                let page = (viewport_h - line).max(line);
-                let step = match ke.key {
-                    Key::Named(NamedKey::ArrowDown) => line,
-                    Key::Named(NamedKey::ArrowUp) => -line,
-                    Key::Named(NamedKey::PageDown) => page,
-                    Key::Named(NamedKey::PageUp) => -page,
-                    Key::Named(NamedKey::Home) => {
-                        offset.set(rt, 0.0);
-                        return;
-                    }
-                    Key::Named(NamedKey::End) => {
-                        offset.set(rt, max_y);
-                        return;
-                    }
-                    _ => return,
-                };
-                offset.update(rt, |o| *o = (*o + step).clamp(0.0, max_y));
-            })),
+
             children: match overlay_scrollbar(&name, viewport_h, y, max_y, offset) {
                 Some(bar) => vec![inner, bar],
                 None => vec![inner],
             },
             ..Element::default()
-        };
+        }
+        .set_scroll(Some(ScrollInfo {
+            x: 0.0,
+            y,
+            max_x: 0.0,
+            max_y,
+        }))
+        .set_on_key(Some(Rc::new(move |rt, ke| {
+            let line = lumen_core::events::WHEEL_LINE_PX;
+            let page = (viewport_h - line).max(line);
+            let step = match ke.key {
+                Key::Named(NamedKey::ArrowDown) => line,
+                Key::Named(NamedKey::ArrowUp) => -line,
+                Key::Named(NamedKey::PageDown) => page,
+                Key::Named(NamedKey::PageUp) => -page,
+                Key::Named(NamedKey::Home) => {
+                    offset.set(rt, 0.0);
+                    return;
+                }
+                Key::Named(NamedKey::End) => {
+                    offset.set(rt, max_y);
+                    return;
+                }
+                _ => return,
+            };
+            offset.update(rt, |o| *o = (*o + step).clamp(0.0, max_y));
+        })))
+        .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
+            offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
+        })));
         common.apply(&mut el);
         el
     }
@@ -275,36 +278,39 @@ pub(crate) fn overlay_scrollbar(
         ..Element::default()
     };
 
-    Some(Element {
-        // No `ScrollBar` role exists; `Slider` is the closest — ARIA models a
-        // scrollbar as a range widget — and it keeps the bar drivable by the
-        // agent rather than invisible to it. A dedicated role would be more
-        // precise if this proves confusing to a screen reader.
-        role: Role::Slider,
-        label: "Scrollbar".to_string(),
-        // A drag is re-resolved by stable id across rebuilds, falling back to
-        // the raw node index only when there is no id — and scrolling rebuilds
-        // on every frame of the drag. The bar was the one draggable control
-        // with no id, so its grab rode on an index that the rebuild was free to
-        // renumber. It is also the only way an agent or a test can address the
-        // bar at all.
-        id: Some(bar_id(name).into()),
-        background: Some(lumen_core::Color::srgb8(0x00, 0x00, 0x00, 0x14)),
-        style: LayoutStyle {
-            position: Position::Absolute,
-            inset: Edges {
-                right: Dim::px(0.0),
-                top: Dim::px(0.0),
-                ..Edges::AUTO
+    Some(
+        Element {
+            // No `ScrollBar` role exists; `Slider` is the closest — ARIA models a
+            // scrollbar as a range widget — and it keeps the bar drivable by the
+            // agent rather than invisible to it. A dedicated role would be more
+            // precise if this proves confusing to a screen reader.
+            role: Role::Slider,
+            label: "Scrollbar".to_string(),
+            // A drag is re-resolved by stable id across rebuilds, falling back to
+            // the raw node index only when there is no id — and scrolling rebuilds
+            // on every frame of the drag. The bar was the one draggable control
+            // with no id, so its grab rode on an index that the rebuild was free to
+            // renumber. It is also the only way an agent or a test can address the
+            // bar at all.
+            id: Some(bar_id(name).into()),
+            background: Some(lumen_core::Color::srgb8(0x00, 0x00, 0x00, 0x14)),
+            style: LayoutStyle {
+                position: Position::Absolute,
+                inset: Edges {
+                    right: Dim::px(0.0),
+                    top: Dim::px(0.0),
+                    ..Edges::AUTO
+                },
+                width: Dim::px(TRACK_W as f32),
+                height: Dim::px(viewport_h as f32),
+                ..LayoutStyle::default()
             },
-            width: Dim::px(TRACK_W as f32),
-            height: Dim::px(viewport_h as f32),
-            ..LayoutStyle::default()
-        },
-        on_drag: Some(Rc::new(move |rt, _fx, fy, _pos| {
+
+            children: vec![thumb],
+            ..Element::default()
+        }
+        .set_on_drag(Some(Rc::new(move |rt, _fx, fy, _pos| {
             offset.set(rt, (fy * max_y).clamp(0.0, max_y));
-        })),
-        children: vec![thumb],
-        ..Element::default()
-    })
+        }))),
+    )
 }

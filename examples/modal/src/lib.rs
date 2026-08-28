@@ -52,7 +52,7 @@ fn build(cx: &mut BuildCx) -> Element {
     base.style.align_items = Some(Align::Center);
     base.style.row_gap = Dim::px(16.0);
     base.style.padding = Edges::all(Dim::px(34.0));
-    base.shadow = Some(Shadow::soft());
+    base = base.shadow(Shadow::soft());
 
     let mut children = vec![base];
 
@@ -75,7 +75,7 @@ fn build(cx: &mut BuildCx) -> Element {
         dialog.style.row_gap = Dim::px(14.0);
         dialog.style.width = Dim::px(340.0);
         dialog.style.padding = Edges::all(Dim::px(26.0));
-        dialog.shadow = Some(Shadow::soft());
+        dialog = dialog.shadow(Shadow::soft());
 
         let overlay = Element {
             role: lumen_core::semantics::Role::Group,

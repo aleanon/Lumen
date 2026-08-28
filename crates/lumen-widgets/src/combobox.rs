@@ -129,9 +129,9 @@ impl Combobox {
             }
             menu.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
             menu.corner_radius = 8.0;
-            menu.shadow = Some(crate::element::Shadow::soft());
+            menu.rare_mut().shadow = Some(crate::element::Shadow::soft());
             menu.overlay = true;
-            menu.on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
+            menu.rare_mut().on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
             menu.style.position = Position::Absolute;
             menu.style.inset = Edges {
                 top: Dim::pct(1.0),

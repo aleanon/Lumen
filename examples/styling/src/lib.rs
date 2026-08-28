@@ -195,7 +195,7 @@ fn build(cx: &mut BuildCx) -> Element {
     let mut panel = vcol(vec![header, badges, buttons, alerts, palette], 26.0).id("panel");
     panel.style.width = Dim::px(680.0);
     panel.style.padding = Edges::all(Dim::px(36.0));
-    panel.shadow = Some(Shadow::soft());
+    panel = panel.shadow(Shadow::soft());
 
     Element {
         role: lumen_core::semantics::Role::Group,

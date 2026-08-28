@@ -200,23 +200,25 @@ pub fn scroll(
     inner.style.flex_shrink = 0.0;
     Element {
         role: Role::ScrollArea,
-        scroll: Some(ScrollInfo {
-            x: 0.0,
-            y,
-            max_x: 0.0,
-            max_y,
-        }),
+
         actions: vec![Action::ScrollIntoView],
         style: LayoutStyle {
             height: Dim::px(viewport_h as f32),
             ..LayoutStyle::default()
         },
-        on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
-            offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
-        })),
+
         children: vec![inner],
         ..Element::default()
     }
+    .set_scroll(Some(ScrollInfo {
+        x: 0.0,
+        y,
+        max_x: 0.0,
+        max_y,
+    }))
+    .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
+        offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
+    })))
 }
 
 /// A single-style text input with its own string state (`name`). Pre-IME
@@ -249,27 +251,28 @@ pub fn text_field_basic(cx: &BuildCx, name: &str, initial: &str) -> Element {
             ..LayoutStyle::default()
         },
         content: crate::NodeContent::Text(shown, TextStyle::default()),
-        on_text: Some(Rc::new(move |rt, t| {
-            let t = t.to_string();
-            value.update(rt, |s| s.push_str(&t))
-        })),
+
         // The basic field has no caret — editing happens at the end, so
         // Backspace pops the last character (with Ctrl: the whole value).
-        on_key: Some(Rc::new(move |rt, ev| {
-            if ev.key == lumen_core::events::Key::Named(lumen_core::events::NamedKey::Backspace) {
-                if ev.modifiers.contains(lumen_core::events::Modifiers::CTRL)
-                    || ev.modifiers.contains(lumen_core::events::Modifiers::META)
-                {
-                    value.set(rt, String::new());
-                } else {
-                    value.update(rt, |s| {
-                        s.pop();
-                    });
-                }
-            }
-        })),
         ..Element::default()
     }
+    .set_on_key(Some(Rc::new(move |rt, ev| {
+        if ev.key == lumen_core::events::Key::Named(lumen_core::events::NamedKey::Backspace) {
+            if ev.modifiers.contains(lumen_core::events::Modifiers::CTRL)
+                || ev.modifiers.contains(lumen_core::events::Modifiers::META)
+            {
+                value.set(rt, String::new());
+            } else {
+                value.update(rt, |s| {
+                    s.pop();
+                });
+            }
+        }
+    })))
+    .set_on_text(Some(Rc::new(move |rt, t| {
+        let t = t.to_string();
+        value.update(rt, |s| s.push_str(&t))
+    })))
 }
 
 /// [`Canvas`] — an immediate-mode drawing surface (typed form of

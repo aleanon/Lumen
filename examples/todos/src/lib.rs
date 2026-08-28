@@ -155,7 +155,7 @@ fn build(cx: &mut BuildCx) -> Element {
     card.style.padding = Edges::all(Dim::px(28.0));
     card.style.row_gap = Dim::px(18.0);
     card.style.align_items = Some(Align::Stretch);
-    card.shadow = Some(Shadow::soft());
+    card = card.shadow(Shadow::soft());
 
     Element {
         role: Role::Group,

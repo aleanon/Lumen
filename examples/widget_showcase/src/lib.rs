@@ -143,7 +143,6 @@ fn header(cx: &mut BuildCx, entry: &'static Entry, w: f32) -> Element {
     let mut band = Element {
         role: Role::Generic,
         background: Some(band()),
-        shadow: Some(Shadow::soft()),
         style: LayoutStyle {
             position: Position::Absolute,
             inset: Edges {
@@ -163,7 +162,8 @@ fn header(cx: &mut BuildCx, entry: &'static Entry, w: f32) -> Element {
         },
         children: vec![picker(cx, entry), caption_row],
         ..Element::default()
-    };
+    }
+    .set_shadow(Some(Shadow::soft()));
     band.id = Some("header".into());
     band
 }
@@ -243,7 +243,6 @@ fn picker(cx: &mut BuildCx, entry: &'static Entry) -> Element {
             role: Role::Menu,
             background: Some(band()),
             corner_radius: 10.0,
-            shadow: Some(Shadow::soft()),
             // Paint above everything and escape ancestor clips.
             overlay: true,
             style: LayoutStyle {
@@ -263,10 +262,11 @@ fn picker(cx: &mut BuildCx, entry: &'static Entry) -> Element {
             },
             children: vec![list],
             ..Element::default()
-        };
+        }
+        .set_shadow(Some(Shadow::soft()));
         panel.id = Some("picker-panel".into());
         // Light dismiss: a click outside, or Escape, closes the panel.
-        panel.on_dismiss = Some(std::rc::Rc::new(move |rt| open.set(rt, false)));
+        panel.rare_mut().on_dismiss = Some(std::rc::Rc::new(move |rt| open.set(rt, false)));
         children.push(panel);
     }
 

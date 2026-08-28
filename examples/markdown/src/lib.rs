@@ -103,7 +103,7 @@ fn build(cx: &mut BuildCx) -> Element {
     doc.style.padding = Edges::all(Dim::px(34.0));
     doc.style.width = Dim::px(480.0);
     doc.style.align_items = Some(Align::Stretch);
-    doc.shadow = Some(Shadow::soft());
+    doc = doc.shadow(Shadow::soft());
 
     let mut page = widgets::column(vec![doc]).id("page");
     page.style.width = Dim::pct(1.0);

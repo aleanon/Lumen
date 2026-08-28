@@ -222,9 +222,7 @@ impl Widget for PaneGrid {
         let mut el = Element {
             role: Role::Group,
             value: Some(format!("{r:.2}")),
-            on_drag: Some(Rc::new(move |rt, frac, _, _| {
-                ratio.set(rt, frac.clamp(0.1, 0.9))
-            })),
+
             style: LayoutStyle {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Row,
@@ -239,6 +237,9 @@ impl Widget for PaneGrid {
             ],
             ..Element::default()
         }
+        .set_on_drag(Some(Rc::new(move |rt, frac, _, _| {
+            ratio.set(rt, frac.clamp(0.1, 0.9))
+        })))
         .id(name);
         common.apply(&mut el);
         el

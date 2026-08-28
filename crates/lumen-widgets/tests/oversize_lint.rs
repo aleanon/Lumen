@@ -19,7 +19,7 @@ fn shadowed(blur: f64, w: f32, h: f32) -> impl Fn(&mut BuildCx) -> Element {
         el.style.height = Dim::px(h);
         el.background = Some(lumen_core::Color::srgb8(0xff, 0xff, 0xff, 0xff));
         el.corner_radius = 12.0;
-        el.shadow = Some(Shadow {
+        el.rare_mut().shadow = Some(Shadow {
             dx: 0.0,
             dy: 2.0,
             blur,

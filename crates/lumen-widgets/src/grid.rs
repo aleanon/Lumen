@@ -503,19 +503,19 @@ impl Grid {
             // not `clip` — stops reporting the clipped overscan row as
             // overflowing (W0103) and as invisible text (W0303). Every other
             // scrolling widget publishes it; the grid was the exception.
-            scroll: Some(lumen_core::semantics::ScrollInfo {
-                x: ox,
-                y: oy,
-                max_x: (content_w - vwc).max(0.0),
-                max_y: (content_h - vhc).max(0.0),
-            }),
             actions: vec![lumen_core::semantics::Action::ScrollIntoView],
             children: layers,
             ..Element::default()
-        };
+        }
+        .set_scroll(Some(lumen_core::semantics::ScrollInfo {
+            x: ox,
+            y: oy,
+            max_x: (content_w - vwc).max(0.0),
+            max_y: (content_h - vhc).max(0.0),
+        }));
         viewport.background = Some(s.gridline);
         let zoomable = self.zoomable;
-        viewport.on_wheel = Some(Rc::new(move |rt, dx, dy, mods| {
+        viewport.rare_mut().on_wheel = Some(Rc::new(move |rt, dx, dy, mods| {
             if zoomable && (mods.contains(Modifiers::CTRL) || mods.contains(Modifiers::META)) {
                 zoom.update(rt, |zz| *zz = (*zz * (1.0 - dy * 0.0016)).clamp(zmin, zmax));
             } else if mods.contains(Modifiers::SHIFT) {
@@ -589,7 +589,7 @@ fn col_handle(
 ) -> Element {
     let mut e = strip(border_x - 3.5, 0.0, 7.0, hh);
     e.id = Some(format!("{name}-cx-{c}").into());
-    e.on_drag = Some(Rc::new(move |rt, _fx, _fy, pos| {
+    e.rare_mut().on_drag = Some(Rc::new(move |rt, _fx, _fy, pos| {
         let z = zclamp(zoom, rt, zoomable, zc.0, zc.1);
         let content_x = sx.get(rt) + (pos.x - vx - hw) / z;
         let neww = (content_x - left_content).clamp(24.0, 400.0);
@@ -617,7 +617,7 @@ fn row_handle(
 ) -> Element {
     let mut e = strip(0.0, border_y - 3.5, hw, 7.0);
     e.id = Some(format!("{name}-ry-{r}").into());
-    e.on_drag = Some(Rc::new(move |rt, _fx, _fy, pos| {
+    e.rare_mut().on_drag = Some(Rc::new(move |rt, _fx, _fy, pos| {
         let z = zclamp(zoom, rt, zoomable, zc.0, zc.1);
         let content_y = sy.get(rt) + (pos.y - vy - hh) / z;
         let newh = (content_y - top_content).clamp(16.0, 240.0);
@@ -670,7 +670,7 @@ fn vscrollbar(
     thumb.background = Some(s.thumb);
     thumb.corner_radius = (sb - 4.0) / 2.0;
     thumb.id = Some(format!("{name}-vthumb").into());
-    thumb.on_drag = Some(Rc::new(move |rt, _fx, _fy, pos| {
+    thumb.rare_mut().on_drag = Some(Rc::new(move |rt, _fx, _fy, pos| {
         let frac = if travel > 0.0 {
             ((pos.y - vy - hh) / travel).clamp(0.0, 1.0)
         } else {
@@ -711,7 +711,7 @@ fn hscrollbar(
     thumb.background = Some(s.thumb);
     thumb.corner_radius = (sb - 4.0) / 2.0;
     thumb.id = Some(format!("{name}-hthumb").into());
-    thumb.on_drag = Some(Rc::new(move |rt, _fx, _fy, pos| {
+    thumb.rare_mut().on_drag = Some(Rc::new(move |rt, _fx, _fy, pos| {
         let frac = if travel > 0.0 {
             ((pos.x - vx - hw) / travel).clamp(0.0, 1.0)
         } else {

@@ -173,7 +173,7 @@ pub fn route_progress(cx: &BuildCx, name: &str, route: &str, duration_ms: f64) -
 /// gesture *is* the timeline.
 pub fn drag_surface(cx: &BuildCx, name: &str, mut el: crate::Element) -> crate::Element {
     let sig: Signal<f64> = cx.signal(name, || 0.0);
-    el.on_drag = Some(std::rc::Rc::new(move |rt, fx, _fy, _pos| {
+    el.rare_mut().on_drag = Some(std::rc::Rc::new(move |rt, fx, _fy, _pos| {
         sig.set(rt, fx.clamp(0.0, 1.0));
     }));
     el

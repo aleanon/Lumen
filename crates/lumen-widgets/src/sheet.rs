@@ -44,19 +44,20 @@ fn scrim_and_panel(
     };
     scrim.style.position = Position::Absolute;
     scrim.style.inset = Edges::all(Dim::px(0.0));
-    scrim.on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
+    scrim.rare_mut().on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
     scrim.on_click = Some(Rc::new(move |rt| open.set(rt, false)));
 
     let panel = Element {
         role: Role::Dialog,
         background: Some(Color::srgb8(0xff, 0xff, 0xff, 0xff)),
         corner_radius: 12.0,
-        shadow: Some(crate::element::Shadow::soft()),
+
         overlay: true,
         style: panel_style,
         children: vec![content],
         ..Element::default()
-    };
+    }
+    .set_shadow(Some(crate::element::Shadow::soft()));
 
     let mut wrap = Element {
         role: Role::Group,

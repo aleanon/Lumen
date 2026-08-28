@@ -72,7 +72,7 @@ fn build(cx: &mut BuildCx) -> Element {
     card.style.padding = Edges::all(Dim::px(30.0));
     card.style.width = Dim::px(380.0);
     card.style.align_items = Some(Align::Start);
-    card.shadow = Some(Shadow::soft());
+    card = card.shadow(Shadow::soft());
 
     let mut page = widgets::column(vec![card]).id("page");
     page.style.width = Dim::pct(1.0);

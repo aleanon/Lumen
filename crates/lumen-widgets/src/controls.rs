@@ -276,12 +276,13 @@ pub fn text_area(cx: &BuildCx, name: &str, initial: &str) -> Element {
             ..LayoutStyle::default()
         },
         content: crate::NodeContent::Text(shown, TextStyle::default()),
-        on_text: Some(Rc::new(move |rt, t| {
-            let t = t.to_string();
-            value.update(rt, |s| s.push_str(&t))
-        })),
+
         ..Element::default()
     }
+    .set_on_text(Some(Rc::new(move |rt, t| {
+        let t = t.to_string();
+        value.update(rt, |s| s.push_str(&t))
+    })))
     .id(name)
 }
 
@@ -528,7 +529,7 @@ impl Widget for Switch {
         let knob = Element {
             background: Some(Color::WHITE),
             corner_radius: KNOB / 2.0,
-            shadow: Some(crate::element::Shadow::soft()),
+
             style: LayoutStyle {
                 position: Position::Absolute,
                 inset: Edges {
@@ -546,6 +547,7 @@ impl Widget for Switch {
             },
             ..Element::default()
         }
+        .set_shadow(Some(crate::element::Shadow::soft()))
         .part("knob");
         let track = Element {
             background: Some(if is {
@@ -680,36 +682,37 @@ impl Widget for Stepper {
                 ..LayoutStyle::default()
             },
             // W2: honour the declared actions.
-            on_increment: Some(Rc::new(move |rt| {
-                value.update(rt, |x| *x = (*x + 1).min(max))
-            })),
-            on_decrement: Some(Rc::new(move |rt| {
-                value.update(rt, |x| *x = (*x - 1).max(min))
-            })),
-            on_set_value: Some(Rc::new(move |rt, s| {
-                if let Ok(n) = s.parse::<i64>() {
-                    value.set(rt, n.clamp(min, max));
-                }
-            })),
+
             // W3: arrow keys adjust, Home/End jump to the bounds.
-            on_key: Some(Rc::new(move |rt, ke| match ke.key {
-                Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::ArrowRight) => {
-                    value.update(rt, |x| *x = (*x + 1).min(max))
-                }
-                Key::Named(NamedKey::ArrowDown) | Key::Named(NamedKey::ArrowLeft) => {
-                    value.update(rt, |x| *x = (*x - 1).max(min))
-                }
-                Key::Named(NamedKey::Home) => value.set(rt, min),
-                Key::Named(NamedKey::End) => value.set(rt, max),
-                _ => {}
-            })),
             children: vec![
                 dec,
                 Element::text(format!("{v}")).id(format!("{name}-value")),
                 inc,
             ],
             ..Element::default()
-        };
+        }
+        .set_on_set_value(Some(Rc::new(move |rt, s| {
+            if let Ok(n) = s.parse::<i64>() {
+                value.set(rt, n.clamp(min, max));
+            }
+        })))
+        .set_on_decrement(Some(Rc::new(move |rt| {
+            value.update(rt, |x| *x = (*x - 1).max(min))
+        })))
+        .set_on_increment(Some(Rc::new(move |rt| {
+            value.update(rt, |x| *x = (*x + 1).min(max))
+        })))
+        .set_on_key(Some(Rc::new(move |rt, ke| match ke.key {
+            Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::ArrowRight) => {
+                value.update(rt, |x| *x = (*x + 1).min(max))
+            }
+            Key::Named(NamedKey::ArrowDown) | Key::Named(NamedKey::ArrowLeft) => {
+                value.update(rt, |x| *x = (*x - 1).max(min))
+            }
+            Key::Named(NamedKey::Home) => value.set(rt, min),
+            Key::Named(NamedKey::End) => value.set(rt, max),
+            _ => {}
+        })));
         common.apply(&mut el);
         el
     }

@@ -200,13 +200,6 @@ fn build(cx: &mut BuildCx) -> Element {
         role: lumen_core::semantics::Role::Group,
         background: Some(pal.surface),
         corner_radius: 30.0,
-        shadow: Some(Shadow {
-            dx: 0.0,
-            dy: 22.0,
-            blur: 48.0,
-            spread: 0.0,
-            color: pal.shadow,
-        }),
         style: LayoutStyle {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
@@ -220,7 +213,14 @@ fn build(cx: &mut BuildCx) -> Element {
         },
         children: vec![header, dial, controls],
         ..Element::default()
-    };
+    }
+    .set_shadow(Some(Shadow {
+        dx: 0.0,
+        dy: 22.0,
+        blur: 48.0,
+        spread: 0.0,
+        color: pal.shadow,
+    }));
 
     // --- full-window page ---
     Element {

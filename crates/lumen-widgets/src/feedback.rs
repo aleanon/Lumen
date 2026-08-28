@@ -177,7 +177,7 @@ impl Widget for Toast {
         row.role = Role::Alert;
         row.background = Some(Color::srgb8(0xff, 0xff, 0xff, 0xff));
         row.corner_radius = 10.0;
-        row.shadow = Some(crate::element::Shadow::soft());
+        row.rare_mut().shadow = Some(crate::element::Shadow::soft());
         row.style.column_gap = Dim::px(14.0);
         row.style.align_items = Some(Align::Stretch);
         row.style.padding = Edges {

@@ -155,43 +155,45 @@ impl Widget for Slider {
                 ..LayoutStyle::default()
             },
             // Horizontal control → the x fraction along the track sets the value.
-            on_drag: Some(Rc::new(move |rt, fx, _fy, _pos| {
-                value.set(rt, min + fx * (max - min))
-            })),
+
             // W2: the declared actions are implemented, so `input.invokeAction`
             // and a screen reader can drive the slider without pixel geometry.
-            on_increment: Some(Rc::new(move |rt| {
-                value.update(rt, |x| *x = (*x + step).clamp(min, max))
-            })),
-            on_decrement: Some(Rc::new(move |rt| {
-                value.update(rt, |x| *x = (*x - step).clamp(min, max))
-            })),
-            on_set_value: Some(Rc::new(move |rt, s| {
-                if let Ok(n) = s.parse::<f64>() {
-                    value.set(rt, n.clamp(min, max));
-                }
-            })),
+
             // W3: the WAI-ARIA slider keys.
-            on_key: Some(Rc::new(move |rt, ke| match ke.key {
-                Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowUp) => {
-                    value.update(rt, |x| *x = (*x + step).clamp(min, max))
-                }
-                Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowDown) => {
-                    value.update(rt, |x| *x = (*x - step).clamp(min, max))
-                }
-                Key::Named(NamedKey::Home) => value.set(rt, min),
-                Key::Named(NamedKey::End) => value.set(rt, max),
-                Key::Named(NamedKey::PageUp) => {
-                    value.update(rt, |x| *x = (*x + step * 10.0).clamp(min, max))
-                }
-                Key::Named(NamedKey::PageDown) => {
-                    value.update(rt, |x| *x = (*x - step * 10.0).clamp(min, max))
-                }
-                _ => {}
-            })),
             children: vec![track, thumb],
             ..Element::default()
-        };
+        }
+        .set_on_set_value(Some(Rc::new(move |rt, s| {
+            if let Ok(n) = s.parse::<f64>() {
+                value.set(rt, n.clamp(min, max));
+            }
+        })))
+        .set_on_decrement(Some(Rc::new(move |rt| {
+            value.update(rt, |x| *x = (*x - step).clamp(min, max))
+        })))
+        .set_on_increment(Some(Rc::new(move |rt| {
+            value.update(rt, |x| *x = (*x + step).clamp(min, max))
+        })))
+        .set_on_key(Some(Rc::new(move |rt, ke| match ke.key {
+            Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowUp) => {
+                value.update(rt, |x| *x = (*x + step).clamp(min, max))
+            }
+            Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowDown) => {
+                value.update(rt, |x| *x = (*x - step).clamp(min, max))
+            }
+            Key::Named(NamedKey::Home) => value.set(rt, min),
+            Key::Named(NamedKey::End) => value.set(rt, max),
+            Key::Named(NamedKey::PageUp) => {
+                value.update(rt, |x| *x = (*x + step * 10.0).clamp(min, max))
+            }
+            Key::Named(NamedKey::PageDown) => {
+                value.update(rt, |x| *x = (*x - step * 10.0).clamp(min, max))
+            }
+            _ => {}
+        })))
+        .set_on_drag(Some(Rc::new(move |rt, fx, _fy, _pos| {
+            value.set(rt, min + fx * (max - min))
+        })));
         common.apply(&mut el);
         el
     }

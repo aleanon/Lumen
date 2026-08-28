@@ -114,18 +114,18 @@ impl Widget for Tabs {
                     // selection (it is keyed by StableId and only Tab moves
                     // it), so keying off `i` would make ← / → depend on
                     // which tab happens to hold focus.
-                    on_key: Some(Rc::new(move |rt, ke| {
-                        let cur = selected.get(rt);
-                        match ke.key {
-                            Key::Named(NamedKey::ArrowRight) => selected.set(rt, (cur + 1) % n),
-                            Key::Named(NamedKey::ArrowLeft) => selected.set(rt, (cur + n - 1) % n),
-                            Key::Named(NamedKey::Home) => selected.set(rt, 0),
-                            Key::Named(NamedKey::End) => selected.set(rt, n - 1),
-                            _ => {}
-                        }
-                    })),
                     ..Element::default()
                 }
+                .set_on_key(Some(Rc::new(move |rt, ke| {
+                    let cur = selected.get(rt);
+                    match ke.key {
+                        Key::Named(NamedKey::ArrowRight) => selected.set(rt, (cur + 1) % n),
+                        Key::Named(NamedKey::ArrowLeft) => selected.set(rt, (cur + n - 1) % n),
+                        Key::Named(NamedKey::Home) => selected.set(rt, 0),
+                        Key::Named(NamedKey::End) => selected.set(rt, n - 1),
+                        _ => {}
+                    }
+                })))
             })
             .collect();
         let mut el = Element {
@@ -583,12 +583,7 @@ impl Widget for PullToRefresh {
 
         let inner = Element {
             role: Role::ScrollArea,
-            scroll: Some(ScrollInfo {
-                x: 0.0,
-                y,
-                max_x: 0.0,
-                max_y: 1e6,
-            }),
+
             style: LayoutStyle {
                 display: Display::Flex,
                 flex_direction: FlexDirection::Column,
@@ -596,18 +591,25 @@ impl Widget for PullToRefresh {
                 ..LayoutStyle::default()
             },
             children: content,
-            on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
-                // Wheel delta < 0 is an upward pull; at the top it triggers refresh.
-                let at_top = offset.get(rt) <= 0.0;
-                if at_top && dy <= -threshold && !refreshing.get(rt) {
-                    refreshing.set(rt, true);
-                    on_refresh(rt);
-                } else {
-                    offset.update(rt, |o| *o = (*o + dy).max(0.0));
-                }
-            })),
+
             ..Element::default()
         }
+        .set_scroll(Some(ScrollInfo {
+            x: 0.0,
+            y,
+            max_x: 0.0,
+            max_y: 1e6,
+        }))
+        .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
+            // Wheel delta < 0 is an upward pull; at the top it triggers refresh.
+            let at_top = offset.get(rt) <= 0.0;
+            if at_top && dy <= -threshold && !refreshing.get(rt) {
+                refreshing.set(rt, true);
+                on_refresh(rt);
+            } else {
+                offset.update(rt, |o| *o = (*o + dy).max(0.0));
+            }
+        })))
         .id(format!("{name}-scroll"));
 
         let mut el = Element {

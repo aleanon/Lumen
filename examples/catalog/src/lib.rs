@@ -235,26 +235,26 @@ fn build(cx: &mut BuildCx) -> Element {
             flex_direction: FlexDirection::Column,
             ..LayoutStyle::default()
         },
-        on_wheel: Some(std::rc::Rc::new(move |rt, _dx, dy, _mods| {
-            scroll.update(rt, |o| *o = (*o + dy).clamp(0.0, MAX_Y))
-        })),
-        on_key: Some(std::rc::Rc::new(move |rt, ke| {
-            let step = match ke.key {
-                Key::Named(NamedKey::ArrowDown) => ROW_H,
-                Key::Named(NamedKey::ArrowUp) => -ROW_H,
-                Key::Named(NamedKey::PageDown) => VIEW_H,
-                Key::Named(NamedKey::PageUp) => -VIEW_H,
-                Key::Named(NamedKey::Home) => -MAX_Y,
-                Key::Named(NamedKey::End) => MAX_Y,
-                _ => 0.0,
-            };
-            if step != 0.0 {
-                scroll.update(rt, |o| *o = (*o + step).clamp(0.0, MAX_Y));
-            }
-        })),
         children: vec![list],
         ..Element::default()
     }
+    .set_on_wheel(Some(std::rc::Rc::new(move |rt, _dx, dy, _mods| {
+        scroll.update(rt, |o| *o = (*o + dy).clamp(0.0, MAX_Y))
+    })))
+    .set_on_key(Some(std::rc::Rc::new(move |rt, ke| {
+        let step = match ke.key {
+            Key::Named(NamedKey::ArrowDown) => ROW_H,
+            Key::Named(NamedKey::ArrowUp) => -ROW_H,
+            Key::Named(NamedKey::PageDown) => VIEW_H,
+            Key::Named(NamedKey::PageUp) => -VIEW_H,
+            Key::Named(NamedKey::Home) => -MAX_Y,
+            Key::Named(NamedKey::End) => MAX_Y,
+            _ => 0.0,
+        };
+        if step != 0.0 {
+            scroll.update(rt, |o| *o = (*o + step).clamp(0.0, MAX_Y));
+        }
+    })))
     .id("viewport")
     .focusable();
     viewport = abs(viewport, HEADER_H, PAD, viewport_w, VIEW_H);
@@ -278,13 +278,13 @@ fn build(cx: &mut BuildCx) -> Element {
                 flex_direction: FlexDirection::Column,
                 ..LayoutStyle::default()
             },
-            // frac_y along the track maps directly to the scroll offset (jump).
-            on_drag: Some(std::rc::Rc::new(move |rt, _fx, fy, _pos| {
-                scroll.set(rt, fy * MAX_Y)
-            })),
             children: vec![thumb],
             ..Element::default()
         }
+        // frac_y along the track maps directly to the scroll offset (jump).
+        .set_on_drag(Some(std::rc::Rc::new(move |rt, _fx, fy, _pos| {
+            scroll.set(rt, fy * MAX_Y)
+        })))
         .class("scrollbar-track")
         .id("scrollbar");
         abs(
@@ -357,7 +357,7 @@ fn build(cx: &mut BuildCx) -> Element {
         ..Element::default()
     }
     .id("card");
-    card.shadow = Some(Shadow::soft());
+    card = card.shadow(Shadow::soft());
 
     let mut page = widgets::column(vec![card]).id("page");
     page.style.width = Dim::pct(1.0);

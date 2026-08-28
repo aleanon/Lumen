@@ -128,16 +128,7 @@ impl Widget for TextField {
                 ..LayoutStyle::default()
             },
             content: NodeContent::Text(shown, TextStyle::default()),
-            caret_byte: Some(caret),
-            selection,
-            on_text: Some(Rc::new(move |rt, t| {
-                editor.update(rt, |e| e.insert(t));
-                let text = editor.get(rt).text().to_string();
-                mirror.set(rt, text);
-            })),
-            on_caret_set: Some(Rc::new(move |rt, byte, extend| {
-                editor.update(rt, |e| e.place(byte, extend));
-            })),
+
             // SD4/W2: `SetValue` is declared above, so it must be implemented.
             // It was not — `input.invokeAction {action:"setValue"}` and any AT
             // offering "set value" on a TextField silently did nothing. The
@@ -145,20 +136,31 @@ impl Widget for TextField {
             // this, was unreachable from `App::lint()` until SD4 wired it in.
             // Same shape as TextInput: select-all + insert, so the edit goes
             // through the normal path and undo history stays coherent.
-            on_set_value: Some(Rc::new(move |rt, v| {
-                editor.update(rt, |e| {
-                    e.select_all();
-                    e.insert(v);
-                });
-                let text = editor.get(rt).text().to_string();
-                mirror.set(rt, text);
-            })),
+
             // Multi-line: Enter inserts a newline (Up/Down are handled app-side).
-            on_key: Some(Rc::new(move |rt, ke| {
-                edit_key(rt, ke, editor, mirror, true);
-            })),
             ..Element::default()
-        };
+        }
+        .set_selection(selection)
+        .set_caret_byte(Some(caret))
+        .set_on_set_value(Some(Rc::new(move |rt, v| {
+            editor.update(rt, |e| {
+                e.select_all();
+                e.insert(v);
+            });
+            let text = editor.get(rt).text().to_string();
+            mirror.set(rt, text);
+        })))
+        .set_on_caret_set(Some(Rc::new(move |rt, byte, extend| {
+            editor.update(rt, |e| e.place(byte, extend));
+        })))
+        .set_on_key(Some(Rc::new(move |rt, ke| {
+            edit_key(rt, ke, editor, mirror, true);
+        })))
+        .set_on_text(Some(Rc::new(move |rt, t| {
+            editor.update(rt, |e| e.insert(t));
+            let text = editor.get(rt).text().to_string();
+            mirror.set(rt, text);
+        })));
         common.apply(&mut el);
         el
     }

@@ -140,6 +140,336 @@ pub fn accent_color() -> Color {
     Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
 }
 
+/// The rare half of [`Element`] — see its `rare` field.
+///
+/// Public only because `Element { .., ..Default::default() }` requires every
+/// field to be nameable; nothing outside the framework should construct one.
+#[doc(hidden)]
+#[derive(Default, Clone)]
+pub struct RareEl {
+    pub on_wheel: Option<WheelHandler>,
+    pub on_drag: Option<DragHandler>,
+    pub on_drop: Option<DropHandler>,
+    pub on_text: Option<TextHandler>,
+    pub on_key: Option<KeyHandler>,
+    pub on_caret_set: Option<CaretHandler>,
+    pub on_dismiss: Option<Handler>,
+    pub on_increment: Option<Handler>,
+    pub on_decrement: Option<Handler>,
+    pub on_set_value: Option<ValueHandler>,
+    pub caret_byte: Option<usize>,
+    pub selection: Option<(usize, usize)>,
+    pub scroll: Option<ScrollInfo>,
+    pub shadow: Option<Shadow>,
+}
+
+impl Element {
+    #[doc(hidden)]
+    pub fn rare_mut(&mut self) -> &mut RareEl {
+        self.rare.get_or_insert_with(Default::default)
+    }
+    /// Set `on_wheel` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_wheel: v, .. }`
+    /// becomes `Element { .., .. }.set_on_wheel(v)`.
+    #[doc(hidden)]
+    pub fn set_on_wheel(mut self, v: Option<WheelHandler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_wheel = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_wheel = None;
+        }
+        self
+    }
+    /// Set `on_drag` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_drag: v, .. }`
+    /// becomes `Element { .., .. }.set_on_drag(v)`.
+    #[doc(hidden)]
+    pub fn set_on_drag(mut self, v: Option<DragHandler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_drag = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_drag = None;
+        }
+        self
+    }
+    /// Set `on_drop` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_drop: v, .. }`
+    /// becomes `Element { .., .. }.set_on_drop(v)`.
+    #[doc(hidden)]
+    pub fn set_on_drop(mut self, v: Option<DropHandler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_drop = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_drop = None;
+        }
+        self
+    }
+    /// Set `on_text` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_text: v, .. }`
+    /// becomes `Element { .., .. }.set_on_text(v)`.
+    #[doc(hidden)]
+    pub fn set_on_text(mut self, v: Option<TextHandler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_text = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_text = None;
+        }
+        self
+    }
+    /// Set `on_key` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_key: v, .. }`
+    /// becomes `Element { .., .. }.set_on_key(v)`.
+    #[doc(hidden)]
+    pub fn set_on_key(mut self, v: Option<KeyHandler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_key = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_key = None;
+        }
+        self
+    }
+    /// Set `on_caret_set` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_caret_set: v, .. }`
+    /// becomes `Element { .., .. }.set_on_caret_set(v)`.
+    #[doc(hidden)]
+    pub fn set_on_caret_set(mut self, v: Option<CaretHandler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_caret_set = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_caret_set = None;
+        }
+        self
+    }
+    /// Set `on_dismiss` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_dismiss: v, .. }`
+    /// becomes `Element { .., .. }.set_on_dismiss(v)`.
+    #[doc(hidden)]
+    pub fn set_on_dismiss(mut self, v: Option<Handler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_dismiss = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_dismiss = None;
+        }
+        self
+    }
+    /// Set `on_increment` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_increment: v, .. }`
+    /// becomes `Element { .., .. }.set_on_increment(v)`.
+    #[doc(hidden)]
+    pub fn set_on_increment(mut self, v: Option<Handler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_increment = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_increment = None;
+        }
+        self
+    }
+    /// Set `on_decrement` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_decrement: v, .. }`
+    /// becomes `Element { .., .. }.set_on_decrement(v)`.
+    #[doc(hidden)]
+    pub fn set_on_decrement(mut self, v: Option<Handler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_decrement = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_decrement = None;
+        }
+        self
+    }
+    /// Set `on_set_value` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., on_set_value: v, .. }`
+    /// becomes `Element { .., .. }.set_on_set_value(v)`.
+    #[doc(hidden)]
+    pub fn set_on_set_value(mut self, v: Option<ValueHandler>) -> Self {
+        if v.is_some() {
+            self.rare_mut().on_set_value = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.on_set_value = None;
+        }
+        self
+    }
+    /// Set `scroll` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., scroll: v, .. }`
+    /// becomes `Element { .., .. }.set_scroll(v)`.
+    #[doc(hidden)]
+    pub fn set_scroll(mut self, v: Option<ScrollInfo>) -> Self {
+        if v.is_some() {
+            self.rare_mut().scroll = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.scroll = None;
+        }
+        self
+    }
+    /// Set `shadow` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., shadow: v, .. }`
+    /// becomes `Element { .., .. }.set_shadow(v)`.
+    #[doc(hidden)]
+    pub fn set_shadow(mut self, v: Option<Shadow>) -> Self {
+        if v.is_some() {
+            self.rare_mut().shadow = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.shadow = None;
+        }
+        self
+    }
+    /// Set `caret_byte` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., caret_byte: v, .. }`
+    /// becomes `Element { .., .. }.set_caret_byte(v)`.
+    #[doc(hidden)]
+    pub fn set_caret_byte(mut self, v: Option<usize>) -> Self {
+        if v.is_some() {
+            self.rare_mut().caret_byte = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.caret_byte = None;
+        }
+        self
+    }
+    /// Set `selection` from an already-`Option` value (O0.14).
+    ///
+    /// The rare fields moved behind a box, so a struct literal can no longer
+    /// name them. This is the literal's replacement: `Element { .., selection: v, .. }`
+    /// becomes `Element { .., .. }.set_selection(v)`.
+    #[doc(hidden)]
+    pub fn set_selection(mut self, v: Option<(usize, usize)>) -> Self {
+        if v.is_some() {
+            self.rare_mut().selection = v;
+        } else if let Some(r) = self.rare.as_mut() {
+            r.selection = None;
+        }
+        self
+    }
+    /// The node's `on_wheel`, if it has one (O0.14).
+    pub fn get_on_wheel(&self) -> Option<&WheelHandler> {
+        self.rare.as_ref().and_then(|r| r.on_wheel.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_wheel(&mut self) -> Option<WheelHandler> {
+        self.rare.as_mut().and_then(|r| r.on_wheel.take())
+    }
+    /// The node's `on_drag`, if it has one (O0.14).
+    pub fn get_on_drag(&self) -> Option<&DragHandler> {
+        self.rare.as_ref().and_then(|r| r.on_drag.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_drag(&mut self) -> Option<DragHandler> {
+        self.rare.as_mut().and_then(|r| r.on_drag.take())
+    }
+    /// The node's `on_drop`, if it has one (O0.14).
+    pub fn get_on_drop(&self) -> Option<&DropHandler> {
+        self.rare.as_ref().and_then(|r| r.on_drop.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_drop(&mut self) -> Option<DropHandler> {
+        self.rare.as_mut().and_then(|r| r.on_drop.take())
+    }
+    /// The node's `on_text`, if it has one (O0.14).
+    pub fn get_on_text(&self) -> Option<&TextHandler> {
+        self.rare.as_ref().and_then(|r| r.on_text.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_text(&mut self) -> Option<TextHandler> {
+        self.rare.as_mut().and_then(|r| r.on_text.take())
+    }
+    /// The node's `on_key`, if it has one (O0.14).
+    pub fn get_on_key(&self) -> Option<&KeyHandler> {
+        self.rare.as_ref().and_then(|r| r.on_key.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_key(&mut self) -> Option<KeyHandler> {
+        self.rare.as_mut().and_then(|r| r.on_key.take())
+    }
+    /// The node's `on_caret_set`, if it has one (O0.14).
+    pub fn get_on_caret_set(&self) -> Option<&CaretHandler> {
+        self.rare.as_ref().and_then(|r| r.on_caret_set.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_caret_set(&mut self) -> Option<CaretHandler> {
+        self.rare.as_mut().and_then(|r| r.on_caret_set.take())
+    }
+    /// The node's `on_dismiss`, if it has one (O0.14).
+    pub fn get_on_dismiss(&self) -> Option<&Handler> {
+        self.rare.as_ref().and_then(|r| r.on_dismiss.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_dismiss(&mut self) -> Option<Handler> {
+        self.rare.as_mut().and_then(|r| r.on_dismiss.take())
+    }
+    /// The node's `on_increment`, if it has one (O0.14).
+    pub fn get_on_increment(&self) -> Option<&Handler> {
+        self.rare.as_ref().and_then(|r| r.on_increment.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_increment(&mut self) -> Option<Handler> {
+        self.rare.as_mut().and_then(|r| r.on_increment.take())
+    }
+    /// The node's `on_decrement`, if it has one (O0.14).
+    pub fn get_on_decrement(&self) -> Option<&Handler> {
+        self.rare.as_ref().and_then(|r| r.on_decrement.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_decrement(&mut self) -> Option<Handler> {
+        self.rare.as_mut().and_then(|r| r.on_decrement.take())
+    }
+    /// The node's `on_set_value`, if it has one (O0.14).
+    pub fn get_on_set_value(&self) -> Option<&ValueHandler> {
+        self.rare.as_ref().and_then(|r| r.on_set_value.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_on_set_value(&mut self) -> Option<ValueHandler> {
+        self.rare.as_mut().and_then(|r| r.on_set_value.take())
+    }
+    /// The node's `scroll`, if it has one (O0.14).
+    pub fn get_scroll(&self) -> Option<&ScrollInfo> {
+        self.rare.as_ref().and_then(|r| r.scroll.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_scroll(&mut self) -> Option<ScrollInfo> {
+        self.rare.as_mut().and_then(|r| r.scroll.take())
+    }
+    /// The node's `shadow`, if it has one (O0.14).
+    pub fn get_shadow(&self) -> Option<&Shadow> {
+        self.rare.as_ref().and_then(|r| r.shadow.as_ref())
+    }
+    #[doc(hidden)]
+    pub fn take_shadow(&mut self) -> Option<Shadow> {
+        self.rare.as_mut().and_then(|r| r.shadow.take())
+    }
+    /// The node's `caret_byte`, if set (O0.14).
+    pub fn get_caret_byte(&self) -> Option<usize> {
+        self.rare.as_ref().and_then(|r| r.caret_byte)
+    }
+    /// The node's `selection`, if set (O0.14).
+    pub fn get_selection(&self) -> Option<(usize, usize)> {
+        self.rare.as_ref().and_then(|r| r.selection)
+    }
+}
+
 /// A description of one node: type + props + children.
 #[derive(Clone)]
 pub struct Element {
@@ -186,43 +516,30 @@ pub struct Element {
     /// Explicit semantic states (e.g. checked/disabled).
     pub states: Vec<SemState>,
     /// Scroll info for scroll containers (semantics).
-    pub scroll: Option<ScrollInfo>,
     /// Click handler.
     pub on_click: Option<Handler>,
     /// Wheel handler (scroll containers).
-    pub on_wheel: Option<WheelHandler>,
     /// Drag handler (sliders); receives the fraction along the main axis.
-    pub on_drag: Option<DragHandler>,
     /// Drag-and-drop drop handler.
-    pub on_drop: Option<DropHandler>,
     /// Committed-text handler (text inputs).
-    pub on_text: Option<TextHandler>,
     /// Key handler invoked on the focused node for each `KeyDown`.
-    pub on_key: Option<KeyHandler>,
     /// Caret-placement handler (editable text fields). Its presence marks the
     /// element as a text editor: the app resolves pointer presses / drags and
     /// vertical-nav keys to a byte offset and calls this.
-    pub on_caret_set: Option<CaretHandler>,
     /// The caret byte offset to draw when this field is focused (text editors).
-    pub caret_byte: Option<usize>,
     /// The selected byte range `(start, end)` to highlight when focused.
-    pub selection: Option<(usize, usize)>,
     /// Light-dismiss handler: fired when a pointer press lands *outside* this
     /// element's bounds, or on Escape. Used for click-away on transient overlays
     /// (dropdowns, popovers, menus, tooltips).
-    pub on_dismiss: Option<Handler>,
     /// Adjust the value one step up / down (W2).
     ///
     /// A widget that declares [`Action::Increment`]/[`Action::Decrement`] must
     /// set these — that pair is the contract the agent (`input.invokeAction`)
     /// and AccessKit read, and it is also what arrow-key handling calls, so a
     /// slider is drivable without pixel geometry.
-    pub on_increment: Option<Handler>,
     /// Counterpart of [`Element::on_increment`].
-    pub on_decrement: Option<Handler>,
     /// Set the value directly from a string (W2) — backs [`Action::SetValue`].
     /// The widget parses it; a value it can't parse is ignored.
-    pub on_set_value: Option<ValueHandler>,
     /// Clip descendants to this element's (rounded) bounds — `overflow: hidden`.
     /// Used by scroll viewports so off-screen content doesn't paint outside.
     pub clip: bool,
@@ -235,7 +552,6 @@ pub struct Element {
     /// [`container`](Self::container).
     pub container: bool,
     /// Optional drop shadow behind the box.
-    pub shadow: Option<Shadow>,
     /// Pointer shape while this node is hovered, as a Rust-side default.
     ///
     /// `cursor` was reachable only from `.lss`, so a widget that ships no
@@ -277,6 +593,19 @@ pub struct Element {
     pub dyn_classes: Option<Dynamic<Vec<String>>>,
     /// Children.
     pub children: Vec<Element>,
+    /// O0.14: the fields almost no node has — every event handler past
+    /// `on_click`, the caret/selection pair, scroll state and the shadow.
+    ///
+    /// Inline they were **304 of `Element`'s 1072 bytes**, written as `None`
+    /// for every label in every list by a view function that builds the whole
+    /// tree at once. This is the same split O0.13 made in `NodeMeta`, on the
+    /// other side of the same lowering.
+    ///
+    /// Private, unlike the fields it replaces: outside `lumen-app` nothing
+    /// assigned any of these directly except `shadow`, which already had a
+    /// builder, so the accessors below preserve every real call site.
+    #[doc(hidden)]
+    pub rare: Option<Box<RareEl>>,
 }
 
 impl Default for Element {
@@ -298,24 +627,10 @@ impl Default for Element {
             autofocus: false,
             elide_semantics: false,
             states: Vec::new(),
-            scroll: None,
             on_click: None,
-            on_wheel: None,
-            on_drag: None,
-            on_drop: None,
-            on_text: None,
-            on_key: None,
-            on_caret_set: None,
-            caret_byte: None,
-            selection: None,
-            on_dismiss: None,
-            on_increment: None,
-            on_decrement: None,
-            on_set_value: None,
             clip: false,
             overlay: false,
             container: false,
-            shadow: None,
             cursor: None,
             css_inline: None,
             scope_deps: None,
@@ -325,6 +640,7 @@ impl Default for Element {
             dyn_bg: None,
             dyn_classes: None,
             children: Vec::new(),
+            rare: None,
         }
     }
 }
@@ -610,7 +926,7 @@ impl Element {
     }
     /// Set a drop shadow.
     pub fn shadow(mut self, shadow: Shadow) -> Self {
-        self.shadow = Some(shadow);
+        self.rare_mut().shadow = Some(shadow);
         self
     }
     /// Replace the layout style.
@@ -628,12 +944,12 @@ impl Element {
         mut self,
         f: impl Fn(&Runtime, &lumen_core::events::DropData) + 'static,
     ) -> Self {
-        self.on_drop = Some(Rc::new(f));
+        self.rare_mut().on_drop = Some(Rc::new(f));
         self
     }
     /// Set the key handler (fires on this node while it is focused).
     pub fn on_key(mut self, f: impl Fn(&Runtime, &lumen_core::events::KeyEvent) + 'static) -> Self {
-        self.on_key = Some(Rc::new(f));
+        self.rare_mut().on_key = Some(Rc::new(f));
         self
     }
     /// Mark the node keyboard-focusable (so it can receive `on_key`).
@@ -643,22 +959,22 @@ impl Element {
     }
     /// Set the light-dismiss handler (fires on an outside press or Escape).
     pub fn on_dismiss(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
-        self.on_dismiss = Some(Rc::new(f));
+        self.rare_mut().on_dismiss = Some(Rc::new(f));
         self
     }
     /// Set the step-up handler (W2) — pair it with [`Action::Increment`].
     pub fn on_increment(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
-        self.on_increment = Some(Rc::new(f));
+        self.rare_mut().on_increment = Some(Rc::new(f));
         self
     }
     /// Set the step-down handler (W2) — pair it with [`Action::Decrement`].
     pub fn on_decrement(mut self, f: impl Fn(&Runtime) + 'static) -> Self {
-        self.on_decrement = Some(Rc::new(f));
+        self.rare_mut().on_decrement = Some(Rc::new(f));
         self
     }
     /// Set the direct-value handler (W2) — pair it with [`Action::SetValue`].
     pub fn on_set_value(mut self, f: impl Fn(&Runtime, &str) + 'static) -> Self {
-        self.on_set_value = Some(Rc::new(f));
+        self.rare_mut().on_set_value = Some(Rc::new(f));
         self
     }
     /// Clip descendants to this element's bounds (`overflow: hidden`).

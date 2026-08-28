@@ -111,12 +111,13 @@ impl Widget for Popover {
                 role: Role::Dialog,
                 background: Some(Color::srgb8(0xff, 0xff, 0xff, 0xff)),
                 corner_radius: 8.0,
-                shadow: Some(crate::element::Shadow::soft()),
+
                 overlay: true,
                 children: vec![content],
                 ..Element::default()
-            };
-            panel.on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
+            }
+            .set_shadow(Some(crate::element::Shadow::soft()));
+            panel.rare_mut().on_dismiss = Some(Rc::new(move |rt| open.set(rt, false)));
             panel.style.position = Position::Absolute;
             panel.style.padding = Edges::all(Dim::px(10.0));
             // Anchored against the trigger: the wrapper is exactly the

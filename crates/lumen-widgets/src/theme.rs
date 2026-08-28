@@ -50,7 +50,7 @@ pub fn badge(text: impl Into<crate::Text>, bg: Color) -> Element {
         role: Role::Group,
         background: Some(bg),
         corner_radius: 10.0,
-        shadow: Some(Shadow::soft()),
+
         style: LayoutStyle {
             padding: Edges {
                 left: Dim::px(18.0),
@@ -63,6 +63,7 @@ pub fn badge(text: impl Into<crate::Text>, bg: Color) -> Element {
         children: vec![label],
         ..Element::default()
     }
+    .set_shadow(Some(Shadow::soft()))
 }
 
 /// Styled text of `size`/`weight`/`color` (helper for the typography below).
@@ -116,7 +117,7 @@ fn panel(mut body: Element, align: Align) -> Element {
         role: Role::Group,
         background: Some(surface()),
         corner_radius: 16.0,
-        shadow: Some(Shadow::soft()),
+
         style: LayoutStyle {
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
@@ -128,6 +129,7 @@ fn panel(mut body: Element, align: Align) -> Element {
         children: vec![body],
         ..Element::default()
     }
+    .set_shadow(Some(Shadow::soft()))
 }
 
 /// A full-window screen: soft background, comfortable padding, a `title`

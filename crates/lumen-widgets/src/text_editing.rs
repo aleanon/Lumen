@@ -190,31 +190,32 @@ impl RichTextEditor {
                 ..LayoutStyle::default()
             },
             content: crate::NodeContent::Text(shown, lumen_text::TextStyle::default()),
-            caret_byte: Some(ed.cursor()),
-            selection: ed.has_selection().then(|| ed.selection()),
-            on_text: Some(Rc::new(move |rt, t| {
-                editor.update(rt, |e| e.insert(t));
-                mirror.set(rt, editor.get(rt).text().to_string());
-            })),
-            on_caret_set: Some(Rc::new(move |rt, byte, extend| {
-                editor.update(rt, |e| e.place(byte, extend));
-            })),
+
             // W2: `SetValue` is advertised, so implement it — replace the
             // whole source through the normal edit path so undo stays
             // coherent. Without this the agent could type into the editor
             // but never set it.
-            on_set_value: Some(Rc::new(move |rt, v: &str| {
-                editor.update(rt, |e| {
-                    e.select_all();
-                    e.insert(v);
-                });
-                mirror.set(rt, editor.get(rt).text().to_string());
-            })),
-            on_key: Some(Rc::new(move |rt, ke| {
-                crate::text_input::edit_key(rt, ke, editor, mirror, true);
-            })),
             ..Element::default()
         }
+        .set_selection(ed.has_selection().then(|| ed.selection()))
+        .set_caret_byte(Some(ed.cursor()))
+        .set_on_set_value(Some(Rc::new(move |rt, v: &str| {
+            editor.update(rt, |e| {
+                e.select_all();
+                e.insert(v);
+            });
+            mirror.set(rt, editor.get(rt).text().to_string());
+        })))
+        .set_on_caret_set(Some(Rc::new(move |rt, byte, extend| {
+            editor.update(rt, |e| e.place(byte, extend));
+        })))
+        .set_on_key(Some(Rc::new(move |rt, ke| {
+            crate::text_input::edit_key(rt, ke, editor, mirror, true);
+        })))
+        .set_on_text(Some(Rc::new(move |rt, t| {
+            editor.update(rt, |e| e.insert(t));
+            mirror.set(rt, editor.get(rt).text().to_string());
+        })))
         .id(name);
 
         // The live preview: the parsed RichDoc (lists, links, images).

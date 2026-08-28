@@ -6151,9 +6151,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 el.content,
                 NodeContent::Text(..) | NodeContent::Image(..) | NodeContent::Custom(..)
             )
-            || el.on_wheel.is_some()
-            || el.on_drag.is_some()
-            || el.on_key.is_some()
+            || el.get_on_wheel().is_some()
+            || el.get_on_drag().is_some()
+            || el.get_on_key().is_some()
             || el.focusable;
         if interactive {
             flags |= NodeFlags::HIT_TESTABLE;
@@ -6550,6 +6550,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             self.structural_reads.extend(&reads);
         }
 
+        // O0.14: lift the rare half out before the children are moved — it is
+        // moved wholesale into `NodeMeta` below, and `el` is partially moved
+        // from that point on.
+        let el_rare = el.rare.take();
         // Consume the children (move, not clone) and recurse.
         let pushed_disabled = el.disabled;
         if pushed_disabled {
@@ -6598,36 +6602,39 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // O0.13: the rare half is allocated only when the node actually has
         // one of these. A label in a list has none of them, so it carries a
         // null pointer instead of 304 bytes of `None`.
-        let rare = if el.on_wheel.is_some()
-            || el.on_drag.is_some()
-            || el.on_drop.is_some()
-            || el.on_text.is_some()
-            || el.on_key.is_some()
-            || el.on_caret_set.is_some()
-            || el.on_dismiss.is_some()
-            || el.on_increment.is_some()
-            || el.on_decrement.is_some()
-            || el.on_set_value.is_some()
-            || el.caret_byte.is_some()
-            || el.selection.is_some()
-            || el.scroll.is_some()
-            || el.shadow.is_some()
+        let rare = if el_rare.as_ref().is_some_and(|r| r.on_wheel.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.on_drag.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.on_drop.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.on_text.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.on_key.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.on_caret_set.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.on_dismiss.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.on_increment.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.on_decrement.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.on_set_value.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.caret_byte.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.selection.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.scroll.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.shadow.is_some())
         {
+            // O0.14: `Element`'s rare half has the same shape as `NodeMeta`'s,
+            // so the whole box moves across instead of fourteen field reads.
+            let r = el_rare.unwrap_or_default();
             Some(Box::new(RareMeta {
-                on_wheel: el.on_wheel,
-                on_drag: el.on_drag,
-                on_drop: el.on_drop,
-                on_text: el.on_text,
-                on_key: el.on_key,
-                on_caret_set: el.on_caret_set,
-                on_dismiss: el.on_dismiss,
-                on_increment: el.on_increment,
-                on_decrement: el.on_decrement,
-                on_set_value: el.on_set_value,
-                caret_byte: el.caret_byte,
-                selection: el.selection,
-                scroll: el.scroll,
-                shadow: el.shadow,
+                on_wheel: r.on_wheel,
+                on_drag: r.on_drag,
+                on_drop: r.on_drop,
+                on_text: r.on_text,
+                on_key: r.on_key,
+                on_caret_set: r.on_caret_set,
+                on_dismiss: r.on_dismiss,
+                on_increment: r.on_increment,
+                on_decrement: r.on_decrement,
+                on_set_value: r.on_set_value,
+                caret_byte: r.caret_byte,
+                selection: r.selection,
+                scroll: r.scroll,
+                shadow: r.shadow,
             }))
         } else {
             None

@@ -154,7 +154,7 @@ fn build(cx: &mut BuildCx) -> Element {
     card.style.row_gap = Dim::px(16.0);
     card.style.width = Dim::px(360.0);
     card.style.padding = Edges::all(Dim::px(32.0));
-    card.shadow = Some(Shadow::soft());
+    card = card.shadow(Shadow::soft());
 
     Element {
         role: lumen_core::semantics::Role::Group,

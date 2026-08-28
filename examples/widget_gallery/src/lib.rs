@@ -334,7 +334,7 @@ fn build(cx: &mut BuildCx) -> Element {
     .background(pal.surface)
     .id("card")
     .into();
-    card.shadow = Some(Shadow::soft());
+    card = card.shadow(Shadow::soft());
 
     Container::new(vec![card])
         .fill()

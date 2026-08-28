@@ -249,12 +249,7 @@ fn viewport(name: &str, w: &Window, viewport_h: f64, children: Vec<Element>) -> 
         // same defect `scroll_hit_clip.rs` exists for on `Scrollable`, which
         // has always set this.
         clip: true,
-        scroll: Some(ScrollInfo {
-            x: 0.0,
-            y,
-            max_x: 0.0,
-            max_y,
-        }),
+
         actions: vec![Action::ScrollIntoView],
         style: LayoutStyle {
             position: Position::Relative,
@@ -262,15 +257,22 @@ fn viewport(name: &str, w: &Window, viewport_h: f64, children: Vec<Element>) -> 
             height: Dim::px(viewport_h as f32),
             ..LayoutStyle::default()
         },
-        on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
-            offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
-        })),
+
         children: match crate::scrollable::overlay_scrollbar(name, viewport_h, y, max_y, offset) {
             Some(bar) => vec![crate::scrollable::gutter_plane(children), bar],
             None => children,
         },
         ..Element::default()
     }
+    .set_scroll(Some(ScrollInfo {
+        x: 0.0,
+        y,
+        max_x: 0.0,
+        max_y,
+    }))
+    .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
+        offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
+    })))
 }
 
 impl VirtualList {
@@ -525,21 +527,14 @@ impl DataGrid {
                 // Same as `VirtualList`: overscan rows outside the viewport must
                 // not paint or take hits.
                 clip: true,
-                scroll: Some(ScrollInfo {
-                    x: 0.0,
-                    y,
-                    max_x: 0.0,
-                    max_y,
-                }),
+
                 style: LayoutStyle {
                     position: Position::Relative,
                     width: Dim::pct(1.0),
                     height: Dim::px(viewport_h as f32),
                     ..LayoutStyle::default()
                 },
-                on_wheel: Some(Rc::new(move |rt, _dx, dy, _mods| {
-                    offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
-                })),
+
                 children: match crate::scrollable::overlay_scrollbar(
                     name, viewport_h, y, max_y, offset,
                 ) {
@@ -547,7 +542,16 @@ impl DataGrid {
                     None => rows,
                 },
                 ..Element::default()
-            };
+            }
+            .set_scroll(Some(ScrollInfo {
+                x: 0.0,
+                y,
+                max_x: 0.0,
+                max_y,
+            }))
+            .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
+                offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
+            })));
 
             Element {
                 role: Role::Table,

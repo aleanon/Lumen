@@ -76,7 +76,20 @@ fn element_size_is_pinned() {
     //
     // The assertion still earns its place: it made that a decision with a
     // number attached instead of an unnoticed drift.
-    assert_size!(Element, 1072);
+    //
+    // 1072 -> 784 on 2026-08-28 (O0.14). This is the "EL" fix the paragraph
+    // above names, applied to the handler group rather than the text one:
+    // every event handler past `on_click`, plus caret/selection, scroll state
+    // and shadow — fourteen fields, 304 bytes — moved behind
+    // `Option<Box<RareEl>>`. They are `None` on every label in every list, and
+    // a view function materializes the whole element tree at once, so the
+    // bytes were paid per node per frame for nothing.
+    //
+    // Chosen over shrinking the text fields because the measurement said so:
+    // the same split had just been made in `NodeMeta` (O0.13, 816 -> 528) on
+    // the other side of the same lowering, and the two together are the
+    // per-node cost of a node that does nothing but hold a string.
+    assert_size!(Element, 784);
 }
 
 #[test]

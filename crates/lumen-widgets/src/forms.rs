@@ -115,12 +115,13 @@ pub fn form_field(cx: &BuildCx, name: &str, label: &str, validators: Vec<Validat
             ..LayoutStyle::default()
         },
         content: crate::NodeContent::Text(shown, TextStyle::default()),
-        on_text: Some(Rc::new(move |rt, t| {
-            let t = t.to_string();
-            value.update(rt, |s| s.push_str(&t))
-        })),
+
         ..Element::default()
     }
+    .set_on_text(Some(Rc::new(move |rt, t| {
+        let t = t.to_string();
+        value.update(rt, |s| s.push_str(&t))
+    })))
     .id(format!("{name}-input"));
 
     let mut children = vec![widgets::text(label.to_string()), input];
