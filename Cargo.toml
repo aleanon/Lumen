@@ -123,7 +123,7 @@ lumen = { path = "crates/lumen" }
 
 # whitelisted runtime deps (ADR-003) — added to crates as tasks need them
 kurbo = "0.13"
-taffy = "0.13"
+taffy = "0.14"
 # `complex-scripts` — the ICU dictionary line-break models — is NOT enabled
 # here any more; it is `lumen-text/complex-scripts`, default-on through the
 # consumer chain, so a lean target can drop it. It is 3.62 MB of the binary,

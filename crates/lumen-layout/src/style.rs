@@ -302,13 +302,16 @@ impl LayoutStyle {
                 width: dim(self.width),
                 height: dim(self.height),
             },
+            // taffy 0.14 types `min_size`/`max_size` as `LengthPercentageAuto`
+            // rather than `Dimension`; `lpa` maps `Dim` the same way `dim` did,
+            // `Auto` included, so the conversion is unchanged in behaviour.
             min_size: TSize {
-                width: dim(self.min_width),
-                height: dim(self.min_height),
+                width: lpa(self.min_width),
+                height: lpa(self.min_height),
             },
             max_size: TSize {
-                width: dim(self.max_width),
-                height: dim(self.max_height),
+                width: lpa(self.max_width),
+                height: lpa(self.max_height),
             },
             aspect_ratio: self.aspect_ratio,
             padding: TRect {

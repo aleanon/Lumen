@@ -796,54 +796,60 @@ credible thing to do *later*, and O0.16–O0.18 leave it fully costed rather tha
 speculative: the trait shape works, containers hold heterogeneous children, and
 the arena mechanism is stable-Rust and drop-safe.
 
-## L1 ✗ Nested auto-sized flex layout is exponential in depth (open)
+## L1 ☑ Nested auto-sized flex layout — 117× (2026-08-28)
 
-Found 2026-08-27 while measuring O0.8, and deferred behind the rest of the
-lowering work rather than taken then: it is a different subsystem and a real
-investigation, not a follow-on edit.
+Found 2026-08-27 while measuring O0.8, deferred behind the lowering work, taken
+after it.
 
-`layout.compute` (taffy 0.13) on rows wrapped in N auto-sized `column`s, 100
-rows, per frame — node count grows **linearly** across this table (101 → 1101):
+**It was taffy, not Lumen.** `benches/src/bin/taffydepth.rs` reproduces it in
+pure taffy with no Lumen types, and the shape of the failure names the cause
+exactly: leaf measurements of **2, 8, 32, 128, 512, 2048** at depths 0…10 —
+`2^(depth+1)`. Each nesting level doubles the work below it, which is the
+signature of a cache that is not serving the second pass rather than of one
+that is thrashing. taffy's `Cache::get` keeps a single `final_layout_entry` and
+a `ComputeSize` result cannot satisfy a `PerformLayout` request, so each level's
+layout pass triggers a fresh cross-axis sizing walk with different keys.
 
-| depth | nodes | layout | µs/node |
+Two facts narrowed it usefully before the fix:
+
+* **Only columns.** Nested auto-width *rows* stay at 2 measurements per leaf.
+* **Only the width axis.** A definite or percentage `width` collapses it to 2;
+  `height`, `flex-grow`, `min-width` and an explicit `align-items: stretch` all
+  leave it at 512.
+
+**taffy 0.14 fixes it outright** — a constant 4 measurements per leaf at every
+depth. The port is four lines: `min_size`/`max_size` moved from `Dimension` to
+`LengthPercentageAuto`, and `lpa` already maps `Dim` identically, `Auto`
+included.
+
+Lumen frame, 100 rows, every node rebuilt, auto-sized nesting:
+
+| depth | taffy 0.13 | taffy 0.14 | |
 |---:|---:|---:|---:|
-| 0 | 101 | 16 µs | 0.16 |
-| 2 | 301 | 257 | 0.85 |
-| 4 | 501 | 1 451 | 2.9 |
-| 6 | 701 | 6 206 | 8.9 |
-| 8 | 901 | 25 377 | 28 |
-| 10 | 1 101 | 103 410 | 94 |
+| 0 | 183 µs | 62 | 2.9× |
+| 4 | 1 996 | 1 015 | 2.0× |
+| 8 | 26 368 | 2 345 | **11×** |
+| 10 | 103 645 | 2 875 | **36×** |
+| 12 | 407 492 | 3 482 | **117×** |
 
-**~3.2× per +2 levels ⇒ ~1.8^depth.** A depth-12 view of 6 501 nodes takes
-**2.0 seconds a frame**.
+**1162 workspace tests pass unchanged — no golden moved.** That is the evidence
+that this is a performance fix and not a layout change, and it is why the
+upgrade was preferred to the workaround below.
 
-What is already ruled in or out:
+### The workaround that was prototyped and rejected
 
-* **Not the cascade** — identical with no stylesheet attached (d4 1422 µs,
-  d8 25523 µs against 1451 / 25377 with one).
-* **Not lowering** — the whole build phase is 2.1% of the d8 frame; layout is
-  97.2%.
-* **Linear in sibling count** at fixed depth (100/200/400 rows → 26/52/105 ms),
-  so it is depth alone.
-* **Definite sizes collapse it to linear**: giving every wrapper a `width` and
-  `height` gives d4 165 µs · d8 329 · d12 511. At depth 8 that is a **77×**
-  difference, which identifies the cause as the intrinsic-sizing cascade —
-  each auto-sized level re-measures its subtree and the results are not reused
-  across levels.
-
-Why it matters more than anything left in the lowering path: every optimization
-in the O0.4–O0.8 series was worth 4–14% of a frame; this is worth up to 77×.
-And the shape is not exotic — panel → section → card → row → label is five
-levels before any content, and none of them can be given a definite size by an
-author who wants content-sized boxes.
-
-Not yet determined: whether the fix is taffy cache configuration, a Lumen-side
-measurement cache keyed on `(node, known_dimensions, available_space)`, or a
-taffy upgrade. **Start by confirming whether taffy's per-node cache is being
-consulted at all** — 1.8^depth is the signature of no caching rather than of
-cache thrashing.
-
-Reproduce: `DEPTH=n [DEFSIZE=1] ROWS=n cargo run --release --bin buildphase`.
+Rewriting an auto-width flex column to `width: 100%` during lowering gave 27× at
+depth 8 and 288× at depth 12, and a semantics diff proved it layout-identical on
+the benchmark shape. It was still **wrong**: `100%` equals stretch only when the
+containing block is *definite*. Against an indefinite parent the percentage
+collapses to content width, which is exactly what
+`widgets_w2::passive_widgets_render_with_semantics` caught — a centred
+`AlignBox` snapping to the left edge. Guarding it (parent stretches, no
+`align_self`, in flow, no horizontal margin) removed 11 of 12 failures but not
+that one, because the missing condition — a definite containing block — cannot
+be established at build time. Recorded because the near-miss is the point: the
+equivalence guard on the benchmark shape said "identical", and it was still an
+unsound transformation.
 
 ## A.3 M0 escalation watchlist (stop + write `BLOCKED.md`, don't decide)
 - `image`-crate / `png` dependency if it falls outside ADR-003's transitive closure (see A.1 `RgbaImage`).
