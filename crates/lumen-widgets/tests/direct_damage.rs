@@ -93,8 +93,8 @@ fn row(
         .background(Color::srgb8(0x11, 0x22, 0x33, 0xff))
         .corner_radius(4.0)
         .resolve();
-    let a = open.child(Label::new(format!("row {i} v{ver}")));
-    let b = open.child(Button::new("Open"));
+    let a = open.child_of(Label::new(format!("row {i} v{ver}")));
+    let b = open.child_of(Button::new("Open"));
     let n = open.index();
     (n, open.end(&LayoutStyle::default(), &[a, b], false))
 }

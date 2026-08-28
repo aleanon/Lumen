@@ -582,6 +582,58 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## O0.16 ☑ `Direct` becomes a tree, and the `Element`-removal case is re-costed (2026-08-28)
+
+The prototype's premise was that widgets write straight into the retained tree
+with no `Element`. It never got there, and the reason was one signature.
+
+**`fn lower(self, ..)` cannot be called through `Box<dyn Direct>`** — `dyn
+Direct` has no statically known size to move out of (E0161) — so a container
+could only hold children whose concrete types it knew at compile time. The
+prototype implemented `Direct` for three *leaves* (`Label`, `Button`,
+`ProgressBar`) and its `begin_row` said the quiet part out loud: *"the child
+widgets are known statically at each site"*. True of a hand-written composite,
+false of every real view, all of which are `column(vec![…])` over a mixed list.
+
+`self: Box<Self>` fixes it. Added with it: `Node = Box<dyn Direct>`, `node(w)`,
+`Open::child(Node)` / `child_of<W>` / `children(Vec<Node>)`, and a `Column`
+holding `Vec<Node>` — the first container in the prototype that describes a
+*tree* rather than a leaf. *Guarded by* `direct_children.rs`: a mixed
+`Label`/`Button`/`ProgressBar` list lowering with no `Element`, containers
+nesting as ordinary children, and a descendant selector matching through a
+dynamic child list (which proves the container is on the ancestor stack while
+its children lower — the ordering the typestate guards exist for).
+
+**And then the re-costing, which is the point.** With the gap closed the arms
+are finally comparable on the shape real views have — 500 rows × 3 children,
+one process per arm:
+
+| arm | median | allocs/node | bytes | peak |
+|---|---:|---:|---:|---:|
+| element | 1195 µs | 4.32 | 14.73 MB | 9.33 MB |
+| boxed (dynamic children) | **1118 µs (−6.4%)** | **4.52** | 13.13 MB | 8.73 MB |
+| element, styled | 1692 µs | | | |
+| boxed, styled | **1588 µs (−6.1%)** | | | |
+
+**Removing `Element` is worth ~6%, not the ~24% this branch's report claims.**
+Both of that figure's premises are now false: it was measured against a
+**1072-byte** `Element` (O0.13/O0.14 made it 784 without any migration) and
+against **static-arity** composition, which avoids the per-child box. Boxing
+dynamic children *adds* 0.2 allocations per node, and that eats most of the
+byte saving — 11% fewer bytes and 6.4% lower peak, but a slightly worse
+allocation count.
+
+So the honest case for the migration is now a single-digit percentage against
+~180 files and a breaking change to `fn build(cx) -> Element`. The obvious way
+to make it worth more is to remove the per-node allocation the boxes cost —
+bump-allocate the widget tree — which is a different piece of work and should
+be costed before, not after, the migration.
+
+*Caveat, stated because it cuts against the result:* the `Column` used in the
+boxed arm is minimal where `Container` is not, so the boxed arm is doing
+slightly *less* work than the element arm. If anything the true gap is smaller
+than −6%.
+
 ## L1 ✗ Nested auto-sized flex layout is exponential in depth (open)
 
 Found 2026-08-27 while measuring O0.8, and deferred behind the rest of the

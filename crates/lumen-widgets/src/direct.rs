@@ -444,7 +444,33 @@ impl TreeSink {
 /// destination, without the uniform 1072-byte staging record in between.
 pub trait Direct {
     /// Write this widget (and its subtree) into `out` under `parent`.
-    fn lower(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode);
+    ///
+    /// Takes `self: Box<Self>`, not `self`. That is the difference between a
+    /// trait that can describe a *leaf* and one that can describe a **tree**:
+    /// `fn lower(self, ..)` is not callable through `Box<dyn Direct>` (E0161 —
+    /// `dyn Direct` has no statically known size to move), so a container could
+    /// only ever hold children whose types it knew at compile time. Every real
+    /// view is `column(vec![heterogeneous…])`, so that limit is the whole
+    /// problem, not an edge case.
+    ///
+    /// The box costs one small allocation per node — a `Label` is 72 bytes,
+    /// against the 784-byte `Element` it replaces — and it buys dynamic
+    /// children, which is what makes `Element` removable rather than merely
+    /// smaller.
+    fn lower(
+        self: Box<Self>,
+        out: &mut TreeSink,
+        parent: Option<NodeIndex>,
+    ) -> (NodeIndex, LayoutNode);
+}
+
+/// A boxed child, the unit a container holds.
+pub type Node = Box<dyn Direct>;
+
+/// Box a widget as a [`Node`], so `vec![node(a), node(b)]` composes widgets of
+/// different types.
+pub fn node<W: Direct + 'static>(w: W) -> Node {
+    Box::new(w)
 }
 
 /// Walk an already-built `Element` into the same sink — the path that exists
@@ -604,8 +630,13 @@ fn apply_common(out: &mut TreeSink, n: NodeIndex, common: Common) -> bool {
 }
 
 impl Direct for crate::Label {
-    fn lower(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
-        let (text, style, width, common) = self.into_parts();
+    fn lower(
+        self: Box<Self>,
+        out: &mut TreeSink,
+        parent: Option<NodeIndex>,
+    ) -> (NodeIndex, LayoutNode) {
+        let this = *self;
+        let (text, style, width, common) = this.into_parts();
         let (s, _dyn_text) = text.into_parts();
         let (d, disabled) = out.node(parent, Role::Text).common(common);
         let node = d.label(s.clone()).text(s, style).resolve();
@@ -620,8 +651,13 @@ impl Direct for crate::Label {
 }
 
 impl Direct for crate::Button {
-    fn lower(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
-        let (label, on_press, fill, ink, common) = self.into_parts();
+    fn lower(
+        self: Box<Self>,
+        out: &mut TreeSink,
+        parent: Option<NodeIndex>,
+    ) -> (NodeIndex, LayoutNode) {
+        let this = *self;
+        let (label, on_press, fill, ink, common) = this.into_parts();
         let (s, _dyn_text) = label.into_parts();
         let (d, disabled) = out.node(parent, Role::Button).common(common);
         let mut d = d
@@ -659,8 +695,13 @@ impl Direct for crate::Button {
 }
 
 impl Direct for crate::ProgressBar {
-    fn lower(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
-        let (frac, width, height, ink, common) = self.into_parts();
+    fn lower(
+        self: Box<Self>,
+        out: &mut TreeSink,
+        parent: Option<NodeIndex>,
+    ) -> (NodeIndex, LayoutNode) {
+        let this = *self;
+        let (frac, width, height, ink, common) = this.into_parts();
         // The ordering that used to be a comment is now the only thing that
         // compiles: `common` lands on `Declaring`, and the fill child is only
         // reachable from the `Open` this `resolve` returns.
@@ -699,9 +740,78 @@ impl Direct for crate::ProgressBar {
     }
 }
 
+/// A column of arbitrary children, lowered with no `Element` anywhere.
+///
+/// This is the piece the prototype was missing, and the reason it could only
+/// ever demonstrate leaves. `begin_row` below carries the assumption that
+/// retired it — "the child widgets are known statically at each site" — which
+/// is true of a hand-written composite and false of every real view, all of
+/// which are `column(vec![…])` over a heterogeneous list.
+///
+/// Holding `Vec<Node>` is what makes the trait describe a *tree*: the children
+/// are boxed widgets, each still only as big as its own data (a `Label` is 72
+/// bytes) rather than a uniform 784-byte `Element`, and none of them is
+/// materialized before it is written.
+pub struct Column {
+    kids: Vec<Node>,
+    gap: f32,
+    padding: f32,
+}
+
+impl Column {
+    /// A column over `kids`.
+    pub fn new(kids: Vec<Node>) -> Column {
+        Column {
+            kids,
+            gap: 0.0,
+            padding: 0.0,
+        }
+    }
+
+    /// Space between children, in logical px.
+    pub fn gap(mut self, gap: f32) -> Column {
+        self.gap = gap;
+        self
+    }
+
+    /// Padding inside the column, in logical px.
+    pub fn padding(mut self, padding: f32) -> Column {
+        self.padding = padding;
+        self
+    }
+}
+
+impl Direct for Column {
+    fn lower(
+        self: Box<Self>,
+        out: &mut TreeSink,
+        parent: Option<NodeIndex>,
+    ) -> (NodeIndex, LayoutNode) {
+        let this = *self;
+        let node = out.node(parent, Role::Group).elide(true).resolve();
+        let n = node.index();
+        let mut node = node;
+        // The children are lowered *while this node is open*, so it is on the
+        // ancestor stack for their cascade — the ordering the typestate guards
+        // exist to enforce.
+        let child_lns = node.children(this.kids);
+        let ls = LayoutStyle {
+            display: Display::Flex,
+            flex_direction: FlexDirection::Column,
+            row_gap: Dim::px(this.gap),
+            padding: Edges::all(Dim::px(this.padding)),
+            ..LayoutStyle::default()
+        };
+        let ln = node.end(&ls, &child_lns, false);
+        (n, ln)
+    }
+}
+
 /// Begin a row box. Children are lowered directly into it by the caller, then
-/// [`TreeSink::end`] closes it — no boxed closures, which is what a real
-/// conversion would do (the child widgets are known statically at each site).
+/// [`TreeSink::end`] closes it — no boxed closures.
+///
+/// Superseded for real views by [`Column`], which takes a `Vec<Node>`; this
+/// stays as the hand-written static-arity form.
 pub fn begin_row(out: &mut TreeSink, parent: Option<NodeIndex>) -> NodeIndex {
     let n = out.begin(parent, Role::Group);
     out.elide(n, true);
@@ -998,7 +1108,7 @@ impl TreeSink {
 /// # use lumen_widgets::Label;
 /// let mut sink = TreeSink::new();
 /// let mut d = sink.node(None, Role::Group);
-/// d.child(Label::new("too early"));   // no method `child` on `Declaring`
+/// d.child_of(Label::new("too early"));   // no method `child` on `Declaring`
 /// ```
 ///
 /// A class declared after the cascade has run — the matchable setters are gone
@@ -1034,7 +1144,7 @@ impl TreeSink {
 /// # use lumen_widgets::Label;
 /// let mut sink = TreeSink::new();
 /// let mut open = sink.node(None, Role::Group).class("panel").resolve();
-/// let child = open.child(Label::new("in time"));
+/// let child = open.child_of(Label::new("in time"));
 /// open.end(&LayoutStyle::default(), &[child], false);
 /// ```
 #[must_use = "a declared node must be resolved and ended, or it never reaches the tree"]
@@ -1180,13 +1290,28 @@ impl<'a> Open<'a> {
         self.n
     }
 
-    /// Lower `w` as a child of this node.
+    /// Lower a boxed child into this node.
     ///
     /// Only reachable from `Open`, so a child can never be written while its
     /// parent is missing from the ancestor stack.
-    pub fn child<W: Direct>(&mut self, w: W) -> LayoutNode {
+    pub fn child(&mut self, w: Node) -> LayoutNode {
         let (_, ln) = w.lower(self.sink, Some(self.n));
         ln
+    }
+
+    /// [`child`](Self::child) for a widget whose type is known here — boxes it
+    /// for you. The static-arity case (a composite with two named fields)
+    /// should use this; a `Vec` of mixed children needs [`Node`].
+    pub fn child_of<W: Direct + 'static>(&mut self, w: W) -> LayoutNode {
+        self.child(node(w))
+    }
+
+    /// Lower a heterogeneous child list, returning their layout nodes in order.
+    ///
+    /// This is the shape every real view has — `column(vec![…])` — and the one
+    /// the trait could not express before `lower` took `self: Box<Self>`.
+    pub fn children(&mut self, kids: Vec<Node>) -> Vec<LayoutNode> {
+        kids.into_iter().map(|k| self.child(k)).collect()
     }
 
     /// Begin a nested node directly, for containers that are not themselves a

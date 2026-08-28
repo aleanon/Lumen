@@ -7,7 +7,7 @@
 
 use lumen_core::semantics::Role;
 use lumen_layout::LayoutStyle;
-use lumen_widgets::direct::{Direct, TreeSink};
+use lumen_widgets::direct::TreeSink;
 use lumen_widgets::Label;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -172,7 +172,8 @@ fn main() {
         let rn = root.index();
         let mut lns = Vec::with_capacity(N);
         for i in 0..N {
-            let (_, ln) = Label::new(format!("row {i}")).lower(root.sink(), Some(rn));
+            let (_, ln) = lumen_widgets::direct::node(Label::new(format!("row {i}")))
+                .lower(root.sink(), Some(rn));
             lns.push(ln);
         }
         root.end(&LayoutStyle::default(), &lns, false);

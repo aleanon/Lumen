@@ -4,7 +4,7 @@
 //! how much is alive at the worst moment. Both reach the same destination and
 //! are checked with `lowered_eq` before anything is reported.
 
-use lumen_widgets::direct::{begin_row, lower_element, lowered_eq, row_style, Direct, TreeSink};
+use lumen_widgets::direct::{begin_row, lower_element, lowered_eq, row_style, TreeSink};
 use lumen_widgets::{Button, Element, Label, ProgressBar};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -78,13 +78,11 @@ fn lower_direct() -> TreeSink {
     let mut lns = Vec::with_capacity(ROWS);
     for i in 0..ROWS {
         let n = begin_row(&mut sink, Some(root));
-        let (_, a) = Label::new(format!("row {i}"))
-            .size(14.0)
+        let (_, a) = lumen_widgets::direct::node(Label::new(format!("row {i}")).size(14.0))
             .lower(&mut sink, Some(n));
-        let (_, b) = ProgressBar::new(i as f64 / ROWS as f64).lower(&mut sink, Some(n));
-        let (_, c) = Button::new("Open")
-            .ghost()
-            .on_press(|_| {})
+        let (_, b) = lumen_widgets::direct::node(ProgressBar::new(i as f64 / ROWS as f64))
+            .lower(&mut sink, Some(n));
+        let (_, c) = lumen_widgets::direct::node(Button::new("Open").ghost().on_press(|_| {}))
             .lower(&mut sink, Some(n));
         lns.push(sink.end(n, &style, &[a, b, c], false));
     }

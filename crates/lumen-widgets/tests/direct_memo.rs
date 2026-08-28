@@ -26,8 +26,8 @@ fn row(
     ver: u64,
 ) -> (lumen_core::NodeIndex, lumen_layout::LayoutNode) {
     let mut open = sink.node(parent, Role::Group).elide(true).resolve();
-    let a = open.child(Label::new(format!("row {i} v{ver}")));
-    let b = open.child(Button::new("Open"));
+    let a = open.child_of(Label::new(format!("row {i} v{ver}")));
+    let b = open.child_of(Button::new("Open"));
     let n = open.index();
     (n, open.end(&LayoutStyle::default(), &[a, b], false))
 }

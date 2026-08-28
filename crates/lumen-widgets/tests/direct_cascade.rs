@@ -12,7 +12,7 @@
 //! specificity between a class and an id.
 
 use lumen_core::semantics::Role;
-use lumen_widgets::direct::{begin_row, row_style, Direct, StyleEnv, TreeSink, VisualState};
+use lumen_widgets::direct::{begin_row, row_style, StyleEnv, TreeSink, VisualState};
 use lumen_widgets::{Button, Label};
 
 fn env(src: &str) -> StyleEnv {
@@ -139,8 +139,9 @@ fn a_real_widget_lowers_through_the_cascade() {
     let mut s = sink("button { border-radius: 2px; } text { color: #123456; }");
     let root = begin_row(&mut s, None);
     s.resolve(root);
-    let (lab, a) = Label::new("hello").size(14.0).lower(&mut s, Some(root));
-    let (btn, b) = Button::new("Go").lower(&mut s, Some(root));
+    let (lab, a) =
+        lumen_widgets::direct::node(Label::new("hello").size(14.0)).lower(&mut s, Some(root));
+    let (btn, b) = lumen_widgets::direct::node(Button::new("Go")).lower(&mut s, Some(root));
     s.end(root, &row_style(8.0, 0.0), &[a, b], false);
 
     assert_eq!(
@@ -167,7 +168,8 @@ fn a_real_widget_lowers_through_the_cascade() {
 fn a_caller_supplied_class_is_visible_to_the_cascade() {
     use lumen_widgets::ProgressBar;
     let mut s = sink(".metered { width: 640px; }");
-    let (n, _) = ProgressBar::new(0.5).class("metered").lower(&mut s, None);
+    let (n, _) =
+        lumen_widgets::direct::node(ProgressBar::new(0.5).class("metered")).lower(&mut s, None);
     assert_eq!(
         s.meta.layout_style(n).width,
         lumen_layout::Dim::px(640.0),
@@ -194,8 +196,8 @@ fn a_balanced_build_passes_the_check() {
     let mut s = sink("button { border-radius: 2px; }");
     let root = begin_row(&mut s, None);
     s.resolve(root);
-    let (_, a) = Label::new("hello").lower(&mut s, Some(root));
-    let (_, b) = Button::new("Go").lower(&mut s, Some(root));
+    let (_, a) = lumen_widgets::direct::node(Label::new("hello")).lower(&mut s, Some(root));
+    let (_, b) = lumen_widgets::direct::node(Button::new("Go")).lower(&mut s, Some(root));
     s.end(root, &row_style(8.0, 0.0), &[a, b], false);
     s.assert_balanced();
 }

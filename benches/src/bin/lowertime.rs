@@ -12,7 +12,7 @@
 //! `compare_lowering.sh` runs them interleaved and reports medians.
 
 use lumen_widgets::direct::{
-    begin_row, lower_element, row_style, Direct, StyleEnv, TreeSink, VisualState,
+    begin_row, lower_element, node, row_style, Column, Node, StyleEnv, TreeSink, VisualState,
 };
 use lumen_widgets::{Button, Element, Label, ProgressBar};
 use std::time::Instant;
@@ -65,17 +65,34 @@ fn direct(styles: Option<StyleEnv>) -> usize {
     for i in 0..ROWS {
         let n = begin_row(&mut sink, Some(root));
         sink.resolve(n);
-        let (_, a) = Label::new(format!("row {i}"))
-            .size(14.0)
-            .lower(&mut sink, Some(n));
-        let (_, b) = ProgressBar::new(i as f64 / ROWS as f64).lower(&mut sink, Some(n));
-        let (_, c) = Button::new("Open")
-            .ghost()
-            .on_press(|_| {})
-            .lower(&mut sink, Some(n));
+        let (_, a) = node(Label::new(format!("row {i}")).size(14.0)).lower(&mut sink, Some(n));
+        let (_, b) = node(ProgressBar::new(i as f64 / ROWS as f64)).lower(&mut sink, Some(n));
+        let (_, c) = node(Button::new("Open").ghost().on_press(|_| {})).lower(&mut sink, Some(n));
         lns.push(sink.end(n, &style, &[a, b, c], false));
     }
     sink.end(root, &Default::default(), &lns, false);
+    sink.tree.len()
+}
+
+/// The shape a real view has: a `Vec` of heterogeneous boxed children, none of
+/// which is known statically at the container. This is the arm that matters —
+/// `direct` above composes with static arity, which no `column(vec![…])` does.
+fn boxed(styles: Option<StyleEnv>) -> usize {
+    let mut sink = match styles {
+        None => TreeSink::new(),
+        Some(env) => TreeSink::new().with_styles(env, VisualState::default()),
+    };
+    let rows: Vec<Node> = (0..ROWS)
+        .map(|i| {
+            let kids: Vec<Node> = vec![
+                node(Label::new(format!("row {i}")).size(14.0)),
+                node(ProgressBar::new(i as f64 / ROWS as f64)),
+                node(Button::new("Open").ghost().on_press(|_| {})),
+            ];
+            node(Column::new(kids).gap(8.0).padding(4.0))
+        })
+        .collect();
+    node(Column::new(rows)).lower(&mut sink, None);
     sink.tree.len()
 }
 
@@ -97,6 +114,8 @@ fn main() {
         "element_styled" => Box::new(|| via_element_styled(Some(env()))),
         "direct" => Box::new(|| direct(None)),
         "styled" => Box::new(|| direct(Some(env()))),
+        "boxed" => Box::new(|| boxed(None)),
+        "boxed_styled" => Box::new(|| boxed(Some(env()))),
         other => {
             eprintln!("unknown mode {other}");
             std::process::exit(2);
