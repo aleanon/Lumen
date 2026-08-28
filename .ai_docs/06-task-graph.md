@@ -750,6 +750,52 @@ first-class`) makes a real cost, not a footnote.
 Still not measured: what any of this is worth on a **whole frame** rather than
 the lowering path in isolation.
 
+## O0.19 ☑ What `Element` removal is worth on a whole frame (2026-08-28)
+
+Every figure up to O0.18 measured the lowering path in isolation. This measures
+lowering's share of a real `pump` at current HEAD, which converts −19.1% on
+lowering into a frame number without another extrapolation.
+
+Two figures per shape. The **ceiling** is what a frame would lose if lowering
+became *free* — a hard measured bound, not a projection, and the more useful
+number for a go/no-go: nothing about direct lowering can beat it. The second
+applies O0.18's −19.1%.
+
+| shape | view | build_node | ceiling | at −19.1% |
+|---|---:|---:|---:|---:|
+| flat 1000 rows, styled | 85 µs | 262 | 60.1% | **11.5%** |
+| flat 4000 rows, styled | 304 | 1005 | 58.2% | **11.1%** |
+| nested depth 8, definite sizes | 163 | 684 | 46.8% | **8.9%** |
+| churn (every label a new string) | 183 | 8738 | 88.4% | *not applicable* |
+
+**Call it 9–11% of a changed frame.**
+
+The churn row is left in as a warning rather than a result. Its ceiling is
+genuine — 88.4% of that frame really is `view` + `build_node` — but ~92% of its
+`build_node` is parley shaping (see O0.12), which is irreducible whatever the
+node representation is. Applying −19.1% there would produce 16.9% by pricing a
+cost direct lowering cannot touch. This is the same shape that produced the
+original "wins don't transfer" error, and it stays in the table so the next
+reader meets the trap with the answer attached.
+
+*Caveat:* O0.18's −19.1% was measured on 500 rows of `Column[Label,
+ProgressBar, Button]`, a richer row than `buildphase`'s single text node. The
+two shapes are not identical, so 9–11% carries that seam.
+
+### The decision this supports
+
+Direct lowering with an arena buys **9–11% of a changed frame**, against a
+breaking change to `fn build(cx) -> Element` across ~180 files at 1.0, and an
+authoring surface that principle 6 makes a real cost. For comparison, the
+O0.6–O0.15 series moved the same frame **5568 → 2251 µs (−60%)** without
+touching public API at all, and **L1 — still open — is a 77× effect** on nested
+auto-sized layout.
+
+On those numbers `Element` removal is not the next thing to do. It is a
+credible thing to do *later*, and O0.16–O0.18 leave it fully costed rather than
+speculative: the trait shape works, containers hold heterogeneous children, and
+the arena mechanism is stable-Rust and drop-safe.
+
 ## L1 ✗ Nested auto-sized flex layout is exponential in depth (open)
 
 Found 2026-08-27 while measuring O0.8, and deferred behind the rest of the
