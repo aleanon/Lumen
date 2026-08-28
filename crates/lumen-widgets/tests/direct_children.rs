@@ -34,7 +34,7 @@ fn a_mixed_child_list_lowers_with_no_element() {
         node(ProgressBar::new(0.25)),
         node(Label::new("omega")),
     ];
-    let (root, _) = node(Column::new(kids).gap(4.0)).lower(&mut s, None);
+    let (root, _) = node(Column::new(kids).gap(4.0)).lower_dyn(&mut s, None);
 
     // Four children under one column, in declaration order.
     let mut kid = s.tree.first_child(root);
@@ -63,7 +63,7 @@ fn containers_nest_as_ordinary_children() {
         node(Column::new(inner)),
         node(Button::new("footer")),
     ];
-    let (root, _) = node(Column::new(outer)).lower(&mut s, None);
+    let (root, _) = node(Column::new(outer)).lower_dyn(&mut s, None);
 
     let mid = s.tree.next_sibling(s.tree.first_child(root));
     assert_eq!(
@@ -87,7 +87,7 @@ fn containers_nest_as_ordinary_children() {
 fn a_descendant_selector_matches_through_a_dynamic_child_list() {
     let mut s = sink("group text { width: 320px; }");
     let kids: Vec<Node> = vec![node(Label::new("inside")), node(Label::new("also"))];
-    let (root, _) = node(Column::new(kids)).lower(&mut s, None);
+    let (root, _) = node(Column::new(kids)).lower_dyn(&mut s, None);
 
     let first = s.tree.first_child(root);
     assert_eq!(

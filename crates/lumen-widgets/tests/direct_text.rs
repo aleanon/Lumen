@@ -29,7 +29,7 @@ fn styled_sink(src: &str) -> TreeSink {
 
 /// Lower a `Label` through the direct path and return its final layout style.
 fn direct_label(s: &mut TreeSink, label: Label) -> LayoutStyle {
-    let (n, _) = lumen_widgets::direct::node(label).lower(s, None);
+    let (n, _) = lumen_widgets::direct::node(label).lower_dyn(s, None);
     s.meta.layout_style(n).clone()
 }
 
@@ -135,7 +135,8 @@ fn a_percentage_width_does_not_feed_the_wrap_width() {
     // The containing block is not resolved until layout runs, which is after
     // measurement — so a percentage-width label lays out as one unwrapped line.
     let mut s = sink();
-    let (n, _) = lumen_widgets::direct::node(Label::new("word ".repeat(20))).lower(&mut s, None);
+    let (n, _) =
+        lumen_widgets::direct::node(Label::new("word ".repeat(20))).lower_dyn(&mut s, None);
     let auto_h = match s.meta.layout_style(n).height {
         Dim::Px(v) => v,
         _ => panic!(),

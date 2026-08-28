@@ -442,35 +442,50 @@ impl TreeSink {
 ///
 /// The counterpart of [`Widget::build`](crate::Widget::build): same data, same
 /// destination, without the uniform 1072-byte staging record in between.
-pub trait Direct {
+pub trait Direct: Sized {
     /// Write this widget (and its subtree) into `out` under `parent`.
     ///
-    /// Takes `self: Box<Self>`, not `self`. That is the difference between a
-    /// trait that can describe a *leaf* and one that can describe a **tree**:
-    /// `fn lower(self, ..)` is not callable through `Box<dyn Direct>` (E0161 —
-    /// `dyn Direct` has no statically known size to move), so a container could
-    /// only ever hold children whose types it knew at compile time. Every real
-    /// view is `column(vec![heterogeneous…])`, so that limit is the whole
-    /// problem, not an edge case.
-    ///
-    /// The box costs one small allocation per node — a `Label` is 72 bytes,
-    /// against the 784-byte `Element` it replaces — and it buys dynamic
-    /// children, which is what makes `Element` removable rather than merely
-    /// smaller.
-    fn lower(
-        self: Box<Self>,
+    /// By value: lowering consumes the widget, so its `String`s and `Rc`s move
+    /// into the node rather than being cloned out of it.
+    fn lower_owned(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode);
+}
+
+/// The object-safe face of [`Direct`] — what a container actually holds.
+///
+/// A by-value `self` cannot go in a vtable (`dyn Direct` has no size to move
+/// out of), and `Box<Self>` — the only owning `self` type stable Rust accepts
+/// for `dyn` — ties every node to a global-allocator free. So the erased form
+/// takes `&mut self` over an `Option`, and *takes* the widget out of it. That
+/// is what lets the same widget be reached through a `Box` **or** through a
+/// bump arena, which `Box` alone cannot do on stable.
+pub trait DirectDyn {
+    /// Lower the widget this slot holds. Panics if called twice.
+    fn lower_dyn(
+        &mut self,
         out: &mut TreeSink,
         parent: Option<NodeIndex>,
     ) -> (NodeIndex, LayoutNode);
 }
 
-/// A boxed child, the unit a container holds.
-pub type Node = Box<dyn Direct>;
+impl<W: Direct> DirectDyn for Option<W> {
+    fn lower_dyn(
+        &mut self,
+        out: &mut TreeSink,
+        parent: Option<NodeIndex>,
+    ) -> (NodeIndex, LayoutNode) {
+        self.take()
+            .expect("a node lowers exactly once")
+            .lower_owned(out, parent)
+    }
+}
+
+/// A boxed child, the unit a container holds by default.
+pub type Node = Box<dyn DirectDyn>;
 
 /// Box a widget as a [`Node`], so `vec![node(a), node(b)]` composes widgets of
 /// different types.
 pub fn node<W: Direct + 'static>(w: W) -> Node {
-    Box::new(w)
+    Box::new(Some(w))
 }
 
 /// Walk an already-built `Element` into the same sink — the path that exists
@@ -630,12 +645,8 @@ fn apply_common(out: &mut TreeSink, n: NodeIndex, common: Common) -> bool {
 }
 
 impl Direct for crate::Label {
-    fn lower(
-        self: Box<Self>,
-        out: &mut TreeSink,
-        parent: Option<NodeIndex>,
-    ) -> (NodeIndex, LayoutNode) {
-        let this = *self;
+    fn lower_owned(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
+        let this = self;
         let (text, style, width, common) = this.into_parts();
         let (s, _dyn_text) = text.into_parts();
         let (d, disabled) = out.node(parent, Role::Text).common(common);
@@ -651,12 +662,8 @@ impl Direct for crate::Label {
 }
 
 impl Direct for crate::Button {
-    fn lower(
-        self: Box<Self>,
-        out: &mut TreeSink,
-        parent: Option<NodeIndex>,
-    ) -> (NodeIndex, LayoutNode) {
-        let this = *self;
+    fn lower_owned(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
+        let this = self;
         let (label, on_press, fill, ink, common) = this.into_parts();
         let (s, _dyn_text) = label.into_parts();
         let (d, disabled) = out.node(parent, Role::Button).common(common);
@@ -695,12 +702,8 @@ impl Direct for crate::Button {
 }
 
 impl Direct for crate::ProgressBar {
-    fn lower(
-        self: Box<Self>,
-        out: &mut TreeSink,
-        parent: Option<NodeIndex>,
-    ) -> (NodeIndex, LayoutNode) {
-        let this = *self;
+    fn lower_owned(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
+        let this = self;
         let (frac, width, height, ink, common) = this.into_parts();
         // The ordering that used to be a comment is now the only thing that
         // compiles: `common` lands on `Declaring`, and the fill child is only
@@ -752,15 +755,15 @@ impl Direct for crate::ProgressBar {
 /// are boxed widgets, each still only as big as its own data (a `Label` is 72
 /// bytes) rather than a uniform 784-byte `Element`, and none of them is
 /// materialized before it is written.
-pub struct Column {
-    kids: Vec<Node>,
+pub struct Column<N = Node> {
+    kids: Vec<N>,
     gap: f32,
     padding: f32,
 }
 
-impl Column {
+impl<N> Column<N> {
     /// A column over `kids`.
-    pub fn new(kids: Vec<Node>) -> Column {
+    pub fn new(kids: Vec<N>) -> Column<N> {
         Column {
             kids,
             gap: 0.0,
@@ -769,25 +772,25 @@ impl Column {
     }
 
     /// Space between children, in logical px.
-    pub fn gap(mut self, gap: f32) -> Column {
+    pub fn gap(mut self, gap: f32) -> Column<N> {
         self.gap = gap;
         self
     }
 
     /// Padding inside the column, in logical px.
-    pub fn padding(mut self, padding: f32) -> Column {
+    pub fn padding(mut self, padding: f32) -> Column<N> {
         self.padding = padding;
         self
     }
 }
 
-impl Direct for Column {
-    fn lower(
-        self: Box<Self>,
-        out: &mut TreeSink,
-        parent: Option<NodeIndex>,
-    ) -> (NodeIndex, LayoutNode) {
-        let this = *self;
+impl<N> Direct for Column<N>
+where
+    N: std::ops::DerefMut,
+    N::Target: DirectDyn,
+{
+    fn lower_owned(self, out: &mut TreeSink, parent: Option<NodeIndex>) -> (NodeIndex, LayoutNode) {
+        let this = self;
         let node = out.node(parent, Role::Group).elide(true).resolve();
         let n = node.index();
         let mut node = node;
@@ -1294,8 +1297,12 @@ impl<'a> Open<'a> {
     ///
     /// Only reachable from `Open`, so a child can never be written while its
     /// parent is missing from the ancestor stack.
-    pub fn child(&mut self, w: Node) -> LayoutNode {
-        let (_, ln) = w.lower(self.sink, Some(self.n));
+    pub fn child<N>(&mut self, mut w: N) -> LayoutNode
+    where
+        N: std::ops::DerefMut,
+        N::Target: DirectDyn,
+    {
+        let (_, ln) = w.lower_dyn(self.sink, Some(self.n));
         ln
     }
 
@@ -1310,7 +1317,11 @@ impl<'a> Open<'a> {
     ///
     /// This is the shape every real view has — `column(vec![…])` — and the one
     /// the trait could not express before `lower` took `self: Box<Self>`.
-    pub fn children(&mut self, kids: Vec<Node>) -> Vec<LayoutNode> {
+    pub fn children<N>(&mut self, kids: Vec<N>) -> Vec<LayoutNode>
+    where
+        N: std::ops::DerefMut,
+        N::Target: DirectDyn,
+    {
         kids.into_iter().map(|k| self.child(k)).collect()
     }
 

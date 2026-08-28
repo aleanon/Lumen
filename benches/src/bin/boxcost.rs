@@ -65,14 +65,14 @@ fn arena_init() {
 }
 
 fn arena_node<W: Direct + 'static>(w: W) -> Node {
-    let l = Layout::new::<W>();
+    let l = Layout::new::<Option<W>>();
     let off = (A_OFF.load(Ordering::Relaxed) + l.align() - 1) & !(l.align() - 1);
     let end = off + l.size();
     assert!(end < A_END.load(Ordering::Relaxed), "arena exhausted");
     A_OFF.store(end, Ordering::Relaxed);
     unsafe {
-        let p = off as *mut W;
-        std::ptr::write(p, w);
+        let p = off as *mut Option<W>;
+        std::ptr::write(p, Some(w));
         Box::from_raw(p)
     }
 }
@@ -90,7 +90,7 @@ fn via_arena() -> usize {
         })
         .collect();
     let mut sink = TreeSink::new();
-    arena_node(Column::new(rows)).lower(&mut sink, None);
+    arena_node(Column::new(rows)).lower_dyn(&mut sink, None);
     sink.tree.len()
 }
 
@@ -147,7 +147,7 @@ fn via_boxed() -> usize {
         })
         .collect();
     let mut sink = TreeSink::new();
-    node(Column::new(rows)).lower(&mut sink, None);
+    node(Column::new(rows)).lower_dyn(&mut sink, None);
     sink.tree.len()
 }
 

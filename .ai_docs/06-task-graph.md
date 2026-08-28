@@ -695,6 +695,61 @@ outside the measurement:
   −16.6% is on the order of **a tenth of a changed frame** — an estimate, not
   a measured frame delta.
 
+## O0.18 ☑ Drop tracking is free — the arena win is real and shippable (2026-08-28)
+
+O0.17's −16.6% came from a device that cannot ship: a `Box` over arena memory
+with a custom global allocator skipping the free. The open question was what
+the *stable* mechanism costs, because bump arenas do not run destructors and
+our widgets own `String`s and `Rc`s — a frame's worth of leaked strings per
+frame is not a trade, it is a bug.
+
+**The stable mechanism.** `Box<Self>` is the only owning `self` type `dyn` will
+accept on stable, and it always frees through the global allocator, so
+ownership had to leave the vtable. `Direct` is now by-value and `Sized`
+(`lower_owned`), with an object-safe façade `DirectDyn` implemented for
+`Option<W>` that *takes* the widget out of the slot. That one indirection is
+what lets the identical widget be reached through a `Box` **or** through a bump
+arena — which `Box` alone cannot do. `Column<N>` and `Open::child`/`children`
+became generic over `N: DerefMut, N::Target: DirectDyn`, so one container
+serves both.
+
+The arena is `&mut dyn DirectDyn` over `Option<W>` in a bump region, with an
+explicit drop list: one `(ptr, drop_glue)` push per node, walked in reverse at
+reset.
+
+| arm | min | vs element |
+|---|---:|---:|
+| element | 1122.3 µs | — |
+| boxed | 1035.0 µs | −7.6% |
+| **arena, drop-tracked** | **907.8 µs** | **−19.1%** |
+
+**Drop tracking costs nothing — it is net positive.** The shippable arena beats
+O0.17's unshippable one (908 vs 944), because a drop list walked once is
+cheaper than routing every node through the global allocator's `dealloc` and
+its address range check. The concern that motivated this experiment was the
+wrong way round.
+
+*Guarded by* an assertion that runs before every timed arm: 1000 `Drop`-counting
+values are arena-allocated, nothing drops before `reset`, all 1000 drop at
+`reset`, and a second round proves `reset` leaves the arena reusable. Without
+it a leaking arena would present as a *faster* arm — the failure mode this
+number is most exposed to.
+
+`arenacost.rs` is retired; `arenadrop.rs` supersedes it with the mechanism that
+can actually ship.
+
+### Where the `Element`-removal case now stands
+
+−19.1% on the lowering path with a stable mechanism, plus the modularity
+argument (one node vocabulary instead of two hand-synced ones, 32 fields copied
+verbatim). Against: a breaking change to `fn build(cx) -> Element` across ~180
+files at 1.0, and `Direct` is a harder authoring surface than filling in a
+struct — which principle 6 (`third-party (and agent-written) widgets are
+first-class`) makes a real cost, not a footnote.
+
+Still not measured: what any of this is worth on a **whole frame** rather than
+the lowering path in isolation.
+
 ## L1 ✗ Nested auto-sized flex layout is exponential in depth (open)
 
 Found 2026-08-27 while measuring O0.8, and deferred behind the rest of the

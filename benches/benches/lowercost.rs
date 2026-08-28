@@ -63,11 +63,11 @@ fn lower_direct() -> TreeSink {
     for i in 0..ROWS {
         let n = begin_row(&mut sink, Some(root));
         let (_, a) = lumen_widgets::direct::node(Label::new(format!("row {i}")).size(14.0))
-            .lower(&mut sink, Some(n));
+            .lower_dyn(&mut sink, Some(n));
         let (_, b) = lumen_widgets::direct::node(ProgressBar::new(i as f64 / ROWS as f64))
-            .lower(&mut sink, Some(n));
+            .lower_dyn(&mut sink, Some(n));
         let (_, c) = lumen_widgets::direct::node(Button::new("Open").ghost().on_press(|_| {}))
-            .lower(&mut sink, Some(n));
+            .lower_dyn(&mut sink, Some(n));
         lns.push(sink.end(n, &style, &[a, b, c], false));
     }
     sink.end(root, &Default::default(), &lns, false);
@@ -135,11 +135,11 @@ fn lower_direct_styled() -> TreeSink {
         let n = begin_row(&mut sink, Some(root));
         sink.resolve(n);
         let (_, a) = lumen_widgets::direct::node(Label::new(format!("row {i}")).size(14.0))
-            .lower(&mut sink, Some(n));
+            .lower_dyn(&mut sink, Some(n));
         let (_, b) = lumen_widgets::direct::node(ProgressBar::new(i as f64 / ROWS as f64))
-            .lower(&mut sink, Some(n));
+            .lower_dyn(&mut sink, Some(n));
         let (_, c) = lumen_widgets::direct::node(Button::new("Open").ghost().on_press(|_| {}))
-            .lower(&mut sink, Some(n));
+            .lower_dyn(&mut sink, Some(n));
         lns.push(sink.end(n, &style, &[a, b, c], false));
     }
     sink.end(root, &Default::default(), &lns, false);

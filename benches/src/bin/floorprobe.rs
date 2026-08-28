@@ -173,7 +173,7 @@ fn main() {
         let mut lns = Vec::with_capacity(N);
         for i in 0..N {
             let (_, ln) = lumen_widgets::direct::node(Label::new(format!("row {i}")))
-                .lower(root.sink(), Some(rn));
+                .lower_dyn(root.sink(), Some(rn));
             lns.push(ln);
         }
         root.end(&LayoutStyle::default(), &lns, false);
