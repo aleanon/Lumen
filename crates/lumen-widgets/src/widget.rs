@@ -245,6 +245,15 @@ impl Common {
 #[macro_export]
 macro_rules! impl_widget {
     ($t:ty) => {
+        $crate::impl_widget!(@modifiers_only $t);
+        $crate::impl_widget!(@direct_bridge $t);
+    };
+    // A widget that lowers natively supplies its own `Direct`; this arm gives
+    // it the universal modifiers without the bridge.
+    ($t:ty, native) => {
+        $crate::impl_widget!(@modifiers_only $t);
+    };
+    (@modifiers_only $t:ty) => {
         impl $t {
             /// Set the stable id (tests, the agent, focus, and `.lss` styling).
             pub fn id(mut self, id: impl Into<$crate::widget::StableId>) -> Self {
@@ -301,6 +310,28 @@ macro_rules! impl_widget {
         impl From<$t> for $crate::Element {
             fn from(w: $t) -> $crate::Element {
                 <$t as $crate::widget::Widget>::build(w)
+            }
+        }
+    };
+    (@direct_bridge $t:ty) => {
+        /// Bridged lowering: builds this widget's `Element` and hands the whole
+        /// tree to the sink.
+        ///
+        /// Every widget is `Direct` from here, which is what lets a converted
+        /// parent hold *any* child monomorphically. Converting a widget to
+        /// native lowering means replacing this — see `impl_widget!($t, native)`.
+        impl $crate::Direct for $t {
+            fn lower_owned(
+                self,
+                w: &mut dyn $crate::NodeWriter,
+                parent: Option<$crate::NodeIndex>,
+                in_overlay: bool,
+            ) -> ($crate::NodeIndex, $crate::LayoutNode) {
+                w.write_tree(
+                    <$t as $crate::widget::Widget>::build(self),
+                    parent,
+                    in_overlay,
+                )
             }
         }
     };

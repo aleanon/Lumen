@@ -90,8 +90,9 @@ impl Accordion {
     }
 }
 
-impl Widget for Accordion {
-    fn build(self) -> Element {
+impl Accordion {
+    /// This node and its children, never joined — see `Container::parts`.
+    fn parts(self) -> (Element, Vec<Element>) {
         let Accordion {
             name,
             title,
@@ -176,15 +177,34 @@ impl Widget for Accordion {
                 row_gap: Dim::px(6.0),
                 ..LayoutStyle::default()
             },
-            children,
             ..Element::default()
         };
         common.apply(&mut el);
+        (el, children)
+    }
+}
+
+impl Widget for Accordion {
+    fn build(self) -> Element {
+        let (mut el, children) = self.parts();
+        el.children = children;
         el
     }
 }
 
-impl_widget!(Accordion);
+impl crate::Direct for Accordion {
+    fn lower_owned(
+        self,
+        w: &mut dyn crate::NodeWriter,
+        parent: Option<crate::NodeIndex>,
+        in_overlay: bool,
+    ) -> (crate::NodeIndex, crate::LayoutNode) {
+        let (el, children) = self.parts();
+        w.write_children(el, children, parent, in_overlay)
+    }
+}
+
+impl_widget!(Accordion, native);
 
 #[cfg(test)]
 mod tests {

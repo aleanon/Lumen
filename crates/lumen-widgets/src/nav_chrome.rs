@@ -409,8 +409,9 @@ impl AppBar {
     }
 }
 
-impl Widget for AppBar {
-    fn build(self) -> Element {
+impl AppBar {
+    /// This node and its children, never joined — see `Container::parts`.
+    fn parts(self) -> (Element, Vec<Element>) {
         let AppBar {
             title,
             actions,
@@ -457,15 +458,34 @@ impl Widget for AppBar {
                 width: Dim::pct(1.0),
                 ..LayoutStyle::default()
             },
-            children,
             ..Element::default()
         };
         common.apply(&mut el);
+        (el, children)
+    }
+}
+
+impl Widget for AppBar {
+    fn build(self) -> Element {
+        let (mut el, children) = self.parts();
+        el.children = children;
         el
     }
 }
 
-impl_widget!(AppBar);
+impl crate::Direct for AppBar {
+    fn lower_owned(
+        self,
+        w: &mut dyn crate::NodeWriter,
+        parent: Option<crate::NodeIndex>,
+        in_overlay: bool,
+    ) -> (crate::NodeIndex, crate::LayoutNode) {
+        let (el, children) = self.parts();
+        w.write_children(el, children, parent, in_overlay)
+    }
+}
+
+impl_widget!(AppBar, native);
 
 /// A top app bar: a title with optional trailing action elements (≥44px tall).
 /// *(Thin shim over [`AppBar`] — the typed form is preferred.)*
@@ -535,8 +555,9 @@ impl PullToRefresh {
     }
 }
 
-impl Widget for PullToRefresh {
-    fn build(self) -> Element {
+impl PullToRefresh {
+    /// This node and its children, never joined — see `Container::parts`.
+    fn parts(self) -> (Element, Vec<Element>) {
         let PullToRefresh {
             name,
             threshold,
@@ -620,15 +641,34 @@ impl Widget for PullToRefresh {
                 width: Dim::pct(1.0),
                 ..LayoutStyle::default()
             },
-            children: vec![indicator, inner],
             ..Element::default()
         };
         common.apply(&mut el);
+        (el, vec![indicator, inner])
+    }
+}
+
+impl Widget for PullToRefresh {
+    fn build(self) -> Element {
+        let (mut el, children) = self.parts();
+        el.children = children;
         el
     }
 }
 
-impl_widget!(PullToRefresh);
+impl crate::Direct for PullToRefresh {
+    fn lower_owned(
+        self,
+        w: &mut dyn crate::NodeWriter,
+        parent: Option<crate::NodeIndex>,
+        in_overlay: bool,
+    ) -> (crate::NodeIndex, crate::LayoutNode) {
+        let (el, children) = self.parts();
+        w.write_children(el, children, parent, in_overlay)
+    }
+}
+
+impl_widget!(PullToRefresh, native);
 
 /// A scroll area with pull-to-refresh: dragging down past the top fires
 /// `on_refresh` and surfaces a `busy` state until the `refreshing` signal is

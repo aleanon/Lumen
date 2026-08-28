@@ -6018,6 +6018,55 @@ pub trait NodeWriter {
         in_overlay: bool,
     ) -> (NodeIndex, LayoutNode);
 
+    /// Lower a complete `Element` tree, children included.
+    ///
+    /// The bridge every widget starts on: a widget that has not yet been
+    /// converted to native lowering still builds its `Element` and hands the
+    /// whole thing over here. It is what makes "every widget is `Direct`" true
+    /// before "no widget builds an `Element`" is.
+    fn write_tree(
+        &mut self,
+        el: Element,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+    ) -> (NodeIndex, LayoutNode);
+
+    /// Write a node and lower `children` under it, applying the node's own
+    /// contexts.
+    ///
+    /// The shape almost every container wants: it owns a list of child
+    /// `Element`s and imposes nothing on them beyond what the node itself
+    /// declares. Provided rather than hand-written per widget so the context
+    /// handling — a z-stack's absolute positioning, today — lives in one place
+    /// and cannot be forgotten by the next container to convert.
+    fn write_children(
+        &mut self,
+        el: Element,
+        children: Vec<Element>,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+    ) -> (NodeIndex, LayoutNode) {
+        let stacks = el.stacks_children;
+        let mut kids = Some(children);
+        self.write_with(el, parent, in_overlay, &mut |w, node, overlay| {
+            kids.take()
+                .expect("a node's children are lowered exactly once")
+                .into_iter()
+                .map(|mut c| {
+                    if stacks {
+                        c.style.position = lumen_layout::Position::Absolute;
+                        c.style.inset = lumen_layout::Edges {
+                            left: Dim::px(0.0),
+                            top: Dim::px(0.0),
+                            ..lumen_layout::Edges::AUTO
+                        };
+                    }
+                    w.write_tree(c, Some(node), overlay).1
+                })
+                .collect()
+        })
+    }
+
     /// Write a node whose children are produced *while it is open*.
     ///
     /// `el.children` is ignored; the callback supplies them. This is what lets
@@ -6042,6 +6091,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         in_overlay: bool,
     ) -> (NodeIndex, LayoutNode) {
         self.lower_node(el, parent, in_overlay, |_, _, _, _| Vec::new())
+    }
+
+    fn write_tree(
+        &mut self,
+        el: Element,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+    ) -> (NodeIndex, LayoutNode) {
+        self.build_node(el, parent, in_overlay)
     }
 
     fn write_with(

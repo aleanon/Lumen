@@ -149,8 +149,9 @@ impl Wrap {
     }
 }
 
-impl Widget for Wrap {
-    fn build(self) -> Element {
+impl Wrap {
+    /// This node and its children, never joined — see `Container::parts`.
+    fn parts(self) -> (Element, Vec<Element>) {
         let Wrap { children, common } = self;
         let mut el = Element {
             role: Role::Group,
@@ -162,15 +163,34 @@ impl Widget for Wrap {
                 row_gap: Dim::px(4.0),
                 ..LayoutStyle::default()
             },
-            children,
             ..Element::default()
         };
         common.apply(&mut el);
+        (el, children)
+    }
+}
+
+impl Widget for Wrap {
+    fn build(self) -> Element {
+        let (mut el, children) = self.parts();
+        el.children = children;
         el
     }
 }
 
-impl_widget!(Wrap);
+impl crate::Direct for Wrap {
+    fn lower_owned(
+        self,
+        w: &mut dyn crate::NodeWriter,
+        parent: Option<crate::NodeIndex>,
+        in_overlay: bool,
+    ) -> (crate::NodeIndex, crate::LayoutNode) {
+        let (el, children) = self.parts();
+        w.write_children(el, children, parent, in_overlay)
+    }
+}
+
+impl_widget!(Wrap, native);
 
 /// A flex row that wraps onto new lines.
 /// *(Thin shim over [`Wrap`] — the typed form is preferred.)*

@@ -841,6 +841,47 @@ It also costs something real: a widget can no longer be held unbuilt in a
 value-form children are not the same expressive power, and the erased path is
 what preserves the latter.
 
+## O0.23 ☑ Every widget is `Direct` (2026-08-28)
+
+All **57** widget types implement `Direct` and lower through the sink. *Guarded
+by* `every_widget_is_direct.rs`, which is a **type-level** check — nothing is
+constructed, so it cannot be satisfied by a widget that merely happens not to
+be exercised elsewhere, and a widget added without a `Direct` impl fails to
+compile there.
+
+**Two tiers, both correct.**
+
+* **Bridged** (50) — `impl_widget!` now generates a `Direct` that builds the
+  widget's `Element` and hands the tree to `NodeWriter::write_tree`. Every
+  widget gets this for free, which is what makes "every widget is `Direct`"
+  true before "no widget builds an `Element`" is. It is also what lets a
+  converted parent hold *any* child monomorphically rather than through the
+  boxed escape hatch.
+* **Native** (7) — the containers: `Container`, `Card`, `Scrollable`,
+  `Accordion`, `AppBar`, `PullToRefresh`, `Wrap`. Each grew a `parts()` that
+  returns its node and its children *without joining them*; `Widget::build`
+  puts them together, `Direct` never does. One construction, two consumers, so
+  the paths cannot drift. `impl_widget!(Ty, native)` suppresses the generated
+  bridge, so a widget cannot silently end up with both.
+
+`NodeWriter::write_children` holds the context handling (a z-stack's absolute
+positioning) in one place, so the next container to convert cannot forget it.
+
+### What this does not yet buy, stated plainly
+
+Native lowering here is **structural, not yet an allocation win**. A container
+still receives its children as `Vec<Element>` from its constructor, so the
+children are materialized either way — `parts()` only stops them being *joined*
+into a tree field. The saving arrives when the authoring API stops handing
+containers a vector, i.e. when children become statements at the call site
+(O0.20's `inline` arm, measured at −18.1% against the `Element` staging tree).
+That is the next stage, and it is the one that changes `fn build(cx) -> Element`.
+
+*Guarded by* `direct_engine.rs::native_and_element_lowering_agree` — the two
+paths must produce byte-identical semantics trees. `parts()` sharing one
+construction is not sufficient evidence for that: the child lowering is
+separate code on each path, which is exactly where a divergence would hide.
+
 ## O0.22 ◐ The `Direct` path is live in the real engine (2026-08-28)
 
 The migration's architecture, complete and exercised against the engine rather

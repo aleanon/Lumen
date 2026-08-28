@@ -70,8 +70,9 @@ impl Scrollable {
     }
 }
 
-impl Widget for Scrollable {
-    fn build(self) -> Element {
+impl Scrollable {
+    /// This node and its children, never joined — see `Container::parts`.
+    fn parts(self) -> (Element, Vec<Element>) {
         let Scrollable {
             name,
             viewport_h,
@@ -123,10 +124,6 @@ impl Widget for Scrollable {
             // (WAI-ARIA: a scrollable region must be keyboard operable).
             focusable: true,
 
-            children: match overlay_scrollbar(&name, viewport_h, y, max_y, offset) {
-                Some(bar) => vec![inner, bar],
-                None => vec![inner],
-            },
             ..Element::default()
         }
         .set_scroll(Some(ScrollInfo {
@@ -159,11 +156,35 @@ impl Widget for Scrollable {
             offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
         })));
         common.apply(&mut el);
+        let kids = match overlay_scrollbar(&name, viewport_h, y, max_y, offset) {
+            Some(bar) => vec![inner, bar],
+            None => vec![inner],
+        };
+        (el, kids)
+    }
+}
+
+impl Widget for Scrollable {
+    fn build(self) -> Element {
+        let (mut el, children) = self.parts();
+        el.children = children;
         el
     }
 }
 
-impl_widget!(Scrollable);
+impl crate::Direct for Scrollable {
+    fn lower_owned(
+        self,
+        w: &mut dyn crate::NodeWriter,
+        parent: Option<crate::NodeIndex>,
+        in_overlay: bool,
+    ) -> (crate::NodeIndex, crate::LayoutNode) {
+        let (el, children) = self.parts();
+        w.write_children(el, children, parent, in_overlay)
+    }
+}
+
+impl_widget!(Scrollable, native);
 
 /// An overlay scrollbar for any container that reports [`ScrollInfo`].
 ///

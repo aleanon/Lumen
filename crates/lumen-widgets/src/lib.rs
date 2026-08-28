@@ -100,8 +100,13 @@ pub use app::{center, App, FrameStats, Headless, ReloadResult};
 #[cfg(feature = "snapshot")]
 pub use app::{AppSnapshot, Checkpoint};
 pub use element::{AbortHandle, BuildCx, Element, Handler, LeafWidget, NodeContent, Text};
+/// The typed-widget trait (`Widget::build`) and the universal-modifier record
+/// every widget embeds.
+pub use lumen_app::{Direct, DirectDyn, NodeWriter};
 /// The data layer: executors + the `Sink` background work pushes results through.
 pub use lumen_core::tasks::{CancelToken, InlineSpawner, ManualSpawner, Sink, Spawner, TaskHandle};
+pub use lumen_core::NodeIndex;
+pub use lumen_layout::LayoutNode;
 /// Compile-time handler-currency check (F2): a handler may only capture stable
 /// `Copy` state (signal/memo handles, scalars), never owned snapshots that go
 /// stale when the handler is retained. See [`lumen_macros::stable_handler`].
@@ -141,8 +146,6 @@ pub use lumen_macros::text;
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
 pub use lumen_render::{Damage, DefaultRenderer, Present, Renderer, RgbaImage, TinySkia};
 pub use tasks::{Resource, TaskError};
-/// The typed-widget trait (`Widget::build`) and the universal-modifier record
-/// every widget embeds.
 pub use widget::{Common, Widget};
 
 /// Render a widget doc-example `app` at `w`×`h` and verify it against the PNG

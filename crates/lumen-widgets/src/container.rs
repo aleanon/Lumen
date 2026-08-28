@@ -151,8 +151,13 @@ impl Container {
     }
 }
 
-impl Widget for Container {
-    fn build(self) -> Element {
+impl Container {
+    /// Split into this node and its children, without ever joining them.
+    ///
+    /// `Widget::build` puts them back together into a tree; `Direct` never
+    /// does — it writes the node, then lowers the children while it is open.
+    /// One construction, two consumers, so the two paths cannot drift.
+    fn parts(self) -> (Element, Vec<Element>) {
         let Container {
             children,
             direction,
@@ -167,8 +172,8 @@ impl Widget for Container {
             common,
         } = self;
         // A z-stack declares that its children are absolutely positioned; the
-        // lowering imposes it as each child is written. It used to walk
-        // `children` and write into each one here, which is the pattern that
+        // lowering imposes it as each child is written, rather than this
+        // walking `children` and writing into each one — the pattern that
         // forces a container to receive its children as values.
         let mut el = Element {
             role: Role::Group,
@@ -192,12 +197,34 @@ impl Widget for Container {
                 height,
                 ..LayoutStyle::default()
             },
-            children,
             ..Element::default()
         };
         common.apply(&mut el);
+        (el, children)
+    }
+}
+
+impl Widget for Container {
+    fn build(self) -> Element {
+        let (mut el, children) = self.parts();
+        el.children = children;
         el
     }
 }
 
-impl_widget!(Container);
+impl crate::Direct for Container {
+    /// Native lowering: the node is written, then its children are emitted
+    /// while it is open. No `Vec<Element>` is handed to the engine as part of
+    /// a tree, and nothing is boxed.
+    fn lower_owned(
+        self,
+        w: &mut dyn crate::NodeWriter,
+        parent: Option<crate::NodeIndex>,
+        in_overlay: bool,
+    ) -> (crate::NodeIndex, crate::LayoutNode) {
+        let (el, children) = self.parts();
+        w.write_children(el, children, parent, in_overlay)
+    }
+}
+
+impl_widget!(Container, native);

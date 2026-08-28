@@ -83,8 +83,9 @@ impl Card {
     }
 }
 
-impl Widget for Card {
-    fn build(self) -> Element {
+impl Card {
+    /// This node and its children, never joined — see `Container::parts`.
+    fn parts(self) -> (Element, Vec<Element>) {
         let Card {
             mut children,
             title,
@@ -132,7 +133,6 @@ impl Widget for Card {
                 padding: Edges::all(Dim::px(16.0)),
                 ..LayoutStyle::default()
             },
-            children,
             ..Element::default()
         }
         .set_shadow(if flat {
@@ -141,11 +141,31 @@ impl Widget for Card {
             Some(crate::element::Shadow::soft())
         });
         common.apply(&mut el);
+        (el, children)
+    }
+}
+
+impl Widget for Card {
+    fn build(self) -> Element {
+        let (mut el, children) = self.parts();
+        el.children = children;
         el
     }
 }
 
-impl_widget!(Card);
+impl crate::Direct for Card {
+    fn lower_owned(
+        self,
+        w: &mut dyn crate::NodeWriter,
+        parent: Option<crate::NodeIndex>,
+        in_overlay: bool,
+    ) -> (crate::NodeIndex, crate::LayoutNode) {
+        let (el, children) = self.parts();
+        w.write_children(el, children, parent, in_overlay)
+    }
+}
+
+impl_widget!(Card, native);
 
 /// A small count or dot overlaid on the top-right of another widget.
 ///

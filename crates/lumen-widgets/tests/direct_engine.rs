@@ -112,3 +112,78 @@ fn a_direct_widget_composes_beside_element_widgets() {
     );
     h.assert_view_coherent();
 }
+
+/// A natively-converted container must produce exactly the tree its `Element`
+/// path produces. `Container::parts` exists so the two share one construction,
+/// but sharing the construction is not the same as producing the same tree —
+/// the child lowering is separate code on each path, and that is where a
+/// divergence would hide.
+#[test]
+fn native_and_element_lowering_agree() {
+    use lumen_widgets::Container;
+
+    let via_element = |_: ()| {
+        let mut h = App::new(|_cx| {
+            Element::from(
+                Container::new(vec![
+                    widgets::text("alpha").id("a"),
+                    widgets::text("beta").id("b"),
+                ])
+                .gap(6.0)
+                .padding(3.0)
+                .id("box"),
+            )
+        })
+        .run_headless(Size::new(300.0, 200.0));
+        h.pump();
+        h.semantics_json().to_string()
+    };
+    let via_direct = |_: ()| {
+        let mut h = App::new(|_cx| {
+            Element::default().direct(
+                Container::new(vec![
+                    widgets::text("alpha").id("a"),
+                    widgets::text("beta").id("b"),
+                ])
+                .gap(6.0)
+                .padding(3.0)
+                .id("box"),
+            )
+        })
+        .run_headless(Size::new(300.0, 200.0));
+        h.pump();
+        h.semantics_json().to_string()
+    };
+    assert_eq!(
+        via_element(()),
+        via_direct(()),
+        "the native path must lower to the same tree as the Element path"
+    );
+}
+
+/// A z-stack is a *context*, and the native path applies it itself — so the
+/// property has to be re-checked there rather than inherited from O0.21.
+#[test]
+fn the_stack_context_survives_native_lowering() {
+    use lumen_widgets::Container;
+    let mut h = App::new(|_cx| {
+        Element::default().direct(
+            Container::new(vec![
+                widgets::text("under").id("under"),
+                widgets::text("over").id("over"),
+            ])
+            .stack()
+            .id("st"),
+        )
+    })
+    .run_headless(Size::new(300.0, 200.0));
+    h.pump();
+    let a = h.node_bounds_by_id("under").expect("under");
+    let b = h.node_bounds_by_id("over").expect("over");
+    assert_eq!(
+        (a.y0, b.y0),
+        (a.y0, a.y0),
+        "stacked children overlay at the same origin rather than stacking: \
+         {a:?} {b:?}"
+    );
+}
