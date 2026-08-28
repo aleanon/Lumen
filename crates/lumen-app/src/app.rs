@@ -1818,6 +1818,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
     }
 
+    /// O0.15: how long the ambient audit may go without running while the
+    /// view keeps changing.
+    ///
+    /// A tenth of a second is below the threshold at which a developer
+    /// notices a delay, and roughly 6× cheaper than per-frame at 60 fps. It is
+    /// a floor on *cadence*, not a cap on fidelity: `ui.lint` answers exactly
+    /// and immediately whenever asked, and a settled tree is audited at once.
+    const AUDIT_MIN_INTERVAL_MS: f64 = 100.0;
+
     /// O0.3: push newly-appeared lint findings into the log ring.
     ///
     /// This is the bridge that turns the whole lint surface from *pull* into
@@ -1843,15 +1852,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     ///   from `Diagnostic.handle` (O0.1b) — path-derived and always present,
     ///   unlike `node`, which is the author's optional `#id`.
     #[cfg(feature = "dev-observability")]
-    /// O0.15: how long the ambient audit may go without running while the
-    /// view keeps changing.
-    ///
-    /// A tenth of a second is below the threshold at which a developer
-    /// notices a delay, and roughly 6× cheaper than per-frame at 60 fps. It is
-    /// a floor on *cadence*, not a cap on fidelity: `ui.lint` answers exactly
-    /// and immediately whenever asked, and a settled tree is audited at once.
-    const AUDIT_MIN_INTERVAL_MS: f64 = 100.0;
-
     fn ambient_audit(&mut self) {
         self.last_audit_gen = self.sem_gen.get();
         let findings = self.lint();
