@@ -6002,6 +6002,102 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     }
 }
 
+/// What a widget writes through — [`Sink`] with its type parameters erased.
+///
+/// `Sink` is generic over renderer, executor and platform, and a widget has no
+/// business knowing any of them. Erasing them here keeps `Direct` free of type
+/// parameters, which is also what makes an object-safe companion possible for
+/// the escape-hatch tier. The dispatch is per *node*, not per field, so it is
+/// one indirect call against everything a node costs to write.
+pub trait NodeWriter {
+    /// Write a childless node.
+    fn write_leaf(
+        &mut self,
+        el: Element,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+    ) -> (NodeIndex, LayoutNode);
+
+    /// Write a node whose children are produced *while it is open*.
+    ///
+    /// `el.children` is ignored; the callback supplies them. This is what lets
+    /// a container emit children as statements instead of collecting them into
+    /// a vector first.
+    fn write_with(
+        &mut self,
+        el: Element,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+        children: &mut dyn FnMut(&mut dyn NodeWriter, NodeIndex, bool) -> Vec<LayoutNode>,
+    ) -> (NodeIndex, LayoutNode);
+}
+
+impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig> NodeWriter
+    for Sink<'_, R, E, P>
+{
+    fn write_leaf(
+        &mut self,
+        el: Element,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+    ) -> (NodeIndex, LayoutNode) {
+        self.lower_node(el, parent, in_overlay, |_, _, _, _| Vec::new())
+    }
+
+    fn write_with(
+        &mut self,
+        el: Element,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+        children: &mut dyn FnMut(&mut dyn NodeWriter, NodeIndex, bool) -> Vec<LayoutNode>,
+    ) -> (NodeIndex, LayoutNode) {
+        self.lower_node(el, parent, in_overlay, |sink, node, overlay, _stacks| {
+            children(sink, node, overlay)
+        })
+    }
+}
+
+/// A widget that writes itself into the tree, with no `Element` subtree.
+///
+/// The by-value half: a widget whose type is known at the call site never
+/// becomes a trait object, so `child` calls inline and cost nothing beyond the
+/// write itself.
+pub trait Direct: Sized {
+    /// Write this widget and its subtree under `parent`.
+    fn lower_owned(
+        self,
+        w: &mut dyn NodeWriter,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+    ) -> (NodeIndex, LayoutNode);
+}
+
+/// The object-safe face of [`Direct`], for the one case that needs it: a
+/// heterogeneous collection of children a container holds and edits before
+/// they lower. Everything else should use `Direct` directly and pay nothing.
+pub trait DirectDyn {
+    /// Lower the widget this slot holds. Panics if called twice.
+    fn lower_dyn(
+        &mut self,
+        w: &mut dyn NodeWriter,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+    ) -> (NodeIndex, LayoutNode);
+}
+
+impl<W: Direct> DirectDyn for Option<W> {
+    fn lower_dyn(
+        &mut self,
+        w: &mut dyn NodeWriter,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+    ) -> (NodeIndex, LayoutNode) {
+        self.take()
+            .expect("a node lowers exactly once")
+            .lower_owned(w, parent, in_overlay)
+    }
+}
+
 /// The destination a node is written into, plus the engine state a write needs.
 ///
 /// Before this existed, `build_node` *was* the only way to produce a node: the
@@ -6031,12 +6127,61 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// the only way to write a node. A [`Direct`] widget writes through the
     /// same primitives, which is what lets the two coexist while widgets
     /// migrate one at a time.
+    /// Lower one `Element` and its subtree.
     pub(crate) fn build_node(
         &mut self,
         mut el: Element,
         parent: Option<NodeIndex>,
         in_overlay: bool,
     ) -> (NodeIndex, LayoutNode) {
+        // The migration boundary: this `Element` stands in for a `Direct`
+        // widget, so hand the write to it rather than lowering the placeholder.
+        if let Some(slot) = el.rare.as_mut().and_then(|r| r.direct.take()) {
+            let taken = slot.borrow_mut().take();
+            if let Some(mut w) = taken {
+                return w.lower_dyn(self, parent, in_overlay);
+            }
+        }
+        let kids = std::mem::take(&mut el.children);
+        self.lower_node(el, parent, in_overlay, |sink, node, overlay, stacks| {
+            kids.into_iter()
+                .map(|mut c| {
+                    if stacks {
+                        c.style.position = lumen_layout::Position::Absolute;
+                        c.style.inset = lumen_layout::Edges {
+                            left: Dim::px(0.0),
+                            top: Dim::px(0.0),
+                            ..lumen_layout::Edges::AUTO
+                        };
+                    }
+                    sink.build_node(c, Some(node), overlay).1
+                })
+                .collect()
+        })
+    }
+
+    /// Write one node, with its children supplied by a **callback** rather than
+    /// carried in a vector.
+    ///
+    /// This is the inversion the whole migration turns on. While children were
+    /// a `Vec<Element>` field, a parent could not exist without its entire
+    /// subtree existing first, so the peak cost of a frame was the whole tree
+    /// of 784-byte records alive at once. As a callback, a node's children are
+    /// lowered *while it is open* and never held: an `Element` becomes a
+    /// transient per-node parameter block instead of a tree, and a widget that
+    /// emits its children as statements never builds one at all.
+    ///
+    /// `el.children` is ignored — the caller has already taken it.
+    pub(crate) fn lower_node<F>(
+        &mut self,
+        mut el: Element,
+        parent: Option<NodeIndex>,
+        in_overlay: bool,
+        children: F,
+    ) -> (NodeIndex, LayoutNode)
+    where
+        F: FnOnce(&mut Self, NodeIndex, bool, bool) -> Vec<LayoutNode>,
+    {
         // A.3.1: a scope-root element records its node span. Nodes allocate
         // preorder in the fresh per-rebuild tree, so a subtree is the
         // contiguous range [span_start, self.tree.len()) once its children are
@@ -6608,28 +6753,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         if pushed_disabled {
             self.app.disabled_count += 1;
         }
-        // A context imposed on each child as it is written, rather than an
-        // edit applied to a vector of children before the fact. The difference
-        // matters: this reaches every child, including ones a loop or a helper
-        // produced, and it does not require the container to receive its
-        // children as values — which is what made the eager form incompatible
-        // with statement-form composition.
-        let stacks = el.stacks_children;
-        let child_lnodes: Vec<LayoutNode> = el
-            .children
-            .into_iter()
-            .map(|mut c| {
-                if stacks {
-                    c.style.position = lumen_layout::Position::Absolute;
-                    c.style.inset = lumen_layout::Edges {
-                        left: Dim::px(0.0),
-                        top: Dim::px(0.0),
-                        ..lumen_layout::Edges::AUTO
-                    };
-                }
-                self.build_node(c, Some(node), this_overlay).1
-            })
-            .collect();
+        // The children are produced now, while this node is open and on every
+        // context stack — which is what makes context imposition work, and what
+        // a `Vec<Element>` field could not express.
+        let child_lnodes: Vec<LayoutNode> = children(self, node, this_overlay, el.stacks_children);
         if pushed_desc {
             self.app.pop_desc();
         }

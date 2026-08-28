@@ -140,6 +140,10 @@ pub fn accent_color() -> Color {
     Color::srgb8(0x1a, 0x73, 0xe8, 0xff)
 }
 
+/// A `Direct` widget waiting to be lowered exactly once — see
+/// [`RareEl::direct`].
+pub type DirectSlot = std::rc::Rc<std::cell::RefCell<Option<Box<dyn crate::app::DirectDyn>>>>;
+
 /// The rare half of [`Element`] — see its `rare` field.
 ///
 /// Public only because `Element { .., ..Default::default() }` requires every
@@ -161,6 +165,22 @@ pub struct RareEl {
     pub selection: Option<(usize, usize)>,
     pub scroll: Option<ScrollInfo>,
     pub shadow: Option<Shadow>,
+    /// A [`Direct`](crate::app::Direct) widget standing in for this node's
+    /// whole subtree.
+    ///
+    /// The migration boundary. Without it, a widget could only become `Direct`
+    /// once its parent already was, so the conversion would have to start at
+    /// the root and change the authoring API before a single widget moved.
+    /// With it, any widget can convert on its own and still sit inside an
+    /// `Element` tree.
+    ///
+    /// `Rc<RefCell<..>>` because `Element` is `Clone` (the scope memo clones a
+    /// cached subtree) while a `Box<dyn DirectDyn>` is not. The widget is
+    /// *taken* on the first lowering, so a clone and its original share one
+    /// slot and exactly one of them can lower it — which is the invariant the
+    /// scope memo needs, since a cloned stub is lowered in place of the
+    /// original rather than as well as it.
+    pub direct: Option<DirectSlot>,
 }
 
 impl Element {
@@ -322,6 +342,15 @@ impl Element {
         }
         self
     }
+    /// Stand this node in for a [`Direct`](crate::app::Direct) widget's whole
+    /// subtree — the migration boundary; see `RareEl::direct`.
+    pub fn direct<W: crate::app::Direct + 'static>(mut self, w: W) -> Self {
+        self.rare_mut().direct = Some(std::rc::Rc::new(std::cell::RefCell::new(Some(
+            Box::new(Some(w)) as Box<dyn crate::app::DirectDyn>,
+        ))));
+        self
+    }
+
     /// Set `shadow` from an already-`Option` value (O0.14).
     ///
     /// The rare fields moved behind a box, so a struct literal can no longer

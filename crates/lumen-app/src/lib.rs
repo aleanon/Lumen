@@ -23,5 +23,7 @@ pub mod tasks;
 /// Re-exported under the old path so this crate's call sites are unchanged.
 pub(crate) use lumen_core::fxhash;
 
-pub use app::{App, DefaultPlatform, FrameStats, Headless, PlatformConfig};
+pub use app::{
+    App, DefaultPlatform, Direct, DirectDyn, FrameStats, Headless, NodeWriter, PlatformConfig,
+};
 pub use element::{BuildCx, Element, Handler, NodeContent, Text};

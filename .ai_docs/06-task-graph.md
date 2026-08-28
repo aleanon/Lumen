@@ -841,6 +841,54 @@ It also costs something real: a widget can no longer be held unbuilt in a
 value-form children are not the same expressive power, and the erased path is
 what preserves the latter.
 
+## O0.22 ◐ The `Direct` path is live in the real engine (2026-08-28)
+
+The migration's architecture, complete and exercised against the engine rather
+than against the prototype's model of it. Widgets can now convert one at a
+time.
+
+**Children became a callback.** `lower_node(el, parent, overlay, children)`
+takes the subtree as `FnOnce` instead of reading `el.children`. This is the
+inversion everything else turns on: while children were a `Vec<Element>` field,
+a parent could not exist without its entire subtree existing first, so the peak
+cost of a frame was the whole tree of 784-byte records alive at once. As a
+callback they are lowered *while the parent is open* and never held — which is
+also what makes context imposition (O0.21) expressible at all.
+
+**`NodeWriter` erases `Sink`'s type parameters.** A widget has no business
+knowing the renderer, executor or platform. Erasing them keeps `Direct` free of
+type parameters, which is what makes the object-safe companion possible. The
+dispatch is per *node*, not per field — one indirect call against everything a
+node costs to write.
+
+**The two tiers, as agreed:** `Direct::lower_owned(self, ..)` by value —
+monomorphic, inlined, never boxed — and `DirectDyn for Option<W>` as the escape
+hatch for a heterogeneous collection.
+
+**`Element::direct(w)` is the migration boundary**, and it is the piece that
+makes this incremental rather than a big-bang rewrite. Without it a widget
+could only convert once its parent already had, so the conversion would have to
+start at the root and change the authoring API before a single widget moved.
+`Rc<RefCell<Option<Box<dyn DirectDyn>>>>` because `Element` is `Clone` (the
+scope memo clones cached subtrees) and a boxed trait object is not; the widget
+is *taken* on first lowering, so a clone and its original share one slot and
+exactly one can lower it — which is the invariant the memo needs, since a
+cloned stub is lowered *instead of* the original, not as well as it.
+
+*Guarded by* `direct_engine.rs`: a `Direct` widget holding a count rather than
+children produces real addressable laid-out nodes, its children are parented
+and ordered correctly, and it composes **inside an ordinary `Element` tree
+between two ordinary widgets** — which is the boundary property the whole
+incremental plan rests on.
+
+### What remains
+
+Honestly sized rather than implied: the 57 widgets convert to `Direct` (each is
+independent now), then `fn build(cx) -> Element` becomes a statement-form
+signature across ~180 files, then `Element` and its `Vec<Element>` children go.
+Each stage is independently landable on a green tree, which it was not before
+this entry.
+
 ## O0.21 ◐ Context imposition replaces child editing (2026-08-28)
 
 The architecture agreed after O0.20: **context is the primary mechanism,
