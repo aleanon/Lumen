@@ -274,6 +274,19 @@ are still strings (they're selectors, not reactive keys).
   `position_in_set`. Set them nowhere else — a spurious `set_size` misleads an
   AT as much as a missing one. `VirtualList` and `DataGrid` are the worked
   examples; `tests/virtualization_contract.rs` is the pattern to copy.
+- **`focusable: true` does nothing without an `id`.** Focus is stored as an id
+  (`move_focus` sets `focused_id = meta.id`), so the Tab traversal finds an
+  id-less focusable node and drops it immediately. If your widget is focusable
+  and does not require the author to pass `.id()`, derive a stable default from
+  its state name — `scrollable::scroll_id` is the pattern — and let
+  `Common::apply` override it. This bit `Scrollable`, `VirtualList` and
+  `DataGrid`; all three had `focusable: true` and none could be focused as
+  shipped, because their tests set an id by hand.
+- **A scrollable widget needs the keyboard, not just the wheel.** Use
+  `scrollable::scroll_keys(offset, viewport_h, max_y)` — one shared
+  constructor for ↑/↓/PageUp/PageDown/Home/End — rather than writing the map
+  again. It exists because it was written once for `Scrollable` and the two
+  widgets that needed it most never got it.
 - **Hit-test / paint priority = document order.** Later siblings paint on top and
   win hit-testing. Push interactive overlays (resize handles, thumbs) **after** the
   things they must sit above.

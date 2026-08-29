@@ -621,6 +621,41 @@ ever fails the perf claim went with it) *and* that the culling is declared. A
 fourth test asserts an ordinary column declares neither, since a spurious
 `set_size` misleads an AT exactly as much as a missing one.
 
+**A second, worse hole surfaced while checking whether the count was
+*actionable*.** Declaring "100 000 items" is a description of an inaccessible
+control if nothing can move the window. Measured against `Scrollable` as a
+working control:
+
+```
+Scrollable   End -> 700        keyboard-operable
+VirtualList  End -> 0          NOT operable
+DataGrid     End -> 0          NOT operable
+```
+
+Both virtualized widgets were **wheel-only** — no `focusable`, no `on_key`. So
+virtualizing a list *removed* AT access rather than degrading it: a plain
+column of 100 000 is navigable (slowly), a `VirtualList` exposed 24 rows and no
+way to move. W3 fixed exactly this for `Scrollable` and did not propagate; the
+key map is now one shared constructor (`scrollable::scroll_keys`) so it cannot
+diverge again.
+
+**Focus is stored as an id, so `focusable` alone is inert.** `move_focus` does
+`focused_id = meta.id.clone()`, meaning the traversal finds an id-less
+focusable node and drops it on the same line. The first version of this fix
+"passed" only because the probe set `.id("vl")`; with the id removed it went
+straight back to 0. Every scroll surface now derives a default id from its
+state name (`scroll_id` -> `vl-scroll`), overridable by an author `.id()`.
+**This also fixed `Scrollable`**, whose W3 tests passed only because they set
+`.id("sc")` by hand — as shipped it could not be focused either.
+
+`tests/virtual_keyboard.rs` sets no id anywhere, keeps `Scrollable` as a
+control, and asserts the row is **realized** — `Row 99999` absent from the tree
+before and present after — not merely that an offset changed.
+
+*Left open (A11Y2c):* `route_at_action` handles `Click` only, so AccessKit's
+`ScrollUp`/`ScrollDown`/`ScrollIntoView`/`SetScrollOffset` are dropped. An AT
+must synthesise keys rather than ask the app to scroll.
+
 **Why not the dev/release feature gate that prompted this.** Three
 measurements said no. (1) Post-T2 phase split at N=100 000 — `view=21262
 build=23763 layout=40007 paint=6579` µs — paint is **6%** of the frame, so

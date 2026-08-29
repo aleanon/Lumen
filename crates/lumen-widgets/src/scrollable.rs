@@ -123,6 +123,11 @@ impl Scrollable {
             // a scroll region a keyboard user cannot move is a real a11y gap
             // (WAI-ARIA: a scrollable region must be keyboard operable).
             focusable: true,
+            // …and focusable is inert without an id, because focus is stored as
+            // one. W3's own tests only passed because they set `.id("sc")` by
+            // hand; a `Scrollable` as shipped could not be focused. See
+            // `scroll_id`. An author `.id()` still wins via `Common::apply`.
+            id: Some(scroll_id(&name).into()),
 
             ..Element::default()
         }
@@ -132,26 +137,7 @@ impl Scrollable {
             max_x: 0.0,
             max_y,
         }))
-        .set_on_key(Some(Rc::new(move |rt, ke| {
-            let line = lumen_core::events::WHEEL_LINE_PX;
-            let page = (viewport_h - line).max(line);
-            let step = match ke.key {
-                Key::Named(NamedKey::ArrowDown) => line,
-                Key::Named(NamedKey::ArrowUp) => -line,
-                Key::Named(NamedKey::PageDown) => page,
-                Key::Named(NamedKey::PageUp) => -page,
-                Key::Named(NamedKey::Home) => {
-                    offset.set(rt, 0.0);
-                    return;
-                }
-                Key::Named(NamedKey::End) => {
-                    offset.set(rt, max_y);
-                    return;
-                }
-                _ => return,
-            };
-            offset.update(rt, |o| *o = (*o + step).clamp(0.0, max_y));
-        })))
+        .set_on_key(Some(scroll_keys(offset, viewport_h, max_y)))
         .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
             offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
         })));
@@ -208,6 +194,44 @@ impl_widget!(Scrollable, native);
 /// already "how far down the track", with no window-coordinate arithmetic and
 /// no drag-origin state. It also makes clicking the track jump there, which is
 /// the behaviour being asked for.
+/// The WAI-ARIA key map for a scroll surface: ↑/↓ a line, PageUp/PageDown a
+/// page, Home/End the ends.
+///
+/// Extracted because it was implemented **once**, on `Scrollable`, and the two
+/// widgets that need it most did not get it. `VirtualList` and `DataGrid` are
+/// what an author reaches for at 100 000 rows, and both were wheel-only: no
+/// `focusable`, no `on_key`, so a keyboard user could not move them at all and
+/// a screen-reader user could reach exactly the ~24 rows in the opening
+/// window. Virtualizing a list actively *removed* access, because a plain
+/// column at least puts every row in the tree. A shared constructor is the
+/// reason that cannot silently happen again.
+pub(crate) fn scroll_keys(
+    offset: lumen_core::state::Signal<f64>,
+    viewport_h: f64,
+    max_y: f64,
+) -> crate::element::KeyHandler {
+    Rc::new(move |rt, ke| {
+        let line = lumen_core::events::WHEEL_LINE_PX;
+        let page = (viewport_h - line).max(line);
+        let step = match ke.key {
+            Key::Named(NamedKey::ArrowDown) => line,
+            Key::Named(NamedKey::ArrowUp) => -line,
+            Key::Named(NamedKey::PageDown) => page,
+            Key::Named(NamedKey::PageUp) => -page,
+            Key::Named(NamedKey::Home) => {
+                offset.set(rt, 0.0);
+                return;
+            }
+            Key::Named(NamedKey::End) => {
+                offset.set(rt, max_y);
+                return;
+            }
+            _ => return,
+        };
+        offset.update(rt, |o| *o = (*o + step).clamp(0.0, max_y));
+    })
+}
+
 /// Width of the overlay scrollbar's track.
 pub(crate) const TRACK_W: f64 = 8.0;
 /// Horizontal space scroll content leaves free on its right so rows stop short
@@ -248,9 +272,27 @@ pub(crate) fn gutter_plane(children: Vec<Element>) -> Element {
 /// Ids are `[a-z0-9-]` (a dot would parse as id+class and be unselectable), and
 /// scroll-state names are author-chosen — `grid.sheet` is a legal signal key —
 /// so anything else folds to a dash.
+pub(crate) fn scroll_id(name: &str) -> String {
+    format!("{}-scroll", slug(name))
+}
+
+/// A stable id for the scroll *surface* named `name`.
+///
+/// Needed because focus is stored as an **id**, not a node: `move_focus` sets
+/// `focused_id = meta.id.clone()`, so a focusable node with no id is found by
+/// the traversal and then immediately dropped — `focusable: true` alone does
+/// nothing. `Scrollable` only ever passed its keyboard tests because they set
+/// `.id("sc")` by hand. A derived default means the widget is operable as
+/// shipped; an author `.id()` still overrides it through `Common::apply`.
 fn bar_id(name: &str) -> String {
-    let slug: String = name
-        .chars()
+    format!("{}-scrollbar", slug(name))
+}
+
+/// Ids are `[a-z0-9-]` (a dot would parse as id+class and be unselectable), and
+/// scroll-state names are author-chosen — `grid.sheet` is a legal signal key —
+/// so anything else folds to a dash.
+fn slug(name: &str) -> String {
+    name.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() {
                 c.to_ascii_lowercase()
@@ -258,8 +300,7 @@ fn bar_id(name: &str) -> String {
                 '-'
             }
         })
-        .collect();
-    format!("{slug}-scrollbar")
+        .collect()
 }
 
 pub(crate) fn overlay_scrollbar(

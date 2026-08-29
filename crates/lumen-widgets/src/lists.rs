@@ -258,6 +258,15 @@ fn viewport(name: &str, w: &Window, viewport_h: f64, children: Vec<Element>) -> 
         clip: true,
 
         actions: vec![Action::ScrollIntoView],
+        // Focus is stored as an id, so `focusable` without one is inert — see
+        // `scroll_id`. An author `.id()` overrides this via `Common::apply`.
+        id: Some(crate::scrollable::scroll_id(name).into()),
+        // W3, and the half of A11Y2 that `set_size` alone does not buy. The
+        // list now tells an AT it holds 100 000 rows; without a keyboard it
+        // offers no way to reach any but the first ~24, which makes the honest
+        // count a description of an inaccessible control. `Scrollable` has
+        // been focusable since W3; this widget was missed.
+        focusable: true,
         style: LayoutStyle {
             position: Position::Relative,
             width: Dim::pct(1.0),
@@ -277,6 +286,7 @@ fn viewport(name: &str, w: &Window, viewport_h: f64, children: Vec<Element>) -> 
         max_x: 0.0,
         max_y,
     }))
+    .set_on_key(Some(crate::scrollable::scroll_keys(offset, viewport_h, max_y)))
     .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
         offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
     })))
@@ -543,6 +553,12 @@ impl DataGrid {
                 // Same as `VirtualList`: overscan rows outside the viewport must
                 // not paint or take hits.
                 clip: true,
+                // …and, same as `VirtualList`, this was wheel-only: a grid of a
+                // million rows that a keyboard could not move. See `scroll_keys`.
+                focusable: true,
+                // The body is not the widget root, so `Common::apply`'s id never
+                // reaches it and focus would have nowhere to live. See `scroll_id`.
+                id: Some(crate::scrollable::scroll_id(name).into()),
 
                 style: LayoutStyle {
                     position: Position::Relative,
@@ -565,6 +581,7 @@ impl DataGrid {
                 max_x: 0.0,
                 max_y,
             }))
+            .set_on_key(Some(crate::scrollable::scroll_keys(offset, viewport_h, max_y)))
             .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
                 offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
             })));
