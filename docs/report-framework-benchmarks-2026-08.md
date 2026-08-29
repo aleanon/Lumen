@@ -185,3 +185,29 @@ configuration.
 Harnesses in `scratchpad/fwbench/` (`SPEC.md`, `run.sh`, one directory per
 framework); Lumen's arm is `benches/src/bin/fwbench.rs`. One process per data
 point — no arm shares an allocator or a warm cache with another.
+
+---
+
+## Addendum, 29 August — after T1/T2
+
+The gap above was one thing: Lumen shaped every label every frame, including the
+offscreen ones. Deferring that (`plan-closing-the-gap-2026-08.md`, T1 + T2)
+changes the table. Same workload, same machine, same day:
+
+| N | GTK | Qt | **Lumen (was)** | **Lumen (now)** |
+|---:|---:|---:|---:|---:|
+| 1 000 | 773 | 3 263 | 5 610 | **2 136** |
+| 10 000 | 7 342 | 6 491 | 51 679 | **7 062** |
+| 100 000 | 75 763 | 53 590 | 564 527 | **101 841** |
+
+Lumen now **beats Qt at 1 000 nodes, is level with both at 10 000**, and is 5.5×
+better than it was at 100 000. Peak RSS at 10 000 fell 117 → 50 MB, and build
+time 65 → 21 ms.
+
+The remaining 100 000-node gap is no longer text: it is ordinary per-node
+lowering at ~1 µs, which is what viewport culling (T4) would address and what
+principle 2 makes non-trivial — the semantics tree must still contain every node.
+
+*Applies where a container gives its children a definite width, which is the
+normal shape and is what `FILL=1` sets in the harness. Where it does not hold,
+`W0404` now says so, with the count and the fix.*
