@@ -652,9 +652,32 @@ state name (`scroll_id` -> `vl-scroll`), overridable by an author `.id()`.
 control, and asserts the row is **realized** — `Row 99999` absent from the tree
 before and present after — not merely that an offset changed.
 
-*Left open (A11Y2c):* `route_at_action` handles `Click` only, so AccessKit's
-`ScrollUp`/`ScrollDown`/`ScrollIntoView`/`SetScrollOffset` are dropped. An AT
-must synthesise keys rather than ask the app to scroll.
+**A11Y2c (done, same day): the AT can now drive the list directly.**
+`route_at_action` handled `Click` and dropped every scroll action AccessKit
+offers. It now honours ScrollUp/Down/Left/Right (ScrollUnit::Item|Page),
+SetScrollOffset, ScrollIntoView and ScrollToPoint. `SetScrollOffset` is the one
+that closes the loop opened by `set_size`: it is how an AT that knows there are
+100 000 rows jumps to row 50 000 — a node that does not exist and therefore
+cannot be targeted. `at_actions.rs` asserts exactly that end to end: row 50 000
+absent, resolve, inject, present.
+
+*The decision is pure.* `a11y::resolve_at_action(tree, target, action, data) ->
+Option<AtCommand>` has no `Headless`, no window and no adapter, so it is unit
+tested; the shell is left with injection, which is the only part that needs a
+live app. Previously the whole thing sat in `lumen-shell` behind a winit event
+loop and was effectively untestable.
+
+*Every scroll becomes a `WheelEvent`,* never a direct state write — otherwise
+an AT scroll would be the one scroll in the app that skips chaining, clamping
+and momentum, and would drift from the pointer the first time any of those
+changed. An AT cannot reach a state a user could not.
+
+*The actions are derived from `ScrollInfo`,* not declared per widget, and only
+for axes with a non-zero extent — advertising `ScrollLeft` on a vertical list
+makes an AT report a control the user cannot operate. Same lesson as
+`scroll_keys`: anything that must be remembered per widget gets forgotten.
+`None` means do nothing, never guess: unknown target, unimplemented action, and
+missing or mistyped `ActionData` are all refused.
 
 **Why not the dev/release feature gate that prompted this.** Three
 measurements said no. (1) Post-T2 phase split at N=100 000 — `view=21262

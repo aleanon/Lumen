@@ -7,9 +7,178 @@
 //! `docs/a11y-checklist.md` for the manual VoiceOver/NVDA verification.
 
 use accesskit::{
-    Action as AkAction, Node, NodeId, Role as AkRole, Toggled, Tree, TreeId, TreeUpdate,
+    Action as AkAction, ActionData, Node, NodeId, Role as AkRole, ScrollUnit, Toggled, Tree, TreeId,
+    TreeUpdate,
 };
+use kurbo::{Point, Rect, Vec2};
 use lumen_core::semantics::{Action, Role, SemanticsNode, State};
+
+/// What the shell should synthesise to satisfy an AT's action request.
+///
+/// Deliberately *events*, not direct state writes. An AT scroll that bypassed
+/// the wheel path would be the one scroll in the app that skips chaining,
+/// clamping and momentum, and would drift from what a mouse does the first
+/// time any of those changed. Routing through the same events means an AT
+/// cannot reach a state a user could not.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AtCommand {
+    /// Press and release at this window point.
+    Click(Point),
+    /// A wheel event at this window point with this delta. Positive `y`
+    /// scrolls toward the end, matching `WheelEvent` everywhere else.
+    Wheel {
+        /// Window-space point to aim the wheel at — the centre of the viewport
+        /// being scrolled, not of the node the AT named.
+        pos: Point,
+        /// Scroll delta in logical px.
+        delta: Vec2,
+    },
+}
+
+fn center(r: Rect) -> Point {
+    Point::new((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0)
+}
+
+/// The chain from `root` down to the node whose published id is `target`.
+///
+/// A path rather than a bare node because the scroll actions need the target's
+/// **ancestors**: `ScrollIntoView` on a list row has to move the list, and the
+/// row itself knows nothing about it.
+fn path_to<'a>(n: &'a SemanticsNode, target: u64, out: &mut Vec<&'a SemanticsNode>) -> bool {
+    out.push(n);
+    if n.node.fold64() == target {
+        return true;
+    }
+    for c in &n.children {
+        if path_to(c, target, out) {
+            return true;
+        }
+    }
+    out.pop();
+    false
+}
+
+/// How far to scroll a viewport so `what` becomes visible inside `view`.
+///
+/// Zero on an axis that already contains it — an AT asking to reveal something
+/// already on screen must not jolt the view.
+fn delta_to_reveal(what: Rect, view: Rect) -> Vec2 {
+    let axis = |w0: f64, w1: f64, v0: f64, v1: f64| {
+        if w0 < v0 {
+            w0 - v0 // negative: scroll back
+        } else if w1 > v1 {
+            w1 - v1 // positive: scroll on
+        } else {
+            0.0
+        }
+    };
+    Vec2::new(
+        axis(what.x0, what.x1, view.x0, view.x1),
+        axis(what.y0, what.y1, view.y0, view.y1),
+    )
+}
+
+/// Resolve an AccessKit action request against the semantic tree.
+///
+/// Pure: no `Headless`, no window, no adapter — which is what makes it
+/// testable. The shell's job is reduced to calling this and injecting the
+/// result.
+///
+/// Returns `None` when the request cannot be honoured (unknown target,
+/// unsupported action, missing or mistyped `ActionData`, or a scroll aimed at
+/// something with nothing scrollable above it). `None` means "do nothing",
+/// never "guess".
+pub fn resolve_at_action(
+    root: &SemanticsNode,
+    target: u64,
+    action: AkAction,
+    data: Option<&ActionData>,
+) -> Option<AtCommand> {
+    let mut path: Vec<&SemanticsNode> = Vec::new();
+    if !path_to(root, target, &mut path) {
+        return None;
+    }
+    let node = *path.last()?;
+
+    // The viewport to drive. For the scroll-by actions the target *is* the
+    // scroller (an AT sends those to the scrollable node). For reveal-style
+    // actions the target is the thing to show, so its own scroll extent is
+    // irrelevant and the search starts at its parent.
+    let scroller = |include_self: bool| -> Option<&SemanticsNode> {
+        let end = if include_self {
+            path.len()
+        } else {
+            path.len() - 1
+        };
+        path[..end].iter().rev().find(|n| n.scroll.is_some()).copied()
+    };
+
+    match action {
+        AkAction::Click => Some(AtCommand::Click(center(node.bounds))),
+
+        AkAction::ScrollUp | AkAction::ScrollDown | AkAction::ScrollLeft | AkAction::ScrollRight => {
+            let sc = scroller(true)?;
+            let step = match data {
+                Some(ActionData::ScrollUnit(ScrollUnit::Page)) => {
+                    (sc.bounds.height() - lumen_core::events::WHEEL_LINE_PX)
+                        .max(lumen_core::events::WHEEL_LINE_PX)
+                }
+                // `Item` and an absent unit both mean "a line" — AccessKit
+                // leaves the unit optional and the line is the safe default.
+                _ => lumen_core::events::WHEEL_LINE_PX,
+            };
+            let delta = match action {
+                AkAction::ScrollDown => Vec2::new(0.0, step),
+                AkAction::ScrollUp => Vec2::new(0.0, -step),
+                AkAction::ScrollRight => Vec2::new(step, 0.0),
+                _ => Vec2::new(-step, 0.0),
+            };
+            Some(AtCommand::Wheel {
+                pos: center(sc.bounds),
+                delta,
+            })
+        }
+
+        // The action that makes a virtualized list navigable: `set_size` tells
+        // the AT there are 100 000 rows, and this is how it jumps to row
+        // 50 000 — a node that does not exist yet and therefore cannot be
+        // targeted directly.
+        AkAction::SetScrollOffset => {
+            let sc = scroller(true)?;
+            let cur = sc.scroll.as_ref()?;
+            let Some(ActionData::SetScrollOffset(p)) = data else {
+                return None;
+            };
+            Some(AtCommand::Wheel {
+                pos: center(sc.bounds),
+                delta: Vec2::new(p.x - cur.x, p.y - cur.y),
+            })
+        }
+
+        AkAction::ScrollIntoView => {
+            let sc = scroller(false)?;
+            Some(AtCommand::Wheel {
+                pos: center(sc.bounds),
+                delta: delta_to_reveal(node.bounds, sc.bounds),
+            })
+        }
+
+        AkAction::ScrollToPoint => {
+            let sc = scroller(false)?;
+            let Some(ActionData::ScrollToPoint(p)) = data else {
+                return None;
+            };
+            // Put the node's top-left at `p`: scroll by how far it currently
+            // sits from there.
+            Some(AtCommand::Wheel {
+                pos: center(sc.bounds),
+                delta: Vec2::new(node.bounds.x0 - p.x, node.bounds.y0 - p.y),
+            })
+        }
+
+        _ => None,
+    }
+}
 
 /// Map a Lumen [`Role`] to the closest AccessKit role.
 pub fn role_to_accesskit(role: Role) -> AkRole {
@@ -182,6 +351,31 @@ fn build_node(
             Action::Collapse => node.add_action(AkAction::Collapse),
             // No AccessKit dismiss action; Escape handles it everywhere.
             Action::Dismiss => {}
+        }
+    }
+    // A11Y2c: the scroll actions are **derived** from the node reporting a
+    // scroll extent, not declared by hand. A node with `ScrollInfo` is
+    // scrollable by definition, so there is no state in which an author could
+    // correctly omit these — and the two widgets that most needed keyboard
+    // scrolling are exactly the ones that went without it for a release
+    // because it had to be remembered per widget (A11Y2b).
+    //
+    // Only the axes that can actually move are declared: offering `ScrollLeft`
+    // on a vertical list tells an AT a lie, and an AT that believes it will
+    // report a control it cannot operate.
+    if let Some(sc) = &n.scroll {
+        if sc.max_y > 0.5 {
+            node.add_action(AkAction::ScrollUp);
+            node.add_action(AkAction::ScrollDown);
+        }
+        if sc.max_x > 0.5 {
+            node.add_action(AkAction::ScrollLeft);
+            node.add_action(AkAction::ScrollRight);
+        }
+        if sc.max_x > 0.5 || sc.max_y > 0.5 {
+            // The one an AT needs to reach item 50 000 of a virtualized list:
+            // `set_size` says how many there are, this is how it jumps there.
+            node.add_action(AkAction::SetScrollOffset);
         }
     }
     let kids: Vec<NodeId> = n

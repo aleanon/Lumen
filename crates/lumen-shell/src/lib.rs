@@ -1641,12 +1641,6 @@ fn route_at_action<
     h: &mut Headless<R, E, P>,
     req: &accesskit::ActionRequest,
 ) {
-    fn find_bounds(n: &lumen_core::semantics::SemanticsNode, id: u64) -> Option<kurbo::Rect> {
-        if n.node.fold64() == id {
-            return Some(n.bounds);
-        }
-        n.children.iter().find_map(|c| find_bounds(c, id))
-    }
     let root = h.semantics_elided();
     // ID1: published ids are `NodeHandle::fold64()` (see
     // `lumen_widgets::a11y::build_tree`), so compare the same projection. The
@@ -1655,15 +1649,33 @@ fn route_at_action<
     // accesskit 0.24 split `target` into `target_tree` + `target_node` for its
     // new subtree support. Lumen publishes only `TreeId::ROOT` (see
     // `a11y::build_tree`), so the node half is the whole address here.
-    let Some(bounds) = find_bounds(&root, req.target_node.0) else {
+    //
+    // A11Y2c: the decision is `a11y::resolve_at_action`, which is pure and
+    // therefore unit-tested (`lumen-widgets/tests/at_actions.rs`). This
+    // function is left with the part that genuinely needs a live app —
+    // injecting and pumping.
+    let Some(cmd) = lumen_widgets::a11y::resolve_at_action(
+        &root,
+        req.target_node.0,
+        req.action,
+        req.data.as_ref(),
+    ) else {
         return;
     };
-    if req.action == accesskit::Action::Click {
-        let p = Point::new((bounds.x0 + bounds.x1) / 2.0, (bounds.y0 + bounds.y1) / 2.0);
-        h.inject(Event::PointerDown(PointerEvent::at(p)));
-        h.inject(Event::PointerUp(PointerEvent::at(p)));
-        h.pump();
+    match cmd {
+        lumen_widgets::a11y::AtCommand::Click(p) => {
+            h.inject(Event::PointerDown(PointerEvent::at(p)));
+            h.inject(Event::PointerUp(PointerEvent::at(p)));
+        }
+        lumen_widgets::a11y::AtCommand::Wheel { pos, delta } => {
+            h.inject(Event::Wheel(lumen_core::events::WheelEvent {
+                pos,
+                delta,
+                modifiers: lumen_core::events::Modifiers::empty(),
+            }));
+        }
     }
+    h.pump();
 }
 
 // --- P.3c: native menus (muda) + portable accelerators ----------------------
