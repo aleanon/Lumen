@@ -12,8 +12,31 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
+[features]
+# ON by default so an unqualified build measures what `cargo run` gives.
+default = ["observability"]
+observability = ["lumen-widgets/dev-observability"]
+
 [dependencies]
-lumen-widgets = { path = "../crates/lumen-widgets" }
+# BENCH5: the harness must be able to measure BOTH profiles, because they are
+# no longer the same framework. `dev-observability` is default-ON in
+# lumen-widgets and runs a full `lint()` over the tree on every painted frame
+# (`app.rs:1638`, the O0.1 ambient audit). That is the right default for
+# `cargo run`, and the wrong thing to compare against GTK and Qt, which run no
+# such pass. So the default features are listed by hand here and the audit is
+# put behind a harness feature:
+#
+#   cargo build --release --bin probe_bench5                       # dev profile
+#   cargo build --release --bin probe_bench5 --no-default-features # release
+#
+# Cargo has no "default minus one" syntax, hence the explicit list.
+lumen-widgets = { path = "../crates/lumen-widgets", default-features = false, features = [
+    "wgpu",
+    "snapshot",
+    "codecs",
+    "complex-scripts",
+    "accessibility",
+] }
 lumen-core = { path = "../crates/lumen-core" }
 # For `Dim` in the subtractive phase probe (src/bin/probe_phases.rs).
 lumen-layout = { path = "../crates/lumen-layout" }
