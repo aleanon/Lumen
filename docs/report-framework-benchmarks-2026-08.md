@@ -29,6 +29,43 @@ importantly, makes it *equal*: no framework can serve a new string from a cache.
 Masonry via its test harness, Qt via `QWidget::grab`, GTK via
 `gsk_cairo_renderer`. No arm gets a GPU advantage.
 
+### No arm virtualizes — and what that means for the numbers
+
+**Every framework builds all N rows in a flat container.** Verified in the
+harness sources, not assumed:
+
+| arm | container | children |
+|---|---|---|
+| Lumen | `widgets::column(kids)` | N `Element` |
+| GTK | `gtk_box_new` + `gtk_box_append` | N `GtkLabel` |
+| Qt | `QVBoxLayout` + `addWidget` | N `QLabel` |
+| iced | `column(rows)` | N `text` |
+| Xilem | `Flex` | N `Label` |
+
+All five at a 400×600 viewport, so at N=10 000 each has ~200 000 px of content
+in a 600 px window: identical shape, identical opportunity to cull paint, and
+**no arm virtualizes its layout**.
+
+This matters for two reasons, in opposite directions.
+
+*It makes the comparison fair.* Layout virtualization is **opt-in in all three
+mature toolkits**, not automatic: GTK has `GtkListView`/`GtkColumnView`/
+`GtkGridView` over a `GListModel`, Qt has `QListView`/`QTableView` over a
+model, Lumen has `VirtualList`/`DataGrid`. A plain `GtkBox`, `QVBoxLayout` or
+`column` lays out every child in all three. Nobody was handicapped. (Paint
+culling *is* automatic everywhere, Lumen included — at N=100 000 paint is
+6 579 µs of a 92 000 µs frame.)
+
+*It also means these numbers do not describe a real application.* No competent
+10 000-row screen is built this way in **any** of these frameworks. With the
+virtualizing widget every arm becomes O(visible) ≈ O(20) and they would all
+land within noise of one another — which is precisely why the flat container
+was chosen: it is the stress case that exposes per-node cost, which is the
+thing being optimized. Read the table as *"what does one node cost, times N"*,
+not as *"how fast is a big app"*. For the second question the answer in all
+five frameworks is "use the virtualizing widget", and the interesting numbers
+are then the ones at N≈50.
+
 ---
 
 ## Frame time (µs, min of 40), depth 0
