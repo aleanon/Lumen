@@ -621,8 +621,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             shadow_cache: HashMap::default(),
             tree: Tree::new(),
             meta: HashMap::default(),
+            #[cfg(feature = "dev-observability")]
             node_ink: HashMap::default(),
             node_caret: HashMap::default(),
+            #[cfg(feature = "dev-observability")]
             node_text_metrics: HashMap::default(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
             sem_root: RefCell::new(None),
@@ -679,6 +681,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             sem_gen: std::cell::Cell::new(0),
             #[cfg(feature = "dev-observability")]
             last_audit_gen: u64::MAX,
+            #[cfg(feature = "dev-observability")]
             last_audit_ms: f64::NEG_INFINITY,
             last_paint_damage: (Damage::None, 0),
             frame_ms: std::collections::VecDeque::new(),
@@ -846,6 +849,7 @@ struct BoundText {
 /// via a rebuild. `text` used to be in that second group and is no longer
 /// (F3.5): it patches when the new string measures the same size, and rebuilds
 /// only when the box would actually move.
+#[cfg(feature = "dev-observability")]
 #[derive(Default, Clone)]
 struct NodeDeps {
     scope: Vec<String>,
@@ -854,6 +858,7 @@ struct NodeDeps {
     class: Vec<String>,
 }
 
+#[cfg(feature = "dev-observability")]
 impl NodeDeps {
     /// De-duplicated union of all sources (for `SemanticsNode.deps`).
     fn union(&self) -> Vec<String> {
@@ -885,8 +890,10 @@ impl NodeDeps {
 #[derive(Clone)]
 /// Snapshot-only: `dependents_of` is the sole constructor, and it is the only
 /// caller's (`what_depends_on`) return shape. Gated so a lean build — which has
-/// no agent surface to serve it to — doesn't carry a dead type.
-#[cfg(feature = "snapshot")]
+/// no agent surface to serve it to — doesn't carry a dead type. A11Y3 adds
+/// `dev-observability` to the gate: its only producer, `dependents_of`, scans
+/// the per-node dep keys that feature collects.
+#[cfg(all(feature = "snapshot", feature = "dev-observability"))]
 struct DepEntry {
     /// Node index (serialized as `node-<index>`).
     node: u32,
@@ -1012,6 +1019,12 @@ pub(crate) struct NodeMeta {
     autofocus: bool,
     elide: bool,
     /// Per-prop signal dependencies (F2 union → semantics; F4 breakdown).
+    /// A11Y3: agent-only. `ui.getDeps` and the reverse index are the sole
+    /// readers — reactivity itself runs off `BoundText`/`BoundBg`'s `Reads`,
+    /// not this. 96 bytes (4 × `Vec<String>`) on a struct that is built for
+    /// every node of every frame, so unlike the `SemanticsNode` payload this
+    /// one sits on the hot path.
+    #[cfg(feature = "dev-observability")]
     deps: NodeDeps,
     on_click: Option<Handler>,
     background: Option<Color>,
@@ -1119,12 +1132,20 @@ pub struct Headless<
     /// node actually painted (text uses the glyph-ink `run_rect`, which can extend
     /// past the layout box via descenders/side bearings). Absent ⇒ ink == box.
     /// Drives the clipping audit (W0104) and `ui.getLayout`'s `ink`.
+    /// A11Y3: collected only under `dev-observability`. Nothing outside the
+    /// agent and the (equally gated) W0104 clipping audit reads it, so a
+    /// shipped build has no reason to carry it. Measured: gating the *writes*
+    /// changes frame time by nothing at all (paint culls, so ~20 text nodes
+    /// reach the insert), which is why this is a footprint change and not a
+    /// speed one — see the task-graph entry.
+    #[cfg(feature = "dev-observability")]
     node_ink: HashMap<NodeIndex, kurbo::Rect>,
     /// The painted caret rectangle (window-space) per focused editor,
     /// repopulated each display-list pass. Introspection for [`Headless::caret_rect`].
     node_caret: HashMap<NodeIndex, kurbo::Rect>,
     /// Typographic metrics per text node from the last paint (diagnostic aid;
     /// surfaced on `SemanticsNode.text_metrics` and via `ui.getLayout`).
+    #[cfg(feature = "dev-observability")]
     node_text_metrics: HashMap<NodeIndex, lumen_text::TextMetrics>,
     frame: RgbaImage,
     /// OB2: the semantics tree, built **on demand**.
@@ -1310,6 +1331,7 @@ pub struct Headless<
     sem_gen: std::cell::Cell<u64>,
     #[cfg(feature = "dev-observability")]
     last_audit_gen: u64,
+    #[cfg(feature = "dev-observability")]
     last_audit_ms: f64,
     /// O1.2: the last damage that actually painted, with its frame number.
     /// `last_damage` is per-pump and an idle frame clears it.
@@ -1853,6 +1875,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// notices a delay, and roughly 6× cheaper than per-frame at 60 fps. It is
     /// a floor on *cadence*, not a cap on fidelity: `ui.lint` answers exactly
     /// and immediately whenever asked, and a settled tree is audited at once.
+    #[cfg(feature = "dev-observability")]
     const AUDIT_MIN_INTERVAL_MS: f64 = 100.0;
 
     /// O0.3: push newly-appeared lint findings into the log ring.
@@ -5568,7 +5591,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// a `HashMap`, so iteration order is unspecified — without the sort the
     /// serialized `dependents` array would reorder whenever the hasher or the
     /// insertion pattern changed, silently altering agent-visible output.
-    #[cfg(feature = "snapshot")]
+    #[cfg(all(feature = "snapshot", feature = "dev-observability"))]
     fn dependents_of(&self, signal: &str) -> Vec<DepEntry> {
         let mut out: Vec<DepEntry> = Vec::new();
         for (node, m) in &self.meta {
@@ -5926,7 +5949,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// `ui.getDeps`): the union of signal keys plus a per-prop breakdown
     /// (`scope`, `text`, `background`). `null` if the selector doesn't resolve to
     /// exactly one node. Snapshot builds only.
-    #[cfg(feature = "snapshot")]
+    ///
+    /// A11Y3: also requires `dev-observability`, which is what collects the
+    /// per-node dep keys this reports. A snapshot build without it keeps every
+    /// other `ui.*` query and loses only this one.
+    #[cfg(all(feature = "snapshot", feature = "dev-observability"))]
     pub fn get_deps(&self, selector: &str) -> serde_json::Value {
         let root = self.semantics_elided();
         let Ok(id) = lumen_core::semantics::resolve_one(&root, selector) else {
@@ -5951,7 +5978,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// The nodes that depend on `signal` and how they'd update if it changed
     /// (F4.2 `ui.whatDependsOn`) — predictive, no write. Empty for a signal the
     /// view doesn't read. Snapshot builds only.
-    #[cfg(feature = "snapshot")]
+    ///
+    /// A11Y3: like `get_deps`, also requires `dev-observability` — the reverse
+    /// index it scans is the per-node dep keys that feature collects.
+    #[cfg(all(feature = "snapshot", feature = "dev-observability"))]
     pub fn what_depends_on(&self, signal: &str) -> serde_json::Value {
         let dependents: Vec<serde_json::Value> = self
             .dependents_of(signal)
@@ -6485,12 +6515,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
 
         // F3: evaluate reactive prop bindings *before* the content is read for
         // hit-testing/measurement, recording their dependency keys per prop (F4).
+        // A11Y3: the dep *key* vectors exist only for `ui.getDeps`. Reactivity
+        // itself runs off the `ReadSet`s below, which are kept in both states —
+        // `dep_keys` is a `Vec<String>` built per bound node purely so an agent
+        // can name the signals, so a build with no agent skips it.
+        #[cfg(feature = "dev-observability")]
         let mut text_deps: Vec<String> = Vec::new();
         // F3.5: the binding, held until the sizing block below has measured it
         // — that is where the wrap width and the auto-size flags are known.
         let mut pending_text: Option<(lumen_core::Dynamic<String>, lumen_core::state::ReadSet)> =
             None;
+        #[cfg(feature = "dev-observability")]
         let mut bg_deps: Vec<String> = Vec::new();
+        #[cfg(feature = "dev-observability")]
         let mut class_deps: Vec<String> = Vec::new();
         if el.dyn_text.is_some() || el.dyn_bg.is_some() || el.dyn_classes.is_some() {
             let rt = self.app.rt.clone();
@@ -6498,7 +6535,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // Classes drive the `.lss` cascade (may change size) → NON-isolated
                 // (structural). Appended to the static classes.
                 let (classes, reads) = d.eval(&rt);
-                class_deps = reads.dep_keys(&rt);
+                #[cfg(feature = "dev-observability")]
+                {
+                    class_deps = reads.dep_keys(&rt);
+                }
                 self.app.structural_reads.extend(&reads);
                 el.classes.extend(classes);
             }
@@ -6516,7 +6556,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // binding before a rebuild chooses what to splice — and drops
                 // the view caches outright when a refresh would move self.layout.
                 let (s, reads) = d.eval_isolated(&rt);
-                text_deps = reads.dep_keys(&rt);
+                #[cfg(feature = "dev-observability")]
+                {
+                    text_deps = reads.dep_keys(&rt);
+                }
                 pending_text = Some((d, reads));
                 // The string is the node's content *and* its accessible label
                 // (Element::text sets both); keep them in sync.
@@ -6530,7 +6573,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // Background is paint-only → ISOLATED + retained: a change patches
                 // this node in place without a rebuild (F3.4).
                 let (c, reads) = d.eval_isolated(&rt);
-                bg_deps = reads.dep_keys(&rt);
+                #[cfg(feature = "dev-observability")]
+                {
+                    bg_deps = reads.dep_keys(&rt);
+                }
                 el.background = Some(c);
                 self.app.bg_bindings.push(BoundBg {
                     node,
@@ -6539,6 +6585,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 });
             }
         }
+        #[cfg(feature = "dev-observability")]
         let node_deps = NodeDeps {
             scope: el.scope_deps.take().unwrap_or_default(),
             text: text_deps,
@@ -7137,6 +7184,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 focusable: el.focusable,
                 autofocus: el.autofocus,
                 elide: el.elide_semantics,
+                #[cfg(feature = "dev-observability")]
                 deps: node_deps,
                 on_click: el.on_click,
                 background: el.background,
@@ -7175,8 +7223,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     fn build_display_list(&mut self) -> (DisplayList, Vec<lumen_render::TextTarget>) {
         let mut dl = DisplayList::new();
         let mut text_targets: Vec<lumen_render::TextTarget> = Vec::new();
+        #[cfg(feature = "dev-observability")]
         self.node_ink.clear(); // repopulated per node as text runs are emitted
         self.node_caret.clear();
+        #[cfg(feature = "dev-observability")]
         self.node_text_metrics.clear();
         // PROP1 `z-index`: siblings paint in ascending z. Sibling-scoped, so
         // the depth-keyed clip stack below still sees a strict preorder — a flat
@@ -7814,8 +7864,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
                 // Record the glyph-ink bounds for this node so the clipping audit
                 // (W0104) and ui.getLayout can compare ink vs the layout box.
-                self.node_ink.insert(node, run_rect);
-                self.node_text_metrics.insert(node, metrics);
+                #[cfg(feature = "dev-observability")]
+                {
+                    self.node_ink.insert(node, run_rect);
+                    self.node_text_metrics.insert(node, metrics);
+                }
                 let run_id = dl.add_run(run);
                 dl.push(DrawCmd::GlyphRun {
                     run: run_id,
@@ -8174,7 +8227,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             s.value = m.value.clone();
             s.classes = m.classes.clone();
             s.actions = m.actions.clone();
-            s.type_name = m.role.type_name();
+            #[cfg(feature = "dev-observability")]
+            {
+                s.type_name = m.role.type_name();
+            }
             s.elide = m.elide;
             s.overlay = m.overlay;
             s.scroll = m.scroll().copied();
@@ -8193,19 +8249,22 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
         }
         s.bounds = self.tree.bounds(node);
-        s.deps = m.and_then(|m| (!m.deps.is_empty()).then(|| m.deps.union()));
-        s.ink = self.node_ink.get(&node).copied();
-        s.text_metrics =
-            self.node_text_metrics
-                .get(&node)
-                .map(|m| lumen_core::semantics::TextMetrics {
-                    line_count: m.line_count as u32,
-                    box_height: m.box_height,
-                    ascent: m.ascent,
-                    descent: m.descent,
-                    line_height: m.line_height,
-                    content_height: m.content_height,
-                });
+        #[cfg(feature = "dev-observability")]
+        {
+            s.deps = m.and_then(|m| (!m.deps.is_empty()).then(|| m.deps.union()));
+            s.ink = self.node_ink.get(&node).copied();
+            s.text_metrics =
+                self.node_text_metrics
+                    .get(&node)
+                    .map(|m| lumen_core::semantics::TextMetrics {
+                        line_count: m.line_count as u32,
+                        box_height: m.box_height,
+                        ascent: m.ascent,
+                        descent: m.descent,
+                        line_height: m.line_height,
+                        content_height: m.content_height,
+                    });
+        }
         let mut child = self.tree.first_child(node);
         // Ordinal counts only the children that survive into the semantic tree,
         // so a hidden sibling appearing or disappearing does not renumber — and

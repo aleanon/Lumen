@@ -3,6 +3,7 @@
 //! no findings; a broken one is flagged.
 
 use kurbo::Size;
+#[cfg(feature = "dev-observability")]
 use lumen_core::codes;
 use lumen_widgets::{App, Button, Element, Label};
 
@@ -31,6 +32,8 @@ fn a_normal_ui_has_no_lint_findings() {
     );
 }
 
+/// A11Y3: W0104 needs recorded ink, which only `dev-observability` collects.
+#[cfg(feature = "dev-observability")]
 #[test]
 fn clipped_text_is_caught_by_lint() {
     let mut h = App::new(|_| Label::new("gypq jQ").line_height(1.0).into())

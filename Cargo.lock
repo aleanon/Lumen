@@ -3010,6 +3010,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumen-obs-app"
+version = "0.1.0"
+dependencies = [
+ "lumen-core",
+ "lumen-shell",
+ "lumen-widgets",
+]
+
+[[package]]
 name = "lumen-render"
 version = "0.1.0"
 dependencies = [

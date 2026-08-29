@@ -1,0 +1,28 @@
+[package]
+name = "lumen-obs-app"
+version = "0.1.0"
+edition = "2021"
+# A11Y3: the A/B arm for `dev-observability`. Identical to `lumen-lean-app`
+# except the feature is reachable through a passthrough, so ONE crate builds
+# both sides — built in two separate `cargo build` invocations, because Cargo
+# unifies features across a single one (the trap A11Y1 hit and recorded).
+
+[features]
+default = []
+obs = ["lumen-widgets/dev-observability", "lumen-core/dev-observability"]
+
+[dependencies]
+lumen-widgets = { path = "../../../../crates/lumen-widgets", default-features = false, features = [
+    "wgpu",
+    "snapshot",
+    "codecs",
+    "complex-scripts",
+    "accessibility",
+] }
+lumen-shell = { path = "../../../../crates/lumen-shell", default-features = false, features = [
+    "wgpu",
+    "accessibility",
+] }
+lumen-core = { path = "../../../../crates/lumen-core", default-features = false, features = [
+    "snapshot",
+] }

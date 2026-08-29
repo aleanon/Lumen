@@ -72,6 +72,16 @@ pub fn check_clipping(root: &SemanticsNode) -> Vec<Diagnostic> {
     out
 }
 
+/// W0104 needs `SemanticsNode.ink`, which is collected only under
+/// `dev-observability` (A11Y3) — the paint pass does not record ink in a build
+/// that has no agent to read it. With the feature off the check therefore
+/// reports nothing rather than reporting *wrongly*: silence here means "not
+/// measured", and the alternative (treating absent ink as no overflow) would
+/// be a clean bill of health nobody checked.
+#[cfg(not(feature = "dev-observability"))]
+fn clipping(_n: &SemanticsNode, _out: &mut Vec<Diagnostic>) {}
+
+#[cfg(feature = "dev-observability")]
 fn clipping(n: &SemanticsNode, out: &mut Vec<Diagnostic>) {
     if let Some(ink) = n.ink {
         let b = n.bounds;

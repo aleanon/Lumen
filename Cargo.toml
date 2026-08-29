@@ -24,6 +24,8 @@ members = [
     "crates/fixtures/hot_b",
     "crates/fixtures/hot_c",
     "benches",
+    # A11Y3 A/B arm: one crate, two feature states, built separately.
+    "benches-competitive/harnesses/apps/lumen-obs",
     "crates/lumen-shell-android",
     "examples/hello_android",
     "crates/lumen-shell-ios",

@@ -406,8 +406,10 @@ pub struct SemanticsNode {
     /// Rendered *ink* bounds — what the node actually painted. For text this can
     /// extend past `bounds` (descenders/side bearings); when it does, content is
     /// being clipped. `None` ⇒ ink coincides with `bounds`.
+    #[cfg(feature = "dev-observability")]
     pub ink: Option<Rect>,
     /// Typographic metrics for text nodes (diagnostic aid; `None` for non-text).
+    #[cfg(feature = "dev-observability")]
     pub text_metrics: Option<TextMetrics>,
     /// Supported actions.
     pub actions: Vec<Action>,
@@ -420,11 +422,13 @@ pub struct SemanticsNode {
     /// `&'static str` rather than `String`: it is always one of 31 compile-time
     /// constants, so owning it cost a heap allocation per node per frame on
     /// both the rebuild and restyle paths.
+    #[cfg(feature = "dev-observability")]
     pub type_name: &'static str,
     /// If this node is the root of a `cx.scope`, the stable keys of the signals
     /// that scope depends on — the reactive graph projected into observability
     /// (F2). Lets the agent see *why* a subtree updates. `None` ⇒ not a scope
     /// root (or a scope that read no state).
+    #[cfg(feature = "dev-observability")]
     pub deps: Option<Vec<String>>,
     /// Whether this node is elided (pure layout, no semantic contribution).
     pub elide: bool,
@@ -465,14 +469,18 @@ impl SemanticsNode {
             classes: Vec::new(),
             states: Vec::new(),
             bounds: Rect::ZERO,
-            ink: None,
-            text_metrics: None,
             actions: Vec::new(),
             set_size: None,
             position_in_set: None,
             scroll: None,
             text_selection: None,
+            #[cfg(feature = "dev-observability")]
+            ink: None,
+            #[cfg(feature = "dev-observability")]
+            text_metrics: None,
+            #[cfg(feature = "dev-observability")]
             type_name: "",
+            #[cfg(feature = "dev-observability")]
             deps: None,
             elide: false,
             overlay: false,
@@ -543,9 +551,12 @@ impl SemanticsNode {
                 json!({"start": ts.start, "end": ts.end}),
             );
         }
-        obj.insert("type".into(), json!(self.type_name));
-        if let Some(deps) = &self.deps {
-            obj.insert("deps".into(), json!(deps));
+        #[cfg(feature = "dev-observability")]
+        {
+            obj.insert("type".into(), json!(self.type_name));
+            if let Some(deps) = &self.deps {
+                obj.insert("deps".into(), json!(deps));
+            }
         }
         obj.insert(
             "children".into(),

@@ -19,7 +19,7 @@ requires a debugger.
 | UI stale (deps look right) | Write happened outside a handler (e.g. from a worker thread) and never entered the runtime | Results must re-enter via `resource`/`Sink`; never touch `Runtime` off-thread |
 | Async value never arrives | `Runtime::resource(name, future)` — the future-taking form polls once with a noop waker and never completes | Use `cx.resource(name, deps, fetch)` / `resource_blocking` (thread pool) instead. (Fixed by plan M.5) |
 | **Layout wrong, state right** | Text node given explicit `height` (ignored — text sizes to glyphs, from `.lss` too), or a `.lss` layout property outside the working seven (per-side/flex-*/grid/… are parse-only until Phase B) | `ui.getLayout {selector}` bounds vs expectation; check the property against 04 §10 / the `styling-lss` skill |
-| Content visibly cut off | Real clipping | `ui.getLayout`: `ink` bigger than `bounds` + `"clipped": true`; `ui.lint` → W0104 |
+| Content visibly cut off | Real clipping | `ui.getLayout`: `ink` bigger than `bounds` + `"clipped": true`; `ui.lint` → W0104. Both need `dev-observability` (default on; A11Y3) — no ink is recorded without it, so silence means *not measured*, not *not clipped* |
 | Overlapping/zero-size controls | — | `ui.lint` → W0103 overflow, W0105 zero-area interactive |
 | Element "missing" but present in the tree | Unreadable contrast (fg == bg) | `ui.lint` → W0303, which names the measured APCA Lc and both colors |
 | Clicked, and nothing seemed to happen | Handler ran but painted nothing | `ui.lastDamage` → `kind: none` means the handler changed no pixels; a `region` naming your node means it did |

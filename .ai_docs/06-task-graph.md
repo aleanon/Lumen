@@ -582,6 +582,68 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## A11Y3 ☑ The agent-only node payload is feature-gated (2026-08-29)
+
+The version of "cull the tree in release" that is actually correct: gate the
+**payload per node**, never *which nodes exist*. Culling the tree in release
+ships an a11y hole to the users who need it and hides it from developers
+(A11Y2); dropping fields nothing but the agent reads costs a shipped app
+nothing.
+
+Gated behind `dev-observability` (default **on**): `SemanticsNode.{ink,
+text_metrics, deps, type_name}`, their producers (`node_ink` /
+`node_text_metrics`, `AUDIT_MIN_INTERVAL_MS`, `last_audit_ms`), and their
+consumers (`ui.getDeps`, `ui.whatDependsOn`, `DepEntry`, W0104). Plus the one
+that is actually on the hot path: **`NodeMeta.deps`** — 4 × `Vec<String>` on a
+struct built for every node of every frame — and the `dep_keys()` call that
+fills it for every *bound* node. Reactivity itself runs off the `ReadSet`s,
+which stay in both states; only the human-readable signal names go.
+
+**Measured.** One arm crate (`lumen-obs-app`) with a feature passthrough, built
+in two separate `cargo build` invocations — Cargo unifies features within one,
+the trap A11Y1 recorded.
+
+| quantity | on | off | delta |
+|---|---:|---:|---:|
+| `SemanticsNode` | 432 B | 320 B | **−112 B (−26%)** |
+| peak RSS holding a 100 000-node tree | 423 MB | 383 MB | **−40.6 MB** |
+| …tree-attributable | 76.5 MB | 36.0 MB | −53% |
+| frame, plain-text rows (fwbench N=10 000) | 6 943 µs | 6 948 µs | **none** |
+| frame, all-bound rows (N=5 000) | 27 451 µs | 26 812 µs | −2.3% |
+| binary, this change alone | — | — | −7.5 KB |
+| binary, whole feature | 20 105 296 B | 19 878 224 B | −227 KB |
+
+Read those honestly. **Frame time is the number that did not move**: removing
+the two per-painted-node side-table inserts changed nothing at all, in the
+normal config *and* in an adversarial one with a 20 000 px window painting ~830
+text nodes — paint culls, so almost nothing reaches that line. The bound-row
+arm moves 2.3%, small but consistent (every off run below every on run), and
+some of it is the ambient audit rather than `dep_keys`. The RSS figure is
+**VmHWM**, i.e. peak: it exceeds the 11 MB the struct arithmetic predicts
+because a smaller node also makes the transient spike of growing a
+100 000-element `Vec` smaller, and it is superlinear in N for the same reason
+(1.7 MB at N=10 000). **This is a footprint change, not a speed one**, and the
+earlier suggestion that it might buy frame time was wrong.
+
+**The compiler found the real target.** Gating the `SemanticsNode` fields alone
+is nearly free (7.5 KB, no frame time). What made it worthwhile were the
+dead-code warnings that appeared *after* the first gate landed: `NodeMeta.deps`
+written and never read, then `text_deps`/`bg_deps`/`class_deps` computed and
+discarded. Neither was visible before the gate existed.
+
+**Two pre-existing failures fell out.** Running the suite with the feature off —
+apparently for the first time — surfaced `task_lifecycle_logs.rs`, whose two
+tests assert log lines `tasks.rs` has gated since O4.4 while the tests never
+were. Verified pre-existing by stashing this change and re-running at HEAD.
+Fixed here. The off state is now green (139 suites) rather than merely
+compiling, which is the state a gate has to be checked in.
+
+**`observability_gate.rs` runs the same assertions in both states** — the AT
+contract, the virtualization contract, and selector addressing all intact —
+because the risk of a gate like this is not that it fails to compile but that
+it quietly takes something a screen reader needs. Same shape as A11Y1's
+`accessibility_gate.rs`.
+
 ## A11Y2 ☑ Virtualized lists tell assistive tech their real size (2026-08-29)
 
 Found while answering a performance question — *could the semantics tree be

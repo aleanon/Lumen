@@ -10,6 +10,7 @@ use lumen_core::state::Signal;
 use lumen_core::{Color, Dynamic};
 use lumen_widgets::{bind, text, widgets, App, BuildCx};
 
+#[cfg(feature = "dev-observability")]
 fn find<'a>(
     n: &'a lumen_core::semantics::SemanticsNode,
     id: &str,
@@ -33,13 +34,19 @@ fn bound_text_tracks_its_signal_and_reports_deps() {
     // Initial build evaluated the binding.
     assert!(h.semantics_json().to_string().contains("n=0"));
     // The node reports its reactive dependency.
+    // A11Y3: `deps` is agent payload and exists only under
+    // `dev-observability`. The *reactivity* either side of this assertion
+    // runs in both states, which is the property that matters.
+    #[cfg(feature = "dev-observability")]
+    {
     let doc = h.semantics_doc();
-    let want = ["n".to_string()];
-    assert_eq!(
-        find(&doc.root, "lbl").and_then(|n| n.deps.as_deref()),
-        Some(want.as_slice())
-    );
-    drop(doc);
+        let want = ["n".to_string()];
+        assert_eq!(
+            find(&doc.root, "lbl").and_then(|n| n.deps.as_deref()),
+            Some(want.as_slice())
+        );
+        drop(doc);
+    }
     h.assert_view_coherent();
 
     // A write updates the bound text.
@@ -66,13 +73,19 @@ fn bound_background_tracks_its_signal() {
     })
     .run_headless(Size::new(120.0, 60.0));
 
+    // A11Y3: `deps` is agent payload and exists only under
+    // `dev-observability`. The *reactivity* either side of this assertion
+    // runs in both states, which is the property that matters.
+    #[cfg(feature = "dev-observability")]
+    {
     let doc = h.semantics_doc();
-    let want = ["on".to_string()];
-    assert_eq!(
-        find(&doc.root, "b").and_then(|n| n.deps.as_deref()),
-        Some(want.as_slice())
-    );
-    drop(doc);
+        let want = ["on".to_string()];
+        assert_eq!(
+            find(&doc.root, "b").and_then(|n| n.deps.as_deref()),
+            Some(want.as_slice())
+        );
+        drop(doc);
+    }
     h.assert_view_coherent();
 
     let on: Signal<bool> = h.runtime().signal("on", || false);
@@ -141,6 +154,7 @@ fn bg_binding_patches_without_rebuild() {
     h2.assert_view_coherent();
 }
 
+#[cfg(feature = "dev-observability")]
 #[test]
 fn get_deps_reports_per_prop_breakdown() {
     // F4.1: a node with both a text and a background binding reports each prop's
@@ -196,6 +210,7 @@ fn invoke_action_runs_handler_geometry_free() {
     assert!(h.invoke_action("#missing", "click").is_err());
 }
 
+#[cfg(feature = "dev-observability")]
 #[test]
 fn what_depends_on_predicts_and_last_change_confirms() {
     // F4.2 + F4.3: whatDependsOn predicts the node + update kind for a signal;
@@ -264,6 +279,7 @@ fn reactive_class_toggles_and_reports_deps() {
         !h.semantics_json().to_string().contains("active"),
         "off → no class"
     );
+    #[cfg(feature = "dev-observability")]
     assert_eq!(
         h.get_deps("#t")["byProp"]["class"],
         serde_json::json!(["on"])
@@ -342,11 +358,14 @@ fn text_macro_sugar_tracks_signals_and_reports_deps() {
     .run_headless(Size::new(200.0, 80.0));
 
     assert!(h.semantics_json().to_string().contains("1 + 2"));
-    let doc = h.semantics_doc();
-    let mut deps = find(&doc.root, "sum").and_then(|n| n.deps.clone()).unwrap();
-    deps.sort();
-    assert_eq!(deps, vec!["a".to_string(), "b".to_string()]);
-    drop(doc);
+    #[cfg(feature = "dev-observability")]
+    {
+        let doc = h.semantics_doc();
+        let mut deps = find(&doc.root, "sum").and_then(|n| n.deps.clone()).unwrap();
+        deps.sort();
+        assert_eq!(deps, vec!["a".to_string(), "b".to_string()]);
+        drop(doc);
+    }
     h.assert_view_coherent();
 
     let a: Signal<i64> = h.runtime().signal("a", || 1);

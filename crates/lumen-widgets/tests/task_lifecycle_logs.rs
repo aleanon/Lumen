@@ -7,6 +7,13 @@
 //! arrived on frame N" — the line separating "the fetch never completed" from
 //! "it completed and the view ignored it" — did not exist.
 
+//! These lines go into the log ring from `tasks.rs`, which has gated them
+//! on `dev-observability` since O4.4. The tests were never gated to match,
+//! so they failed in the feature-off state — a pre-existing gap, found by
+//! A11Y3 running the off state across the whole suite for the first time
+//! rather than caused by it.
+#![cfg(feature = "dev-observability")]
+
 use kurbo::Size;
 use lumen_widgets::{widgets, App, BuildCx, Element, TaskError};
 

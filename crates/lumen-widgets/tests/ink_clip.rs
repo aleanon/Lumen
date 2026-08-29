@@ -2,6 +2,13 @@
 //! is clipped by its own box (W0104) — the intent-vs-result check that box-only
 //! audits miss (e.g. a too-small line-height clipping descenders).
 
+//! A11Y3: ink is recorded only under `dev-observability` — a build with
+//! no agent does not pay to collect it — so W0104 reports nothing there
+//! and this whole file is conditional. `observability_gate.rs` asserts
+//! that the payload IS present when the feature is on, so the gate
+//! cannot silently become "never collected".
+#![cfg(feature = "dev-observability")]
+
 use kurbo::Size;
 use lumen_core::codes;
 use lumen_widgets::{App, Label};

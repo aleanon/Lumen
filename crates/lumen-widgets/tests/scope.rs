@@ -118,17 +118,23 @@ fn scope_deps_project_into_semantics() {
     })
     .run_headless(Size::new(200.0, 80.0));
 
-    let doc = h.semantics_doc();
-    let node = find(&doc.root, "counter").expect("scoped node present");
-    assert_eq!(
-        node.deps.as_deref(),
-        Some(&["count".to_string()][..]),
-        "the scope root lists its signal dependency"
-    );
+    // A11Y3: `deps` is agent payload, gated behind `dev-observability`. The
+    // scope machinery itself is not, so only the reporting is conditional.
+    #[cfg(feature = "dev-observability")]
+    {
+        let doc = h.semantics_doc();
+        let node = find(&doc.root, "counter").expect("scoped node present");
+        assert_eq!(
+            node.deps.as_deref(),
+            Some(&["count".to_string()][..]),
+            "the scope root lists its signal dependency"
+        );
+    }
     h.assert_view_coherent();
 }
 
 /// Depth-first find a node by author id.
+#[cfg(feature = "dev-observability")]
 fn find<'a>(
     n: &'a lumen_core::semantics::SemanticsNode,
     id: &str,

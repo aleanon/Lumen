@@ -138,10 +138,10 @@ The ones you'll actually use:
 | `ui.getTree {raw?}` | roles/labels/bounds/states/actions/ids |
 | `ui.getLayout {selector}` | bounds + **ink** + `clipped` + text metrics |
 | `ui.screenshot {}` / `{selector, scale}` | full frame / zoomed element crop with box+ink overlay |
-| `ui.lint` / `app.diagnostics` | overflow W0103, clip W0104, zero-area W0105, contrast W0303. `ui.lint` caps at 50 findings per code (`{"all": true}` lifts it) |
+| `ui.lint` / `app.diagnostics` | overflow W0103, clip W0104, zero-area W0105, contrast W0303. `ui.lint` caps at 50 findings per code (`{"all": true}` lifts it). **W0104 needs `dev-observability`** (default on; A11Y3) — it compares glyph ink to the box, and ink is recorded only under that feature |
 | `ui.lastDamage` | what repainted last frame — the rect plus the nodes inside it |
 | `ui.getCursor` | the pointer shape under the cursor (`pointer`/`text`/`col-resize`/…, `default` when no rule applies) — user-visible state no screenshot captures |
-| `ui.getDeps` / `ui.whatDependsOn` / `ui.lastChange` | *why* did it update — predict, act, confirm idle/patch/rebuild |
+| `ui.getDeps` / `ui.whatDependsOn` / `ui.lastChange` | *why* did it update — predict, act, confirm idle/patch/rebuild. **`getDeps`/`whatDependsOn` need `dev-observability`** (default on; A11Y3) — they read per-node dep keys a build without it does not collect. `lastChange` is unaffected |
 | `input.click/hover/type/key/scroll {selector,…}` | click takes `button`/`count` (double-click); type takes `clear: true` (full editors); scroll takes `dx`+`dy` (C.4a) |
 | `state.get {key?}` / `ui.getTree {selector}` / `ui.screenshot {max_width}` | store snapshot; subtree-only reply; downscaled frame for vision budgets (C.4a) |
 | `input.invokeAction {selector, action}` | geometry-free — use when overlap/transform makes clicks flaky |

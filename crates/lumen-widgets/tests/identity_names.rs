@@ -104,6 +104,9 @@ fn snapshot_keys_are_readable_and_unquoted() {
 /// The agent reports *why* a subtree updates by dep name (ADR-009, `getDeps`).
 /// Those names come from the same cold-path builder, so a scoped dep must still
 /// be attributed with its full path rather than a bare local name.
+///
+/// A11Y3: dep names are agent payload, emitted only under `dev-observability`.
+#[cfg(feature = "dev-observability")]
 #[test]
 fn scope_deps_report_readable_scoped_names() {
     let mut a = App::new(rows_view).run_headless(Size::new(300.0, 240.0));
