@@ -138,6 +138,15 @@ fn build_node(
     let mut node = Node::new(role_to_accesskit(n.role));
     if !n.label.is_empty() {
         node.set_label(n.label.clone());
+        // The virtualization contract. A `VirtualList` puts a dozen rows in the
+        // tree for a hundred thousand items; without these, a screen reader is
+        // told the list HAS a dozen rows — a wrong answer, not a trade-off.
+        if let Some(total) = n.set_size {
+            node.set_size_of_set(total);
+        }
+        if let Some(pos) = n.position_in_set {
+            node.set_position_in_set(pos);
+        }
     }
     if let Some(v) = &n.value {
         node.set_value(v.clone());

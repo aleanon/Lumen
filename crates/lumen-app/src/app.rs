@@ -951,6 +951,8 @@ pub(crate) struct RareMeta {
     selection: Option<(usize, usize)>,
     scroll: Option<lumen_core::semantics::ScrollInfo>,
     shadow: Option<crate::element::Shadow>,
+    set_size: Option<usize>,
+    position_in_set: Option<usize>,
 }
 
 impl NodeMeta {
@@ -7094,6 +7096,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             || el_rare.as_ref().is_some_and(|r| r.selection.is_some())
             || el_rare.as_ref().is_some_and(|r| r.scroll.is_some())
             || el_rare.as_ref().is_some_and(|r| r.shadow.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.set_size.is_some())
+            || el_rare.as_ref().is_some_and(|r| r.position_in_set.is_some())
         {
             // O0.14: `Element`'s rare half has the same shape as `NodeMeta`'s,
             // so the whole box moves across instead of fourteen field reads.
@@ -7113,6 +7117,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 selection: r.selection,
                 scroll: r.scroll,
                 shadow: r.shadow,
+                set_size: r.set_size,
+                position_in_set: r.position_in_set,
             }))
         } else {
             None
@@ -8172,6 +8178,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             s.elide = m.elide;
             s.overlay = m.overlay;
             s.scroll = m.scroll().copied();
+            s.set_size = m.rare.as_ref().and_then(|r| r.set_size);
+            s.position_in_set = m.rare.as_ref().and_then(|r| r.position_in_set);
             s.states = m.states.clone();
             let flags = self.tree.flags(node);
             if flags.contains(NodeFlags::FOCUSED) {

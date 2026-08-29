@@ -182,6 +182,9 @@ struct Window {
     max_y: f64,
     first: usize,
     last: usize,
+    /// How many items the list *has*, as opposed to how many it materializes.
+    /// Carried so the viewport can declare it to assistive tech.
+    count: usize,
 }
 
 fn window(
@@ -208,6 +211,7 @@ fn window(
         max_y,
         first,
         last,
+        count: item_count,
     }
 }
 
@@ -236,7 +240,10 @@ fn place(mut el: Element, i: usize, y: f64, item_height: f64) -> Element {
         el.style.width = Dim::pct(1.0);
     }
     el.style.height = Dim::px(item_height as f32);
-    el
+    // The row's *true* ordinal, not its index among the materialized few. A
+    // screen reader on row 3 of the window announces "50 001 of 100 000"
+    // because of this line; without it, "3 of 24".
+    el.position_in_set(i + 1)
 }
 
 /// Assemble the viewport around already-placed rows.
@@ -273,6 +280,12 @@ fn viewport(name: &str, w: &Window, viewport_h: f64, children: Vec<Element>) -> 
     .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
         offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
     })))
+    // Virtualization is invisible to the user and must be invisible to
+    // assistive tech too. The tree holds a window of rows; this says how many
+    // there really are, so a screen reader reports the list's true length
+    // instead of the window's. Paired with `position_in_set` on each row in
+    // `place`.
+    .set_size(w.count)
 }
 
 impl VirtualList {
@@ -519,6 +532,9 @@ impl DataGrid {
                         children: cells,
                         ..Element::default()
                     }
+                    // The row's true index among `row_count`, not among the
+                    // ~20 materialized. See `place` in `VirtualList`.
+                    .position_in_set(r + 1)
                 })
                 .collect();
 
@@ -564,6 +580,9 @@ impl DataGrid {
                 children: vec![header, body],
                 ..Element::default()
             }
+            // A million-row grid puts ~20 rows in the tree; this is how many
+            // there really are.
+            .set_size(row_count)
         };
         DataGrid {
             el,

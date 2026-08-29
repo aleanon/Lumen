@@ -428,6 +428,23 @@ pub struct SemanticsNode {
     pub deps: Option<Vec<String>>,
     /// Whether this node is elided (pure layout, no semantic contribution).
     pub elide: bool,
+    /// How many items the collection this node belongs to *really* has, and
+    /// which one this is (1-based) — the virtualization contract.
+    ///
+    /// A `VirtualList` materializes only the rows on screen, so the tree
+    /// contains a dozen nodes for a hundred thousand items. Without these, a
+    /// screen reader is told the list has a dozen rows, which is not a
+    /// performance trade-off but a wrong answer. `aria-setsize` /
+    /// `aria-posinset` and their AT-SPI/UIA equivalents exist precisely so a
+    /// virtualized collection can be honest, and AccessKit carries them as
+    /// `size_of_set` / `position_in_set`.
+    ///
+    /// Set on the container (`set_size`) and on each materialized item
+    /// (`position_in_set`); `None` on anything that is not a virtualized
+    /// collection, which is almost everything.
+    pub set_size: Option<usize>,
+    /// See [`set_size`](Self::set_size).
+    pub position_in_set: Option<usize>,
     /// Whether this node is an overlay root (paints above the normal flow —
     /// its bounds legitimately escape its structural parent).
     pub overlay: bool,
@@ -451,6 +468,8 @@ impl SemanticsNode {
             ink: None,
             text_metrics: None,
             actions: Vec::new(),
+            set_size: None,
+            position_in_set: None,
             scroll: None,
             text_selection: None,
             type_name: "",

@@ -165,6 +165,12 @@ pub struct RareEl {
     pub selection: Option<(usize, usize)>,
     pub scroll: Option<ScrollInfo>,
     pub shadow: Option<Shadow>,
+    /// The virtualization contract — see
+    /// [`SemanticsNode::set_size`](lumen_core::semantics::SemanticsNode::set_size).
+    /// Rare by construction: only a windowing collection sets them.
+    pub set_size: Option<usize>,
+    /// See [`set_size`](Self::set_size).
+    pub position_in_set: Option<usize>,
     /// A [`Direct`](crate::app::Direct) widget standing in for this node's
     /// whole subtree.
     ///
@@ -333,6 +339,26 @@ impl Element {
     /// The rare fields moved behind a box, so a struct literal can no longer
     /// name them. This is the literal's replacement: `Element { .., scroll: v, .. }`
     /// becomes `Element { .., .. }.set_scroll(v)`.
+    /// Declare that this node is a *window* onto `total` items — the
+    /// virtualization contract for assistive tech.
+    ///
+    /// A `VirtualList` of 100 000 rows puts ~24 in the tree. Without this a
+    /// screen reader announces "list, 24 items", which is not a degraded
+    /// answer but a wrong one, and there is no way to reach row 50 000.
+    /// Set it on the collection; set [`position_in_set`](Self::position_in_set)
+    /// on each materialized child.
+    pub fn set_size(mut self, total: usize) -> Self {
+        self.rare_mut().set_size = Some(total);
+        self
+    }
+
+    /// This node's 1-based index among its collection's `set_size` items.
+    /// See [`set_size`](Self::set_size).
+    pub fn position_in_set(mut self, pos: usize) -> Self {
+        self.rare_mut().position_in_set = Some(pos);
+        self
+    }
+
     #[doc(hidden)]
     pub fn set_scroll(mut self, v: Option<ScrollInfo>) -> Self {
         if v.is_some() {

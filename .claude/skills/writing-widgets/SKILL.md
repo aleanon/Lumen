@@ -265,6 +265,15 @@ are still strings (they're selectors, not reactive keys).
   frame is dominated by rasterizing them. Measured 1.01× for a one-element row,
   ~1.1× at 16 elements. `VirtualList::memoized` exists for genuinely expensive
   row builders; reach for it with a measurement, not on principle.
+- **A widget that windows MUST declare `set_size` / `position_in_set`.** If you
+  materialize only the visible slice, the semantics tree holds ~24 nodes for
+  100 000 items — and a screen reader reads that tree, so it will announce
+  "list, 24 items" and the rest is unreachable. Call `.set_size(total)` on the
+  collection element and `.position_in_set(i + 1)` (1-based, the *real* index)
+  on each materialized item; they map to AccessKit `size_of_set` /
+  `position_in_set`. Set them nowhere else — a spurious `set_size` misleads an
+  AT as much as a missing one. `VirtualList` and `DataGrid` are the worked
+  examples; `tests/virtualization_contract.rs` is the pattern to copy.
 - **Hit-test / paint priority = document order.** Later siblings paint on top and
   win hit-testing. Push interactive overlays (resize handles, thumbs) **after** the
   things they must sit above.

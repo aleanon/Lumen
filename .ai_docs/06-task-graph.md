@@ -582,6 +582,56 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## A11Y2 ☑ Virtualized lists tell assistive tech their real size (2026-08-29)
+
+Found while answering a performance question — *could the semantics tree be
+full in dev builds and viewport-culled in release?* — by measuring what the
+tree already contains. A `VirtualList` of 100 000 items:
+
+```
+semantics contains 24 text nodes
+mentions a total/count anywhere: false
+```
+
+So Lumen **already** culls the semantics tree wherever it virtualizes, in every
+build including release, and has done since `VirtualList` shipped. The culling
+is correct and is the entire reason the widget is fast. What was missing is the
+*declaration*: nothing told an AT that the 24 rows were a window onto 100 000.
+A screen reader announces "list, 24 items", and rows 25..100 000 cannot be
+reached — a **wrong** answer, not a degraded one.
+
+**Fix — the standard virtualization contract.** `SemanticsNode` gains
+`set_size` / `position_in_set`, mapped to AccessKit's `size_of_set` /
+`position_in_set` (`aria-setsize` / `aria-posinset`; both present in accesskit
+0.24.1, verified). `VirtualList` declares `set_size` on the `Role::List`
+viewport and `position_in_set = i + 1` on each row in `place`, so a row reports
+its index in the *real* space (50 001 of 100 000), not among the materialized
+few (3 of 24). `DataGrid` does the same on its `Role::Table` and rows. Both
+constructors of `VirtualList` funnel through `place`/`viewport`, so neither can
+drift.
+
+Both fields are `Option` and live in the **rare** half of `Element`/`NodeMeta`,
+so an ordinary node still carries a null pointer rather than two more words —
+the O0.13/O0.14 layout work is not disturbed. The rare box is now allocated for
+materialized rows, which is bounded by the *window* (~24), not the item count.
+
+`tests/virtualization_contract.rs` pins both halves, which is the point: it
+asserts the tree really is culled (`< 100` nodes for 100 000 items — if that
+ever fails the perf claim went with it) *and* that the culling is declared. A
+fourth test asserts an ordinary column declares neither, since a spurious
+`set_size` misleads an AT exactly as much as a missing one.
+
+**Why not the dev/release feature gate that prompted this.** Three
+measurements said no. (1) Post-T2 phase split at N=100 000 — `view=21262
+build=23763 layout=40007 paint=6579` µs — paint is **6%** of the frame, so
+culling at paint time is not where the remaining cost is. (2) The other 83%
+needs the nodes to *exist*, so a real win means not creating them, which is
+what `VirtualList` already does. (3) Release is precisely where screen readers
+run: gating the full tree to dev builds would ship the a11y hole to users and
+hide it from developers. Qt and GTK cull paint while keeping the full tree
+exposed to AT, and carry set-size/position-in-set for the virtualized cases —
+which is what this task implements.
+
 ## O0.16 ☑ `Direct` becomes a tree, and the `Element`-removal case is re-costed (2026-08-28)
 
 The prototype's premise was that widgets write straight into the retained tree
