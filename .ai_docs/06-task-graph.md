@@ -582,6 +582,69 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## BENCH2 ☑ A sparse-update arm — the workload every real frame has (2026-08-30)
+
+`benches/src/bin/sparse.rs`. N rows of which only **K** change per frame, with
+three modes isolating which mechanism engages: `plain` (top-level structural
+read — the control), `scope` (`cx.scope_with_deps` per row — F1), `bind`
+(`bind!` per row — F3). Reports `nodes_rebuilt`/`nodes_copied` (the O(changed)
+meter) and `damage` alongside frame time, because "did it get faster" and "did
+it stop re-lowering the tree" are different questions and only the second
+diagnoses.
+
+Built because **fwbench changes every row every frame**, which makes it
+structurally blind to the three things Lumen relies on to be fast — scope
+memoization, the F3 patch path, and taffy's per-node layout cache. All three
+pay off exactly when *few* nodes change.
+
+**Two defects in the benchmark itself, found while validating it** — both would
+have produced confident wrong conclusions:
+1. Rotating the changed row over all N walked it **off screen** after ~28 frames
+   (a 600 px viewport holds ~28 of 10 000 rows). It reported `damage=none`: it
+   was timing frames where nothing visible changed. Rotation now stays within
+   the visible span (`SPAN` overrides).
+2. The scope was placed *inside* the depth wrappers, so 8 000 of 9 001 nodes
+   rebuilt anyway and memoization looked useless at depth. The scope must cover
+   the whole row.
+An equivalence guard now asserts each mode actually applies its update before
+its number is reported — a mode whose binding silently never fired would
+otherwise look fastest.
+
+**Findings (N=1000, K=1, one arm per process):**
+
+| D | nodes | plain | scope | speedup | nodes_rebuilt (scope) |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 1 001 | 1 048 µs | 872 µs | 1.2× | 2 |
+| 4 | 5 001 | 7 255 µs | 941 µs | **7.7×** | 6 |
+| 8 | 9 001 | 15 375 µs | **1 440 µs** | **10.7×** | 10 |
+
+1. **F1 memoization works, and works very well at depth** — 15 375 → 1 440 µs.
+   F2.1's taffy-node reuse holds, so layout is *not* recomputed cold for spliced
+   spans. **This revises R6's framing**: the "layout is cold every frame" claim
+   came from fwbench, where everything rebuilds by construction. Where spans
+   splice, taffy's cache already survives.
+
+2. **F3 (`bind`) is broken and expensive.** 19 038 µs vs `plain`'s 7 147 µs at
+   N=10 000 — **2.7× slower than the thing it replaces** — with
+   `nodes_rebuilt=10001`, i.e. it does not avoid the rebuild at all. Confirms
+   and sharpens the earlier finding; the trigger is still undiagnosed (Step 1).
+
+3. **The real target: a residual O(N) floor.** With `nodes_rebuilt=2` and
+   `damage=region(64×20)`:
+
+   | N | frame | per node |
+   |---:|---:|---:|
+   | 1 000 | 837 µs | 0.84 µs |
+   | 10 000 | 5 137 µs | 0.51 µs |
+   | 50 000 | **44 476 µs** | 0.89 µs |
+
+   **Changing one row of 50 000 costs 44 ms** — nothing rebuilt, nothing
+   relaid-out cold, one small rect repainted. Some pass is O(total nodes) every
+   frame regardless. Candidates: the F2.2 bounds/clip walk over every live node,
+   semantics generation, damage computation, or the root flex container
+   re-solving across all its children. **This is what Step 1 should diagnose** —
+   it is a larger and better-founded target than either T4 culling or R6.
+
 ## R6 ✗ Incremental layout is available after all — taffy caches, Lumen discards it (2026-08-30)
 
 **Investigation, no code change.** Findings only; the probes were reverted.
