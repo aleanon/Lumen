@@ -582,6 +582,59 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## R7 ☑ The O(N) floor diagnosed — it is four costs, and three are authoring (2026-08-30)
+
+BENCH2 found that changing **one** row of 50 000 cost 44 ms with
+`nodes_rebuilt=2` and damage confined to a 64×20 rect. Diagnosed by phase
+instrumentation (added, measured, reverted — no behaviour change).
+
+**It is not one floor.** N=50 000, K=1, steady-state minimums, per-row
+`cx.scope` vs the same rows grouped 256 to a scope:
+
+| phase | per-row `scope` | `chunk`(256) | |
+|---|---:|---:|---|
+| view | 16 604 µs | 2 736 µs | −84% |
+| layout | 13 258 µs | 2 724 µs | −79% |
+| `sweep_dead_scopes` | 752 µs | 3 µs | −99.6% |
+| bounds walk (F2.2) | 1 278 µs | 1 162 µs | −9% |
+| paint | 2 185 µs | 2 039 µs | −7% |
+| **frame** | **42 915 µs** | **9 223 µs** | **−79%** |
+
+1. **`cx.scope_with_deps` costs ~0.28 µs per call.** Chunking does not reduce
+   the signal reads — the outer loop still reads all 50 000 — so the 84% view
+   drop isolates the scope call itself: (16 604 − 2 736) / 50 000 ≈ 0.28 µs.
+   **Per-row `cx.scope` is an anti-pattern at scale.**
+2. **The root flex re-solves across all its children.** Chunking turns one
+   50 000-child container into 196 containers of 256, so taffy re-solves 196
+   children plus one chunk instead of 50 000. This is the same flat-container
+   effect measured in R6 (D=0 gained 27%, D=8 gained 20×): **nesting helps
+   layout, flatness hurts it.**
+3. **`sweep_dead_scopes` is O(scopes)** — 752 µs for 50 000 of them.
+4. **Genuinely irreducible: the F2.2 bounds walk + paint's display-list diff**,
+   ~1.2 + 2.0 ms, unmoved by chunking. **≈0.064 µs/node** — the real framework
+   floor, 3.2 ms at N=50 000 against 42.9 ms today.
+
+**So three of the four costs are escapable by authoring, not by engine work** —
+and the framework offers no construct that steers an author toward chunking.
+`For` (designed in the 2026-07-03 F3 entry, never built) is exactly that
+construct. Chunk-size sweep shows a U-curve with a broad optimum around 256
+(16→12.3 ms, 64→9.7, 256→9.2, 1024→10.0): small chunks pay scope overhead,
+large ones re-lower too much.
+
+**Two more benchmark bugs, both caught by the equivalence guard** (its second
+and third catches — it has now paid for itself three times):
+- `key(i)` was `format!("r{i}")` — 50 000 String allocations per frame, the
+  exact anti-pattern **ADR-021** exists to kill. Worth 5 ms of 36. Now an
+  integer key.
+- Chunk mode read `cx2.signal(i)` *inside* the scope, which is **scope-local**
+  (F1 namespacing), so it read an always-zero signal rather than the one being
+  written. The guard failed the run rather than reporting a fast, wrong number.
+
+**Revises the framing again.** BENCH2 called the floor "some O(N) pass". It is
+mostly not a pass at all — it is per-row scope bookkeeping plus a flat
+container, both of which the *author* controls. The engine's own floor is 14×
+smaller than the number that prompted the investigation.
+
 ## BENCH2 ☑ A sparse-update arm — the workload every real frame has (2026-08-30)
 
 `benches/src/bin/sparse.rs`. N rows of which only **K** change per frame, with

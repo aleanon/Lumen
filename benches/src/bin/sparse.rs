@@ -49,8 +49,15 @@ fn rss_kb() -> u64 {
 
 /// Row `i`'s counter. One signal per row, so a write touches exactly one row's
 /// dependency — the whole point of the workload.
-fn key(i: usize) -> String {
-    format!("r{i}")
+///
+/// An integer key, NOT `format!("r{i}")`. ADR-021 made identity `impl Hash +
+/// Debug` precisely so per-row state costs no allocation ("re-addressing 1 000
+/// per-row signals went 51.0 µs / 1 000 allocations → 18.2 µs / 0"). The first
+/// version of this benchmark used the `format!` key it was written to kill,
+/// which put 50 000 String allocations per frame into the measurement and made
+/// the view closure look like the floor.
+fn key(i: usize) -> usize {
+    i
 }
 
 fn main() {
@@ -63,6 +70,61 @@ fn main() {
     let m = mode.clone();
     let t0 = Instant::now();
     let mut h = App::new(move |cx: &mut BuildCx| {
+        // MODE=chunk: rows grouped `CHUNK` at a time under ONE scope. The
+        // per-row view cost only disappears if the loop itself stops running,
+        // which needs a scope ABOVE the loop, not inside it. This is the
+        // standard escape from the O(N) view floor and the shape a keyed-list
+        // construct (`For`, not yet built) would generate.
+        if m == "chunk" {
+            let chunk = std::env::var("CHUNK")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(64)
+                .max(1);
+            let groups: Vec<Element> = (0..rows.div_ceil(chunk))
+                .map(|g| {
+                    let lo = g * chunk;
+                    let hi = ((g + 1) * chunk).min(rows);
+                    // The chunk's dep is the sum of its rows' versions: cheap,
+                    // and changes iff any row in the chunk changed.
+                    // Read the values in the OUTER cx and move them in.
+                    // `cx2.signal(i)` inside the scope would be SCOPE-LOCAL
+                    // (F1 namespaces scope signals), so it would read a fresh
+                    // always-zero signal rather than the one `bump` writes —
+                    // caught by the equivalence guard, which is why it exists.
+                    let vals: Vec<i64> = (lo..hi)
+                        .map(|i| {
+                            let v: Signal<i64> = cx.signal(key(i), || 0);
+                            v.get(cx.runtime())
+                        })
+                        .collect();
+                    let mut acc: i64 = 0;
+                    for v in &vals {
+                        acc = acc.wrapping_mul(31).wrapping_add(*v);
+                    }
+                    cx.scope_with_deps(("chunk", g), acc, move |_cx2| {
+                        let items: Vec<Element> = (lo..hi)
+                            .map(|i| {
+                                let mut e: Element = widgets::text(format!(
+                                    "row {i} · {}",
+                                    vals[i - lo]
+                                ));
+                                for _ in 0..depth {
+                                    e = widgets::column(vec![e]);
+                                }
+                                e
+                            })
+                            .collect();
+                        widgets::column(items)
+                    })
+                })
+                .collect();
+            let mut root: Element = widgets::column(groups);
+            if std::env::var("NOFILL").is_err() {
+                root.style.width = lumen_layout::Dim::pct(1.0);
+            }
+            return root;
+        }
         let kids: Vec<Element> = (0..rows)
             .map(|i| {
                 // The depth wrappers belong INSIDE the scope. An earlier
