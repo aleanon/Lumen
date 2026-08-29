@@ -1013,6 +1013,61 @@ Still open for the full removal: the `Sink` primitives a `Direct` widget writes
 through (`Declaring`/`Open` over the engine's structures rather than the
 prototype's), then the 57 widgets, then `fn build(cx) -> Element`.
 
+## T1 + T2 ☑ Deferred text measurement — the Qt/GTK gap closes (2026-08-29)
+
+The cross-framework benchmark put Lumen 2–9× behind Qt and GTK. Instrumenting
+the shape cache found the cause was one thing: **10 010 shaping operations per
+frame at N=10 000 against 19 cache hits**. Every label was shaped every frame,
+including the 99% offscreen, because `build_node` sized each text node from its
+shaped block. Bypassing shaping put Lumen at 6 928 µs against Qt's 6 433 —
+**shaping was 87% of the frame and everything else was already competitive.**
+
+**T1 — `TextEngine::line_height_for`.** A single unwrapped line's height is a
+property of the font and size, not the glyphs, so it is answered once per
+distinct `TextStyle` and cached: O(distinct styles), not O(nodes). *Guarded by*
+`line_metrics.rs`, which requires **exact** equality with the shaped answer
+across eight sizes — an approximation would move every baseline in the corpus —
+and holds the claim the cache depends on, that a line's height does not vary
+with the text on it.
+
+**T2 — defer the measurement.** A text node is not shaped at layout time when
+nothing consumes its intrinsic width. Two inherited bits carry CSS's
+definite/indefinite distinction down the lowering: `cb_definite` (is the
+containing block's width definite — true at the root, whose containing block is
+the viewport) and `stretched` (does the parent assign this node's cross size —
+a flex column with default stretch alignment does; a row does not, since width
+is its main axis).
+
+| N | before | after | Qt | GTK |
+|---:|---:|---:|---:|---:|
+| 1 000 | 5 711 µs | **2 220** | 3 275 | 775 |
+| 10 000 | 52 847 | **7 369** | 6 433 | 7 294 |
+| 100 000 | 568 614 | **105 192** | 53 467 | 77 119 |
+
+Shaping per frame collapses from *N* to the visible-row count — what Qt and GTK
+do. Peak RSS at N=10 000 falls 117 → 50 MB. **Lumen now lands level with both
+at 10 000 nodes and ahead of Qt at 1 000.**
+
+### The guard is the work
+
+Applied without one, this fails **121 of 1 173 tests**. With the
+definite/stretched guard alone it fails **one** — the `combobox` doc shot,
+because leaving the width `Auto` makes the box span the parent instead of
+hugging the glyphs. That is what CSS prescribes for a stretched block, and it is
+still a *rendering* change wearing a performance change's clothes.
+
+So the guard has a second half: a node is deferred only if its box is
+**unobservable** — nothing fills it, outlines it, shadows it or clips it, and
+the text sits at the start of it. With that, **1183 tests pass and no golden
+moves**. *Guarded by* `deferred_text.rs`, which holds each half separately: the
+height stays exact, a content-sized parent still measures its children, and a
+label with a background, or centred text, or wrapping, keeps the box it had.
+
+**Applies only under a definite-width ancestor.** A root that shrink-wraps gives
+its children no definite containing block, so nothing defers — which is why the
+benchmark's `FILL=1` variant exists. Whether Lumen's root should fill the
+viewport by default is a separate question this raises but does not settle.
+
 ## L1 ☑ Nested auto-sized flex layout — 117× (2026-08-28)
 
 Found 2026-08-27 while measuring O0.8, deferred behind the lowering work, taken

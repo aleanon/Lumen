@@ -46,7 +46,14 @@ fn main() {
                 e
             })
             .collect();
-        widgets::column(kids)
+        let mut root: Element = widgets::column(kids);
+        // FILL=1: the root fills the viewport, which is what virtually every
+        // real app's root does — and what gives its children a definite
+        // containing block, the precondition for T2's deferred measurement.
+        if std::env::var("FILL").is_ok() {
+            root.style.width = lumen_layout::Dim::pct(1.0);
+        }
+        root
     })
     .run_headless(Size::new(400.0, win_h));
     h.pump();

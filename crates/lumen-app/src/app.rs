@@ -5306,6 +5306,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             tree: &mut tree,
             layout: &mut layout,
             meta: &mut meta,
+            // The root's containing block is the viewport, which always has a
+            // width; nothing stretches the root itself.
+            cb_definite: true,
+            stretched: false,
         }
         .lower_root(root_el);
         debug_assert_eq!(root_node, tree.root(), "build left the tree root unset");
@@ -6272,6 +6276,16 @@ pub struct Sink<'a, R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P:
     pub(crate) tree: &'a mut Tree,
     pub(crate) layout: &'a mut P::Layout,
     pub(crate) meta: &'a mut HashMap<NodeIndex, NodeMeta>,
+    /// T2: is the **containing block's** width definite for the node being
+    /// lowered? A percentage resolves against it, so a percentage under an
+    /// indefinite parent is itself indefinite. True at the root — the root's
+    /// containing block is the viewport, which always has a width.
+    pub(crate) cb_definite: bool,
+    /// T2: does the parent assign this node's width (a flex column with the
+    /// default stretch cross-alignment)? An `Auto` width under such a parent is
+    /// decided by the parent rather than by the node's own content, which is
+    /// what makes measuring that content pointless.
+    pub(crate) stretched: bool,
 }
 
 impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig>
@@ -6778,6 +6792,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
 
         // Text nodes get a fixed size from measurement.
+        // T2: captured before `el.style` is moved out below — these decide
+        // whether a text node's box is observable, and therefore whether its
+        // width may be left to the parent. See `deferred` below.
+        let box_is_invisible =
+            el.background.is_none() && el.border.is_none() && el.get_shadow().is_none() && !el.clip;
         let mut style = el.style;
         let (pl, pt) = (dim_px(style.padding.left), dim_px(style.padding.top));
         let (pr, pb) = (dim_px(style.padding.right), dim_px(style.padding.bottom));
@@ -6813,67 +6832,107 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     ellipsized = self.app.text.ellipsized_text(txt, ts, avail);
                 }
             }
-            let block = self.app.text.shaped(txt, ts, wrap, ts.align);
-            // Size the box to the glyphs ONLY when the author asked for nothing.
-            // `== Dim::Auto` rather than `wrap.is_none()`, which clobbered two
-            // widths the author *had* expressed:
+            // T2: a single unwrapped line whose width its parent assigns has
+            // no intrinsic size anyone consumes — the height is font metrics
+            // (T1) and the width is the parent's. Shaping it at layout time
+            // computes a glyph advance that is then thrown away, once per node
+            // per frame, which measured as 87% of a 10 000-row frame.
             //
-            //  * `Dim::Percent` — `width: 100%` on a label silently became the
-            //    glyph width, in normal flow as well as absolute. That is what
-            //    made a `VirtualList` of bare `text` rows shrink-wrap: nothing
-            //    could stretch the row, so everything right of the label fell
-            //    through it on a tap. The custom-leaf branch below already gets
-            //    this right ("let an explicit width win so a leaf can flex/fill,
-            //    e.g. a chart at `width: 100%`"); text was the odd one out.
-            //  * `Dim::Px` under `text-wrap: nowrap` — which sets `wrap = None`
-            //    precisely in order to *keep the explicit width for the box*, and
-            //    then had it overwritten two lines later.
+            // Paint still shapes what it draws, so the run is shaped once for
+            // the rows actually on screen instead of once for every row in the
+            // list. That is what Qt and GTK do, and it is the whole gap.
+            // The guard has two halves. The first is "does anyone consume this
+            // node's intrinsic width" — a single unwrapped line whose parent
+            // assigns its cross size. The second is "would anyone SEE the
+            // difference": leaving the width `Auto` makes the box span the
+            // parent instead of hugging the glyphs, which is what CSS
+            // prescribes for a stretched block but is visible the moment
+            // anything paints that box or positions text inside it.
             //
-            // A percentage cannot feed the wrap width: the containing block is
-            // not resolved until layout runs, and this measurement happens
-            // during the build. So a percentage-width label lays out as one
-            // unwrapped line inside a stretched box — the same shape as
-            // `nowrap`. Wrapping still needs a definite `Dim::px` (or a sized
-            // container around the label).
-            // F3.5: capture BEFORE the assignments below overwrite the dims —
-            // an axis the author fixed cannot be moved by a new measurement.
-            let auto_w = style.width == Dim::Auto;
-            let auto_h = style.height == Dim::Auto;
-            if auto_w {
-                style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
+            // So a node is deferred only if its box is invisible: nothing fills
+            // it, nothing outlines it, and the text sits at the start of it.
+            // Without this second half the optimisation is a rendering change
+            // wearing a performance change's clothes — it moved the `combobox`
+            // doc shot, which is how it was caught.
+            let deferred = self.stretched
+                && self.cb_definite
+                && style.width == Dim::Auto
+                && wrap.is_none()
+                && ellipsized.is_none()
+                && box_is_invisible
+                && ts.align == lumen_text::TextAlign::Start
+                && !txt.contains('\n');
+            if deferred {
+                let lh = self.app.text.line_height_of(ts);
+                if style.height == Dim::Auto {
+                    style.height = Dim::px(lh.ceil() + (pt + pb) as f32);
+                }
+                // `style.width` deliberately left `Auto`: the parent's stretch
+                // resolves it, so no glyph advance is needed.
+                text_wrap = wrap;
+            } else {
+                let block = self.app.text.shaped(txt, ts, wrap, ts.align);
+                // Size the box to the glyphs ONLY when the author asked for nothing.
+                // `== Dim::Auto` rather than `wrap.is_none()`, which clobbered two
+                // widths the author *had* expressed:
+                //
+                //  * `Dim::Percent` — `width: 100%` on a label silently became the
+                //    glyph width, in normal flow as well as absolute. That is what
+                //    made a `VirtualList` of bare `text` rows shrink-wrap: nothing
+                //    could stretch the row, so everything right of the label fell
+                //    through it on a tap. The custom-leaf branch below already gets
+                //    this right ("let an explicit width win so a leaf can flex/fill,
+                //    e.g. a chart at `width: 100%`"); text was the odd one out.
+                //  * `Dim::Px` under `text-wrap: nowrap` — which sets `wrap = None`
+                //    precisely in order to *keep the explicit width for the box*, and
+                //    then had it overwritten two lines later.
+                //
+                // A percentage cannot feed the wrap width: the containing block is
+                // not resolved until layout runs, and this measurement happens
+                // during the build. So a percentage-width label lays out as one
+                // unwrapped line inside a stretched box — the same shape as
+                // `nowrap`. Wrapping still needs a definite `Dim::px` (or a sized
+                // container around the label).
+                // F3.5: capture BEFORE the assignments below overwrite the dims —
+                // an axis the author fixed cannot be moved by a new measurement.
+                let auto_w = style.width == Dim::Auto;
+                let auto_h = style.height == Dim::Auto;
+                if auto_w {
+                    style.width = Dim::px(block.width().ceil() + (pl + pr) as f32);
+                }
+                // Same guard, same reason as the width above: an explicit height was
+                // being overwritten by the measured glyph height. A `VirtualList`
+                // sets each item's height to `item_height`, so a 24 px-pitch list of
+                // text rows laid out 21 px rows — a 3 px strip between every pair
+                // that painted no background and took no taps. CSS gives a
+                // fixed-height element that height with the text at the top, which
+                // is what the paint already does (the run is drawn at the padded
+                // origin), so honouring it needs nothing else.
+                //
+                // The "text ignores an explicit height" gotcha this retires cost one
+                // golden across the whole corpus: `Grid`'s doc-shot, where the cells
+                // now fill their 32 px rows instead of leaving a pale band between
+                // them. That band was the same defect, sitting in a committed image.
+                if auto_h {
+                    style.height = Dim::px(block.height().ceil() + (pt + pb) as f32);
+                }
+                // F3.5: retain the binding with what this build measured, so a
+                // later update can ask "would the box change?" without rebuilding.
+                if let Some((dynamic, deps)) = pending_text.take() {
+                    self.app.text_bindings.push(BoundText {
+                        node,
+                        dynamic,
+                        deps,
+                        wrap,
+                        auto_w,
+                        auto_h,
+                        w: block.width().ceil(),
+                        h: block.height().ceil(),
+                        patchable: ellipsized.is_none(),
+                    });
+                }
+                text_wrap = wrap;
             }
-            // Same guard, same reason as the width above: an explicit height was
-            // being overwritten by the measured glyph height. A `VirtualList`
-            // sets each item's height to `item_height`, so a 24 px-pitch list of
-            // text rows laid out 21 px rows — a 3 px strip between every pair
-            // that painted no background and took no taps. CSS gives a
-            // fixed-height element that height with the text at the top, which
-            // is what the paint already does (the run is drawn at the padded
-            // origin), so honouring it needs nothing else.
-            //
-            // The "text ignores an explicit height" gotcha this retires cost one
-            // golden across the whole corpus: `Grid`'s doc-shot, where the cells
-            // now fill their 32 px rows instead of leaving a pale band between
-            // them. That band was the same defect, sitting in a committed image.
-            if auto_h {
-                style.height = Dim::px(block.height().ceil() + (pt + pb) as f32);
-            }
-            // F3.5: retain the binding with what this build measured, so a
-            // later update can ask "would the box change?" without rebuilding.
-            if let Some((dynamic, deps)) = pending_text.take() {
-                self.app.text_bindings.push(BoundText {
-                    node,
-                    dynamic,
-                    deps,
-                    wrap,
-                    auto_w,
-                    auto_h,
-                    w: block.width().ceil(),
-                    h: block.height().ceil(),
-                    patchable: ellipsized.is_none(),
-                });
-            }
-            text_wrap = wrap;
         } else if let NodeContent::Custom(w) = &el.content {
             // Size a custom leaf from its intrinsic measure (E2), but let an
             // explicit `width`/`height` win so a leaf can flex/fill (e.g. a chart
@@ -6921,7 +6980,28 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // The children are produced now, while this node is open and on every
         // context stack — which is what makes context imposition work, and what
         // a `Vec<Element>` field could not express.
+        // T2: what this node tells its children about their width.
+        //
+        // `definite` is CSS's definite/indefinite distinction: a length is
+        // definite, a percentage only if its containing block is, and `Auto` only
+        // if a parent stretches it. `gives_width` is whether this node assigns
+        // its children's cross size — a flex column with the default stretch
+        // alignment does; a row does not (width is its MAIN axis), and an
+        // explicit non-stretch `align-items` opts out.
+        let definite = match style.width {
+            Dim::Px(_) => true,
+            Dim::Percent(_) => self.cb_definite,
+            Dim::Auto => self.stretched && self.cb_definite,
+        };
+        let gives_width = style.display == lumen_layout::Display::Flex
+            && style.flex_direction == lumen_layout::FlexDirection::Column
+            && matches!(style.align_items, None | Some(lumen_layout::Align::Stretch));
+        let (outer_cb, outer_stretch) = (self.cb_definite, self.stretched);
+        self.cb_definite = definite;
+        self.stretched = gives_width;
         let child_lnodes: Vec<LayoutNode> = children(self, node, this_overlay, el.stacks_children);
+        self.cb_definite = outer_cb;
+        self.stretched = outer_stretch;
         if pushed_desc {
             self.app.pop_desc();
         }
