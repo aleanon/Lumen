@@ -45,7 +45,38 @@ and the root is definite only if it declares a width.
   tests. The guard is what makes it correct, so the test corpus is the
   acceptance criterion, not a formality.
 
-## T3 — Parallel shaping  *(where T2 does not apply)*
+## T3 — ~~Parallel shaping~~ → **report the cliff**  *(revised on evidence)*
+
+The plan said parallel shaping. A coverage census after T2 changed the answer,
+and the plan follows the measurement rather than the other way round.
+
+Instrumenting *why* each text node still shapes: under a container with a
+definite width, **100% of labels defer and none shape**. Under a content-sizing
+container, **0% defer and all of them shape — for one reason, an indefinite
+containing block.** T2's coverage is not a gradient to be squeezed with
+parallelism; it is a cliff with a single cause.
+
+That makes parallel shaping the wrong next move. It is a large change — parley
+borrows `&mut FontContext` to shape, so it needs one font collection per thread,
+plus a pool that `rayon` would supply and ADR-003's whitelist does not — and it
+would speed up work that should not be happening.
+
+Making the root fill the viewport by default was tested and **rejected**: it
+takes the benchmark to 100% coverage but breaks **57 tests**, because what the
+root does is the author's decision, not the framework's.
+
+So T3 is: **make the cliff visible.** `W0404` reports, once per frame with a
+count, that N labels were shaped during layout because a container above them
+sizes to its content — and names the one-line fix. The cost is otherwise
+undetectable: the layout is correct, the tree looks healthy, and the app is
+simply slower with nothing saying why. That is precisely the class of defect the
+observability tier exists for.
+
+* **Done when** a content-sized list of 200 reports once with the count, a
+  definite-width list reports nothing, and a four-item shrink-to-fit box is not
+  treated as noise.
+
+## T3-old — Parallel shaping  *(deferred, not dropped)*
 
 Wrapped and content-sized text still shapes at layout time. Shaping is pure, so
 parallelism cannot change the result — ADR-002's determinism holds by

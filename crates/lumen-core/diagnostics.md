@@ -45,6 +45,7 @@ same commit. Codes are assigned by `02-spec-core.md §9` and `04-spec-lss-stylin
 | W0401 | warning  | Missing translation for a message key in the active locale (T5.3) | 02 §9 |
 | W0402 | warning  | Tofu — shaped text contains `.notdef` glyphs no registered font covers (T.4) | 02 §9 |
 | W0403 | warning  | Text is painted truncated (`text-overflow: ellipsis`) while the semantic label keeps the full string — advisory, so the split is knowable | 02 §9 |
+| W0404 | warning  | Text is shaped during layout because a container sizes itself to its content, so glyph widths are needed for offscreen rows too — give the container a definite width and the shaping defers to paint | 02 §9 |
 | E0701 | error    | A build/layout/paint panic was contained; previous frame kept, app alive (T7.3) | 02 §9 |
 | E0702 | error    | An **un**contained panic crossed the crash-report hook (E.3); process is going down | 02 §9 |
 

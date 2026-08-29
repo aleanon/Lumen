@@ -375,6 +375,26 @@ pub mod codes {
     /// split explicitly. Advisory — truncation is often exactly what the author
     /// intended; the value is that it becomes *knowable*.
     pub const W0403: &str = "W0403";
+    /// Text is being **shaped at layout time** because its container
+    /// content-sizes, so the shaping cannot be deferred to paint.
+    ///
+    /// A single unwrapped label whose width its parent assigns needs no glyph
+    /// measurement to be laid out: its height is font metrics, and its width is
+    /// the parent's. Lumen skips shaping for those and lets paint shape only
+    /// the rows it draws — which is what makes a long list cost the visible
+    /// rows rather than all of them.
+    ///
+    /// A container that sizes itself to its content defeats that: it genuinely
+    /// needs each child's intrinsic width, so every child must be shaped
+    /// whether or not it is on screen. On a 10 000-row list that was measured
+    /// at **87% of the frame**.
+    ///
+    /// The fix is one line — give the container a definite width (`100%` of its
+    /// parent is usually what was meant) — and it is reported rather than left
+    /// to profiling because the cost is invisible: the layout is correct, the
+    /// tree looks healthy, and the app is simply slower with nothing naming the
+    /// reason.
+    pub const W0404: &str = "W0404";
     /// A build/layout/paint panic was contained; the previous frame was kept
     /// and the app stayed alive (T7.3 error boundary, top level).
     pub const E0701: &str = "E0701";

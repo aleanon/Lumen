@@ -655,6 +655,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             nodes_rebuilt_total: 0,
             nodes_copied_total: 0,
             style_memo: HashMap::default(),
+            shaped_for_indefinite: 0,
             style_memo_hits: 0,
             style_memo_misses: 0,
             commands: HashMap::default(),
@@ -1239,6 +1240,9 @@ pub struct Headless<
     /// O(distinct keys) cascades instead of O(nodes). Cleared with the view
     /// caches (stylesheet/theme/resize force-rebuilds).
     style_memo: HashMap<IdHash, StylePair>,
+    /// W0404: text nodes this build had to shape at layout time because a
+    /// content-sizing container needed their intrinsic width.
+    shaped_for_indefinite: usize,
     style_memo_hits: u64,
     style_memo_misses: u64,
     /// B.5: running `transition:` animations keyed by (stable id, property).
@@ -2742,6 +2746,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         out.extend(self.truncation_findings(cap));
         out.extend(self.stuck_animation_findings());
         out.extend(self.contrast_findings());
+        out.extend(self.indefinite_shaping_findings());
         out
     }
 
@@ -3229,6 +3234,35 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 shown + suppressed
             ),
         )
+    }
+
+    /// W0404: text shaped at layout time because a container content-sizes.
+    ///
+    /// Reported as **one** finding with a count, not one per node: it is a
+    /// single fact about the view — a container above them needs their widths —
+    /// and a thousand copies of it would be the flood O0.5 exists to prevent.
+    ///
+    /// The threshold exists because a handful is normal and unavoidable: a menu
+    /// or a tooltip that hugs its content is *supposed* to measure its children.
+    /// It is worth saying only once it is a list.
+    fn indefinite_shaping_findings(&self) -> Vec<lumen_core::Diagnostic> {
+        /// Below this it is an ordinary shrink-to-fit container, not a cost.
+        const NOTEWORTHY: usize = 64;
+        if self.shaped_for_indefinite < NOTEWORTHY {
+            return Vec::new();
+        }
+        vec![lumen_core::Diagnostic::new(
+            lumen_core::codes::W0404,
+            format!(
+                "{} text nodes were shaped during layout because a container \
+                 above them sizes itself to its content, so their glyph widths \
+                 are needed whether or not they are on screen. Give that \
+                 container a definite width (`width: 100%` of its parent is \
+                 usually what was meant) and their shaping defers to paint, \
+                 which only draws what is visible.",
+                self.shaped_for_indefinite
+            ),
+        )]
     }
 
     fn offscreen_findings(&self, cap: usize) -> Vec<lumen_core::Diagnostic> {
@@ -5167,6 +5201,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // those are.
         self.prev_spans = std::mem::take(&mut self.scope_spans);
         self.impure_seen = 0;
+        self.shaped_for_indefinite = 0;
         self.nodes_rebuilt = 0;
         self.nodes_copied = 0;
         self.desc_stack.clear();
@@ -6871,6 +6906,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // resolves it, so no glyph advance is needed.
                 text_wrap = wrap;
             } else {
+                // W0404: this label had to be shaped to be laid out, because a
+                // container above it sizes itself to its content and therefore
+                // genuinely needs the glyph advance. Counted so the audit can
+                // say so — the cost is otherwise invisible.
+                if style.width == Dim::Auto && wrap.is_none() && self.stretched && !self.cb_definite
+                {
+                    self.app.shaped_for_indefinite += 1;
+                }
                 let block = self.app.text.shaped(txt, ts, wrap, ts.align);
                 // Size the box to the glyphs ONLY when the author asked for nothing.
                 // `== Dim::Auto` rather than `wrap.is_none()`, which clobbered two
