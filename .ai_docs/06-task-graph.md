@@ -582,6 +582,68 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## R6 ✗ Incremental layout is available after all — taffy caches, Lumen discards it (2026-08-30)
+
+**Investigation, no code change.** Findings only; the probes were reverted.
+
+The 2026-07-03 decision recorded "Incremental layout is SKIPPED … layout is one
+`taffy::TaffyTree::compute_layout` (ADR-004) that can't be partially re-solved
+across disjoint subtrees". **That premise does not hold for taffy 0.14.**
+
+- `compute_layout(node, available)` takes **any** node as a layout root.
+- `mark_dirty(node)` walks **up the parent chain**, and stops at the first
+  already-dirty ancestor (`ClearState::AlreadyEmpty` → "No need to visit
+  ancestors").
+- `dirty(node)` is literally `cache.is_empty()`, and `compute/mod.rs:186` does
+  `cache_get(node, &inputs)` with an early return **per node**.
+
+So taffy already implements per-node layout caching with upward invalidation —
+the exact algorithm GTK's `queue_resize` uses.
+
+**Lumen discards it every frame.** `lumen-layout/src/tree.rs:105,119` call
+`new_leaf` / `new_with_children`, so a rebuilt node gets a *fresh* taffy node
+with an empty cache. F2.1 retains taffy nodes only for memo-**hit** spans;
+everything rebuilt starts cold, and in the fwbench workload everything is
+rebuilt.
+
+**Measured** (N=1000, `FILL=1`, one arm per process; cold = today's behaviour,
+warm = same tree recomputed with nothing dirty, one-dirty = a single leaf
+invalidated then recomputed):
+
+| D | nodes | cold | warm | one dirty leaf | frame | layout share |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 1 001 | 172 µs | 36 µs | 126 µs | 2 157 µs | 8% |
+| 4 | 5 001 | 5 468 µs | 268 µs | 377 µs | 8 528 µs | 64% |
+| 8 | 9 001 | 11 861 µs | 495 µs | **590 µs** | 16 705 µs | **72%** |
+
+Cold grows superlinearly with depth; warm grows linearly. **The depth penalty
+is cold-cache cost, not per-node cost.** At D=8 a single dirty leaf costs 590 µs
+against 11 861 µs — 20×.
+
+**Shape, not just constant.** Today Lumen is 2 157 → 16 705 µs for 9× the nodes
+(7.7×, superlinear). With warm layout it would be ~2 021 → ~5 131 µs (2.5×) —
+sublinear, matching GTK's 775 → 1 603 (2.1×). This is the mechanism behind the
+depth column where GTK most embarrasses Lumen.
+
+**Two honest limits.**
+1. *Flat containers gain little.* At D=0 one dirty leaf costs 126 µs vs 172
+   cold — 27%, not 20×. Dirtying one child of a 1 000-child flex column forces
+   that column to re-solve across all its children. The win is in **nesting**,
+   and fwbench's flat shape is the worst case for it.
+2. *This benchmark cannot show the win.* Every row's text changes, so every leaf
+   is dirty and propagates to the root. Incremental layout pays off when **few**
+   nodes change — which is every real frame and no fwbench frame.
+
+**What it would take:** stop calling `new_leaf`/`new_with_children` for nodes
+that did not change, and `mark_dirty` the ones that did. Both halves already
+exist — `cx.scope` retains the build (F1/F2.2), taffy retains the layout — they
+are on opposite sides of a seam that throws the layout half away.
+
+Supersedes the layout half of **T4** (viewport culling): T4 caps at 37% by
+skipping layout for offscreen nodes, needs the every-node rule relaxed, and only
+helps a shape real apps do not have. This is larger, needs no rule change, and
+no new authoring API.
+
 ## A11Y3 ☑ The agent-only node payload is feature-gated (2026-08-29)
 
 The version of "cull the tree in release" that is actually correct: gate the
