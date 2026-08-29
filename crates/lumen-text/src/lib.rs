@@ -457,6 +457,21 @@ pub struct CachedRun {
 /// (the alternative — inferring frames from call patterns — is exactly the bug
 /// the epoch policy replaced). An engine with no cache implements it empty.
 pub trait TextEngineApi {
+    /// The height of **one line** in this style, without shaping any text.
+    ///
+    /// A single unwrapped line's height is a property of the font and the
+    /// size, not of the glyphs on it — so it can be answered once per distinct
+    /// [`TextStyle`] instead of once per node. That is the difference between
+    /// O(distinct styles) and O(nodes), and it is what lets the lowering size a
+    /// label it is not going to measure.
+    ///
+    /// Defaulted to `line_height x font_size`, which is what an engine with no
+    /// font tables can honestly say; the real engine overrides it with the
+    /// face's own metrics.
+    fn line_height_of(&mut self, style: &TextStyle) -> f32 {
+        style.line_height.unwrap_or(1.2) * style.font_size
+    }
+
     /// MOD7 S3: set the shape- and run-cache ceilings for this engine.
     ///
     /// Defaulted to a no-op, so an engine with no caches (a measuring-only
@@ -660,6 +675,9 @@ impl TextEngineApi for TextEngine {
     fn tofu_seen(&self) -> bool {
         self.tofu_seen
     }
+    fn line_height_of(&mut self, style: &TextStyle) -> f32 {
+        TextEngine::line_height_for(self, style)
+    }
     fn register_font(&mut self, bytes: Vec<u8>) -> Option<String> {
         TextEngine::register_font(self, bytes)
     }
@@ -734,6 +752,10 @@ pub struct TextEngine {
     /// measure it and to paint it, every frame — this collapses that to one
     /// shaping per `(text, geometry, wrap)` and reuses it across frames.
     shape_cache: HashMap<ShapeKey, Aged<TextBlock>>,
+    /// T1: one-line height per style, keyed by everything that can move a
+    /// baseline. Bounded by the number of distinct styles an app uses, which is
+    /// a handful — so unlike the shape cache it needs no sweep.
+    line_height_cache: HashMap<lumen_core::identity::IdHash, f32>,
     /// Cache of origin-relative glyph runs keyed by `(ShapeKey, scale)` (R5). The
     /// paint layer translates + interns these instead of re-building the run each
     /// frame — the dominant display-list-emission cost for text.
@@ -816,6 +838,7 @@ impl TextEngine {
             layout_cx: LayoutContext::new(),
             family,
             shape_cache: HashMap::default(),
+            line_height_cache: HashMap::default(),
             run_cache: HashMap::default(),
             epoch: 0,
             shape_cap: SHAPE_CACHE_CAP,
@@ -875,6 +898,34 @@ impl TextEngine {
     ) -> &TextBlock {
         let key = ShapeKey::new(text, base, max_width, align);
         self.shaped_by_key(key, text, base, max_width, align)
+    }
+
+    /// One line's height in this style, from the font's own metrics (T1).
+    ///
+    /// Computed by shaping a single probe glyph **once per distinct style** and
+    /// keeping the line height; every later call with that style is a hash
+    /// lookup. The probe is `"x"` rather than the empty string because parley
+    /// gives an empty run no line box to measure.
+    pub fn line_height_for(&mut self, base: &TextStyle) -> f32 {
+        use std::hash::Hash;
+        let key = {
+            let mut h = lumen_core::identity::IdHasher::new();
+            base.font_size.to_bits().hash(&mut h);
+            base.weight.to_bits().hash(&mut h);
+            base.line_height.map(f32::to_bits).hash(&mut h);
+            base.family.as_deref().hash(&mut h);
+            base.italic.hash(&mut h);
+            base.variations.as_deref().hash(&mut h);
+            h.finish128()
+        };
+        if let Some(v) = self.line_height_cache.get(&key) {
+            return *v;
+        }
+        let h = self
+            .layout("x", base.clone(), &[], None, TextAlign::Start)
+            .height();
+        self.line_height_cache.insert(key, h);
+        h
     }
 
     /// [`shaped`](Self::shaped) with the cache key already computed.
