@@ -274,6 +274,17 @@ are still strings (they're selectors, not reactive keys).
   `position_in_set`. Set them nowhere else — a spurious `set_size` misleads an
   AT as much as a missing one. `VirtualList` and `DataGrid` are the worked
   examples; `tests/virtualization_contract.rs` is the pattern to copy.
+- **A screen or section is a `Component`, not a free function.** Implement
+  `deps` + `build`, mount with `cx.component(key, c)`. This is the difference
+  between a 42.3 ms frame and a 9.0 ms one at 50 000 rows (R7/C1) — not because
+  the engine is faster, but because a component is a *coarse* memo unit and a
+  per-row `cx.scope` is a fine one. Never put a `cx.scope` around each row of a
+  long list; group them.
+- **`deps` must list every captured value.** Signals read inside `build` are
+  tracked for you and must NOT be listed. Omitting captured data does not
+  error — the component is memo-hit forever and renders frozen content. Return
+  `SIGNALS_ONLY` when the component captures nothing.
+
 - **`focusable: true` does nothing without an `id`.** Focus is stored as an id
   (`move_focus` sets `focused_id = meta.id`), so the Tab traversal finds an
   id-less focusable node and drops it immediately. If your widget is focusable

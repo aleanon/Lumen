@@ -110,10 +110,28 @@ a stringly-generic registration adds no capability over the typed surface.
 *Shipped (B.6b) as `.css(Style)`* — the typed 04 §8 style at inline
 origin (the name `.style` was taken by `LayoutStyle`).
 
-**Components** are functions; memoization is signal-based via `cx.scope`
-(a scope whose recorded signal reads are current returns its cached
-subtree). *Planned:* the `#[component]` attribute macro with
-`PartialEq`-on-props memoization (plan W.3).
+**Components** are *types*, shipped as the `Component` trait (C1): a struct
+with `deps(&self) -> u64` and `build(&self, cx) -> Element`, mounted with
+`cx.component(key, c)`. `build` runs only when `deps` changes or a signal it
+read changes; otherwise the whole subtree splices in place. A dirty component
+is **torn down and rewritten**, not diffed — the cost is bounded by one
+component, which is the point of the granularity.
+
+Free functions plus `cx.scope` remain available and unchanged; the trait exists
+because *granularity*, not mechanism, is what costs. **Measured** (R7, N=50 000
+with one row changing): a `cx.scope` per row is 42.3 ms, the same rows as
+`Component`s of 256 is **9.0 ms**, and the naive path is 54.8 ms. `cx.scope` is
+available at any granularity, so the worst one is the obvious way to reach for
+it; a component makes the coarse grain the natural unit and brings the nesting
+that fixes the layout half (R6) with it.
+
+`deps` is deliberately **required** — a component built from captured data whose
+`deps` omitted it would be memo-hit forever and render frozen content, silently.
+Return `SIGNALS_ONLY` when there is no plain data. *Superseded:* the planned
+`#[component]` attribute macro with `PartialEq`-on-props (W.3) — a trait needs
+no proc-macro, and an explicit `deps` states the dependency rather than
+inferring it, which is the same argument ADR-007's F3 entry made for declared
+bindings over inferred holes.
 
 ## 4. Signals & state store (binding discipline)
 

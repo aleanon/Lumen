@@ -13,6 +13,7 @@
 
 pub mod app;
 pub mod audit;
+pub mod component;
 pub mod element;
 pub mod system;
 /// The async/data layer (`cx.resource`, `cx.task`) — an inherent `impl BuildCx`,

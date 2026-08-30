@@ -100,6 +100,7 @@ pub use app::{center, App, FrameStats, Headless, ReloadResult};
 #[cfg(feature = "snapshot")]
 pub use app::{AppSnapshot, Checkpoint};
 pub use element::{AbortHandle, BuildCx, Element, Handler, LeafWidget, NodeContent, Text};
+pub use lumen_app::component::{hash_of, Component, SIGNALS_ONLY};
 /// The typed-widget trait (`Widget::build`) and the universal-modifier record
 /// every widget embeds.
 pub use lumen_app::{Direct, DirectDyn, Kids, NodeWriter};

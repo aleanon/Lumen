@@ -70,6 +70,67 @@ fn main() {
     let m = mode.clone();
     let t0 = Instant::now();
     let mut h = App::new(move |cx: &mut BuildCx| {
+        // MODE=component: the same grouping as `chunk`, expressed as a
+        // `Component`. This is the arm that proves the abstraction costs
+        // nothing over the hand-written scope it packages — if it does not
+        // match `chunk`, the trait is overhead rather than ergonomics.
+        if m == "component" {
+            struct RowGroup {
+                lo: usize,
+                hi: usize,
+                depth: usize,
+                vals: Vec<i64>,
+            }
+            impl lumen_widgets::Component for RowGroup {
+                fn deps(&self) -> u64 {
+                    lumen_widgets::hash_of(&(self.lo, self.hi, &self.vals))
+                }
+                fn build(&self, _cx: &mut BuildCx) -> Element {
+                    let items: Vec<Element> = (self.lo..self.hi)
+                        .map(|i| {
+                            let mut e: Element =
+                                widgets::text(format!("row {i} · {}", self.vals[i - self.lo]));
+                            for _ in 0..self.depth {
+                                e = widgets::column(vec![e]);
+                            }
+                            e
+                        })
+                        .collect();
+                    widgets::column(items)
+                }
+            }
+            let chunk = std::env::var("CHUNK")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(64)
+                .max(1);
+            let groups: Vec<Element> = (0..rows.div_ceil(chunk))
+                .map(|g| {
+                    let lo = g * chunk;
+                    let hi = ((g + 1) * chunk).min(rows);
+                    let vals: Vec<i64> = (lo..hi)
+                        .map(|i| {
+                            let v: Signal<i64> = cx.signal(key(i), || 0);
+                            v.get(cx.runtime())
+                        })
+                        .collect();
+                    cx.component(
+                        ("group", g),
+                        RowGroup {
+                            lo,
+                            hi,
+                            depth,
+                            vals,
+                        },
+                    )
+                })
+                .collect();
+            let mut root: Element = widgets::column(groups);
+            if std::env::var("NOFILL").is_err() {
+                root.style.width = lumen_layout::Dim::pct(1.0);
+            }
+            return root;
+        }
         // MODE=chunk: rows grouped `CHUNK` at a time under ONE scope. The
         // per-row view cost only disappears if the loop itself stops running,
         // which needs a scope ABOVE the loop, not inside it. This is the

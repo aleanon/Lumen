@@ -582,6 +582,68 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## C1 ☑ `Component` — a screen is a type, and the unit of rebuild (2026-08-30)
+
+R7's conclusion was that three of the four costs in a "one row of 50 000
+changed" frame are **authoring granularity**, and that the framework offered no
+construct steering anyone toward the good one. `cx.scope` is available at *any*
+granularity, which makes per-row — the worst — the obvious way to reach for it.
+
+`lumen-app/src/component.rs`:
+
+```rust
+pub trait Component {
+    fn deps(&self) -> u64;                            // captured plain data
+    fn build(&self, cx: &mut BuildCx) -> Element;
+}
+cx.component(key, c)                                  // one memoized subtree
+```
+
+**Measured**, N=50 000 with one row changing (`sparse`, `CHUNK=256`):
+
+| mode | frame | `nodes_rebuilt` |
+|---|---:|---:|
+| plain (naive) | 54 844 µs | 50 001 |
+| per-row `cx.scope` | 42 346 µs | 2 |
+| hand-written chunking | 9 128 µs | 258 |
+| **`Component`** | **9 047 µs** | 258 |
+
+**6.1× over naive, 4.7× over per-row scopes, and within 1% of the hand-written
+chunking it packages** — identical `nodes_rebuilt` and node counts, so the
+abstraction is ergonomics rather than overhead. That equivalence is the point of
+the `component` arm in `sparse`: if the trait had cost anything over the scope
+it wraps, it would show there.
+
+**Design decisions and why.**
+- *A thin layer over `scope_with_deps`, deliberately.* It inherits splice-in-
+  place, taffy-node reuse (F2.1) and read tracking rather than duplicating them,
+  so there is no second source of truth about what the tree contains.
+- *Teardown-and-rewrite, not reconciliation.* Cost is bounded by one component,
+  which is exactly what the coarse granularity buys. Scope identity survives, so
+  scope-local signals and running tasks are kept across a rebuild — only nodes
+  are rewritten.
+- *`deps` is required, with no default.* A component built from captured data
+  whose `deps` omitted it is memo-hit forever and renders frozen content —
+  silently, no panic, no diagnostic. One required line removes the failure mode;
+  `SIGNALS_ONLY` covers the no-captured-data case.
+- *Not `build(&mut NodeTree)`.* R8 measured the `Element` intermediary at ~5% of
+  a frame against this change's 79%. They are separable, and a component builds
+  `Element`s internally today with no loss.
+- *Mutate-then-build needs no mechanism.* A component is a struct: construct it,
+  mutate it, hand it over. The `Direct` path's constraint was never about that —
+  it is about editing *already-lowered nodes*. The real constraint is
+  heterogeneous child storage (boxing), which is cheap per component and was not
+  per node.
+
+*Supersedes* the planned `#[component]` attribute macro with
+`PartialEq`-on-props (W.3): a trait needs no proc-macro, and an explicit `deps`
+states the dependency rather than inferring it — the same argument F3 made for
+declared bindings over inferred holes.
+
+`tests/component.rs` pins the contract: build skipped while deps hold, re-run
+when they move, signals read inside tracked without being declared, siblings
+distinguished by key.
+
 ## R8 ☑ The `Element` intermediary costs ~5% of a frame — not the migration to lead with (2026-08-30)
 
 **The `Direct` migration removed `Element` in principle and not in practice.**
