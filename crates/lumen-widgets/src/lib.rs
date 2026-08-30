@@ -327,7 +327,7 @@ pub use file_picker::FilePicker;
 pub use grid::{CellRef, Grid, GridStyle};
 pub use label::Label;
 pub use lists::Pagination;
-pub use lists::VirtualList;
+pub use lists::{For, VirtualList};
 pub use lists::{DataGrid, Tree};
 pub use nav_chrome::Tabs;
 pub use nav_chrome::{AppBar, BottomNav, NavigationRail, PullToRefresh};

@@ -70,6 +70,29 @@ fn main() {
     let m = mode.clone();
     let t0 = Instant::now();
     let mut h = App::new(move |cx: &mut BuildCx| {
+        // MODE=for: the materialized keyed collection. Same chunked memo as
+        // `chunk`/`component`, but the widget picks the grain instead of the
+        // author — the point of R10.
+        if m == "for" {
+            let vals: Vec<i64> = (0..rows)
+                .map(|i| {
+                    let v: Signal<i64> = cx.signal(key(i), || 0);
+                    v.get(cx.runtime())
+                })
+                .collect();
+            let mut root: Element = lumen_widgets::For::new(cx, "rows", &vals, |_cx, i, v| {
+                let mut e: Element = widgets::text(format!("row {i} · {v}"));
+                for _ in 0..depth {
+                    e = widgets::column(vec![e]);
+                }
+                e
+            })
+            .into();
+            if std::env::var("NOFILL").is_err() {
+                root.style.width = lumen_layout::Dim::pct(1.0);
+            }
+            return root;
+        }
         // MODE=virtual: the collection widget that owns its own granularity.
         // `VirtualList` calls `render(i)` only over the visible window, so the
         // view loop, the build, the layout and the paint are all O(visible)

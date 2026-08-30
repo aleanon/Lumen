@@ -825,3 +825,110 @@ impl_widget!(Tree);
 pub fn tree(cx: &BuildCx, name: &str, rows: &[TreeRow]) -> Element {
     Tree::new(cx, name, rows).into()
 }
+
+// ---------------------------------------------------------------------------
+// `For` — a materialized list that memoizes in chunks (R10)
+// ---------------------------------------------------------------------------
+
+/// How many items share one memo scope.
+///
+/// Measured (R10, N=50 000, one item changed): 1 → 50 522 µs, 64 → 9 618,
+/// **256 → 9 098**, 1 024 → 9 892, 8 192 → 19 061, whole-list → 91 110. The
+/// curve is a broad U with a flat floor between 64 and 1 024, so the exact
+/// constant matters far less than being *somewhere in the middle* — which is
+/// the entire reason this is the widget's business and not the author's. Both
+/// endpoints are where a hand-written list naturally lands: one scope per item,
+/// or one for the lot.
+const CHUNK: usize = 256;
+
+/// A list that materializes **every** item and memoizes them in chunks.
+///
+/// Reach for [`VirtualList`] first. It is O(1) in item count (measured flat at
+/// 1 530 µs from 1 000 to 200 000 items) because it never builds what is not on
+/// screen, and it beats the best chunk size here by ~6×. `For` exists for the
+/// cases where every item genuinely must exist:
+///
+/// * the list is not inside a scroll viewport (a flow of cards, a toolbar);
+/// * something must reach items that are off screen — find-in-page, Tab
+///   traversal to a control below the fold, an agent selector addressing a row
+///   by id.
+///
+/// `For` turns an O(N)-per-frame list into O(chunk): changing one item rebuilds
+/// its chunk and splices the rest in place.
+///
+/// # Identity, and what "keyed" does and does not mean here
+///
+/// **Chunks are positional.** Appending or editing in place costs one chunk.
+/// **Inserting at the front shifts every chunk's contents and rebuilds the
+/// whole list** — the classic keyed-list problem, and this widget does not
+/// solve it. Solving it needs per-item nodes with stable identity, which is
+/// exactly the one-scope-per-item shape measured at 5.6× *worse* than chunking.
+/// That trade is why this is documented rather than hidden.
+///
+/// Per-item *state* is a different matter and is preserved: use
+/// `cx.component(item_key, ..)` inside `render`. A component's identity is its
+/// key, so its scope-local signals survive its chunk being rebuilt.
+///
+/// # Example
+///
+/// ```ignore
+/// For::new(cx, "inbox", &messages, |cx, i, m| {
+///     cx.component(m.id, MessageRow { subject: m.subject.clone(), unread: m.unread })
+/// })
+/// ```
+pub struct For {
+    el: Element,
+    common: Common,
+}
+
+impl For {
+    /// Build a chunk-memoized list over `items`.
+    ///
+    /// `id` names this list (it seeds the chunk scopes, so two lists in one view
+    /// need different ids). `T: Hash` because a chunk rebuilds when its items'
+    /// *values* change — that is the dependency, and stating it through `Hash`
+    /// is the same contract [`BuildCx::scope_with_deps`] uses.
+    ///
+    /// `render` receives a `&mut BuildCx`, so items may mount their own
+    /// components; it runs only for chunks that are dirty.
+    pub fn new<K, T, R>(cx: &mut BuildCx, id: K, items: &[T], render: R) -> For
+    where
+        K: std::hash::Hash + std::fmt::Debug + Copy,
+        T: std::hash::Hash,
+        R: Fn(&mut BuildCx, usize, &T) -> Element,
+    {
+        let groups: Vec<Element> = items
+            .chunks(CHUNK)
+            .enumerate()
+            .map(|(g, chunk)| {
+                let lo = g * CHUNK;
+                // Deps are the chunk's item values: the scope re-runs iff
+                // something it renders actually changed. Identity is (id, g) so
+                // a chunk keeps its scope — and any scope-local state within —
+                // across a rebuild.
+                cx.scope_with_deps((id, g), chunk, |cx2| {
+                    let kids: Vec<Element> = chunk
+                        .iter()
+                        .enumerate()
+                        .map(|(j, it)| render(cx2, lo + j, it))
+                        .collect();
+                    widgets::column(kids)
+                })
+            })
+            .collect();
+        For {
+            el: widgets::column(groups),
+            common: Common::default(),
+        }
+    }
+}
+
+impl Widget for For {
+    fn build(self) -> Element {
+        let For { mut el, common } = self;
+        common.apply(&mut el);
+        el
+    }
+}
+
+impl_widget!(For);

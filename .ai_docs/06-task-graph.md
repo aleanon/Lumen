@@ -582,6 +582,70 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## C2 ☑ `For` — the materialized keyed collection (2026-08-30)
+
+R10's gap: `VirtualList` is the answer whenever the list is in a scroll viewport
+(O(1) in item count), but some lists must materialize every item — not inside a
+viewport, or something must reach items below the fold (find-in-page, Tab
+traversal, an agent selector addressing a row by id). Those are the only case
+the chunking curve still governs, and until now the author had to hand-roll it.
+
+`For::new(cx, id, items, render)` chunks the list into memo scopes of **256**
+and rebuilds only the chunks whose items changed. **The widget picks the grain,
+not the author** — the whole point of R10.
+
+**Measured** (N=50 000, one item changed):
+
+| mode | frame | rebuilt | nodes |
+|---|---:|---:|---:|
+| plain | 54 565 µs | 50 001 | 50 001 |
+| per-row `scope` | 42 139 µs | 2 | 50 001 |
+| hand-written `Component` chunking | 9 157 µs | 258 | 50 197 |
+| **`For`** | **9 148 µs** | 258 | 50 197 |
+| `VirtualList` (where applicable) | 1 522 µs | 37 | 37 |
+
+Within 0.1% of the hand-written chunking it replaces, with identical
+`nodes_rebuilt` — so the widget is ergonomics, not overhead. `CHUNK = 256` from
+R10's curve, whose floor is broad (64–1 024 all within ~9–10 ms), so the
+constant matters far less than being off the endpoints.
+
+**Documented limitation rather than a hidden one:** chunks are **positional**.
+Append and in-place edit cost one chunk; **inserting at the front shifts every
+chunk and rebuilds the list.** Fixing that needs per-item nodes with stable
+identity — the one-scope-per-item shape measured 4.7× *worse*. Per-item *state*
+is unaffected: `cx.component(item_key, ..)` inside `render` keeps its
+scope-local signals across a chunk rebuild, because component identity is its
+key.
+
+`tests/for_list.rs` pins both halves of the contract — every item materialized
+(what separates it from `VirtualList`) and one change costing ≤1 chunk (what
+separates it from a plain `column`) — plus an idle pump rendering nothing and
+two lists not colliding.
+
+*A test bug worth recording:* the first version shared one `static` counter
+across tests that the harness runs in **parallel**, so they reset each other and
+the first-build assertion read 256 instead of 1 000. It looked exactly like a
+real memoization bug in `For`. Per-test statics fixed it.
+
+## S0 ◐ State-struct model — plan written, blocked on two decisions (2026-08-30)
+
+`docs/plan-state-struct-2026-08.md`. Phased S0→S4, each shipping alone.
+
+**Blocked on two decisions before any code (S0):**
+* **D1 — view-local state.** Hover, caret, dropdown-open do not belong in app
+  state; SwiftUI needs both `@State` and `@Observable`. The keyed store does not
+  go away, it stops being the only thing. What is the authoring rule?
+* **D2 — hot reload.** ADR-007 records that the central store is *what makes hot
+  reload possible*. A typed struct changes shape when code changes, turning
+  reload into a schema migration. **Strongest argument against**; must be
+  answered first.
+
+Sized honestly by R9: **8.8% of a frame**, a floor. The motivation is
+correctness and ergonomics — compile-time identity, and `Component::deps`
+getting a correct automatic default that removes C1's silent-freeze failure mode
+— not speed. Orthogonal to C1/C2 (79% and 6×), and adopting it *instead* of them
+would trade 79% for 9%.
+
 ## R10 ☑ Granularity belongs to the collection, not the author — and that widget already exists (2026-08-30)
 
 **Corrects the framing of R7 and C1.** Both argued from a scope-granularity

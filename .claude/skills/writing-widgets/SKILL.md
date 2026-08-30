@@ -274,6 +274,14 @@ are still strings (they're selectors, not reactive keys).
   `position_in_set`. Set them nowhere else — a spurious `set_size` misleads an
   AT as much as a missing one. `VirtualList` and `DataGrid` are the worked
   examples; `tests/virtualization_contract.rs` is the pattern to copy.
+- **Choosing a list widget is a performance decision with one right default.**
+  `VirtualList` first — it is O(1) in item count (1 530 µs flat from 1 000 to
+  200 000 items) because it never builds what is off screen. Use `For` only when
+  every item must exist: not in a scroll viewport, or something must reach items
+  below the fold (find-in-page, Tab, an agent selector by id). Never a plain
+  `column` of thousands of rows, and never a `cx.scope` per row — measured at
+  54 565 µs and 42 139 µs respectively against `For`'s 9 148 and `VirtualList`'s
+  1 522 (R10/C2).
 - **A screen or section is a `Component`, not a free function.** Implement
   `deps` + `build`, mount with `cx.component(key, c)`. This is the difference
   between a 42.3 ms frame and a 9.0 ms one at 50 000 rows (R7/C1) — not because
