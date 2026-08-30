@@ -70,6 +70,15 @@ pub trait LayoutEngine {
     /// Absolute window-space bounds of a node, valid after [`compute`](Self::compute).
     fn bounds(&self, node: LayoutNode) -> kurbo::Rect;
 
+    /// MUT4: whether `node` was touched by the most recent compute. `false`
+    /// is a guarantee that the node's whole subtree is unchanged — the
+    /// runtime's bounds walk prunes there. Defaulted to `true` (always
+    /// fresh), which disables pruning and is correct for any engine.
+    fn node_is_fresh(&self, node: LayoutNode) -> bool {
+        let _ = node;
+        true
+    }
+
     /// Mirror the computed tree horizontally for right-to-left layout.
     fn mirror_rtl(&mut self, root: LayoutNode);
 
@@ -126,6 +135,9 @@ impl LayoutEngine for LayoutTree {
     }
     fn bounds(&self, node: LayoutNode) -> kurbo::Rect {
         LayoutTree::bounds(self, node)
+    }
+    fn node_is_fresh(&self, node: LayoutNode) -> bool {
+        LayoutTree::node_is_fresh(self, node)
     }
     fn mirror_rtl(&mut self, root: LayoutNode) {
         LayoutTree::mirror_rtl(self, root)

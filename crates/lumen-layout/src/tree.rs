@@ -43,7 +43,18 @@ impl LayoutNode {
 /// then [`LayoutTree::compute`]; read results via [`LayoutTree::bounds`].
 pub struct LayoutTree {
     taffy: TaffyTree<()>,
-    abs: HashMap<NodeId, Rect>,
+    abs: HashMap<NodeId, AbsEntry>,
+    /// MUT4: bumped once per `compute`; entries written this compute carry it.
+    /// An entry with an older stamp was pruned — its whole subtree unchanged.
+    stamp: u64,
+    /// RTL mirroring rewrites rounded rects after the fact, which the pruning
+    /// invariant cannot see — so the first `mirror_rtl` disables pruning.
+    mirrored: bool,
+    /// MUT4: nodes whose style changed since the last compute, plus their
+    /// ancestor chains (taffy's own `mark_dirty` shape, early-out included).
+    /// The pruner must descend through these even when a rect is unchanged —
+    /// a fixed-size box can keep its rect while its interior reflows.
+    dirty_up: std::collections::HashSet<NodeId>,
     last_count: usize,
 }
 
@@ -69,8 +80,22 @@ impl LayoutTree {
     /// were. See `docs/profile-vs-iced-2026-08-19.md`.
     pub fn with_capacity(capacity: usize) -> LayoutTree {
         LayoutTree {
-            taffy: TaffyTree::with_capacity(capacity),
+            taffy: {
+                // MUT4: taffy's own rounding pass walks the ENTIRE tree on
+                // every `compute_layout`, dirty or not — measured at ~1.7 ms
+                // of a 1.85 ms "solve" at N=50 000 while the actual warm
+                // solve was 170 µs. `update_abs` applies the identical
+                // formula (round the cumulative unrounded absolute, so the
+                // per-node rounded values telescope to the same rects taffy
+                // produced) and prunes unchanged subtrees while it is there.
+                let mut t = TaffyTree::with_capacity(capacity);
+                t.disable_rounding();
+                t
+            },
             abs: HashMap::with_capacity_and_hasher(capacity, Default::default()),
+            stamp: 0,
+            mirrored: false,
+            dirty_up: std::collections::HashSet::default(),
             last_count: 0,
         }
     }
@@ -151,6 +176,17 @@ impl LayoutTree {
         self.taffy
             .set_style(node.0, style.to_taffy())
             .expect("set_style");
+        // MUT4: the pruner may not stop anywhere above this node, even where
+        // a rect is unchanged — the restyle can reflow an interior without
+        // moving the box (a fixed-size panel). Same early-out as taffy's
+        // upward invalidation.
+        let mut cur = Some(node.0);
+        while let Some(n) = cur {
+            if !self.dirty_up.insert(n) {
+                break;
+            }
+            cur = self.taffy.parent(n);
+        }
     }
 
     /// Compute layout for the whole tree rooted at `root`, filling absolute
@@ -165,30 +201,49 @@ impl LayoutTree {
                 },
             )
             .expect("compute_layout");
-        self.last_count = self.update_abs(root.0, Point::ZERO);
+        self.stamp = self.stamp.wrapping_add(1);
+        self.last_count = self.update_abs(root.0, 0.0, 0.0, 0.0, 0.0);
+        self.dirty_up.clear();
     }
 
     /// Recompute layout for `node`'s subtree only, within its established box.
     /// Nodes outside the subtree keep their bounds. [`LayoutTree::touched`]
     /// returns how many nodes were recomputed.
     pub fn relayout_subtree(&mut self, node: LayoutNode) {
-        let cur = self.abs.get(&node.0).copied().unwrap_or(Rect::ZERO);
+        let cur = self
+            .abs
+            .get(&node.0)
+            .map(|e| e.raw)
+            .unwrap_or([0.0, 0.0, 0.0, 0.0]);
         self.taffy
             .compute_layout(
                 node.0,
                 TSize {
-                    width: AvailableSpace::Definite(cur.width() as f32),
-                    height: AvailableSpace::Definite(cur.height() as f32),
+                    width: AvailableSpace::Definite(cur[2]),
+                    height: AvailableSpace::Definite(cur[3]),
                 },
             )
             .expect("compute_layout");
-        self.last_count = self.update_abs(node.0, cur.origin());
+        self.stamp = self.stamp.wrapping_add(1);
+        let origin = self.abs.get(&node.0).map(|e| (e.rect.x0, e.rect.y0));
+        let (px, py) = origin.unwrap_or((0.0, 0.0));
+        self.last_count = self.update_abs(node.0, cur[0], cur[1], px, py);
+        self.dirty_up.clear();
     }
 
     /// Absolute window-space bounds of `node` (the single source of truth shared
     /// with the SoA `bounds` and `ui.getLayout`, 02 §5).
     pub fn bounds(&self, node: LayoutNode) -> Rect {
-        self.abs.get(&node.0).copied().unwrap_or(Rect::ZERO)
+        self.abs.get(&node.0).map(|e| e.rect).unwrap_or(Rect::ZERO)
+    }
+
+    /// MUT4: whether `node` was touched by the most recent
+    /// `compute`/`relayout_subtree`. `false` means the pruner proved its whole
+    /// subtree unchanged — every stored bound below it is still exact.
+    pub fn node_is_fresh(&self, node: LayoutNode) -> bool {
+        self.abs
+            .get(&node.0)
+            .is_none_or(|e| e.stamp == self.stamp)
     }
 
     /// Number of nodes whose bounds were recomputed by the last
@@ -202,16 +257,21 @@ impl LayoutTree {
     /// content moves to the right and rows read right-to-left, while sizes and
     /// vertical layout are unchanged. Call after [`LayoutTree::compute`].
     pub fn mirror_rtl(&mut self, root: LayoutNode) {
-        let r = self.abs.get(&root.0).copied().unwrap_or(Rect::ZERO);
+        // Mirroring edits rounded rects behind the pruner's back; from here on
+        // every compute rewrites everything (RTL apps forgo the pruning).
+        self.mirrored = true;
+        let r = self.bounds(root);
         self.mirror_node(root.0, r);
     }
 
     fn mirror_node(&mut self, node: NodeId, parent: Rect) {
-        let b = self.abs.get(&node).copied().unwrap_or(Rect::ZERO);
+        let b = self.abs.get(&node).map(|e| e.rect).unwrap_or(Rect::ZERO);
         let new_x0 = parent.x0 + (parent.width() - (b.x0 - parent.x0) - b.width());
         let mirrored =
             Rect::from_origin_size(Point::new(new_x0, b.y0), Size::new(b.width(), b.height()));
-        self.abs.insert(node, mirrored);
+        if let Some(e) = self.abs.get_mut(&node) {
+            e.rect = mirrored;
+        }
         let children = self.taffy.children(node).expect("children");
         for child in children {
             self.mirror_node(child, mirrored);
@@ -220,22 +280,65 @@ impl LayoutTree {
 
     /// Post-order-free recursive accumulation of absolute bounds; returns the
     /// number of nodes visited.
-    fn update_abs(&mut self, node: NodeId, parent_origin: Point) -> usize {
+    /// Absolute positions from the *unrounded* solve, rounded here with
+    /// taffy's own `round_layout` formula, byte-for-byte: the rounded origin
+    /// is the running sum of per-node `round(location)` (taffy rounds the
+    /// RELATIVE location — summing `round(cumulative)` instead drifts a pixel
+    /// whenever fractions accumulate, which five doc-shot goldens caught),
+    /// and the size is `round(cum + size) − round(cum)` against the
+    /// *unrounded* f32 cumulative, exactly as taffy computes it. Same rects
+    /// as the old rounding-on pipeline, without taffy's O(whole tree)
+    /// rounding pass.
+    ///
+    /// MUT4 pruning: a node whose unrounded absolute rect is unchanged has an
+    /// unchanged interior — its subtree was either cache-hit (spliced spans
+    /// keep their taffy nodes and nothing dirties inside one) or re-solved
+    /// deterministically against the same box. A freshly minted node can
+    /// never match: its slotmap key is new, so `abs` has no entry. Comparing
+    /// *unrounded* values also closes the subpixel hole a rounded compare
+    /// has (a parent moved by 0.4 px can keep its rounded rect while a
+    /// child's rounded position shifts a pixel). Skipped entries keep their
+    /// old `stamp`, which is what `node_is_fresh` reports to the arena walk.
+    fn update_abs(&mut self, node: NodeId, cx: f32, cy: f32, px: f64, py: f64) -> usize {
         let layout = *self.taffy.layout(node).expect("layout");
-        let origin = Point::new(
-            parent_origin.x + layout.location.x as f64,
-            parent_origin.y + layout.location.y as f64,
+        let rx = cx + layout.location.x;
+        let ry = cy + layout.location.y;
+        let raw = [rx, ry, layout.size.width, layout.size.height];
+        if !self.mirrored && !self.dirty_up.contains(&node) {
+            if let Some(e) = self.abs.get(&node) {
+                if e.raw == raw {
+                    return 0; // prune: the whole subtree is current
+                }
+            }
+        }
+        let x0 = px + layout.location.x.round() as f64;
+        let y0 = py + layout.location.y.round() as f64;
+        let w = (rx + layout.size.width).round() - rx.round();
+        let h = (ry + layout.size.height).round() - ry.round();
+        let rect = Rect::new(x0, y0, x0 + w as f64, y0 + h as f64);
+        self.abs.insert(
+            node,
+            AbsEntry {
+                raw,
+                rect,
+                stamp: self.stamp,
+            },
         );
-        let rect = Rect::from_origin_size(
-            origin,
-            Size::new(layout.size.width as f64, layout.size.height as f64),
-        );
-        self.abs.insert(node, rect);
         let children = self.taffy.children(node).expect("children");
         let mut count = 1;
         for child in children {
-            count += self.update_abs(child, origin);
+            count += self.update_abs(child, rx, ry, x0, y0);
         }
         count
     }
+}
+
+/// MUT4: one node's solved geometry — the unrounded absolute rect (the
+/// pruning key), the rounded rect every consumer reads, and the compute
+/// stamp that wrote it.
+#[derive(Clone, Copy)]
+struct AbsEntry {
+    raw: [f32; 4],
+    rect: Rect,
+    stamp: u64,
 }

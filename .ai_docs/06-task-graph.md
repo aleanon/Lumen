@@ -582,6 +582,53 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT4 ☑ Layout's two hidden O(N) passes removed — rebuild frames −45…55% (2026-08-30)
+
+**The diagnosis rewrote the plan.** MUT4 was scoped as "warm layout for
+rebuilt spans" on R6's cold-cache evidence. Phase probes (added, measured,
+reverted) on the chunk N=50 000 steady frame showed taffy's caching already
+working — the 2 927 µs "layout" phase was: **taffy's rounding pass ~1 675 µs**
+(an O(whole tree) walk on every `compute_layout`, dirty or not), **
+`update_abs` ~996 µs** (O(N) absolute-position pass, plus one `Vec` allocation
+per node from `taffy.children()`), and the actual warm solve **~170 µs**.
+Confirmed by flipping `disable_rounding`: the solve fell from 1 845 to
+170 µs.
+
+**What landed.** Taffy rounding is off; `update_abs` applies taffy's `round_layout`
+formula byte-for-byte — and getting there took the goldens: the first version
+rounded the cumulative absolute (`x0 = round(abs)`), which drifts a pixel
+whenever fractional locations accumulate, and **five doc-shot goldens
+caught it**. Taffy rounds the RELATIVE location per node (origin = running
+sum of `round(location)`) while sizes use the unrounded f32 cumulative
+(`round(cum+size) − round(cum)`); replicated exactly, all 68 doc-shots are
+byte-identical again. While there it
+**prunes**: an entry whose unrounded absolute rect is unchanged keeps its
+subtree (`AbsEntry { raw, rect, stamp }`); the arena walk now prunes on
+`node_is_fresh` (the stamp) instead of its own rounded-value compare — which
+also closes MUT3's subpixel hole (a parent moved 0.4 px can keep its rounded
+rect while a child's rounded position shifts a pixel; unrounded comparison
+descends). The MUT3 build-epoch survives as a debug invariant
+(`fresh || !born_this_epoch`).
+
+**The soundness hole the layout suite caught before it shipped:** "unchanged
+rect ⇒ unchanged interior" is FALSE on the dirty path —
+`dirty_subtree_relayout_touches_only_descendants` re-styles a leaf inside a
+fixed-size panel: the panel's rect is unchanged while its interior reflows,
+and the first pruner skipped it (`touched()` 3 → 0). Fix: `set_style` marks
+the node and its ancestor chain (`dirty_up`, taffy's early-out shape); the
+pruner never stops on a marked node. Spliced spans mark nothing, so the hot
+path is unaffected. RTL: `mirror_rtl` rewrites rounded rects behind the
+pruner's back, so the first mirror call disables pruning permanently —
+RTL apps forgo the optimization, correctness first.
+
+**Measured** (sparse, taskset, K=1): chunk N=50 000 **8 817 → 4 171 µs**
+(−53%); scope N=10 000 D=8 **22 198 → 12 193 µs** (−45%); decline path
+**10 962 → 7 260 µs**; patch frames unaffected (218 → 200 µs). Also from the
+probes, for the record: `damage_between` is **2 µs** on a rebuild frame (the
+prefix/suffix trim works) — the remaining rebuild-frame O(N) is the **view
+phase (~3.3 ms, authoring + store reads) and `build_display_list`
+(~2.7 ms)**, which is MUT5's target list.
+
 ## MUT3 ☑ The bounds walk prunes unmoved spliced subtrees — 50 197 visits → 712 (2026-08-30)
 
 **The rebuild frame's flat O(live nodes) bounds/clip pass is now change-

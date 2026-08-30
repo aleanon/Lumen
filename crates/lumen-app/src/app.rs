@@ -5598,7 +5598,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
         .lower_root(root_el);
         debug_assert_eq!(root_node, tree.root(), "build left the tree root unset");
-
         // F2.2: free the previous frame's spine — arena node, side-table
         // entries and taffy node together.
         //
@@ -5693,7 +5692,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 self.scope_spans.insert(*k, *r);
             }
         }
-
         layout.compute(root_lnode, self.size);
         if self.rtl {
             layout.mirror_rtl(root_lnode);
@@ -5704,20 +5702,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // not enumerated anywhere else — and their absolute positions still
         // change whenever something above them resizes.
         //
-        // MUT3: top-down with subtree pruning, replacing the flat O(live
-        // nodes) pass. A node retained from a previous build (spliced — its
-        // styles and children unchanged by definition of the splice) whose
-        // solved absolute rect equals its stored bounds has an interior laid
-        // out purely relative to that rect: nothing inside can have moved, and
-        // every stored descendant bound and clip is still exact, so the walk
-        // stops there. A freshly lowered node is never pruned (`born_this_
-        // epoch`, which slot recycling cannot fool), so its bounds and clip
-        // are always written. Scroll offsets need no special case: they are
-        // expressed through layout (negative margins), so a scrolled span
-        // re-lowers and descends. One narrowing this shares with restyle: a
-        // `.lss` state-part that changes `clip` reaches the hit-test tree
-        // when the node re-lowers, not from a spliced frame — restyle never
-        // wrote `tree.clip` either, so that edge is unchanged.
+        // MUT3/MUT4: top-down with subtree pruning, replacing the flat O(live
+        // nodes) pass. The layout engine's own pruner (`update_abs`) proves,
+        // per subtree, that nothing moved — it compares the *unrounded*
+        // absolute rect, so even a subpixel shift that keeps the rounded rect
+        // descends — and `node_is_fresh` reports the result: `false` means
+        // every stored bound and clip below the node is still exact, so the
+        // walk stops there. A freshly lowered node always reports fresh (its
+        // taffy slot is new), so its bounds and clip are always written; the
+        // arena's build epoch (MUT3) cross-checks that as a debug invariant.
+        // Scroll offsets need no special case: they are expressed through
+        // layout (negative margins), so a scrolled span re-lowers and
+        // descends. One narrowing this shares with restyle: a `.lss`
+        // state-part that changes `clip` reaches the hit-test tree when the
+        // node re-lowers, not from a spliced frame — restyle never wrote
+        // `tree.clip` either, so that edge is unchanged.
         //
         // Clip propagation (unchanged): a `clip: true` node (e.g. a
         // Scrollable viewport) must reject pointer events on descendants that
@@ -5733,10 +5732,15 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
                 stack.push(tree.next_sibling(node));
                 if let Some(raw) = tree.lnode(node) {
-                    let b = layout.bounds(LayoutNode::from_raw(raw));
-                    if !tree.born_this_epoch(node) && tree.bounds(node) == b {
+                    let ln = LayoutNode::from_raw(raw);
+                    if !layout.node_is_fresh(ln) {
+                        debug_assert!(
+                            !tree.born_this_epoch(node),
+                            "a node lowered this build must have fresh layout"
+                        );
                         continue; // prune: the whole subtree is current
                     }
+                    let b = layout.bounds(ln);
                     tree.set_bounds(node, b);
                     let clip_on = self
                         .node_style
@@ -5749,7 +5753,6 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 stack.push(tree.first_child(node));
             }
         }
-
         // B.2b: container queries resolved against the *previous* layout's
         // container sizes; if this layout measured them differently, one
         // bounded re-pass lets queries see the fresh sizes within this pump
