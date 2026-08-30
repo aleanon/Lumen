@@ -169,7 +169,8 @@ diagnostic can catch it: the mismatch is only knowable after layout.
   so it costs the same at 50 000 rows as at 10 000 (~0.2 ms). Measured on a 3000-row list, changing one row:
   **~93 µs bound against ~832 µs** for the same change written as a value read
   inside the view (or inside a `cx.scope`). Backgrounds (`bind_background`)
-  always patch; text patches whenever the new string measures the same size,
+  and text colours (`bind_text_color`, MUT5 — the glyph brush is rewritten in
+  place, no reshaping) always patch; text patches whenever the new string measures the same size,
   and falls back to a rebuild only when the box would genuinely move — an axis
   the author fixed (`style.width = Dim::px(..)`, a `VirtualList` item height, a
   paragraph that still wraps to the same lines) can never move, so those always

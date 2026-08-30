@@ -582,6 +582,63 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT6 ☑ Semantics patch in place — the 15 ms observer tax is gone (2026-08-30)
+
+**Measured first** (`benches/src/bin/semtime.rs`, kept as the arm): after a
+one-row text patch at N=50 000, the next semantics consumer — an agent RPC,
+an attached screen reader, `assert_view_coherent` — paid **15 049 µs**
+(split: 8.5 ms tree rebuild + 6.5 ms elide projection), 70× the 218 µs patch
+frame itself, because every text patch set `sem_root = None` and invalidated
+the elided cache wholesale.
+
+**Now the projections are patched in place.** A lazy per-tree path index
+(slot → child positions, built once per tree instance) lets
+`patch_semantics_label` navigate straight to the node in both the full tree
+and the elided projection and update exactly the fields
+`build_semantics_at` derives for a text change: the label plus, under
+`dev-observability`, the dep union, ink and text metrics (the paint runs
+first, so the side tables are already fresh). Bounds, states, value and
+identity are untouched by a layout-neutral patch. Each projection falls back
+to the old invalidation when it cannot patch — the tree is shared (a
+consumer still holds an `Rc`, pinned by the new fallback test), the path is
+stale, the slot is missing — and a slot absent from the *elided* index just
+means the node is elided out. The serialized JSON doc cannot be patched and
+is dropped as before. **`assert_view_coherent` is the oracle**: every
+binding-suite test compares the patched projections against a fresh build.
+
+**Measured after: 0 µs** — the semantics after a patch is simply already
+current. The remaining per-consumer cost for an attached screen reader is the
+AccessKit adapter's own tree conversion (outside the engine; noted, not
+addressed). `sem_gen` still bumps per patch so agents' change detection sees
+patched frames.
+
+## MUT5 ☑ `bind_text_color` — the paint-only binding set grows (2026-08-30)
+
+**Scoped by evidence, not by the plan's list.** The plan named colour,
+opacity, transform, value and visual state. Opacity and transform have **no
+element-level property to bind** — `Tree::set_opacity`/`set_transform` have
+zero callers and both effects flow exclusively from `.lss` into compositing
+layers — so binding them means designing new node-level paint properties,
+deferred to the animations rework rather than half-built here. Widget values
+(ProgressBar) are layout-coupled and already land correctly through the MUT1
+scoped-decline fallback. Visual state is the restyle path's job. What
+remained with real leverage: **text colour**, the missing half of the text
+story (content patched since F3.5, colour still forced a rebuild).
+
+`Element::bind_text_color(Dynamic<Color>)` (field in `RareEl`, so `Element`
+stays 784 B — the `type_sizes` gate is why): isolated + retained like the
+background, indexed through `BindingSlot::Color`, settled in
+`settle_bindings_for_rebuild`, carried across splices, folded into the same
+pump arms. A colour change rewrites only the glyph run's **brush** through
+the MUT2 surgery — the run itself is reused from the shape cache (colour
+never reshapes) — and has no semantic footprint, so MUT6 does no work
+either: the cheapest patch in the system. `.lss` `color` still wins at
+paint, exactly as over a static colour. `NodeMeta.deps` gains a `color`
+bucket (`ui.getDeps.byProp.color`); the facade gate calls the new builder.
+*Guarded by* `a_color_binding_patches_without_rebuild` (build count stays 1,
+pixels change, coherence holds) and the MUT2 byte-equality oracle, whose
+view now carries a colour binding through its patch rounds.
+
 ## MUT4 ☑ Layout's two hidden O(N) passes removed — rebuild frames −45…55% (2026-08-30)
 
 **The diagnosis rewrote the plan.** MUT4 was scoped as "warm layout for

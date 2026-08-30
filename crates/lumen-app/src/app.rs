@@ -628,6 +628,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             node_text_metrics: HashMap::default(),
             frame: RgbaImage::new(size.width as u32, size.height as u32),
             sem_root: RefCell::new(None),
+            sem_paths: RefCell::new(None),
+            elided_paths: RefCell::new(None),
             handle_index: RefCell::new(None),
             build_panic: None,
             focused_id: focused,
@@ -705,6 +707,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             scope_skipped: RefCell::new(crate::fxhash::HashSet::default()),
             tasks_table: RefCell::new(HashMap::default()),
             bg_bindings: Vec::new(),
+            color_bindings: Vec::new(),
             binding_index: HashMap::default(),
             dl_patch: HashMap::default(),
             text_bindings: Vec::new(),
@@ -803,6 +806,13 @@ pub enum ReloadResult {
 /// A retained paint-only prop binding (F3.4): its node, the binding, and the
 /// signals it last read. When those change, the runtime re-evaluates the binding
 /// and patches `meta[node]` + repaints — no rebuild, no relayout.
+/// MUT5: a retained text-colour binding — paint-only, like the background.
+struct BoundColor {
+    node: NodeIndex,
+    dynamic: lumen_core::Dynamic<Color>,
+    deps: lumen_core::state::ReadSet,
+}
+
 struct BoundBg {
     node: NodeIndex,
     dynamic: lumen_core::Dynamic<Color>,
@@ -830,6 +840,7 @@ struct BoundBg {
 enum BindingSlot {
     Text(u32),
     Bg(u32),
+    Color(u32),
 }
 
 /// MUT2: a bound node's footprint in the retained display list. `text_cmd` /
@@ -883,6 +894,8 @@ struct NodeDeps {
     text: Vec<String>,
     background: Vec<String>,
     class: Vec<String>,
+    /// MUT5: text-colour binding deps — updates via a paint-only patch.
+    color: Vec<String>,
 }
 
 #[cfg(feature = "dev-observability")]
@@ -896,6 +909,7 @@ impl NodeDeps {
             .chain(&self.text)
             .chain(&self.background)
             .chain(&self.class)
+            .chain(&self.color)
         {
             if !d.contains(k) {
                 d.push(k.clone());
@@ -1183,6 +1197,15 @@ pub struct Headless<
     /// A rebuild now invalidates this; the first reader builds it and the rest
     /// share the `Rc`.
     sem_root: RefCell<Option<Rc<SemanticsNode>>>,
+    /// MUT6: slot → child-position path into `sem_root`, built lazily once
+    /// per tree instance so a text patch can navigate straight to its node
+    /// instead of invalidating the whole tree (measured: a one-row patch at
+    /// N=50 000 cost the next consumer 8.5 ms of rebuild + 6.5 ms of elide).
+    /// Dies with the tree.
+    sem_paths: RefCell<Option<HashMap<u32, Vec<u32>>>>,
+    /// Same, for `elided_cache`. A slot absent from THIS map is an elided
+    /// node — its label does not appear in the projection, nothing to patch.
+    elided_paths: RefCell<Option<HashMap<u32, Vec<u32>>>>,
     /// O0.4: node index → handle, built once per semantic tree.
     ///
     /// `handle_for_index` used to walk the whole semantic tree per call, and
@@ -1426,6 +1449,7 @@ pub struct Headless<
     /// Retained paint-only prop bindings from the last build (F3.4). A change to
     /// one binding's deps patches its node + repaints, skipping the rebuild.
     bg_bindings: Vec<BoundBg>,
+    color_bindings: Vec<BoundColor>,
     /// MUT1: SignalId → binding slots. Rebuilt after every rebuild and kept
     /// current across patches whose read set changed, so the pump resolves a
     /// write to its bindings in O(writes) instead of scanning every binding.
@@ -1699,8 +1723,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // risk note) so layout stays correct.
         let restyle_only = visual_changed && !needs_rebuild && !full_rebuild_forced();
         // MUT1: written signals → stale binding indices via the reverse index.
-        let (stale_text, stale_bg) = if needs_rebuild {
-            (Vec::new(), Vec::new())
+        let (stale_text, stale_bg, stale_color) = if needs_rebuild {
+            (Vec::new(), Vec::new(), Vec::new())
         } else {
             self.stale_bindings(&written)
         };
@@ -1769,13 +1793,24 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             if !self.patch_text_bindings(&stale_text) {
                 self.allow_copy_forward = !visual_changed && !full_rebuild_forced();
                 self.rebuild();
-            } else if !stale_bg.is_empty() {
-                // A background binding changed in the same pump — fold it in,
-                // rather than leave it for a frame that may never come.
+            } else {
+                // Sibling paint-only bindings changed in the same pump — fold
+                // them in, rather than leave them for a frame that may never
+                // come.
+                if !stale_bg.is_empty() {
+                    self.patch_bg_bindings(&stale_bg);
+                }
+                if !stale_color.is_empty() {
+                    self.patch_color_bindings(&stale_color);
+                }
+            }
+        } else if write_changed && (!stale_bg.is_empty() || !stale_color.is_empty()) {
+            if !stale_bg.is_empty() {
                 self.patch_bg_bindings(&stale_bg);
             }
-        } else if write_changed && !stale_bg.is_empty() {
-            self.patch_bg_bindings(&stale_bg);
+            if !stale_color.is_empty() {
+                self.patch_color_bindings(&stale_color);
+            }
         } else {
             // Nothing changed — keep the retained frame, report no damage.
             self.last_damage = Damage::None;
@@ -3801,6 +3836,113 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
     }
 
+    /// MUT6: update the retained semantics projections in place for one
+    /// patched text node — the label plus, under `dev-observability`, the
+    /// dep union, ink and text metrics: exactly the fields
+    /// `build_semantics_at` derives from the meta and side tables. Bounds,
+    /// states, value and identity are untouched by a layout-neutral text
+    /// patch. On any mismatch a projection falls back to invalidation,
+    /// which is always correct; `assert_view_coherent` compares the patched
+    /// tree against a fresh build, so a missed field cannot ship silently.
+    fn patch_semantics_label(&self, node: NodeIndex) {
+        #[cfg(feature = "dev-observability")]
+        self.sem_gen.set(self.sem_gen.get() + 1);
+        // The serialized doc cannot be patched — rebuilt on demand.
+        #[cfg(feature = "snapshot")]
+        {
+            *self.json_cache.borrow_mut() = [None, None];
+        }
+        let slot = node.index();
+        let apply = |s: &mut SemanticsNode| {
+            if let Some(m) = self.meta.get(&node) {
+                s.label = m.label.clone();
+                #[cfg(feature = "dev-observability")]
+                {
+                    s.deps = (!m.deps.is_empty()).then(|| m.deps.union());
+                }
+            }
+            #[cfg(feature = "dev-observability")]
+            {
+                s.ink = self.node_ink.get(&node).copied();
+                s.text_metrics =
+                    self.node_text_metrics
+                        .get(&node)
+                        .map(|m| lumen_core::semantics::TextMetrics {
+                            line_count: m.line_count as u32,
+                            box_height: m.box_height,
+                            ascent: m.ascent,
+                            descent: m.descent,
+                            line_height: m.line_height,
+                            content_height: m.content_height,
+                        });
+            }
+        };
+        if !Self::patch_projection(&self.sem_root, &self.sem_paths, slot, false, &apply) {
+            *self.sem_root.borrow_mut() = None;
+            self.sem_paths.borrow_mut().take();
+            self.elided_cache.borrow_mut().take();
+            self.elided_paths.borrow_mut().take();
+            return;
+        }
+        if !Self::patch_projection(&self.elided_cache, &self.elided_paths, slot, true, &apply) {
+            self.elided_cache.borrow_mut().take();
+            self.elided_paths.borrow_mut().take();
+        }
+    }
+
+    /// Navigate one retained projection to `slot` and apply the update.
+    /// `false` ⇒ the caller must invalidate that projection instead: the tree
+    /// is shared (a consumer still holds an `Rc`), or the path is stale.
+    /// `absent_ok` covers the elided projection, where a missing slot means
+    /// the node is elided out and carries nothing to patch. An empty cell is
+    /// trivially fine — the next consumer builds fresh.
+    fn patch_projection(
+        cell: &RefCell<Option<Rc<SemanticsNode>>>,
+        paths: &RefCell<Option<HashMap<u32, Vec<u32>>>>,
+        slot: u32,
+        absent_ok: bool,
+        apply: &dyn Fn(&mut SemanticsNode),
+    ) -> bool {
+        let mut cell_b = cell.borrow_mut();
+        let Some(rc) = cell_b.as_mut() else {
+            return true;
+        };
+        {
+            let mut pb = paths.borrow_mut();
+            if pb.is_none() {
+                fn rec(n: &SemanticsNode, path: &mut Vec<u32>, out: &mut HashMap<u32, Vec<u32>>) {
+                    out.insert(n.index, path.clone());
+                    for (i, c) in n.children.iter().enumerate() {
+                        path.push(i as u32);
+                        rec(c, path, out);
+                        path.pop();
+                    }
+                }
+                let mut map = HashMap::default();
+                rec(rc, &mut Vec::new(), &mut map);
+                *pb = Some(map);
+            }
+        }
+        let pb = paths.borrow();
+        let Some(path) = pb.as_ref().and_then(|m| m.get(&slot)) else {
+            return absent_ok;
+        };
+        let Some(mut cur) = Rc::get_mut(rc) else {
+            return false;
+        };
+        for &i in path {
+            match cur.children.get_mut(i as usize) {
+                Some(c) => cur = c,
+                None => return false,
+            }
+        }
+        if cur.index != slot {
+            return false;
+        }
+        apply(cur);
+        true
+    }
+
     /// Drop the memoized elided tree — call wherever `sem_root` is reassigned.
     fn invalidate_semantics_cache(&self) {
         // O0.3: the semantic tree is what every lint finding derives from, so
@@ -3812,6 +3954,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         #[cfg(feature = "dev-observability")]
         self.sem_gen.set(self.sem_gen.get() + 1);
         self.elided_cache.borrow_mut().take();
+        self.elided_paths.borrow_mut().take();
         // O0.4: derived from the tree, so it dies with it.
         self.handle_index.borrow_mut().take();
         #[cfg(feature = "snapshot")]
@@ -4800,7 +4943,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
 
         *self.sem_root.borrow_mut() = None;
-
+        self.sem_paths.borrow_mut().take();
         self.invalidate_semantics_cache();
         self.last_damage = self.paint();
         self.record_change("restyle", || nodes.iter().map(|n| n.index()).collect());
@@ -5029,17 +5172,21 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // repaints — so no paint or semantics work here.
             return false;
         }
-        // The accessible name changed, so the memoized semantics tree is stale.
-        // The background patch below does not need this and does not do it;
-        // text does.
-        *self.sem_root.borrow_mut() = None;
-        self.invalidate_semantics_cache();
         // MUT2: rewrite the patched runs in the retained display list; the
         // full rebuild-and-diff paint is the fallback, not the steady state.
         self.last_damage = match self.paint_patched(&patched_nodes, &[]) {
             Some(d) => d,
             None => self.paint(),
         };
+        // MUT6: the accessible name changed — update the retained semantics
+        // projections in place (after the paint, which refreshes the ink and
+        // text-metrics side tables the projection mirrors). Each projection
+        // falls back to whole-tree invalidation when it cannot patch, which
+        // is what this path always did. The background patch has no semantic
+        // footprint and does none of this.
+        for &node in &patched_nodes {
+            self.patch_semantics_label(node);
+        }
         self.last_build_gen = self.rt.write_gen();
         self.record_change("patch", || patched);
         true
@@ -5081,6 +5228,23 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     m.deps.background = self.bg_bindings[i].deps.dep_keys(&rt);
                 }
                 m.background = Some(color);
+            }
+        }
+        for i in 0..self.color_bindings.len() {
+            if self.color_bindings[i].deps.is_current(&rt) {
+                continue;
+            }
+            let (c, reads) = self.color_bindings[i].dynamic.eval_isolated(&rt);
+            let node = self.color_bindings[i].node;
+            self.color_bindings[i].deps = reads;
+            if let Some(m) = self.meta.get_mut(&node) {
+                #[cfg(feature = "dev-observability")]
+                {
+                    m.deps.color = self.color_bindings[i].deps.dep_keys(&rt);
+                }
+                if let NodeContent::Text(_, ts) = &mut m.content {
+                    ts.color = c;
+                }
             }
         }
         let mut evict: Vec<NodeIndex> = Vec::new();
@@ -5175,18 +5339,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// Sorted and deduplicated; `is_current` stays the authority (a logged
     /// signal may resolve to bindings that were already refreshed), the index
     /// only narrows the scan from O(bindings) to O(writes).
-    fn stale_bindings(&self, written: &[SignalId]) -> (Vec<usize>, Vec<usize>) {
+    fn stale_bindings(&self, written: &[SignalId]) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
         if written.is_empty() {
-            return (Vec::new(), Vec::new());
+            return (Vec::new(), Vec::new(), Vec::new());
         }
         let mut text: Vec<usize> = Vec::new();
         let mut bg: Vec<usize> = Vec::new();
+        let mut color: Vec<usize> = Vec::new();
         for sig in written {
             if let Some(slots) = self.binding_index.get(sig) {
                 for s in slots {
                     match *s {
                         BindingSlot::Text(i) => text.push(i as usize),
                         BindingSlot::Bg(i) => bg.push(i as usize),
+                        BindingSlot::Color(i) => color.push(i as usize),
                     }
                 }
             }
@@ -5195,9 +5361,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         text.dedup();
         bg.sort_unstable();
         bg.dedup();
+        color.sort_unstable();
+        color.dedup();
         text.retain(|&i| !self.text_bindings[i].deps.is_current(&self.rt));
         bg.retain(|&i| !self.bg_bindings[i].deps.is_current(&self.rt));
-        (text, bg)
+        color.retain(|&i| !self.color_bindings[i].deps.is_current(&self.rt));
+        (text, bg, color)
     }
 
     /// MUT1: rebuild the reverse index from the live binding records. Called
@@ -5219,6 +5388,14 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     .entry(id)
                     .or_default()
                     .push(BindingSlot::Bg(i as u32));
+            }
+        }
+        for (i, b) in self.color_bindings.iter().enumerate() {
+            for id in b.deps.signal_ids() {
+                self.binding_index
+                    .entry(id)
+                    .or_default()
+                    .push(BindingSlot::Color(i as u32));
             }
         }
     }
@@ -5279,6 +5456,43 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             patched_nodes.push(node);
         }
         self.last_damage = match self.paint_patched(&[], &patched_nodes) {
+            Some(d) => d,
+            None => self.paint(),
+        };
+        self.last_build_gen = self.rt.write_gen();
+        self.record_change("patch", || patched);
+    }
+
+    /// MUT5: satisfy changed text-colour bindings with a brush rewrite — the
+    /// glyph run itself is unchanged (colour never reshapes), so the MUT2
+    /// text surgery reuses the cached run and only the brush and damage move.
+    fn patch_color_bindings(&mut self, stale: &[usize]) {
+        let rt = self.rt.clone();
+        let mut patched: Vec<u32> = Vec::new();
+        let mut patched_nodes: Vec<NodeIndex> = Vec::new();
+        for &i in stale {
+            let (c, reads) = self.color_bindings[i].dynamic.eval_isolated(&rt);
+            let node = self.color_bindings[i].node;
+            Self::reindex_binding(
+                &mut self.binding_index,
+                BindingSlot::Color(i as u32),
+                &self.color_bindings[i].deps,
+                &reads,
+            );
+            self.color_bindings[i].deps = reads;
+            if let Some(m) = self.meta.get_mut(&node) {
+                #[cfg(feature = "dev-observability")]
+                {
+                    m.deps.color = self.color_bindings[i].deps.dep_keys(&rt);
+                }
+                if let NodeContent::Text(_, ts) = &mut m.content {
+                    ts.color = c;
+                }
+            }
+            patched.push(node.index());
+            patched_nodes.push(node);
+        }
+        self.last_damage = match self.paint_patched(&patched_nodes, &[]) {
             Some(d) => d,
             None => self.paint(),
         };
@@ -5390,6 +5604,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // free walk keeps the records whose nodes are still alive.
         let prev_bg_bindings = std::mem::take(&mut self.bg_bindings);
         let prev_text_bindings = std::mem::take(&mut self.text_bindings);
+        let prev_color_bindings = std::mem::take(&mut self.color_bindings);
 
         // Dispatch background-work requests this build emitted, on the executor.
         // The runtime owns the executor + the deferred-op channel, so it mints
@@ -5677,6 +5892,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 self.text_bindings.push(b);
             }
         }
+        for b in prev_color_bindings {
+            if tree.is_alive(b.node) {
+                self.color_bindings.push(b);
+            }
+        }
 
         // F2.2: carry forward the span records of scopes that were never
         // visited this build because an ancestor took the memo-hit path.
@@ -5821,6 +6041,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         }
         self.last_damage = self.paint();
         *self.sem_root.borrow_mut() = None;
+        self.sem_paths.borrow_mut().take();
         self.invalidate_semantics_cache();
     }
 
@@ -6222,6 +6443,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 "text": deps.text,
                 "background": deps.background,
                 "class": deps.class,
+                "color": deps.color,
             },
         })
     }
@@ -6779,8 +7001,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         #[cfg(feature = "dev-observability")]
         let mut bg_deps: Vec<String> = Vec::new();
         #[cfg(feature = "dev-observability")]
+        let mut color_deps: Vec<String> = Vec::new();
+        #[cfg(feature = "dev-observability")]
         let mut class_deps: Vec<String> = Vec::new();
-        if el.dyn_text.is_some() || el.dyn_bg.is_some() || el.dyn_classes.is_some() {
+        let dyn_color = el.rare.as_ref().and_then(|r| r.dyn_color.clone());
+        if el.dyn_text.is_some() || el.dyn_bg.is_some() || el.dyn_classes.is_some() || dyn_color.is_some() {
             let rt = self.app.rt.clone();
             if let Some(d) = el.dyn_classes.clone() {
                 // Classes drive the `.lss` cascade (may change size) → NON-isolated
@@ -6835,6 +7060,25 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     deps: reads,
                 });
             }
+            if let Some(d) = dyn_color {
+                // MUT5: text colour is paint-only — ISOLATED + retained like
+                // the background; a change rewrites the glyph brush in place.
+                // `.lss` `color` still wins at paint, same as over a static
+                // colour.
+                let (c, reads) = d.eval_isolated(&rt);
+                #[cfg(feature = "dev-observability")]
+                {
+                    color_deps = reads.dep_keys(&rt);
+                }
+                if let NodeContent::Text(_, ts) = &mut el.content {
+                    ts.color = c;
+                }
+                self.app.color_bindings.push(BoundColor {
+                    node,
+                    dynamic: d,
+                    deps: reads,
+                });
+            }
         }
         #[cfg(feature = "dev-observability")]
         let node_deps = NodeDeps {
@@ -6842,6 +7086,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             text: text_deps,
             background: bg_deps,
             class: class_deps,
+            color: color_deps,
         };
 
         let mut flags = NodeFlags::VISIBLE;
@@ -7511,6 +7756,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             .iter()
             .map(|b| b.node)
             .chain(self.bg_bindings.iter().map(|b| b.node))
+            .chain(self.color_bindings.iter().map(|b| b.node))
             .collect();
         // PROP1 `z-index`: siblings paint in ascending z. Sibling-scoped, so
         // the depth-keyed clip stack below still sees a strict preorder — a flat

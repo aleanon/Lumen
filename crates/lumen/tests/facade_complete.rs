@@ -6,7 +6,7 @@
 //! `lumen` is the crate a consumer depends on; `lumen-widgets` is an
 //! implementation crate. But `Element`'s builders take `lumen_style::Style`,
 //! `Shadow` and `Dynamic<T>`, and none of those were re-exported — so
-//! `css()`, `shadow()`, `bind_text()`, `bind_background()` and `bind_class()`
+//! `css()`, `shadow()`, `bind_text()`, `bind_background()`, `bind_text_color()` and `bind_class()`
 //! were **uncallable** by anyone depending only on `lumen`. The methods
 //! compiled, documented and tested fine; they simply could not be named.
 //!
@@ -49,13 +49,16 @@ fn reactive_binding_builders_are_callable_through_the_facade() {
     let bg: Dynamic<Color> = Dynamic::new(|_: &Runtime| Color::BLACK);
     let classes: Dynamic<Vec<String>> = Dynamic::new(|_: &Runtime| vec!["a".into()]);
 
+    let color: Dynamic<Color> = Dynamic::new(|_: &Runtime| Color::BLACK);
     let el = Element::default()
         .bind_text(text)
         .bind_background(bg)
+        .bind_text_color(color)
         .bind_class(classes);
     assert!(el.dyn_text.is_some());
     assert!(el.dyn_bg.is_some());
     assert!(el.dyn_classes.is_some());
+    assert!(el.rare.as_ref().is_some_and(|r| r.dyn_color.is_some()));
 }
 
 /// The theming helpers (`theme::card`, `theme::accent`, …) are a documented part

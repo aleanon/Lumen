@@ -151,6 +151,8 @@ pub type DirectSlot = std::rc::Rc<std::cell::RefCell<Option<Box<dyn crate::app::
 #[doc(hidden)]
 #[derive(Default, Clone)]
 pub struct RareEl {
+    /// MUT5: reactive text colour — paint-only, patches the glyph brush.
+    pub dyn_color: Option<Dynamic<Color>>,
     pub on_wheel: Option<WheelHandler>,
     pub on_drag: Option<DragHandler>,
     pub on_drop: Option<DropHandler>,
@@ -969,6 +971,15 @@ impl Element {
     /// paint-only prop, so a change patches without relayout.
     pub fn bind_background(mut self, d: Dynamic<Color>) -> Self {
         self.dyn_bg = Some(d);
+        self
+    }
+    /// Bind this node's text colour to a reactive closure (MUT5) — a
+    /// paint-only prop like the background: a change rewrites the glyph
+    /// run's brush in the retained display list, no rebuild, no relayout,
+    /// no reshaping. A `.lss` `color` rule still wins over the bound value,
+    /// exactly as it wins over a widget's static colour.
+    pub fn bind_text_color(mut self, d: Dynamic<Color>) -> Self {
+        self.rare_mut().dyn_color = Some(d);
         self
     }
     /// Bind extra classes reactively (F5.2): the closure's `Vec<String>` is

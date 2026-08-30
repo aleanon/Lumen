@@ -607,6 +607,16 @@ fn mut2_view(_cx: &mut BuildCx) -> Element {
     let deferred: Element = widgets::text(bind!(rt => {
         let v: Signal<i64> = rt.signal("m2a", || 0);
         format!("alpha {}", v.get(rt))
+    }))
+    // MUT5: a colour binding on the same node — its patch rewrites only the
+    // glyph brush, and the byte-equality oracle below covers that surgery.
+    .bind_text_color(Dynamic::new(|rt| {
+        let v: Signal<i64> = rt.signal("m2a", || 0);
+        if v.get(rt) % 2 == 0 {
+            Color::srgb8(20, 20, 20, 255)
+        } else {
+            Color::srgb8(0, 120, 30, 255)
+        }
     }));
     let mut fixed: Element = widgets::text(bind!(rt => {
         let v: Signal<i64> = rt.signal("m2b", || 0);
@@ -669,4 +679,71 @@ fn patched_frames_render_byte_identical_to_a_full_render() {
         fresh.pixels(),
         "a patched frame must be byte-identical to a full render of the same state"
     );
+}
+
+
+#[test]
+fn a_color_binding_patches_without_rebuild() {
+    // MUT5: text colour is paint-only. A change must not re-run the build,
+    // must repaint, and must survive the coherence oracle (which re-lowers
+    // and re-evaluates the binding fresh).
+    let build_runs = Rc::new(Cell::new(0u32));
+    let br = build_runs.clone();
+    let mut h = App::new(move |_cx: &mut BuildCx| {
+        br.set(br.get() + 1);
+        let mut root = widgets::column(vec![widgets::text("steady").bind_text_color(
+            Dynamic::new(|rt| {
+                let hot: Signal<bool> = rt.signal("hot", || false);
+                if hot.get(rt) {
+                    Color::srgb8(200, 0, 0, 255)
+                } else {
+                    Color::srgb8(0, 0, 0, 255)
+                }
+            }),
+        )]);
+        root.style.width = lumen_layout::Dim::pct(1.0);
+        root
+    })
+    .run_headless(Size::new(240.0, 80.0));
+
+    let before = h.screenshot();
+    let hot: Signal<bool> = h.runtime().signal("hot", || false);
+    hot.set(h.runtime(), true);
+    let stats = h.pump();
+
+    assert_eq!(build_runs.get(), 1, "a colour change patches, not rebuilds");
+    assert!(stats.painted, "the brush rewrite repainted");
+    assert_ne!(
+        before.pixels(),
+        h.screenshot().pixels(),
+        "the new colour actually reached the frame"
+    );
+    h.assert_view_coherent();
+}
+
+#[test]
+fn a_shared_semantics_tree_falls_back_to_invalidation() {
+    // MUT6: holding a consumer Rc across a patch makes the in-place update
+    // impossible for that projection; it must invalidate instead — and the
+    // next read must carry the new label.
+    let mut h = App::new(move |_cx: &mut BuildCx| {
+        let mut root = widgets::column(vec![widgets::text(bind!(rt => {
+            let v: Signal<i64> = rt.signal("held", || 0);
+            format!("held {}", v.get(rt))
+        }))]);
+        root.style.width = lumen_layout::Dim::pct(1.0);
+        root
+    })
+    .run_headless(Size::new(240.0, 80.0));
+    h.pump();
+    let held = h.semantics_elided(); // keep the Rc alive across the patch
+    let v: Signal<i64> = h.runtime().signal("held", || 0);
+    v.set(h.runtime(), 9);
+    h.pump();
+    assert!(
+        h.semantics_json().to_string().contains("held 9"),
+        "the fallback invalidation still yields the fresh label"
+    );
+    drop(held);
+    h.assert_view_coherent();
 }
