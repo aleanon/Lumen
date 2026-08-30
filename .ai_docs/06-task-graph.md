@@ -582,6 +582,55 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## R8 ☑ The `Element` intermediary costs ~5% of a frame — not the migration to lead with (2026-08-30)
+
+**The `Direct` migration removed `Element` in principle and not in practice.**
+Counted: 62 widgets, **10** with a hand-written `Direct` impl, of which **8**
+still hand an `Element` to `write_tree`/`write_children`. **1** writes fields
+directly. The other 52 use the auto-generated `@direct_bridge`
+(`build() → Element → write_tree`). So **61 of 62 widgets still construct a
+784-byte `Element` per node**, and every `NodeWriter` method takes one. This was
+staged deliberately — the trait's doc says it makes *"every widget is `Direct`"
+true before "no widget builds an `Element`" is* — but the second half never
+happened.
+
+**Measured** with the existing WT-EXP probes (`lowertime` / `lowerprobe`, one
+arm per process, equivalence-checked by `lowered_eq`), 500 rows × 3 widgets
+≈ 2 000 nodes:
+
+| | via `Element` | direct | |
+|---|---:|---:|---:|
+| lowering time | ~1 220 µs | ~960 µs | **−21%** |
+| bytes allocated | 8.90 MB | 7.26 MB | −18% |
+| peak live | 7.42 MB | 6.93 MB | −6.6% |
+| allocation **count** | 10 803 | 10 302 | −4.6% |
+
+The count barely moves because `Element` is a stack value: the 784 bytes are
+*moved*, not heap-allocated. The 18% byte saving is its inline `Vec`s/`String`s.
+
+**In frame context** (lowering derived from R7's phase split as
+`rebuild_inner − view − layout − bounds − sweep`):
+
+| | scope mode, N=50 000 | chunk mode |
+|---|---:|---:|
+| lowering | ~9 760 µs | ~2 350 µs |
+| 21% of it | ~2 050 µs | ~490 µs |
+| **share of frame** | **~4.8%** | **~5.3%** |
+
+**Removing `Element` across 61 widgets buys ≈5% of the frame. The
+component/chunking restructuring measured 79%** (R7). The two are **separable**
+— a component can build `Element`s internally and still get the whole chunking
+win, so `build(&mut NodeTree)` is *not* a prerequisite for components. Element
+removal is also not all-or-nothing: converting the hot widgets (`text`,
+`column`) captures most of the 5% without touching all 61.
+
+*Caveat:* the 21% is from a Label+ProgressBar+Button workload with styles.
+Text-only rows have a thinner `Element`, so their saving is likely smaller. The
+frame-share figures are derived, not measured end to end.
+
+**Order set by this:** the component trait first, `Element` removal second and
+independently.
+
 ## R7 ☑ The O(N) floor diagnosed — it is four costs, and three are authoring (2026-08-30)
 
 BENCH2 found that changing **one** row of 50 000 cost 44 ms with
