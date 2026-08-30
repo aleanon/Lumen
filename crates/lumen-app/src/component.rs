@@ -50,6 +50,18 @@
 //! `build` runs only when `deps` changes or when a signal it read changes.
 //! Otherwise the whole subtree — nodes, layout and all — is spliced in place.
 //!
+//! ## `deps` is derived, not declared (S2)
+//!
+//! `Component: Hash`, and `deps` defaults to hashing the whole component. Write
+//! `#[derive(Hash)]` — std's, no Lumen macro — and the dependency is exact by
+//! construction. This replaced C1's required `deps`, which existed only to stop
+//! an author omitting a captured field and getting silently frozen content.
+//!
+//! *Consequence:* `Hash` has a generic method, so `Component` is **not
+//! object-safe** — there is no `Box<dyn Component>`. This costs nothing in
+//! practice: components produce `Element`, which is already the currency for
+//! heterogeneous children, so a mixed list is a `Vec<Element>` as before.
+//!
 //! ## Rebuild is teardown-and-rewrite
 //!
 //! When a component *is* dirty its subtree is rebuilt from scratch rather than
@@ -82,19 +94,30 @@ pub const SIGNALS_ONLY: u64 = 0;
 /// unit the engine rebuilds.
 ///
 /// See the [module docs](self) for why the granularity matters.
-pub trait Component {
-    /// A hash of every piece of **plain data** this component's output depends
-    /// on — the values it captured rather than read from a signal.
+pub trait Component: Hash {
+    /// What this component's output depends on, beyond the signals its
+    /// [`build`](Self::build) reads.
     ///
-    /// Signals read inside [`build`](Self::build) are tracked automatically and
-    /// must **not** be listed here.
+    /// **Defaults to hashing the whole component (S2), which is almost always
+    /// what you want** — every captured field is included because the default
+    /// cannot see past `Hash`, so it cannot *omit* one. C1 shipped this as a
+    /// required method precisely because a hand-written `deps` that forgot a
+    /// captured field would be memo-hit forever and render frozen content,
+    /// silently. Deriving it from the fields removes the failure mode instead
+    /// of documenting it.
     ///
-    /// There is deliberately no default. A component built from captured data
-    /// whose `deps` omitted that data would be memo-hit forever and render
-    /// frozen content — silently, with no panic and no diagnostic. Making this
-    /// required costs one line and removes the failure mode. Return
-    /// [`SIGNALS_ONLY`] when there genuinely is no plain data.
-    fn deps(&self) -> u64;
+    /// Signals read inside `build` are tracked separately and need not appear:
+    /// `scope_impl` requires **both** `deps` unchanged *and* the recorded reads
+    /// still current, so the two are additive. A component that captures
+    /// nothing therefore hashes to a constant and correctly relies on its reads.
+    ///
+    /// Override when a field must not participate — a handler (`Rc<dyn Fn>`
+    /// has no meaningful hash and does not affect rendering), or an `f64`,
+    /// which is not `Hash`. Returning [`SIGNALS_ONLY`] states "no captured
+    /// data" explicitly.
+    fn deps(&self) -> u64 {
+        hash_of(self)
+    }
 
     /// Build this component's subtree.
     ///

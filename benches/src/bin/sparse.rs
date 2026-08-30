@@ -117,6 +117,9 @@ fn main() {
         // nothing over the hand-written scope it packages — if it does not
         // match `chunk`, the trait is overhead rather than ergonomics.
         if m == "component" {
+            // S2: `#[derive(Hash)]` and no `deps` — every field participates,
+            // so it cannot omit one.
+            #[derive(std::hash::Hash)]
             struct RowGroup {
                 lo: usize,
                 hi: usize,
@@ -124,9 +127,6 @@ fn main() {
                 vals: Vec<i64>,
             }
             impl lumen_widgets::Component for RowGroup {
-                fn deps(&self) -> u64 {
-                    lumen_widgets::hash_of(&(self.lo, self.hi, &self.vals))
-                }
                 fn build(&self, _cx: &mut BuildCx) -> Element {
                     let items: Vec<Element> = (self.lo..self.hi)
                         .map(|i| {

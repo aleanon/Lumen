@@ -288,10 +288,12 @@ are still strings (they're selectors, not reactive keys).
   the engine is faster, but because a component is a *coarse* memo unit and a
   per-row `cx.scope` is a fine one. Never put a `cx.scope` around each row of a
   long list; group them.
-- **`deps` must list every captured value.** Signals read inside `build` are
-  tracked for you and must NOT be listed. Omitting captured data does not
-  error — the component is memo-hit forever and renders frozen content. Return
-  `SIGNALS_ONLY` when the component captures nothing.
+- **Write `#[derive(Hash)]` on a component and let `deps` default.** It hashes
+  every field, so it cannot omit a captured value — which is the failure that
+  renders frozen content with no panic and no diagnostic. Only override `deps`
+  when a field must *not* participate: an `Rc<dyn Fn>` handler (no meaningful
+  hash, does not affect rendering) or an `f64` (not `Hash`). Signals read inside
+  `build` are tracked separately and are never listed.
 
 - **`focusable: true` does nothing without an `id`.** Focus is stored as an id
   (`move_focus` sets `focused_id = meta.id`), so the Tab traversal finds an

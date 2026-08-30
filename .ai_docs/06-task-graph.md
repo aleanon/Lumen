@@ -627,6 +627,48 @@ across tests that the harness runs in **parallel**, so they reset each other and
 the first-build assertion read 256 instead of 1 000. It looked exactly like a
 real memoization bug in `For`. Per-test statics fixed it.
 
+## S2 ☑ `Component::deps` derives itself — the required-deps footgun is gone (2026-08-30)
+
+`Component: Hash`, and `deps` defaults to `hash_of(self)`. An author writes
+`#[derive(Hash)]` — **std's derive, no Lumen macro** — and the dependency is
+exact by construction: every captured field participates, so the default cannot
+*omit* one.
+
+C1 shipped `deps` as a **required** method for exactly one reason: a
+hand-written `deps` that forgot a captured field is memo-hit forever and renders
+frozen content, silently, and looks *fast* while doing it. S2 removes the
+failure mode rather than documenting it.
+
+**Verified first, not assumed:** `scope_impl`'s cache check is
+`cached.deps == deps && cached.reads.is_current(rt)` — **both**. Explicit deps
+and read-tracking are additive, so a component that captures nothing hashes to a
+constant and still correctly depends on whatever it read. The whole design rests
+on that and it was worth reading rather than believing.
+
+**Override paths kept**, both exercised in the tests: a manual `Hash` that skips
+a field which does not affect rendering (an `Rc<dyn Fn>` handler, an `f64` which
+is not `Hash`), and `SIGNALS_ONLY` to state "no captured data" explicitly.
+
+*Consequence:* `Hash` has a generic method, so `Component` is **not
+object-safe** — no `Box<dyn Component>`. Costs nothing: components produce
+`Element`, already the currency for heterogeneous children.
+
+**A weak C1 test was found and fixed.** `signals_read_inside_build_are_tracked_
+without_being_declared` asserted that a signals-only component *renders* — and
+never moved the signal, so it never tested the claim in its own name. A build
+that ignored reads entirely would have passed. It now reads a
+`#[derive(Reactive)]` field (S1 × S2), moves it, and asserts the rebuild.
+
+**Bench unchanged:** `sparse`'s `RowGroup` dropped its hand-written `deps` for
+`#[derive(Hash)]`; `component` and `for` arms unmoved (9 484 / 9 497 µs).
+
+*Fourth occurrence of the same test bug, now fixed at the root.* A `static`
+counter shared across tests the harness runs **in parallel** produced a failure
+that looked exactly like a broken memo (`left: 3, right: 1`) — the memo was
+fine, as a probe showed (`builds=1, rebuilt=0` on every pump). The S2 tests use
+a **thread-local**, which is isolated per test by construction rather than by
+remembering to use a distinct static.
+
 ## S1 ☑ `#[derive(Reactive)]` — field-path keys into the existing store (2026-08-30)
 
 `lumen-macros`. For each named field, an accessor keyed by its **compile-time

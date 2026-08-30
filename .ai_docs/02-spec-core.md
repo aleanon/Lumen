@@ -125,9 +125,23 @@ available at any granularity, so the worst one is the obvious way to reach for
 it; a component makes the coarse grain the natural unit and brings the nesting
 that fixes the layout half (R6) with it.
 
-`deps` is deliberately **required** — a component built from captured data whose
-`deps` omitted it would be memo-hit forever and render frozen content, silently.
-Return `SIGNALS_ONLY` when there is no plain data. *Superseded:* the planned
+`deps` **defaults to hashing the component** (S2): `Component: Hash`, so write
+`#[derive(Hash)]` — std's — and every captured field participates, which means
+the default cannot omit one. C1 shipped `deps` as a *required* method precisely
+because a hand-written one that forgot a field is memo-hit forever and renders
+frozen content, silently; deriving it removes the failure mode rather than
+documenting it. Override when a field must not participate (an `Rc<dyn Fn>`
+handler has no meaningful hash and does not affect rendering; `f64` is not
+`Hash`), or return `SIGNALS_ONLY` to state "no captured data" explicitly.
+
+Explicit deps and read-tracking are **additive**, not alternatives:
+`scope_impl` re-runs unless *both* the deps are unchanged **and** the recorded
+reads are still current. A component that captures nothing therefore hashes to a
+constant and correctly depends on whatever it read.
+
+*Consequence:* `Hash` has a generic method, so `Component` is **not
+object-safe** — no `Box<dyn Component>`. This costs nothing: components produce
+`Element`, already the currency for heterogeneous children. *Superseded:* the planned
 `#[component]` attribute macro with `PartialEq`-on-props (W.3) — a trait needs
 no proc-macro, and an explicit `deps` states the dependency rather than
 inferring it, which is the same argument ADR-007's F3 entry made for declared
