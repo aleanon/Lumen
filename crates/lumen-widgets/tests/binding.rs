@@ -418,3 +418,70 @@ fn a_click_settles_the_binding_it_changes_in_the_same_pump() {
     );
     h.assert_view_coherent();
 }
+
+#[test]
+fn deferred_bound_text_patches_without_rebuild() {
+    // MUT0: a stretched, invisible-boxed label under a definite containing
+    // block is exactly the shape T2 defers (no shaping at build). T2 landed
+    // without carrying F3.5's binding registration onto that path, so the
+    // binding's reads fell to the structural safety net and every bound write
+    // rebuilt the world — 18.4 ms vs 0.6 ms at N=10 000 in `sparse`. This is
+    // the test that would have caught it: the same view as
+    // `bg_binding_patches_without_rebuild`, plus the one ingredient no other
+    // binding test had — a definite root width.
+    let build_runs = Rc::new(Cell::new(0u32));
+    let br = build_runs.clone();
+    let mut h = App::new(move |_cx: &mut BuildCx| {
+        br.set(br.get() + 1);
+        let mut root = widgets::column(vec![widgets::text(bind!(rt => {
+            let v: Signal<i64> = rt.signal("count", || 0);
+            format!("count {}", v.get(rt))
+        }))]);
+        root.style.width = lumen_layout::Dim::pct(1.0);
+        root
+    })
+    .run_headless(Size::new(300.0, 100.0));
+
+    assert_eq!(build_runs.get(), 1, "one build so far");
+    let v: Signal<i64> = h.runtime().signal("count", || 0);
+    v.set(h.runtime(), 5);
+    let stats = h.pump();
+
+    assert_eq!(
+        build_runs.get(),
+        1,
+        "a single-line change to a deferred bound label patches, not rebuilds"
+    );
+    assert!(stats.painted, "the patch repainted");
+    assert!(
+        h.semantics_json().to_string().contains("count 5"),
+        "the patched frame carries the new value"
+    );
+    h.assert_view_coherent();
+}
+
+#[test]
+fn deferred_bound_text_gaining_a_newline_falls_back_to_rebuild() {
+    // The one replacement a deferred label cannot patch: a second line box.
+    // The decline must land as a correct rebuild, whose deferral guard then
+    // routes the now-multiline text down the eager (measured) path.
+    let mut h = App::new(move |_cx: &mut BuildCx| {
+        let mut root = widgets::column(vec![widgets::text(bind!(rt => {
+            let v: Signal<i64> = rt.signal("lines", || 1);
+            if v.get(rt) > 1 { "first\nsecond".to_string() } else { "first".to_string() }
+        }))]);
+        root.style.width = lumen_layout::Dim::pct(1.0);
+        root
+    })
+    .run_headless(Size::new(300.0, 100.0));
+
+    let v: Signal<i64> = h.runtime().signal("lines", || 1);
+    v.set(h.runtime(), 2);
+    h.pump();
+
+    assert!(
+        h.semantics_json().to_string().contains("first\\nsecond"),
+        "the multiline value landed via the rebuild fallback"
+    );
+    h.assert_view_coherent();
+}

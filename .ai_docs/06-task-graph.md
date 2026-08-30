@@ -582,6 +582,50 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT0 ☑ The F3 rebuild trigger diagnosed — a T2 regression, fixed: 18 430 → 529 µs (2026-08-30)
+
+**The term that fires is `write_changed && !structural_current`, and the reads
+are in `structural_reads` because T2 dropped them there.** Probed (added,
+measured, reverted): on every bound-write pump, `structural_current=false` and
+`text_bindings_stale()=false` — the binding's reads had gone structural and
+**no binding record existed at all**. The cause is a seam between two features
+landed a week apart: T2's deferred-measurement branch (2026-08-29) bypasses
+the eager text-sizing block where F3.5 registers `BoundText`, so `pending_text`
+falls through to the F3.5 safety net, which converts the reads to structural
+and retains nothing. The net's `debug_assert` would have caught it, but **no
+test combined `bind!` with a deferred-qualifying label** (stretched, invisible
+box, definite containing block — i.e. any label in a `width: 100%` column, the
+shape `FILL=1` makes and virtually every real root has). The 2.7×-slower-than-
+plain overhead was 10 000 isolated closure evaluations per frame whose product
+was thrown away. Cross-check: `NOFILL=1` (deferral impossible) and the patch
+path worked all along — 565 µs, `nodes_rebuilt=0`.
+
+**Fix:** the deferred branch registers the binding too, with `deferred: true`.
+A deferred label's box takes nothing from the glyphs — width parent-assigned,
+height line metrics — so the patch check is **"still a single line"**, no
+shaping at all; a replacement gaining a `\n` falls back to a rebuild whose own
+deferral guard routes the multiline text down the eager path. Same handling in
+`settle_bindings_for_rebuild`.
+
+**Measured** (`sparse`, taskset, K=1, D=0, FILL):
+
+| arm | N=10 000 | nodes_rebuilt |
+|---|---:|---:|
+| plain | 6 806 µs | 10 001 |
+| scope | 5 341 µs | 2 |
+| bind before | 18 430 µs | 10 001 |
+| **bind after** | **529 µs** | **0** |
+
+**35× on the broken arm; 10× under the best previous authoring.** At
+N=50 000: **2 162 µs** (vs C1's 9 047 best), linear at 0.043 µs/node — the
+remaining tail is precisely `build_display_list` + `damage_between` on the
+patch frame, which is MUT2's target. The plan's ordering is confirmed by its
+first phase. *Guarded by* two tests in `binding.rs` that fail against the
+unfixed engine (verified by stash): a deferred bound label patches
+(`build_runs` stays 1), and a newline replacement falls back correctly. The
+BENCH2/sparse claim "F3 is broken and expensive" is hereby resolved: it was
+broken by regression, not by design.
+
 ## MUT ☑ Investigation: the maximum-performance architecture — build once, mutate (2026-08-30)
 
 **Investigation, no code change** — the user's mandate: absolutely maximum

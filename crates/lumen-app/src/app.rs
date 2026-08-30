@@ -841,6 +841,11 @@ struct BoundText {
     /// truncation, not the binding's value, and reproducing it here would mean
     /// duplicating that logic. Such a node always rebuilds.
     patchable: bool,
+    /// T2: the label was laid out without shaping — width parent-assigned,
+    /// height from line metrics — so no measurement exists to compare and none
+    /// is needed. A replacement is layout-neutral iff it is still a single
+    /// line; `w`/`h` are 0 and never consulted.
+    deferred: bool,
 }
 
 /// Per-node reactive dependencies, split by source (F4). The union projects to
@@ -4915,6 +4920,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             }
             let node = self.text_bindings[i].node;
             let (s, reads) = self.text_bindings[i].dynamic.eval_isolated(&rt);
+            if self.text_bindings[i].deferred {
+                // A newline would add a line box the deferral guard promised
+                // away; the rebuild's own guard then routes the node down the
+                // eager path.
+                if s.contains('\n') {
+                    return false;
+                }
+                let b = &self.text_bindings[i];
+                pending.push((i, s, reads, b.w, b.h));
+                continue;
+            }
             let wrap = self.text_bindings[i].wrap;
             let Some(ts) = self.meta.get(&node).and_then(|m| match &m.content {
                 NodeContent::Text(_, ts) => Some(ts.clone()),
@@ -5014,6 +5030,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 continue;
             };
             let (s, reads) = self.text_bindings[i].dynamic.eval_isolated(&rt);
+            if self.text_bindings[i].deferred {
+                if s.contains('\n') {
+                    must_relower = true;
+                    continue;
+                }
+                self.text_bindings[i].deps = reads;
+                if let Some(m) = self.meta.get_mut(&node) {
+                    m.label = s.clone();
+                    if let NodeContent::Text(t, _) = &mut m.content {
+                        *t = s;
+                    }
+                }
+                continue;
+            }
             let wrap = self.text_bindings[i].wrap;
             let block = self.text.shaped(&s, &ts, wrap, ts.align);
             let (w, h) = (block.width().ceil(), block.height().ceil());
@@ -6953,6 +6983,28 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
                 // `style.width` deliberately left `Auto`: the parent's stretch
                 // resolves it, so no glyph advance is needed.
+                //
+                // F3.5 × T2: the binding must be retained on THIS path too.
+                // T2 landed after F3.5 and bypassed the eager sizing block
+                // below, so `pending_text` fell through to the structural
+                // safety net — every bound write under a definite containing
+                // block became a full rebuild (MUT0: 18.4 ms vs 0.6 ms at
+                // N=10 000). A deferred box takes nothing from the glyphs, so
+                // the patch check is "still one line", not a measurement.
+                if let Some((dynamic, deps)) = pending_text.take() {
+                    self.app.text_bindings.push(BoundText {
+                        node,
+                        dynamic,
+                        deps,
+                        wrap,
+                        auto_w: false,
+                        auto_h: false,
+                        w: 0.0,
+                        h: 0.0,
+                        patchable: true,
+                        deferred: true,
+                    });
+                }
                 text_wrap = wrap;
             } else {
                 // W0404: this label had to be shaped to be laid out, because a
@@ -7021,6 +7073,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                         w: block.width().ceil(),
                         h: block.height().ceil(),
                         patchable: ellipsized.is_none(),
+                        deferred: false,
                     });
                 }
                 text_wrap = wrap;
