@@ -627,6 +627,50 @@ across tests that the harness runs in **parallel**, so they reset each other and
 the first-build assertion read 256 instead of 1 000. It looked exactly like a
 real memoization bug in `For`. Per-test statics fixed it.
 
+## S3 ✗ Field-as-slot — measured, and deferred on the evidence (2026-08-30)
+
+S3 was to remove the addressing and lookup that R9 sized at **8.8% of a frame**.
+Measured before implementing; the cheap version buys **nothing**, and the real
+version costs the plan's largest API change.
+
+**The cheap version does not work.** `Runtime::signal_at` is public and takes a
+*precomputed* hash, so a derive can hash a field path once instead of per read.
+Measured (N=50 000, collector open):
+
+| arm | µs | ns/read |
+|---|---:|---:|
+| `address+read` (today) | 1 274.9 | 25.5 |
+| **`address+read` with the hash precomputed** | **1 279.1** | 25.6 |
+| hash only | 4.3 | 0.1 |
+
+**Saved: −4.1 µs, i.e. nothing.** Hashing is free; the 511 µs called
+"addressing" is entirely downstream of it.
+
+**What it actually is.** `intern_hashed` does `inner.borrow_mut()` then a
+`HashMap<IdHash, SignalId>` get (`state.rs:1125`); `signal_at` borrows *again*
+for `slots.contains_key`; `read_with` borrows a *third* time for the slot and
+then downcasts. **Three RefCell borrows and two map lookups per read.** None of
+that is removable while the value lives in a keyed store — the `SignalId` would
+have to be cached per *(Runtime, field)*, which is inherently per-runtime state,
+which is the store.
+
+**So the real S3 is the deep change**: the state struct instance holds the
+values, the runtime holds per-field version counters, and a read is a direct
+field access plus `note_read`. That requires the instance to be threaded through
+the view — `App::new(|cx, state| ..)` — the largest API change in the plan.
+
+**Deferred, on these grounds:**
+* The prize is 8.8%, and R9 already established that the state-struct work is
+  motivated by **correctness and ergonomics, not speed**.
+* S1 and S2 delivered that motivation in full: compile-time identity, and
+  `deps` deriving itself so the silent-freeze failure mode is gone.
+* The remaining 5.2% (read recording) survives *any* representation, so even a
+  perfect S3 leaves most of the store cost in place.
+* Against C1/C2's 79% and 6×, this is not where the next effort belongs.
+
+**Reopen if** the view signature changes for another reason — at that point
+field-as-slot is nearly free to add, and this entry has the measurements ready.
+
 ## S2 ☑ `Component::deps` derives itself — the required-deps footgun is gone (2026-08-30)
 
 `Component: Hash`, and `deps` defaults to `hash_of(self)`. An author writes

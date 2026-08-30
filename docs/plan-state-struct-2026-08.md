@@ -1,6 +1,6 @@
 # Plan — the state-struct model (`#[derive(Reactive)]`)
 
-**Status: S0 complete, S1 ready to start.** Written 2026-08-30 after R7–R10 and
+**Status: S1 and S2 shipped; S3 measured and deferred; S4 optional.** Written 2026-08-30 after R7–R10 and
 C1; D1 and D2 resolved the same day (see below) — the two blockers are cleared.
 
 ## What is being proposed
@@ -160,7 +160,7 @@ predecessor's measurement is in.
 | **S0** | ~~Answer D1 and D2~~ — **done, both resolved above.** Record in the decision log. | ☑ Decisions taken; record them and proceed. |
 | **S1** | `#[derive(Reactive)]` in `lumen-macros`, generating field-path keys into the **existing** store. No API change for readers. **Carries D2's requirement: preserve W0002 on dropped fields.** | An app builds and runs identically; keys are allocation-free and cannot collide across structs; a reload that removes a field still reports W0002. **No performance claim** — see below. |
 | **S2** | `Component::deps` gains a default derived from tracked field reads; `deps` becomes optional where the component reads only `Reactive` state. | `tests/component.rs` passes with `deps` removed from a component that reads only state fields. |
-| **S3** | Field storage: the field *is* the slot, removing lookup+downcast. | The `read only` arm approaches the `field read` arm; no regression in `sparse` or `for_list`. |
+| **S3** | ~~Field storage~~ — **measured and deferred (2026-08-30).** Precomputing the field-path hash saves **−4.1 µs, i.e. nothing**: the cost is `intern_hashed`'s borrow + map lookup, not hashing. The real version needs the state instance threaded through the view (`App::new(\|cx, state\|)`), the plan's largest API change, for 8.8%. See task-graph S3. | Reopen only if the view signature changes for another reason. |
 | **S4** | Migrate examples and the `lumen new` scaffold; the keyed store stays for view-local state per D1. | Whole workspace green; `sparse` unregressed. |
 
 ## What this plan explicitly does not do

@@ -85,6 +85,18 @@ fn main() {
         acc
     });
 
+    // S3 candidate: hash the key ONCE (a derive can, the path is static) and
+    // address through `signal_at`, which takes a precomputed hash. Splits the
+    // 510 µs "addressing" figure into hashing vs interning.
+    let hashes: Vec<lumen_core::identity::IdHash> = (0..n)
+        .map(|i| {
+            lumen_core::identity::fold_id(
+                lumen_core::identity::ROOT_ID,
+                lumen_core::identity::hash_id(&i),
+            )
+        })
+        .collect();
+
     // --- collector OPEN (reads are recorded, as in a real build) ------------
     let (addr_read_c, s4) = best_of(rounds, || {
         let (acc, _reads) = rt.collect_reads(|| {
@@ -108,6 +120,37 @@ fn main() {
         acc
     });
 
+    // Hashing alone — what a precomputed field path removes.
+    let (hash_only, s6) = best_of(rounds, || {
+        let mut acc = 0i64;
+        for i in 0..n {
+            let h = lumen_core::identity::fold_id(
+                lumen_core::identity::ROOT_ID,
+                lumen_core::identity::hash_id(&i),
+            );
+            acc = acc.wrapping_add((h as i64) & 1);
+        }
+        std::hint::black_box(acc);
+        // Return the expected sum so the equivalence guard still applies to the
+        // arms that read; this one reads nothing and is excluded below.
+        (0..n as i64).sum()
+    });
+
+    // Addressing with the hash already known, then reading — the S3 candidate.
+    let (precomputed, s7) = best_of(rounds, || {
+        let (acc, _r) = rt.collect_reads(|| {
+            let mut acc = 0i64;
+            for (i, h) in hashes.iter().enumerate() {
+                let s: Signal<i64> = rt.signal_at(*h, lumen_core::identity::ROOT_ID, || {
+                    format!("{i}")
+                }, || 0);
+                acc = acc.wrapping_add(s.get(rt));
+            }
+            acc
+        });
+        acc
+    });
+
     // Equivalence: every arm must sum the same values, or one of them is not
     // doing the work.
     let expect: i64 = (0..n as i64).sum();
@@ -117,6 +160,8 @@ fn main() {
         ("field", s3),
         ("addr+read/collect", s4),
         ("read-only/collect", s5),
+        ("hash-only", s6),
+        ("precomputed/collect", s7),
     ] {
         let per = got / (rounds as i64 + 3);
         assert_eq!(
@@ -144,5 +189,13 @@ fn main() {
     println!(
         "    lookup+downcast+record (partly stays) {:8.1} µs",
         read_only_c - field
+    );
+    println!("  S3 candidate: precomputed field-path hash");
+    println!("    hash only                     {:8.1}  {:6.1} ns", us(hash_only), per_ns(hash_only));
+    println!("    precomputed addr+read         {:8.1}  {:6.1} ns", us(precomputed), per_ns(precomputed));
+    println!(
+        "    saved vs address+read         {:8.1} µs ({:.0}% of addressing)",
+        addr_read_c - precomputed,
+        100.0 * (addr_read_c - precomputed) / (addr_read_c - read_only_c)
     );
 }
