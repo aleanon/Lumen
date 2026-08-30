@@ -582,6 +582,49 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## R9 ☑ The keyed store costs 14% of a frame; a state struct could remove 8.8% (2026-08-30)
+
+Measures the performance argument for a `#[derive(Reactive)]` state struct —
+"each field is a scope, reads are field accesses". `benches/src/bin/storelookup.rs`,
+N=50 000, min of 40, collector **open** (recording only happens inside a build,
+so a closed-collector number alone understates it):
+
+| layer | µs | ns/read | removed by field paths? |
+|---|---:|---:|---|
+| addressing (key → `SignalId`) | 510.3 | 10.2 | **yes** |
+| slot lookup + downcast | 288.6 | 5.8 | **yes**, if the field *is* the storage |
+| read recording | 466.7 | 9.3 | **no** — the engine must still know what was read |
+| plain field access | 3.1 | 0.1 | — |
+| **total** | **1 268.7** | **25.4** | |
+
+Against C1's 9 047 µs frame at N=50 000 / K=1:
+
+* total store cost **14.0%**
+* **removable by a state struct: 8.8%**
+* read recording, which survives any representation change: 5.2%
+
+**This corrects an earlier inference in this thread.** The ~30% figure quoted
+when the idea was first discussed came from attributing R7's whole `view` phase
+(2 736 µs) to store lookups. Measured directly, the store is 1 269 µs — about
+half of that phase — and only 799 µs of it is representation-dependent. The
+performance case is **8.8%, not 30%**.
+
+*Caveat, and it points the other way:* the arms use `rt.signal(i)`, while a
+build uses `cx.signal(i)`, which additionally folds the enclosing scope's
+prefix for scope-local namespacing. Real in-build addressing is therefore
+**higher** than 510 µs, so 8.8% is a floor rather than a ceiling.
+
+**Consequence for the design.** The state-struct proposal's *performance*
+argument is modest and does not compete with C1's 79%; the two are orthogonal
+(C1 sets rebuild granularity, this sets how a dependency is named and read). Its
+strong arguments are correctness and ergonomics, which this measurement does not
+touch: identity becomes a compile-time field path (allocation-free,
+collision-free), and `Component::deps` gets a correct automatic default,
+removing the silent-freeze failure mode C1 had to make a required method to
+avoid. Both bugs this session's benchmarks hit — a `format!` key (ADR-021's
+anti-pattern) and a scope-local signal read silently addressing the wrong slot —
+become unrepresentable.
+
 ## C1 ☑ `Component` — a screen is a type, and the unit of rebuild (2026-08-30)
 
 R7's conclusion was that three of the four costs in a "one row of 50 000
