@@ -182,6 +182,16 @@ diagnostic can catch it: the mismatch is only knowable after layout.
   its width is parent-assigned and its height is line metrics, so only a
   replacement that gains a `\n` falls back (MUT0).
 
+  **App-level state as one struct (MUT8)** — prefer
+  `App::with_state(MyState::default(), |cx, s| …)` with
+  `#[derive(Reactive)]` (+ `Serialize`/`Deserialize` + `#[serde(default)]`).
+  Read fields as `s.field(cx)` (a direct reference — 8× cheaper than a keyed
+  signal read and every bit as reactive); in `bind!` closures and handlers
+  use the generated `MyState::get_field(rt)` / `set_field` / `update_field`.
+  Snapshots carry the instance and restore by serde, so hot reload survives
+  adding or removing fields. View-local state (an open/closed flag inside a
+  widget) stays `cx.signal(...)` in the keyed store.
+
   **Statement-form views** (O0.24/MUT7b) are the Element-free authoring
   shape: `App::view(|cx| Stack::column(|c| { for … { c.child(Label::new(…)) } })
   .width(Dim::pct(1.0)))` — children lower as they are written, no

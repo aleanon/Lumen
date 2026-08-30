@@ -582,6 +582,45 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT8 ☑ The state struct is the storage — 26.5 → 3.4 ns per read (2026-08-30)
+
+**S3-deep, shipped.** `App::with_state(state, |cx, s: &S| …)` threads one
+`#[derive(Reactive)]` instance into the view. The value lives in the struct;
+the runtime holds one **value-less `()` version slot per field** — so every
+consumer of the reactive machinery (ReadSets, scope memos, `take_written`,
+the MUT1 binding index, `structural_reads`) works on field writes unchanged,
+without one new code path. The instance lives in its own cell OUTSIDE the
+store's `RefCell`, so a view holding `&S` across the build never contends
+with the store's borrows; builds are pure and handlers run outside builds,
+so the shared borrow never crosses a mutation.
+
+**The derive now generates the full surface** (S1's signal accessor renamed
+`field_signal`): `s.field(cx) -> &T` — one recorded read
+(`track_state_field`: one borrow, one index, one push, plus scope
+subscription when tracking) and a direct reference; `S::get_field(rt)` for
+`bind!` closures and handlers; `S::set_field` / `S::update_field`, which
+mutate through `with_state_mut` and bump the field's slot exactly as a
+signal write (write-gen, written log, dirty subs, flush). `ReactiveState`
+carries the field names; ordinals are declaration order.
+
+**Reload is the user's proven iced recipe**: the instance rides in the
+snapshot as `"__app_state"`; `install_state` adopts a staged value at boot
+and `adopt_pending_live` swaps it live (then touches every field so
+dependents re-run); a value that no longer deserializes falls back to the
+initial with a `W0002` diagnostic; `#[serde(default)]` makes shape changes
+survivable. View-local state stays in the keyed store (D1).
+
+**Measured** (`storelookup`, N=50 000, collector open — a build's reality):
+today's `signal(key).get(rt)` **26.5 ns/read**; the state-field accessor
+**3.4 ns/read** — **87% of the store cost removed**, above R9's predicted
+63% because the accessor also skips the per-read re-addressing `rt.signal`
+pays even on a warm slot. Read-recording residue: **1.8 ns/read** (the
+collector push), down from ~11 — which reframes MUT9 before it starts.
+*Guarded by* three `reactive_derive.rs` tests: per-field scope granularity
+(writing one field re-runs one scope, the sibling splices), a `bind!` via
+`get_*` patching without a rebuild through the reverse index, and the serde
+reload restoring a live snapshot with defaults for missing fields.
+
 ## MUT7 ☑ The display-list walk goes dense; the Direct engine is measured end-to-end (2026-08-30)
 
 **MUT7a — the rebuild frame's last big engine pass, profiled then flattened.**

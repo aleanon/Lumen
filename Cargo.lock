@@ -2949,6 +2949,7 @@ dependencies = [
  "lumen-render",
  "lumen-style",
  "lumen-widgets",
+ "serde",
  "taffy",
 ]
 

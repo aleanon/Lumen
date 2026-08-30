@@ -265,6 +265,14 @@ pub trait ReadCx {
     fn tracks(&self) -> bool;
 }
 
+/// MUT8: a `#[derive(Reactive)]` app-state struct. `FIELDS` is the field
+/// names in declaration order; a field's ordinal indexes the runtime's
+/// per-field version slots.
+pub trait ReactiveState: 'static {
+    /// Field names, declaration order.
+    const FIELDS: &'static [&'static str];
+}
+
 /// Write access to the store. Implemented by [`Runtime`] and [`ReadScope`].
 pub trait WriteCx {
     #[doc(hidden)]
@@ -384,6 +392,10 @@ struct Inner {
     /// staleness scan with an O(writes) lookup.
     written: Vec<SignalId>,
     written_set: HashSet<SignalId>,
+    /// MUT8: the installed state struct's per-field version slots, by field
+    /// ordinal (declaration order). Value-less `()` slots — versions, subs,
+    /// the write log and `ReadSet`s all work on them unchanged.
+    state_field_ids: Vec<SignalId>,
 
     // restore
     #[cfg(feature = "snapshot")]
@@ -473,6 +485,33 @@ pub struct Runtime {
     /// O4.6: the painted-frame counter stamped onto each log entry, so an agent
     /// can group entries by the pump that produced them.
     log_frame: Rc<std::cell::Cell<u64>>,
+    /// MUT8: the app-state instance (`App::with_state`). Lives OUTSIDE
+    /// `inner` so a view holding `&S` across the build never contends with
+    /// the store's own borrows; per-field *version* slots live in `inner`
+    /// like any signal, so every consumer of `ReadSet`/`take_written`/the
+    /// binding index works unchanged. Builds are pure (no writes), handlers
+    /// run outside builds — so the shared borrow is never held across a
+    /// mutation.
+    app_state: Rc<RefCell<Option<Box<dyn std::any::Any>>>>,
+    /// MUT8 (snapshot): erased serializer + adopter for the instance, set by
+    /// `install_state`, so `snapshot()` can dump it and a live restore can
+    /// swap it without knowing `S`.
+    #[cfg(feature = "snapshot")]
+    state_json: Rc<RefCell<Option<StateJsonFns>>>,
+}
+
+/// MUT8 (snapshot): erased serializer for the installed app state.
+#[cfg(feature = "snapshot")]
+type StateToJson = Box<dyn Fn(&dyn std::any::Any) -> serde_json::Value>;
+/// MUT8 (snapshot): erased deserializer for the installed app state.
+#[cfg(feature = "snapshot")]
+type StateFromJson = Box<dyn Fn(&serde_json::Value) -> Option<Box<dyn std::any::Any>>>;
+
+/// MUT8 (snapshot): how to serialize/deserialize the installed app state.
+#[cfg(feature = "snapshot")]
+struct StateJsonFns {
+    to_json: StateToJson,
+    from_json: StateFromJson,
 }
 
 /// A diagnostic log entry (C.2) — agent-visible via the protocol's
@@ -538,6 +577,9 @@ impl Runtime {
             clipboard: Rc::new(RefCell::new(String::new())),
             logs: Rc::new(RefCell::new((0, std::collections::VecDeque::new()))),
             log_frame: Rc::new(std::cell::Cell::new(0)),
+            app_state: Rc::new(RefCell::new(None)),
+            #[cfg(feature = "snapshot")]
+            state_json: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -653,6 +695,142 @@ impl Runtime {
         let mut b = self.inner.borrow_mut();
         b.written_set.clear();
         std::mem::take(&mut b.written)
+    }
+
+    /// MUT8: install the app-state instance and register a value-less version
+    /// slot per field. Under `snapshot`, a staged `"__app_state"` value (from
+    /// [`Runtime::load_pending`]) is adopted instead of `initial` — the
+    /// serde-based reload recipe: derive `Serialize`/`Deserialize` (add
+    /// `#[serde(default)]` to survive shape changes); a value that no longer
+    /// deserializes falls back to `initial` with a restore diagnostic.
+    pub fn install_state<S: ReactiveState + State>(&self, initial: S) {
+        let ids: Vec<SignalId> = S::FIELDS
+            .iter()
+            .map(|f| {
+                let sig = self.signal_at::<()>(
+                    fold_id(ROOT_ID, hash_id(&("__state_field", *f))),
+                    ROOT_ID,
+                    || format!("state.{f}"),
+                    || (),
+                );
+                sig.id
+            })
+            .collect();
+        self.inner.borrow_mut().state_field_ids = ids;
+        #[cfg(feature = "snapshot")]
+        let initial: S = {
+            let staged = self.inner.borrow_mut().pending.remove("__app_state");
+            match staged {
+                Some(json) => match serde_json::from_value::<S>(json) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        self.inner.borrow_mut().restore_diags.push(Diagnostic::new(
+                            crate::codes::W0002,
+                            format!("app state did not restore ({e}); using the initial value"),
+                        ));
+                        initial
+                    }
+                },
+                None => initial,
+            }
+        };
+        #[cfg(feature = "snapshot")]
+        {
+            *self.state_json.borrow_mut() = Some(StateJsonFns {
+                to_json: Box::new(|any| {
+                    any.downcast_ref::<S>()
+                        .and_then(|s| serde_json::to_value(s).ok())
+                        .unwrap_or(serde_json::Value::Null)
+                }),
+                from_json: Box::new(|json| {
+                    serde_json::from_value::<S>(json.clone())
+                        .ok()
+                        .map(|s| Box::new(s) as Box<dyn std::any::Any>)
+                }),
+            });
+        }
+        *self.app_state.borrow_mut() = Some(Box::new(initial));
+    }
+
+    /// MUT8: read the installed state. Panics if none of this type is
+    /// installed — reaching for state without `App::with_state` is a wiring
+    /// bug, not a runtime condition.
+    pub fn with_state<S: 'static, R>(&self, f: impl FnOnce(&S) -> R) -> R {
+        let b = self.app_state.borrow();
+        let s = b
+            .as_ref()
+            .and_then(|a| a.downcast_ref::<S>())
+            .expect("no app state of this type installed (App::with_state)");
+        f(s)
+    }
+
+    /// MUT8: mutate the installed state. Callers must follow with
+    /// [`Runtime::touch_state_field`] for every field they changed — the
+    /// derive's generated `set_*`/`update_*` fns do exactly that.
+    pub fn with_state_mut<S: 'static, R>(&self, f: impl FnOnce(&mut S) -> R) -> R {
+        let mut b = self.app_state.borrow_mut();
+        let s = b
+            .as_mut()
+            .and_then(|a| a.downcast_mut::<S>())
+            .expect("no app state of this type installed (App::with_state)");
+        f(s)
+    }
+
+    /// MUT8: record a read of state field `ordinal` — push it onto any open
+    /// read-collection window and, when the context tracks, subscribe the
+    /// current reactive scope. One borrow, one index, one push: the cheap
+    /// path that replaces addressing + slot lookup + downcast (R9's 16 ns of
+    /// a 25 ns read).
+    pub fn track_state_field(&self, ordinal: usize, tracks: bool) {
+        let mut borrow = self.inner.borrow_mut();
+        let b = &mut *borrow;
+        let Some(&id) = b.state_field_ids.get(ordinal) else {
+            return;
+        };
+        for win in b.read_collectors.iter_mut() {
+            win.push(id);
+        }
+        if tracks {
+            if let Some(&scope) = b.stack.last() {
+                if let Some(slot) = b.slots.get_mut(&id) {
+                    slot.subs.insert(scope);
+                }
+            }
+        }
+    }
+
+    /// MUT8: a write happened to state field `ordinal` — bump its version
+    /// slot exactly as a signal write would (write-gen, written log, dirty
+    /// subscribers, flush outside a batch).
+    pub fn touch_state_field(&self, ordinal: usize) {
+        let batching = {
+            let mut borrow = self.inner.borrow_mut();
+            let b = &mut *borrow;
+            let Some(&id) = b.state_field_ids.get(ordinal) else {
+                return;
+            };
+            let ver = b.write_gen.wrapping_add(1);
+            b.write_gen = ver;
+            if b.written_set.insert(id) {
+                b.written.push(id);
+            }
+            let subs: Vec<ScopeId> = match b.slots.get_mut(&id) {
+                Some(slot) => {
+                    slot.version = ver;
+                    slot.subs.iter().copied().collect()
+                }
+                None => Vec::new(),
+            };
+            for sc in subs {
+                if b.dirty_set.insert(sc) {
+                    b.dirty.push(sc);
+                }
+            }
+            b.batch_depth > 0
+        };
+        if !batching {
+            self.flush();
+        }
     }
 
     /// The global write generation: bumped on every value write, so a caller
@@ -1040,6 +1218,12 @@ impl Runtime {
             let key = b.id_to_key[id.0 as usize].clone();
             map.insert(key, <dyn StoredValue as StoredValue>::to_json(&*slot.value));
         }
+        // MUT8: the app-state instance rides along under a reserved key.
+        if let (Some(fns), Some(state)) =
+            (self.state_json.borrow().as_ref(), self.app_state.borrow().as_ref())
+        {
+            map.insert("__app_state".into(), (fns.to_json)(state.as_ref()));
+        }
         StateSnapshot(serde_json::Value::Object(map))
     }
 
@@ -1084,6 +1268,30 @@ impl Runtime {
     #[cfg(feature = "snapshot")]
     pub fn adopt_pending_live(&self) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        // MUT8: adopt a staged app-state instance first — the same live
+        // semantics as a slot: swap the value, then treat every field as
+        // written so dependents re-run.
+        let staged = self.inner.borrow_mut().pending.remove("__app_state");
+        if let Some(json) = staged {
+            let adopted = self
+                .state_json
+                .borrow()
+                .as_ref()
+                .and_then(|fns| (fns.from_json)(&json));
+            match adopted {
+                Some(state) => {
+                    *self.app_state.borrow_mut() = Some(state);
+                    let n = self.inner.borrow().state_field_ids.len();
+                    for i in 0..n {
+                        self.touch_state_field(i);
+                    }
+                }
+                None => diags.push(Diagnostic::new(
+                    crate::codes::W0002,
+                    "app state did not restore; keeping the live value".to_string(),
+                )),
+            }
+        }
         let adopted = {
             let mut borrow = self.inner.borrow_mut();
             let b = &mut *borrow;

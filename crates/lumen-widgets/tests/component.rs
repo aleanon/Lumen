@@ -134,7 +134,7 @@ impl Component for FromSignal {
     }
     fn build(&self, cx: &mut BuildCx) -> Element {
         self.0.fetch_add(1, Ordering::Relaxed);
-        widgets::text(format!("v={}", Model::v(cx).get(cx.runtime())))
+        widgets::text(format!("v={}", Model::v_signal(cx).get(cx.runtime())))
     }
 }
 
@@ -154,7 +154,7 @@ fn signals_read_inside_build_are_tracked_without_being_declared() {
     // invalidates it. That is the whole claim, and it was untested: a build
     // that ignored reads entirely would have passed. Move the signal.
     //
-    Model::v(h.runtime()).set(h.runtime(), 5);
+    Model::v_signal(h.runtime()).set(h.runtime(), 5);
     h.pump();
     assert_eq!(
         C.load(Ordering::Relaxed),

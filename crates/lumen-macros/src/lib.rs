@@ -519,16 +519,70 @@ pub fn reactive(input: TokenStream) -> TokenStream {
         }
     };
 
-    let accessors = fields.iter().map(|f| {
+    let field_names: Vec<String> = fields
+        .iter()
+        .map(|f| f.ident.as_ref().expect("named").to_string())
+        .collect();
+
+    let accessors = fields.iter().enumerate().map(|(ordinal, f)| {
         let ident = f.ident.as_ref().expect("named");
+        let signal_ident = quote::format_ident!("{}_signal", ident);
+        let get_ident = quote::format_ident!("get_{}", ident);
+        let set_ident = quote::format_ident!("set_{}", ident);
+        let update_ident = quote::format_ident!("update_{}", ident);
         let ty = &f.ty;
         let key = ident.to_string();
         let doc = format!(
             "Signal for `{name_str}.{key}`, keyed by its compile-time field path."
         );
+        let read_doc = format!(
+            "MUT8: read `{name_str}.{key}` from the installed instance — one \
+             recorded read plus a direct field reference (no store lookup)."
+        );
+        let get_doc = format!(
+            "MUT8: clone `{name_str}.{key}` out of the installed instance, for \
+             `bind!` closures and handlers that only have a `Runtime`."
+        );
+        let set_doc = format!("MUT8: write `{name_str}.{key}` and bump its version slot.");
+        let update_doc = format!("MUT8: update `{name_str}.{key}` in place and bump its version slot.");
         quote! {
+            #[doc = #read_doc]
+            pub fn #ident<'a>(
+                &'a self,
+                cx: &impl ::lumen_core::state::ReadCx,
+            ) -> &'a #ty {
+                let rt = ::lumen_core::state::ReadCx::runtime(cx);
+                rt.track_state_field(#ordinal, ::lumen_core::state::ReadCx::tracks(cx));
+                &self.#ident
+            }
+
+            #[doc = #get_doc]
+            pub fn #get_ident(cx: &impl ::lumen_core::state::ReadCx) -> #ty
+            where
+                #ty: ::core::clone::Clone,
+            {
+                let rt = ::lumen_core::state::ReadCx::runtime(cx);
+                rt.track_state_field(#ordinal, ::lumen_core::state::ReadCx::tracks(cx));
+                rt.with_state(|s: &Self| ::core::clone::Clone::clone(&s.#ident))
+            }
+
+            #[doc = #set_doc]
+            pub fn #set_ident(rt: &::lumen_core::state::Runtime, v: #ty) {
+                rt.with_state_mut(|s: &mut Self| s.#ident = v);
+                rt.touch_state_field(#ordinal);
+            }
+
+            #[doc = #update_doc]
+            pub fn #update_ident(
+                rt: &::lumen_core::state::Runtime,
+                f: impl ::core::ops::FnOnce(&mut #ty),
+            ) {
+                rt.with_state_mut(|s: &mut Self| f(&mut s.#ident));
+                rt.touch_state_field(#ordinal);
+            }
+
             #[doc = #doc]
-            pub fn #ident(
+            pub fn #signal_ident(
                 cx: &impl ::lumen_core::state::ReadCx,
             ) -> ::lumen_core::state::Signal<#ty>
             where
@@ -549,6 +603,10 @@ pub fn reactive(input: TokenStream) -> TokenStream {
     quote! {
         impl #name {
             #(#accessors)*
+        }
+
+        impl ::lumen_core::state::ReactiveState for #name {
+            const FIELDS: &'static [&'static str] = &[#(#field_names),*];
         }
     }
     .into()

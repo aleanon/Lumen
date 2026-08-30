@@ -7,7 +7,9 @@
 //! in this repo's own benchmarks that it renders unrepresentable.
 
 use kurbo::Size;
-use lumen_widgets::{widgets, App, BuildCx, Reactive};
+use lumen_widgets::{bind, widgets, App, BuildCx, Reactive};
+use std::cell::Cell;
+use std::rc::Rc;
 
 // The fields are never *read* from the struct: in S1 the struct is a key
 // namespace and the values live in the store. That is the phase's shape, not an
@@ -31,13 +33,13 @@ struct Other {
 #[test]
 fn a_field_reads_and_writes_through_its_own_signal() {
     let mut h = App::new(|cx: &mut BuildCx| {
-        widgets::text(format!("n={}", Counter::count(cx).get(cx.runtime())))
+        widgets::text(format!("n={}", Counter::count_signal(cx).get(cx.runtime())))
     })
     .run_headless(Size::new(200.0, 80.0));
     h.pump();
     assert!(h.semantics_json().to_string().contains("n=0"), "default");
 
-    Counter::count(h.runtime()).set(h.runtime(), 41);
+    Counter::count_signal(h.runtime()).set(h.runtime(), 41);
     h.pump();
     assert!(
         h.semantics_json().to_string().contains("n=41"),
@@ -52,14 +54,14 @@ fn a_field_reads_and_writes_through_its_own_signal() {
 fn identically_named_fields_of_different_structs_do_not_collide() {
     let mut h = App::new(|cx: &mut BuildCx| {
         widgets::column(vec![
-            widgets::text(format!("c={}", Counter::count(cx).get(cx.runtime()))),
-            widgets::text(format!("o={}", Other::count(cx).get(cx.runtime()))),
+            widgets::text(format!("c={}", Counter::count_signal(cx).get(cx.runtime()))),
+            widgets::text(format!("o={}", Other::count_signal(cx).get(cx.runtime()))),
         ])
     })
     .run_headless(Size::new(200.0, 120.0));
     h.pump();
 
-    Counter::count(h.runtime()).set(h.runtime(), 5);
+    Counter::count_signal(h.runtime()).set(h.runtime(), 5);
     h.pump();
     let doc = h.semantics_json().to_string();
     assert!(doc.contains("c=5"), "the written one moved: {doc}");
@@ -77,13 +79,13 @@ fn fields_of_one_struct_are_independent() {
     let mut h = App::new(|cx: &mut BuildCx| {
         widgets::text(format!(
             "{}|{}",
-            Counter::count(cx).get(cx.runtime()),
-            Counter::label(cx).get(cx.runtime())
+            Counter::count_signal(cx).get(cx.runtime()),
+            Counter::label_signal(cx).get(cx.runtime())
         ))
     })
     .run_headless(Size::new(240.0, 80.0));
     h.pump();
-    Counter::label(h.runtime()).set(h.runtime(), "hi".to_string());
+    Counter::label_signal(h.runtime()).set(h.runtime(), "hi".to_string());
     h.pump();
     assert!(h.semantics_json().to_string().contains("0|hi"));
     h.assert_view_coherent();
@@ -100,15 +102,15 @@ fn fields_of_one_struct_are_independent() {
 #[test]
 fn a_field_reads_the_same_slot_inside_and_outside_a_scope() {
     let mut h = App::new(|cx: &mut BuildCx| {
-        let outer = Counter::count(cx).get(cx.runtime());
+        let outer = Counter::count_signal(cx).get(cx.runtime());
         let inner = cx.scope("s", |cx2| {
-            widgets::text(format!("inner={}", Counter::count(cx2).get(cx2.runtime())))
+            widgets::text(format!("inner={}", Counter::count_signal(cx2).get(cx2.runtime())))
         });
         widgets::column(vec![widgets::text(format!("outer={outer}")), inner])
     })
     .run_headless(Size::new(240.0, 120.0));
     h.pump();
-    Counter::count(h.runtime()).set(h.runtime(), 9);
+    Counter::count_signal(h.runtime()).set(h.runtime(), 9);
     h.pump();
     h.pump(); // a moved signal can lag one frame through a restyle
 
@@ -129,11 +131,11 @@ fn a_field_reads_the_same_slot_inside_and_outside_a_scope() {
 #[test]
 fn a_dropped_field_is_still_reported_on_restore() {
     let mut h = App::new(|cx: &mut BuildCx| {
-        widgets::text(format!("{}", Counter::count(cx).get(cx.runtime())))
+        widgets::text(format!("{}", Counter::count_signal(cx).get(cx.runtime())))
     })
     .run_headless(Size::new(200.0, 80.0));
     h.pump();
-    Counter::count(h.runtime()).set(h.runtime(), 3);
+    Counter::count_signal(h.runtime()).set(h.runtime(), 3);
     h.pump();
 
     let snap = h.runtime().snapshot();
@@ -155,4 +157,120 @@ fn a_dropped_field_is_still_reported_on_restore() {
         "a field present in the snapshot and absent from the new build must be \
          reported, not silently dropped; got {diags:?}"
     );
+}
+
+
+// ---- MUT8: the instance-threaded state model ----
+
+#[derive(Reactive)]
+#[cfg_attr(feature = "snapshot", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "snapshot", serde(default))]
+struct Dash {
+    count: i64,
+    title: String,
+}
+
+impl Default for Dash {
+    fn default() -> Self {
+        Dash {
+            count: 0,
+            title: "hello".into(),
+        }
+    }
+}
+
+#[test]
+fn with_state_reads_are_field_refs_and_writes_are_field_grained() {
+    // The view reads two fields through the derive's instance accessors; each
+    // field is its own scope dep, so writing one re-runs one scope only.
+    let count_runs = Rc::new(Cell::new(0u32));
+    let title_runs = Rc::new(Cell::new(0u32));
+    let (cr, tr) = (count_runs.clone(), title_runs.clone());
+    let mut h = App::with_state(Dash::default(), move |cx: &mut BuildCx, s: &Dash| {
+        let cr = cr.clone();
+        let tr = tr.clone();
+        let c = *s.count(cx);
+        let t = s.title(cx).clone();
+        let a = cx.scope_with_deps("c", c, move |_| {
+            cr.set(cr.get() + 1);
+            widgets::text(format!("count {c}"))
+        });
+        let b = cx.scope_with_deps("t", t.clone(), move |_| {
+            tr.set(tr.get() + 1);
+            widgets::text(format!("title {t}"))
+        });
+        widgets::column(vec![a, b])
+    })
+    .run_headless(Size::new(240.0, 120.0));
+
+    assert_eq!((count_runs.get(), title_runs.get()), (1, 1));
+    Dash::set_count(h.runtime(), 7);
+    h.pump();
+    assert_eq!(count_runs.get(), 2, "the written field's scope re-ran");
+    assert_eq!(title_runs.get(), 1, "the other field's scope spliced");
+    assert!(h.semantics_json().to_string().contains("count 7"));
+    h.assert_view_coherent();
+}
+
+#[test]
+fn with_state_binding_patches_through_get_accessor() {
+    // A bind! closure has only a Runtime — the derive's get_* form records
+    // the field read, so the reverse index routes the write to the binding
+    // and the frame patches instead of rebuilding.
+    let build_runs = Rc::new(Cell::new(0u32));
+    let br = build_runs.clone();
+    let mut h = App::with_state(Dash::default(), move |_cx: &mut BuildCx, _s: &Dash| {
+        br.set(br.get() + 1);
+        let mut root = widgets::column(vec![widgets::text(bind!(rt => {
+            format!("n = {}", Dash::get_count(rt))
+        }))]);
+        root.style.width = lumen_layout::Dim::pct(1.0);
+        root
+    })
+    .run_headless(Size::new(240.0, 120.0));
+
+    assert_eq!(build_runs.get(), 1);
+    Dash::update_count(h.runtime(), |c| *c += 41);
+    h.pump();
+    assert_eq!(build_runs.get(), 1, "a bound field write patches, not rebuilds");
+    assert!(h.semantics_json().to_string().contains("n = 41"));
+    h.assert_view_coherent();
+}
+
+#[cfg(feature = "snapshot")]
+#[test]
+fn with_state_reloads_by_serde_and_defaults_missing_fields() {
+    // The user's iced recipe: serialize, swap code, deserialize with
+    // #[serde(default)]. A field present in the snapshot survives; one the
+    // snapshot lacks takes its default.
+    let mut h = App::with_state(Dash::default(), |_cx: &mut BuildCx, s: &Dash| {
+        widgets::column(vec![widgets::text(format!(
+            "{} #{}",
+            s.title.clone(),
+            s.count
+        ))])
+    })
+    .run_headless(Size::new(240.0, 120.0));
+    Dash::set_count(h.runtime(), 9);
+    Dash::set_title(h.runtime(), "saved".into());
+    h.pump();
+    let snap = h.runtime().snapshot();
+
+    // "Swap code": a fresh app boots, stages the snapshot, adopts it live.
+    let mut h2 = App::with_state(Dash::default(), |cx: &mut BuildCx, s: &Dash| {
+        widgets::column(vec![widgets::text(format!(
+            "{} #{}",
+            s.title(cx).clone(),
+            s.count(cx)
+        ))])
+    })
+    .run_headless(Size::new(240.0, 120.0));
+    h2.runtime().load_pending(snap);
+    h2.runtime().adopt_pending_live();
+    h2.pump();
+    assert!(
+        h2.semantics_json().to_string().contains("saved #9"),
+        "the instance restored by serde"
+    );
+    h2.assert_view_coherent();
 }

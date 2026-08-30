@@ -372,6 +372,9 @@ type WindowDecl = (
     std::rc::Rc<dyn Fn(&mut BuildCx) -> Element>,
 );
 
+/// MUT8: the deferred app-state installer (`App` has no runtime yet).
+type StateInstall = Box<dyn FnOnce(&Runtime)>;
+
 /// An application: a root build closure, an optional stylesheet, and the frame
 /// renderer backend `R` (defaults to [`lumen_render::DefaultRenderer`] = the
 /// deterministic CPU `TinySkia`). The runtime is generic over `R` — zero-cost by
@@ -385,6 +388,9 @@ pub struct App<
     /// MOD1: `App` names the platform bundle only to hand it to the `Headless`
     /// it builds — it holds no layout or text state itself.
     _platform: std::marker::PhantomData<P>,
+    /// MUT8: installs the `App::with_state` instance into the runtime at
+    /// creation, before the first build. `None` for stateless apps.
+    state_install: Option<StateInstall>,
     /// The root view.
     ///
     /// Returns a boxed `DirectDyn` rather than an `Element`: the *root* is the
@@ -420,9 +426,39 @@ impl App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner> {
     /// unique target type once more than one type is `Direct`, and ~25 call
     /// sites across this repo alone stopped inferring. An additive door costs
     /// nothing and breaks nobody.
+    /// MUT8: an app whose state is one `#[derive(Reactive)]` struct, threaded
+    /// into the view by reference. Field reads are direct references plus one
+    /// recorded read — no store addressing, no slot lookup, no downcast
+    /// (R9's 16 ns of a 25 ns read). Writes go through the derive's generated
+    /// `set_*`/`update_*` fns, which bump the field's version slot so every
+    /// consumer of the reactive machinery (scopes, bindings, the reverse
+    /// index) works unchanged. Under `snapshot`, the instance rides in the
+    /// snapshot as `"__app_state"` and restores by serde — derive
+    /// `Serialize`/`Deserialize` and add `#[serde(default)]` so a reload
+    /// survives fields being added or removed; view-local state stays in the
+    /// keyed store exactly as before (the D1 decision).
+    pub fn with_state<S, V>(
+        state: S,
+        root: impl Fn(&mut BuildCx, &S) -> V + 'static,
+    ) -> App
+    where
+        S: lumen_core::state::ReactiveState + lumen_core::state::State,
+        V: Direct + 'static,
+    {
+        let mut app = App::view(move |cx: &mut BuildCx| {
+            let rt = lumen_core::state::ReadCx::runtime(cx).clone();
+            rt.with_state(|s: &S| root(cx, s))
+        });
+        app.state_install = Some(Box::new(move |rt: &Runtime| rt.install_state(state)));
+        app
+    }
+
+    /// O0.24: like [`App::new`](App::new) for any `Direct` root — the
+    /// statement-form entry point.
     pub fn view<V: Direct + 'static>(root: impl Fn(&mut BuildCx) -> V + 'static) -> App {
         App {
             _platform: std::marker::PhantomData,
+            state_install: None,
             root: Box::new(move |cx| Box::new(Some(root(cx)))),
             stylesheet: None,
             fonts: Vec::new(),
@@ -445,6 +481,7 @@ impl<P: PlatformConfig> App<lumen_render::TinySkia, lumen_core::tasks::InlineSpa
     pub fn with_platform<V: Direct + 'static>(root: impl Fn(&mut BuildCx) -> V + 'static) -> Self {
         App {
             _platform: std::marker::PhantomData,
+            state_install: None,
             root: Box::new(move |cx| Box::new(Some(root(cx))) as Box<dyn DirectDyn>),
             stylesheet: None,
             fonts: Vec::new(),
@@ -479,6 +516,7 @@ impl<C: AppConfig> ConfiguredApp<C> {
     pub fn with_config(root: impl Fn(&mut BuildCx) -> Element + 'static) -> Self {
         App {
             _platform: std::marker::PhantomData,
+            state_install: None,
             root: Box::new(move |cx| Box::new(Some(root(cx))) as Box<dyn DirectDyn>),
             stylesheet: None,
             fonts: Vec::new(),
@@ -532,6 +570,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     pub fn with_renderer<R2: lumen_render::Renderer>(self, renderer: R2) -> App<R2, E, P> {
         App {
             _platform: std::marker::PhantomData,
+            state_install: None,
             root: self.root,
             stylesheet: self.stylesheet,
             fonts: self.fonts,
@@ -549,6 +588,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     pub fn with_executor<E2: lumen_core::tasks::Spawner>(self, executor: E2) -> App<R, E2, P> {
         App {
             _platform: std::marker::PhantomData,
+            state_install: None,
             root: self.root,
             stylesheet: self.stylesheet,
             fonts: self.fonts,
@@ -588,7 +628,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
 
     /// Construct the headless instance (fonts registered, focus applied) without
     /// the first build. Shared by the plain and restore boot paths.
-    fn into_headless(self, size: Size, focused: Option<StableId>) -> Headless<R, E, P> {
+    fn into_headless(mut self, size: Size, focused: Option<StableId>) -> Headless<R, E, P> {
         // Register app fonts before the first build so styled text can select
         // them. Bytes are retained so secondary windows (P.3d) can build
         // their own TextEngine with the same faces.
@@ -604,12 +644,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let window_descs: Vec<crate::system::WindowDesc> =
             self.windows.iter().map(|(d, _)| d.clone()).collect();
         let stylesheet_src = self.stylesheet.clone();
+        // MUT8: install the app state before the first build sees the runtime.
+        let rt = Runtime::new();
+        if let Some(install) = self.state_install.take() {
+            install(&rt);
+        }
         let h = Headless {
             root: self.root,
             window_decls: self.windows,
             font_bytes,
             stylesheet_src,
-            rt: Runtime::new(),
+            rt,
             size,
             scale: 1.0,
             clock_ms: 0.0,
@@ -3710,6 +3755,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // geometry the owner cannot reason about.
         let app: App<R2, E2, P> = App {
             _platform: std::marker::PhantomData,
+            // A secondary window shares the parent's runtime-installed state
+            // implicitly? No — it has its OWN runtime; P.3d revisits this.
+            state_install: None,
             root: Box::new(move |cx| Box::new(Some(root(cx))) as Box<dyn DirectDyn>),
             stylesheet: self.stylesheet_src.clone(),
             fonts: self.font_bytes.clone(),

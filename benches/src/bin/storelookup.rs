@@ -151,6 +151,37 @@ fn main() {
         acc
     });
 
+    // --- MUT8: the installed-state field read -----------------------------
+    // The derive's instance accessor: one recorded read + a direct reference.
+    // No addressing, no slot lookup, no downcast.
+    #[derive(Default, lumen_widgets::Reactive, serde::Serialize, serde::Deserialize)]
+    #[serde(default)]
+    struct StateBench {
+        rows: Vec<i64>,
+    }
+    rt.install_state(StateBench { rows: vals.clone() });
+    let (state_read, s8) = best_of(rounds, || {
+        rt.with_state(|st: &StateBench| {
+            let mut acc = 0i64;
+            for i in 0..n {
+                acc = acc.wrapping_add(st.rows(rt)[i]);
+            }
+            acc
+        })
+    });
+    let (state_read_c, s9) = best_of(rounds, || {
+        let (acc, _r) = rt.collect_reads(|| {
+            rt.with_state(|st: &StateBench| {
+                let mut acc = 0i64;
+                for i in 0..n {
+                    acc = acc.wrapping_add(st.rows(rt)[i]);
+                }
+                acc
+            })
+        });
+        acc
+    });
+
     // Equivalence: every arm must sum the same values, or one of them is not
     // doing the work.
     let expect: i64 = (0..n as i64).sum();
@@ -162,6 +193,8 @@ fn main() {
         ("read-only/collect", s5),
         ("hash-only", s6),
         ("precomputed/collect", s7),
+        ("state-field", s8),
+        ("state-field/collect", s9),
     ] {
         let per = got / (rounds as i64 + 3);
         assert_eq!(
@@ -197,5 +230,21 @@ fn main() {
         "    saved vs address+read         {:8.1} µs ({:.0}% of addressing)",
         addr_read_c - precomputed,
         100.0 * (addr_read_c - precomputed) / (addr_read_c - read_only_c)
+    );
+    println!("  MUT8: installed-state field read (the shipped form)");
+    println!(
+        "    state field    {:8.1}  {:6.1} ns   (closed)",
+        us(state_read),
+        per_ns(state_read)
+    );
+    println!(
+        "    state field    {:8.1}  {:6.1} ns   (collector open)",
+        us(state_read_c),
+        per_ns(state_read_c)
+    );
+    println!(
+        "    saved vs address+read         {:8.1} µs ({:.1}% of the store's 25.4 ns/read)",
+        addr_read_c - state_read_c,
+        100.0 * (addr_read_c - state_read_c) / addr_read_c
     );
 }

@@ -149,6 +149,16 @@ bindings over inferred holes.
 
 ## 4. Signals & state store (binding discipline)
 
+**MUT8 (2026-08-30):** app-level state may instead be ONE `#[derive(Reactive)]`
+struct installed via `App::with_state(state, |cx, s| …)`. Values live in the
+instance; the runtime keeps a value-less version slot per field, so ReadSets,
+memos and the binding index treat field writes exactly like signal writes.
+Reads are `s.field(cx)` (a recorded read + direct reference, 3.4 ns vs the
+keyed store's 26.5); writes go through the generated `set_*`/`update_*`.
+Snapshots carry the instance under `"__app_state"` and restore by serde
+(`#[serde(default)]` recommended). View-local state stays in the keyed store.
+
+
 ```rust
 pub trait State: serde::Serialize + serde::de::DeserializeOwned + 'static {}
 impl<T: Serialize + DeserializeOwned + 'static> State for T {}

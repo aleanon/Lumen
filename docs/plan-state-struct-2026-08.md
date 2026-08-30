@@ -1,6 +1,6 @@
 # Plan — the state-struct model (`#[derive(Reactive)]`)
 
-**Status: S1 and S2 shipped; S3 measured and deferred; S4 optional.** Written 2026-08-30 after R7–R10 and
+**Status: S1 and S2 shipped; S3 shipped as MUT8 (2026-08-30, 26.5 → 3.4 ns/read); S4 optional.** Written 2026-08-30 after R7–R10 and
 C1; D1 and D2 resolved the same day (see below) — the two blockers are cleared.
 
 ## What is being proposed
