@@ -582,6 +582,43 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT3 ☑ The bounds walk prunes unmoved spliced subtrees — 50 197 visits → 712 (2026-08-30)
+
+**The rebuild frame's flat O(live nodes) bounds/clip pass is now change-
+driven.** The F2.2 walk read every live node's solved rect and re-derived its
+clip (two hash lookups per node) even when 49 939 of 50 197 nodes were
+spliced and unmoved. It is now top-down with subtree pruning: a node
+**retained from a previous build** whose solved absolute rect equals its
+stored bounds has an interior laid out purely relative to that rect — nothing
+inside can have moved, every stored descendant bound and clip is still exact,
+and the walk stops there.
+
+**The freshness signal had to be real.** "Solved == stored" alone is unsound:
+the arena recycles freed slots, so a freshly lowered node can inherit a freed
+node's index — and `alloc` resetting bounds to `Rect::ZERO` almost saves it,
+except a genuinely zero-rect node aliases that too. The arena now carries a
+**build epoch** (`Tree::bump_epoch` per rebuild, `born[slot]` per alloc):
+`born_this_epoch` distinguishes spliced from fresh in O(1) and recycling
+cannot fool it. Scroll needs no special case — offsets are expressed through
+layout (negative margins), so a scrolled span re-lowers and descends. One
+narrowing, documented in place: a `.lss` state-part `clip` reaches the
+hit-test tree when the node re-lowers, not from a spliced frame — restyle
+never wrote `tree.clip` either, so that edge is unchanged.
+
+**Probed (added, measured, reverted):** chunk N=50 000 K=1 rebuild frames
+visit **712** nodes and prune at **195** chunk roots (was 50 197 visits); the
+coherence oracle's fresh build correctly prunes zero (every node born this
+epoch).
+
+**Measured** (sparse, taskset, K=1): chunk N=50 000 **9 299 → 8 817 µs**
+(−5.2%); scope N=10 000 D=8 (90 001 nodes) **23 359 → 22 198 µs** (−5.0%);
+decline path 11 072 → 10 962. *A correction to R7's attribution:* the phase
+labelled "bounds walk, 1 162 µs, irreducible" evidently bundled neighbouring
+per-frame work — the loop this replaced was worth ~500 µs of it. The walk
+itself is now effectively free; the remaining rebuild-frame O(N) costs are
+the splice bookkeeping (`nodes_copied`), the display-list rebuild + diff on
+rebuild frames, `propagate_disabled`, and layout — MUT4's territory.
+
 ## MUT2 ☑ Patch-driven damage — the patch frame is O(K) and flat in N (2026-08-30)
 
 **The last O(live nodes) work on a patch frame was `paint()` itself**: a full

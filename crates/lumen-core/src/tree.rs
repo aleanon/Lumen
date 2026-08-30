@@ -57,6 +57,12 @@ pub struct Tree {
     alive: Vec<bool>,
     free: Vec<u32>,
     live_count: usize,
+    /// MUT3: the build epoch each slot was (re-)allocated in. Distinguishes a
+    /// node retained across builds (spliced) from one lowered this build —
+    /// which slot recycling makes impossible to tell from the index alone.
+    born: Vec<u64>,
+    /// The current build epoch; `bump_epoch` advances it once per rebuild.
+    epoch: u64,
 
     // SoA hot data (02 §5)
     bounds: Vec<Rect>,
@@ -122,6 +128,8 @@ impl Tree {
             alive: Vec::with_capacity(c),
             free: Vec::new(),
             live_count: 0,
+            born: Vec::with_capacity(c),
+            epoch: 0,
             bounds: Vec::with_capacity(c),
             transform: Vec::with_capacity(c),
             opacity: Vec::with_capacity(c),
@@ -339,6 +347,22 @@ impl Tree {
     pub fn set_flags(&mut self, n: NodeIndex, f: NodeFlags) {
         self.flags[n.index() as usize] = f;
     }
+    /// Advance the build epoch. Called once at the start of each rebuild, so
+    /// [`born_this_epoch`](Self::born_this_epoch) means "lowered by the build
+    /// in progress" (MUT3).
+    pub fn bump_epoch(&mut self) {
+        self.epoch += 1;
+    }
+
+    /// Whether `n`'s slot was allocated during the current build epoch. A
+    /// retained (spliced) node answers false; a freshly lowered one true —
+    /// even when it recycled a freed slot.
+    pub fn born_this_epoch(&self, n: NodeIndex) -> bool {
+        self.born
+            .get(n.index() as usize)
+            .is_some_and(|b| *b == self.epoch)
+    }
+
     pub fn set_clip(&mut self, n: NodeIndex, c: Option<Rect>) {
         self.clip[n.index() as usize] = c;
     }
@@ -467,6 +491,7 @@ impl Tree {
         if let Some(i) = self.free.pop() {
             let iu = i as usize;
             self.alive[iu] = true;
+            self.born[iu] = self.epoch;
             self.bounds[iu] = Rect::ZERO;
             self.transform[iu] = Affine::IDENTITY;
             self.opacity[iu] = 1.0;
@@ -484,6 +509,7 @@ impl Tree {
             let i = self.generation.len() as u32;
             self.generation.push(0);
             self.alive.push(true);
+            self.born.push(self.epoch);
             self.bounds.push(Rect::ZERO);
             self.transform.push(Affine::IDENTITY);
             self.opacity.push(1.0);

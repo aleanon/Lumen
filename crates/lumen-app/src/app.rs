@@ -5581,6 +5581,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // and each scope is lowered normally — a mispredicted frame is
             // slower, never wrong.
         }
+        // MUT3: stamp this build, so the bounds walk below can tell a spliced
+        // node (retained slot, older epoch) from a freshly lowered one that
+        // recycled the same index.
+        tree.bump_epoch();
         let old_root = tree.root();
         let (root_node, root_lnode) = Sink {
             app: self,
@@ -5695,32 +5699,55 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             layout.mirror_rtl(root_lnode);
         }
 
-        // F2.2: bounds and clip for every live node, not just the ones this
-        // build lowered. A spliced span is not walked, so its nodes are not
-        // enumerated anywhere else — and their absolute positions still change
-        // whenever something above them resizes.
-        for node in tree.iter_live().collect::<Vec<_>>() {
-            let Some(raw) = tree.lnode(node) else {
-                continue;
-            };
-            let b = layout.bounds(LayoutNode::from_raw(raw));
-            tree.set_bounds(node, b);
-            // Propagate clipping to the hit-test tree: a `clip: true` node (e.g. a
-            // Scrollable viewport) must reject pointer events on descendants that
-            // overflow its box. Otherwise scrolled-out rows — laid out *above* the
-            // viewport via negative margin, painted-clipped but still present —
-            // keep hittable bounds outside the box and steal clicks from widgets
-            // above the list. Mirrors the paint clip in `emit_pass`: `.lss` `clip`
-            // overrides the element flag (`none` disables it). Descendants inherit
-            // the intersected clip in `Tree::hit_test`, so only self-clipping nodes
-            // need it set.
-            let clip_on = self
-                .node_style
-                .get(&node)
-                .and_then(|s| s.clip)
-                .map(|c| c != lumen_style::StyleClip::None)
-                .unwrap_or_else(|| meta.get(&node).is_some_and(|m| m.clip));
-            tree.set_clip(node, clip_on.then_some(b));
+        // F2.2: bounds and clip for every live node this build could have
+        // moved. A spliced span is not walked by the build, so its nodes are
+        // not enumerated anywhere else — and their absolute positions still
+        // change whenever something above them resizes.
+        //
+        // MUT3: top-down with subtree pruning, replacing the flat O(live
+        // nodes) pass. A node retained from a previous build (spliced — its
+        // styles and children unchanged by definition of the splice) whose
+        // solved absolute rect equals its stored bounds has an interior laid
+        // out purely relative to that rect: nothing inside can have moved, and
+        // every stored descendant bound and clip is still exact, so the walk
+        // stops there. A freshly lowered node is never pruned (`born_this_
+        // epoch`, which slot recycling cannot fool), so its bounds and clip
+        // are always written. Scroll offsets need no special case: they are
+        // expressed through layout (negative margins), so a scrolled span
+        // re-lowers and descends. One narrowing this shares with restyle: a
+        // `.lss` state-part that changes `clip` reaches the hit-test tree
+        // when the node re-lowers, not from a spliced frame — restyle never
+        // wrote `tree.clip` either, so that edge is unchanged.
+        //
+        // Clip propagation (unchanged): a `clip: true` node (e.g. a
+        // Scrollable viewport) must reject pointer events on descendants that
+        // overflow its box; descendants inherit the intersected clip in
+        // `Tree::hit_test`, so only self-clipping nodes need it set. `.lss`
+        // `clip` overrides the element flag (`none` disables it), mirroring
+        // the paint clip in `emit_pass`.
+        {
+            let mut stack: Vec<NodeIndex> = vec![tree.root()];
+            while let Some(node) = stack.pop() {
+                if !node.is_some() {
+                    continue;
+                }
+                stack.push(tree.next_sibling(node));
+                if let Some(raw) = tree.lnode(node) {
+                    let b = layout.bounds(LayoutNode::from_raw(raw));
+                    if !tree.born_this_epoch(node) && tree.bounds(node) == b {
+                        continue; // prune: the whole subtree is current
+                    }
+                    tree.set_bounds(node, b);
+                    let clip_on = self
+                        .node_style
+                        .get(&node)
+                        .and_then(|s| s.clip)
+                        .map(|c| c != lumen_style::StyleClip::None)
+                        .unwrap_or_else(|| meta.get(&node).is_some_and(|m| m.clip));
+                    tree.set_clip(node, clip_on.then_some(b));
+                }
+                stack.push(tree.first_child(node));
+            }
         }
 
         // B.2b: container queries resolved against the *previous* layout's
