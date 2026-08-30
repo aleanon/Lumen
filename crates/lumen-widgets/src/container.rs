@@ -254,6 +254,10 @@ pub struct Stack<F> {
     direction: FlexDirection,
     gap: f32,
     padding: f32,
+    /// MUT7b: an explicit main/cross size, for statement-form roots that need
+    /// a definite containing block (`width: 100%` being every real root).
+    width: Option<Dim>,
+    height: Option<Dim>,
     common: Common,
 }
 
@@ -265,6 +269,8 @@ impl<F: FnMut(&mut crate::Kids)> Stack<F> {
             direction: FlexDirection::Column,
             gap: 0.0,
             padding: 0.0,
+            width: None,
+            height: None,
             common: Common::default(),
         }
     }
@@ -288,6 +294,19 @@ impl<F: FnMut(&mut crate::Kids)> Stack<F> {
         self.padding = padding;
         self
     }
+
+    /// Explicit width (MUT7b) — a statement-form root wants `Dim::pct(1.0)`
+    /// for the definite containing block T2's deferred text relies on.
+    pub fn width(mut self, w: Dim) -> Self {
+        self.width = Some(w);
+        self
+    }
+
+    /// Explicit height (MUT7b).
+    pub fn height(mut self, h: Dim) -> Self {
+        self.height = Some(h);
+        self
+    }
 }
 
 impl<F: FnMut(&mut crate::Kids)> crate::Direct for Stack<F> {
@@ -302,6 +321,8 @@ impl<F: FnMut(&mut crate::Kids)> crate::Direct for Stack<F> {
             direction,
             gap,
             padding,
+            width,
+            height,
             common,
         } = self;
         let mut el = Element {
@@ -313,6 +334,8 @@ impl<F: FnMut(&mut crate::Kids)> crate::Direct for Stack<F> {
                 row_gap: Dim::px(gap),
                 column_gap: Dim::px(gap),
                 padding: Edges::all(Dim::px(padding)),
+                width: width.unwrap_or(Dim::Auto),
+                height: height.unwrap_or(Dim::Auto),
                 ..LayoutStyle::default()
             },
             ..Element::default()

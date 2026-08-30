@@ -197,6 +197,7 @@ impl DisplayList {
             images: self.images.clone(),
             runs: self.runs.clone(),
             glyph_images: self.glyph_images.clone(),
+            glyph_keys: self.glyph_keys.clone(),
         }
     }
 }
@@ -381,6 +382,9 @@ pub struct DisplayList {
     pub runs: Vec<GlyphRun>,
     /// Deduplicated glyph coverage bitmaps referenced by [`PlacedGlyph::image`].
     pub glyph_images: Vec<GlyphImage>,
+    /// MUT7a: key → index into `glyph_images`. The intern fns were a linear
+    /// scan per glyph, quadratic in distinct glyphs per frame.
+    glyph_keys: std::collections::HashMap<u64, u32>,
 }
 
 impl DisplayList {
@@ -405,10 +409,11 @@ impl DisplayList {
     /// index for [`PlacedGlyph::image`]. The same glyph used many times across
     /// runs is stored once.
     pub fn intern_glyph(&mut self, img: GlyphImage) -> u32 {
-        if let Some(i) = self.glyph_images.iter().position(|g| g.key == img.key) {
-            return i as u32;
+        if let Some(&i) = self.glyph_keys.get(&img.key) {
+            return i;
         }
         let i = self.glyph_images.len() as u32;
+        self.glyph_keys.insert(img.key, i);
         self.glyph_images.push(img);
         i
     }
@@ -417,10 +422,11 @@ impl DisplayList {
     /// coverage image only when it isn't already present — so reusing a cached run
     /// pays a clone only for glyphs new to this frame.
     pub fn intern_glyph_ref(&mut self, img: &GlyphImage) -> u32 {
-        if let Some(i) = self.glyph_images.iter().position(|g| g.key == img.key) {
-            return i as u32;
+        if let Some(&i) = self.glyph_keys.get(&img.key) {
+            return i;
         }
         let i = self.glyph_images.len() as u32;
+        self.glyph_keys.insert(img.key, i);
         self.glyph_images.push(img.clone());
         i
     }

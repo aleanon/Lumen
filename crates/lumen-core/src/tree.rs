@@ -46,6 +46,16 @@ bitflags! {
         const FOCUSED      = 1 << 7;
         /// Node is currently pressed.
         const PRESSED      = 1 << 8;
+        /// MUT7a: overlay root (routes to the overlay paint pass). Cached
+        /// here so the display-list partition reads the flags SoA instead of
+        /// a meta hash lookup per node.
+        const OVERLAY      = 1 << 9;
+        /// MUT7a: `.lss` `visibility: none` — the css-derived hidden bit,
+        /// maintained wherever `node_style` is written.
+        const CSS_HIDDEN   = 1 << 10;
+        /// MUT7a: the css gives this node a compositing layer (clip, opacity
+        /// or blend), so an offscreen node must still emit its layer cmds.
+        const LAYER_FX     = 1 << 11;
     }
 }
 
@@ -361,6 +371,18 @@ impl Tree {
         self.born
             .get(n.index() as usize)
             .is_some_and(|b| *b == self.epoch)
+    }
+
+    /// Total slots in the arena (live + free) — the bound for dense
+    /// slot-indexed scratch arrays (MUT7a).
+    pub fn slot_count(&self) -> usize {
+        self.generation.len()
+    }
+
+    /// The node's own clip rect, if it clips (MUT7a — read by the
+    /// display-list cull; written by the bounds walk).
+    pub fn clip(&self, n: NodeIndex) -> Option<Rect> {
+        self.clip.get(n.index() as usize).copied().flatten()
     }
 
     pub fn set_clip(&mut self, n: NodeIndex, c: Option<Rect>) {

@@ -182,6 +182,15 @@ diagnostic can catch it: the mismatch is only knowable after layout.
   its width is parent-assigned and its height is line metrics, so only a
   replacement that gains a `\n` falls back (MUT0).
 
+  **Statement-form views** (O0.24/MUT7b) are the Element-free authoring
+  shape: `App::view(|cx| Stack::column(|c| { for … { c.child(Label::new(…)) } })
+  .width(Dim::pct(1.0)))` — children lower as they are written, no
+  `Vec<Element>` staging (−4.7% build at 50 000 rows, full parity on the
+  patch path). `Stack::column`/`row` take `gap`/`padding`/`width`/`height`
+  plus the universal modifiers; give a statement-form root an explicit
+  `width(Dim::pct(1.0))` so deferred text keeps its definite containing
+  block. `App::new` (Element form) remains fully supported.
+
   Reading a signal in the view body and interpolating the *value*
   (`widgets::text(format!("{}", n.get(cx.runtime())))`) is the slow form: that
   read is structural, so every change rebuilds. Prefer `bind!`/`text!`.

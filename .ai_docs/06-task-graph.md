@@ -582,6 +582,51 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT7 ☑ The display-list walk goes dense; the Direct engine is measured end-to-end (2026-08-30)
+
+**MUT7a — the rebuild frame's last big engine pass, profiled then flattened.**
+Probes split the 2.7 ms `build_display_list` at chunk N=50 000 into:
+paint_order 121 µs, **partition 1 304 µs** (three hash ops per node — a depth
+`HashMap` insert+get plus `node_style`/`meta` lookups, to route nodes that
+mostly emit nothing) and **emit 1 706 µs** (~34 ns/node of per-node early-out,
+since only ~28 of 50 197 rows are on canvas — R.3 already culls emission; the
+*iteration* was the cost). Landed: depth as a dense slot-indexed array
+(`Tree::slot_count`); the hidden/overlay/effects tests as **flags-SoA bits**
+— `NodeFlags::{OVERLAY, CSS_HIDDEN, LAYER_FX}`, written at the three
+`node_style` insert sites and at lowering, `alloc`'s flag reset covering
+recycling; the offscreen cull decided from `tree.clip` (the final derived
+clip the bounds walk writes) + `LAYER_FX`, so the everything-offscreen case
+pays **zero hash lookups**; and the glyph intern's linear scan replaced by a
+key index in `DisplayList`. *Measured:* partition **1 304 → 79 µs**, emit
+**1 706 → ~200 µs**; frames: chunk N=50 000 **4 204 → 3 046 µs** (−28%),
+scope N=10 000 D=8 **12 273 → 8 014 µs** (−35%), decline path
+**7 260 → 5 525 µs** (−24%).
+
+**MUT7b — the Direct-only engine, staged honestly.** The architecture is
+already Direct end-to-end at the root (`App::view<V: Direct>`, O0.24) and
+every widget lowers Direct (O0.23); what "Element deletion" still means is
+(a) statement-form migration of ~180 authoring files and (b) rewriting
+`build_node` to consume widgets instead of the `Element` IR — the true 1.0
+break, R8-costed at ~5% of a changed frame. This stage **proved the path at
+scale**: sparse gained `MODE=direct` — a 50 000-row statement-form root
+(`Stack::column(|c| … c.child(Label::new(bind!(…))))`) — and it is at **full
+parity on the patch path** (215 µs, bindings register through the
+`@direct_bridge`, the equivalence guard and coherence oracle both pass) with
+**build −4.7%** (122.8 → 117.0 ms at 50k) and lower RSS. `Stack` gained
+`width`/`height` (a statement-form root needs the definite containing block
+T2's deferred text relies on — an API gap this exercise found). The
+remaining stage is recorded, not implied: migrate authoring files
+incrementally via `Element::direct`'s boundary, then rewrite `build_node`;
+nothing perf-critical waits on it — the transient per-node `Element` is the
+~5%, and the staging-tree half of that is already gone in statement form.
+
+**What remains O(N) on a rebuild frame, for the record:** the view phase
+(authoring + store reads — the S-series' territory), splice bookkeeping
+(`nodes_copied`), `paint_order`'s walk (121 µs), the partition/emit iteration
+(~280 µs now), `propagate_disabled`, and the warm layout solve. The engine's
+change-driven contract holds everywhere the change is *known*; these passes
+are the residue of the parts that still discover it.
+
 ## MUT6 ☑ Semantics patch in place — the 15 ms observer tax is gone (2026-08-30)
 
 **Measured first** (`benches/src/bin/semtime.rs`, kept as the arm): after a

@@ -4937,6 +4937,19 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                         self.apply_keyframes(&id, owned);
                     }
                 }
+                {
+                    // MUT7a: keep the cached css paint-routing bits current
+                    // through a restyle, same rule as at lowering.
+                    let mut f = self.tree.flags(node);
+                    f.set(NodeFlags::CSS_HIDDEN, css.visibility == Some(false));
+                    f.set(
+                        NodeFlags::LAYER_FX,
+                        css.clip.is_some()
+                            || css.opacity.unwrap_or(1.0) < 1.0
+                            || css.blend_mode.is_some(),
+                    );
+                    self.tree.set_flags(node, f);
+                }
                 self.node_style.insert(node, css);
                 self.node_computed.insert(node, resolved);
             }
@@ -7115,6 +7128,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         if el.id.is_some() && el.id == self.app.hovered_id {
             flags |= NodeFlags::HOVERED;
         }
+        if this_overlay {
+            // MUT7a: cached in the flags SoA so the display-list partition
+            // reads one dense word per node instead of a meta hash lookup.
+            flags |= NodeFlags::OVERLAY;
+        }
         self.tree.set_flags(node, flags);
         if this_overlay {
             self.tree.set_z(node, OVERLAY_Z);
@@ -7324,6 +7342,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     self.tree.set_z(node, z.max(0) as u32);
                 }
             }
+            // MUT7a: cache the css-derived paint-routing bits in the flags
+            // SoA — the display-list walk reads them densely per node.
+            let mut f = self.tree.flags(node);
+            f.set(NodeFlags::CSS_HIDDEN, css.visibility == Some(false));
+            f.set(
+                NodeFlags::LAYER_FX,
+                css.clip.is_some()
+                    || css.opacity.unwrap_or(1.0) < 1.0
+                    || css.blend_mode.is_some(),
+            );
+            self.tree.set_flags(node, f);
             self.app.node_style.insert(node, css);
             self.app.node_computed.insert(node, resolved);
             // B.1: this node becomes an ancestor for its children's matching
@@ -7354,6 +7383,17 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     self.tree.set_z(node, z.max(0) as u32);
                 }
             }
+            // MUT7a: cache the css-derived paint-routing bits in the flags
+            // SoA — the display-list walk reads them densely per node.
+            let mut f = self.tree.flags(node);
+            f.set(NodeFlags::CSS_HIDDEN, css.visibility == Some(false));
+            f.set(
+                NodeFlags::LAYER_FX,
+                css.clip.is_some()
+                    || css.opacity.unwrap_or(1.0) < 1.0
+                    || css.blend_mode.is_some(),
+            );
+            self.tree.set_flags(node, f);
             self.app.node_style.insert(node, css);
             self.app.node_computed.insert(node, resolved);
         }
@@ -7767,8 +7807,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // they sit above the rest of the UI and escape ancestor clips (dropdown
         // menus, popovers, tooltips). Both subsets keep document order.
         let root = order.first().copied();
-        let mut depth: HashMap<NodeIndex, u32> = HashMap::default();
-        let mut main_order: Vec<NodeIndex> = Vec::new();
+        // MUT7a: depth as a dense slot-indexed array and the hidden/overlay
+        // tests as flags-SoA reads. The HashMap-per-node version of this loop
+        // measured 1.3 ms of a 2.7 ms display-list build at N=50 000 — three
+        // hash operations per node to route nodes that mostly emit nothing.
+        let mut depth: Vec<u32> = vec![0; self.tree.slot_count()];
+        let mut main_order: Vec<NodeIndex> = Vec::with_capacity(order.len());
         let mut overlay_order: Vec<NodeIndex> = Vec::new();
         let mut overlay_depths: Vec<u32> = Vec::new();
         let mut hidden_depths: Vec<u32> = Vec::new();
@@ -7776,9 +7820,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             let d = if Some(node) == root {
                 0
             } else {
-                depth.get(&self.tree.parent(node)).map_or(0, |p| p + 1)
+                depth[self.tree.parent(node).index() as usize] + 1
             };
-            depth.insert(node, d);
+            depth[node.index() as usize] = d;
             while overlay_depths.last().is_some_and(|&od| d <= od) {
                 overlay_depths.pop();
             }
@@ -7790,16 +7834,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             if !hidden_depths.is_empty() {
                 continue;
             }
-            if self
-                .node_style
-                .get(&node)
-                .and_then(|s| s.visibility)
-                .is_some_and(|v| !v)
-            {
+            let flags = self.tree.flags(node);
+            if flags.contains(NodeFlags::CSS_HIDDEN) {
                 hidden_depths.push(d);
                 continue;
             }
-            let is_root = self.meta.get(&node).is_some_and(|m| m.overlay);
+            let is_root = flags.contains(NodeFlags::OVERLAY);
             let inside = !overlay_depths.is_empty() || is_root;
             if is_root {
                 overlay_depths.push(d);
@@ -7820,7 +7860,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     fn emit_pass(
         &mut self,
         order: &[NodeIndex],
-        depth: &HashMap<NodeIndex, u32>,
+        depth: &[u32],
         bound: &crate::fxhash::HashSet<NodeIndex>,
         dl: &mut DisplayList,
         text_targets: &mut Vec<lumen_render::TextTarget>,
@@ -7828,31 +7868,34 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let mut clip_stack: Vec<u32> = Vec::new();
         for &node in order {
             let bounds = self.tree.bounds(node);
-            let d = depth.get(&node).copied().unwrap_or(0);
+            let d = depth[node.index() as usize];
             while clip_stack.last().is_some_and(|&cd| d <= cd) {
                 dl.push(DrawCmd::PopLayer);
                 clip_stack.pop();
+            }
+            // R.3: a node fully outside the canvas emits nothing (scrolled-
+            // away content skips DL emission and raster). Nodes carrying a
+            // clip or layer effects still run so descendants compose
+            // correctly. MUT7a: decided from the SoA alone — `tree.clip` is
+            // the final derived clip (css override included, written by the
+            // bounds walk) and LAYER_FX caches the css opacity/blend/clip
+            // bits — so the ~everything-offscreen case of a long list pays
+            // no hash lookups at all.
+            let offscreen = bounds.x1 <= 0.0
+                || bounds.y1 <= 0.0
+                || bounds.x0 >= self.size.width
+                || bounds.y0 >= self.size.height;
+            if offscreen
+                && self.tree.clip(node).is_none()
+                && !self.tree.flags(node).contains(NodeFlags::LAYER_FX)
+            {
+                continue;
             }
             let Some(m) = self.meta.get(&node) else {
                 continue;
             };
             // `.lss` overrides the widget's hardcoded background/radius.
             let css = self.node_style.get(&node);
-            // R.3: a node fully outside the canvas emits nothing (scrolled-
-            // away content skips DL emission and raster). Nodes carrying
-            // layer effects still run so descendants compose correctly.
-            let offscreen = bounds.x1 <= 0.0
-                || bounds.y1 <= 0.0
-                || bounds.x0 >= self.size.width
-                || bounds.y0 >= self.size.height;
-            if offscreen
-                && !m.clip
-                && css.is_none_or(|s| {
-                    s.clip.is_none() && s.opacity.unwrap_or(1.0) >= 1.0 && s.blend_mode.is_none()
-                })
-            {
-                continue;
-            }
             let mut bg = css.and_then(|s| s.background).or(m.background);
             // Hover feedback: lighten a dark control / darken a light one while
             // the pointer is over a clickable node. Automatic for every button.

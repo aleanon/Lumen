@@ -28,7 +28,7 @@
 
 use kurbo::Size;
 use lumen_core::state::Signal;
-use lumen_widgets::{bind, widgets, App, BuildCx, Element};
+use lumen_widgets::{bind, widgets, App, BuildCx, Element, Label, Stack};
 use std::time::Instant;
 
 fn env(k: &str, d: usize) -> usize {
@@ -71,7 +71,29 @@ fn main() {
 
     let m = mode.clone();
     let t0 = Instant::now();
-    let mut h = App::new(move |cx: &mut BuildCx| {
+    // MODE=direct (MUT7b): the statement-form Direct root — no Vec<Element>
+    // staging, children lowered as they are written. Rows are bound labels,
+    // so steady frames take the same patch path as MODE=bind; what this arm
+    // isolates is the build/view side of the authoring form.
+    let app = if m == "direct" {
+        let fill = std::env::var("NOFILL").is_err();
+        App::view(move |_cx: &mut BuildCx| {
+            let s = Stack::column(move |c| {
+                for i in 0..rows {
+                    c.child(Label::new(bind!(rt => {
+                        let v: Signal<i64> = rt.signal(key(i), || 0);
+                        format!("row {i} · {}", v.get(rt))
+                    })));
+                }
+            });
+            if fill {
+                s.width(lumen_layout::Dim::pct(1.0))
+            } else {
+                s
+            }
+        })
+    } else {
+        App::new(move |cx: &mut BuildCx| {
         // MODE=for: the materialized keyed collection. Same chunked memo as
         // `chunk`/`component`, but the widget picks the grain instead of the
         // author — the point of R10.
@@ -324,8 +346,9 @@ fn main() {
             root.style.width = lumen_layout::Dim::pct(1.0);
         }
         root
-    })
-    .run_headless(Size::new(400.0, win_h));
+        })
+    };
+    let mut h = app.run_headless(Size::new(400.0, win_h));
     h.pump();
     let build_ms = t0.elapsed().as_secs_f64() * 1e3;
 
