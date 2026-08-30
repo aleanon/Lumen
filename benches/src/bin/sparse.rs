@@ -70,6 +70,25 @@ fn main() {
     let m = mode.clone();
     let t0 = Instant::now();
     let mut h = App::new(move |cx: &mut BuildCx| {
+        // MODE=virtual: the collection widget that owns its own granularity.
+        // `VirtualList` calls `render(i)` only over the visible window, so the
+        // view loop, the build, the layout and the paint are all O(visible)
+        // rather than O(N) or O(N/chunk) — no author-chosen grain at all.
+        if m == "virtual" {
+            let rt = cx.runtime().clone();
+            return lumen_widgets::VirtualList::new(
+                cx,
+                "vl",
+                rows,
+                21.0,
+                win_h,
+                move |i| {
+                    let v: Signal<i64> = rt.signal(key(i), || 0);
+                    widgets::text(format!("row {i} · {}", v.get(&rt)))
+                },
+            )
+            .into();
+        }
         // MODE=component: the same grouping as `chunk`, expressed as a
         // `Component`. This is the arm that proves the abstraction costs
         // nothing over the hand-written scope it packages — if it does not

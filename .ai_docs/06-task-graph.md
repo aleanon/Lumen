@@ -582,6 +582,60 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## R10 ☑ Granularity belongs to the collection, not the author — and that widget already exists (2026-08-30)
+
+**Corrects the framing of R7 and C1.** Both argued from a scope-granularity
+curve; neither asked whether the author should be choosing a point on it at all.
+
+The curve is real (N=50 000, one row changed, `MODE=chunk` sweeping the grain):
+
+| grain | frame | rebuilt | corresponds to |
+|---:|---:|---:|---|
+| 1 per row | 50 522 µs | 3 | "each `Row` is a scope" |
+| 64 | 9 618 µs | 66 | |
+| **256** | **9 098 µs** | 258 | the optimum |
+| 8 192 | 19 061 µs | 8 194 | |
+| 50 000 (whole list) | 91 110 µs | 50 002 | "`rows: Vec<Row>` is a scope" |
+
+Both *natural* mappings — per element and per field — land on the curve's
+endpoints, 4.7× and 10× off the optimum. **But so does `Component`**: C1 does
+not supply a grain either; the benchmark hand-wrote the chunking and passed
+`CHUNK=256`. The criticism levelled at a state-struct mapping applied equally to
+C1 and was not stated that way.
+
+**The answer is a collection that owns its own granularity, and Lumen has had
+one all along.** `VirtualList` calls `render(i)` only over the visible window
+(`lists.rs:319`), so view, build, layout and paint are all O(visible):
+
+| mode | frame | rebuilt | nodes existing |
+|---|---:|---:|---:|
+| plain | 54 523 µs | 50 001 | 50 001 |
+| per-row `scope` | 41 420 µs | 2 | 50 001 |
+| `Component`, chunk 256 | 9 161 µs | 258 | 50 197 |
+| **`VirtualList`** | **1 524 µs** | 37 | **37** |
+
+**6× better than the best author-chosen grain, and O(1) in the item count** —
+1 534 µs at N=1 000 and 1 529 µs at N=200 000, a 200× increase with 37 nodes
+throughout. The residual 1.5 ms is fixed overhead for shaping and painting a
+37-row window, not a scaling term.
+
+**What this does and does not change.**
+* *R7's diagnosis stands* — the four costs and their sizes are unaffected.
+* *C1 stands, with a corrected scope*: `Component` is for screens and sections —
+  coarse memo units, ergonomic `deps`, teardown-and-rewrite. It is **not** the
+  answer for large collections, and the 79% headline was measured on a workload
+  where the real answer was `VirtualList` all along.
+* *The methodological error worth recording*: `sparse` was built on a flat,
+  non-virtualized 50 000-row column — a shape the benchmark report had **already
+  disclosed as unrealistic** (commit `adf1e03`: "no competent 10 000-row screen
+  is built this way in any of these frameworks"). Having documented that, the
+  next benchmark was built on it anyway, and two features were then justified
+  against it. A disclosure in one document does not protect the next experiment.
+
+**Open, and now the actual gap:** a *non-virtualized* keyed collection (`For`)
+for lists whose items must all exist — not in a scroll viewport, or needing
+find-in-page. That is the only case the chunking curve still governs.
+
 ## R9 ☑ The keyed store costs 14% of a frame; a state struct could remove 8.8% (2026-08-30)
 
 Measures the performance argument for a `#[derive(Reactive)]` state struct —
