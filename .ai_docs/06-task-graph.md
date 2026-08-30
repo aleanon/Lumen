@@ -582,6 +582,35 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT ☑ Investigation: the maximum-performance architecture — build once, mutate (2026-08-30)
+
+**Investigation, no code change** — the user's mandate: absolutely maximum
+performance, widgets built once and mutated, reloadability and agent
+observability preserved, architecture/API changes on the table (`.lss`
+fast-restyle expendable). Full design in `docs/plan-max-performance-2026-08.md`.
+
+The consolidation of PROF1–R10/F2.x/F3.x/O0.x/C/S into one cost model yields a
+target frame contract — **cost = O(K bindings) + O(dirty-layout subtree) +
+O(damage) + O(structural churn), idle = 0** — and a finding that revises R7:
+the bounds walk + display-list diff called “genuinely irreducible” there are
+irreducible only under *rebuild* semantics, where the engine must discover
+change by walking; under mutation semantics both are O(K). Confirmed in source
+that `paint()` re-runs `build_display_list()` + `damage_between` on every
+painted frame regardless of what the patch path already knows.
+
+Program **MUT0–MUT9**, ordered by measured size: MUT0 diagnose the F3 trigger
+(bind is 2.7× `plain`, `nodes_rebuilt=10001`, term never isolated); MUT1
+reverse-indexed per-binding commit with component-scoped fallback (kills the
+all-or-nothing abort at app.rs:4929); MUT2 patch-driven damage + retained DL
+(~2.0 ms at 50k); MUT3 incremental bounds walk (~1.2 ms); MUT4 warm layout for
+rebuilt spans (20× at D=8, R6✗); MUT5 generalized property bindings; MUT6
+semantics patching (observability stays current instead of being invalidated);
+MUT7 Direct-only engine, `Element` deleted (~5%, R8); MUT8 **S3-deep reopened**
+— the mandate is the API-change justification S3's deferral was waiting for
+(8.8% floor, serde reload per the user's proven iced recipe); MUT9 compile-time
+dep masks. Hypothesis to verify per phase, not promise: sparse K=1 at N=50 000
+from 9.2 ms to under 1 ms.
+
 ## C2 ☑ `For` — the materialized keyed collection (2026-08-30)
 
 R10's gap: `VirtualList` is the answer whenever the list is in a scroll viewport
