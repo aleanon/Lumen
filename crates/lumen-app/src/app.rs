@@ -706,6 +706,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             tasks_table: RefCell::new(HashMap::default()),
             bg_bindings: Vec::new(),
             binding_index: HashMap::default(),
+            dl_patch: HashMap::default(),
             text_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
             elided_cache: RefCell::new(None),
@@ -829,6 +830,18 @@ struct BoundBg {
 enum BindingSlot {
     Text(u32),
     Bg(u32),
+}
+
+/// MUT2: a bound node's footprint in the retained display list. `text_cmd` /
+/// `bg_cmd` index the command `paint_patched` rewrites in place; `ineligible`
+/// marks a node that emitted something string-dependent beyond the run itself
+/// (an ellipsized display string, an editor caret/selection, a text
+/// decoration) — a patch touching such a node falls back to a full `paint()`.
+#[derive(Clone, Copy, Default)]
+struct DlSlot {
+    text_cmd: Option<u32>,
+    bg_cmd: Option<u32>,
+    ineligible: bool,
 }
 
 struct BoundText {
@@ -1417,6 +1430,10 @@ pub struct Headless<
     /// current across patches whose read set changed, so the pump resolves a
     /// write to its bindings in O(writes) instead of scanning every binding.
     binding_index: HashMap<SignalId, Vec<BindingSlot>>,
+    /// MUT2: bound nodes' display-list footprints, refreshed by every
+    /// `build_display_list`. Lets a patch frame rewrite exactly the changed
+    /// commands instead of rebuilding and diffing the whole list.
+    dl_patch: HashMap<NodeIndex, DlSlot>,
     /// F3.5: retained text bindings — see [`BoundText`].
     text_bindings: Vec<BoundText>,
     /// Signals whose change requires a structural rebuild (root + scope + text-
@@ -4971,6 +4988,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // Phase 2 — commit. Every binding above is layout-neutral, so the
         // retained layout is still correct and only paint and semantics change.
         let mut patched: Vec<u32> = Vec::new();
+        let mut patched_nodes: Vec<NodeIndex> = Vec::new();
         for (i, s, reads, w, h) in pending {
             let node = self.text_bindings[i].node;
             Self::reindex_binding(
@@ -5003,6 +5021,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
             }
             patched.push(node.index());
+            patched_nodes.push(node);
         }
         if declined {
             // MUT1: the decliners fall to `settle_bindings_for_rebuild`, which
@@ -5015,7 +5034,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // text does.
         *self.sem_root.borrow_mut() = None;
         self.invalidate_semantics_cache();
-        self.last_damage = self.paint();
+        // MUT2: rewrite the patched runs in the retained display list; the
+        // full rebuild-and-diff paint is the fallback, not the steady state.
+        self.last_damage = match self.paint_patched(&patched_nodes, &[]) {
+            Some(d) => d,
+            None => self.paint(),
+        };
         self.last_build_gen = self.rt.write_gen();
         self.record_change("patch", || patched);
         true
@@ -5233,6 +5257,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     fn patch_bg_bindings(&mut self, stale: &[usize]) {
         let rt = self.rt.clone();
         let mut patched: Vec<u32> = Vec::new();
+        let mut patched_nodes: Vec<NodeIndex> = Vec::new();
         for &i in stale {
             let (color, reads) = self.bg_bindings[i].dynamic.eval_isolated(&rt);
             let node = self.bg_bindings[i].node;
@@ -5251,8 +5276,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 m.background = Some(color);
             }
             patched.push(node.index());
+            patched_nodes.push(node);
         }
-        self.last_damage = self.paint();
+        self.last_damage = match self.paint_patched(&[], &patched_nodes) {
+            Some(d) => d,
+            None => self.paint(),
+        };
         self.last_build_gen = self.rt.write_gen();
         self.record_change("patch", || patched);
     }
@@ -7443,6 +7472,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         self.node_caret.clear();
         #[cfg(feature = "dev-observability")]
         self.node_text_metrics.clear();
+        // MUT2: refresh the bound nodes' footprints. A bound node that never
+        // reaches emission (hidden subtree, visibility:none) simply has no
+        // entry — it paints nothing, so a patch of it changes no pixels.
+        self.dl_patch.clear();
+        let bound: crate::fxhash::HashSet<NodeIndex> = self
+            .text_bindings
+            .iter()
+            .map(|b| b.node)
+            .chain(self.bg_bindings.iter().map(|b| b.node))
+            .collect();
         // PROP1 `z-index`: siblings paint in ascending z. Sibling-scoped, so
         // the depth-keyed clip stack below still sees a strict preorder — a flat
         // z sort would not (see `Tree::paint_order`).
@@ -7495,8 +7534,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 main_order.push(node);
             }
         }
-        self.emit_pass(&main_order, &depth, &mut dl, &mut text_targets);
-        self.emit_pass(&overlay_order, &depth, &mut dl, &mut text_targets);
+        self.emit_pass(&main_order, &depth, &bound, &mut dl, &mut text_targets);
+        self.emit_pass(&overlay_order, &depth, &bound, &mut dl, &mut text_targets);
         (dl, text_targets)
     }
 
@@ -7506,6 +7545,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         &mut self,
         order: &[NodeIndex],
         depth: &HashMap<NodeIndex, u32>,
+        bound: &crate::fxhash::HashSet<NodeIndex>,
         dl: &mut DisplayList,
         text_targets: &mut Vec<lumen_render::TextTarget>,
     ) {
@@ -7876,6 +7916,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 brush
             });
             if bg.is_some() || border.is_some() || gradient.is_some() {
+                if bound.contains(&node) {
+                    self.dl_patch.entry(node).or_default().bg_cmd = Some(dl.cmds.len() as u32);
+                }
                 dl.push(DrawCmd::Rect {
                     rect: bounds,
                     brush: gradient.unwrap_or(Brush::Solid(bg.unwrap_or(Color::srgb8(0, 0, 0, 0)))),
@@ -8085,6 +8128,20 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                     self.node_text_metrics.insert(node, metrics);
                 }
                 let run_id = dl.add_run(run);
+                if bound.contains(&node) {
+                    let e = self.dl_patch.entry(node).or_default();
+                    e.text_cmd = Some(dl.cmds.len() as u32);
+                    // An ellipsized display string, an editor caret (which also
+                    // brings selection rects and caret-follow scroll), or a
+                    // decoration rect below make the footprint more than the
+                    // run — those frames take the full `paint()`.
+                    e.ineligible |= m.display_text.is_some()
+                        || m.caret_byte().is_some()
+                        || css
+                            .and_then(|s| s.text_decoration)
+                            .unwrap_or(lumen_core::TextDecoration::None)
+                            != lumen_core::TextDecoration::None;
+                }
                 dl.push(DrawCmd::GlyphRun {
                     run: run_id,
                     brush: Brush::Solid(text_color),
@@ -8238,6 +8295,175 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// re-rendered (byte-identical to a full render there — R0
     /// `damage_equivalence`) and composited in, leaving the unchanged pixels
     /// (which still match) intact.
+    /// MUT2: repaint a patch frame by rewriting the patched nodes' commands
+    /// inside the retained display list, instead of rebuilding and diffing
+    /// the whole list (`paint()` — two O(live nodes) passes). Damage is the
+    /// union of each rewritten command's paint bounds before and after —
+    /// exactly the rect `damage_between` would have found for the same
+    /// change. Returns `None` when the frame can't be patched in place — no
+    /// retained list, a stale CPU frame, a node whose footprint is more than
+    /// its own command (`DlSlot::ineligible`), or a bg patch on a node that
+    /// emitted no box — and the caller falls back to a full `paint()`, which
+    /// is always correct. A partial rewrite before a bail is harmless for the
+    /// same reason: the fallback rebuilds the list from scratch.
+    fn paint_patched(
+        &mut self,
+        text_nodes: &[NodeIndex],
+        bg_nodes: &[NodeIndex],
+    ) -> Option<Damage> {
+        let pw = (self.size.width * self.scale).round().max(1.0) as u32;
+        let ph = (self.size.height * self.scale).round().max(1.0) as u32;
+        if self.last_dl.is_none()
+            || (!self.surface_attached && (self.frame.width() != pw || self.frame.height() != ph))
+        {
+            return None;
+        }
+        let mut dl = self.last_dl.take().expect("checked above");
+        let mut acc: Option<Rect> = None;
+        fn union(acc: &mut Option<Rect>, b: Option<Rect>) {
+            if let Some(b) = b {
+                *acc = Some(acc.map_or(b, |r: Rect| r.union(b)));
+            }
+        }
+        for &node in text_nodes {
+            // Absent ⇒ the node painted nothing (hidden subtree) — the patch
+            // changes no pixels, and the next full build will pick it up.
+            let Some(slot) = self.dl_patch.get(&node).copied() else {
+                continue;
+            };
+            let (false, Some(ci)) = (slot.ineligible, slot.text_cmd) else {
+                self.last_dl = Some(dl);
+                return None;
+            };
+            let ci = ci as usize;
+            let Some(m) = self.meta.get(&node) else {
+                self.last_dl = Some(dl);
+                return None;
+            };
+            let NodeContent::Text(txt, ts) = &m.content else {
+                self.last_dl = Some(dl);
+                return None;
+            };
+            // Mirror the emission path: `.lss` color over the widget's own.
+            let mut ts = ts.clone();
+            if let Some(c) = self.node_style.get(&node).and_then(|s| s.color) {
+                ts.color = c;
+            }
+            let bounds = self.tree.bounds(node);
+            // No caret ⇒ no caret-follow scroll (ineligible covers editors).
+            let tx = bounds.x0 + m.pad.0;
+            let ty = bounds.y0 + m.pad.1;
+            let scale = self.scale as f32;
+            let (run, run_rect, _metrics) = {
+                let cached = self.text.shaped_run(txt, &ts, m.wrap_width, ts.align, scale);
+                let mut run = cached.run.clone();
+                for g in &mut run.glyphs {
+                    g.x += tx as f32;
+                    g.y += ty as f32;
+                    g.image = dl.intern_glyph_ref(&cached.images[g.image as usize]);
+                }
+                let run_rect = Rect::new(
+                    cached.ink[0] as f64 + tx,
+                    cached.ink[1] as f64 + ty,
+                    cached.ink[2] as f64 + tx,
+                    cached.ink[3] as f64 + ty,
+                );
+                (run, run_rect, cached.metrics)
+            };
+            let DrawCmd::GlyphRun {
+                run: rid,
+                rect: old_rect,
+                ..
+            } = dl.cmds[ci]
+            else {
+                self.last_dl = Some(dl);
+                return None;
+            };
+            union(&mut acc, Some(old_rect.inflate(1.0, 1.0)));
+            dl.runs[rid.0 as usize] = run;
+            dl.cmds[ci] = DrawCmd::GlyphRun {
+                run: rid,
+                brush: Brush::Solid(ts.color),
+                rect: run_rect,
+            };
+            union(&mut acc, Some(run_rect.inflate(1.0, 1.0)));
+            #[cfg(feature = "dev-observability")]
+            {
+                self.node_ink.insert(node, run_rect);
+                self.node_text_metrics.insert(node, _metrics);
+            }
+        }
+        for &node in bg_nodes {
+            let Some(slot) = self.dl_patch.get(&node).copied() else {
+                continue;
+            };
+            let Some(ci) = slot.bg_cmd else {
+                // The build emitted no box for this node (it had no fill,
+                // border, or gradient then) — a patch that adds one needs a
+                // new command, which only a full paint can place.
+                self.last_dl = Some(dl);
+                return None;
+            };
+            let ci = ci as usize;
+            let Some(m) = self.meta.get(&node) else {
+                self.last_dl = Some(dl);
+                return None;
+            };
+            // Mirror the emission path's brush resolution, hover tint and all.
+            let css = self.node_style.get(&node);
+            let mut bg = css.and_then(|s| s.background).or(m.background);
+            let hovered =
+                m.on_click.is_some() && self.tree.flags(node).contains(NodeFlags::HOVERED);
+            if let Some(c) = bg {
+                if hovered {
+                    bg = Some(hover_tint(c));
+                }
+            }
+            let bounds = self.tree.bounds(node);
+            let gradient = css.and_then(|s| s.background_gradient.as_ref()).map(|g| {
+                let mut brush = gradient_brush(g, bounds);
+                if hovered {
+                    hover_tint_brush(&mut brush);
+                }
+                brush
+            });
+            let brush =
+                gradient.unwrap_or(Brush::Solid(bg.unwrap_or(Color::srgb8(0, 0, 0, 0))));
+            let bounds_now = dl.cmds[ci].paint_bounds();
+            let DrawCmd::Rect { brush: b, .. } = &mut dl.cmds[ci] else {
+                self.last_dl = Some(dl);
+                return None;
+            };
+            *b = brush;
+            union(&mut acc, bounds_now);
+        }
+        let damage = match acc {
+            Some(r) => Damage::Region(r),
+            None => Damage::None,
+        };
+        // The render tail, exactly as `paint()` does it for a region.
+        if !self.surface_attached {
+            if let Damage::Region(r) = damage {
+                let bg = Color::srgb8(255, 255, 255, 255);
+                let dirty = kurbo::Rect::new(
+                    (r.x0 * self.scale).floor().max(0.0),
+                    (r.y0 * self.scale).floor().max(0.0),
+                    (r.x1 * self.scale).ceil().min(pw as f64),
+                    (r.y1 * self.scale).ceil().min(ph as f64),
+                );
+                if dirty.width() >= 1.0 && dirty.height() >= 1.0 {
+                    let tile = self
+                        .renderer
+                        .render_damage(&dl, pw, ph, self.scale, bg, dirty);
+                    self.frame
+                        .overwrite_rect(dirty.x0 as u32, dirty.y0 as u32, &tile);
+                }
+            }
+        }
+        self.last_dl = Some(dl);
+        Some(damage)
+    }
+
     fn paint(&mut self) -> Damage {
         let (dl, _) = self.build_display_list();
         // Layout/display list are in logical px; rasterize at physical px so the

@@ -602,3 +602,71 @@ fn a_binding_that_switches_signals_stays_indexed() {
     );
     h.assert_view_coherent();
 }
+
+fn mut2_view(_cx: &mut BuildCx) -> Element {
+    let deferred: Element = widgets::text(bind!(rt => {
+        let v: Signal<i64> = rt.signal("m2a", || 0);
+        format!("alpha {}", v.get(rt))
+    }));
+    let mut fixed: Element = widgets::text(bind!(rt => {
+        let v: Signal<i64> = rt.signal("m2b", || 0);
+        format!("beta {}", v.get(rt))
+    }));
+    fixed.style.width = lumen_layout::Dim::px(180.0);
+    fixed.style.height = lumen_layout::Dim::px(20.0);
+    let boxed = widgets::text("box").id("bx").bind_background(Dynamic::new(|rt| {
+        let v: Signal<i64> = rt.signal("m2c", || 0);
+        if v.get(rt) % 2 == 0 {
+            Color::srgb8(200, 0, 0, 255)
+        } else {
+            Color::srgb8(0, 0, 200, 255)
+        }
+    }));
+    let mut root = widgets::column(vec![deferred, fixed, boxed]);
+    root.style.width = lumen_layout::Dim::pct(1.0);
+    root
+}
+
+#[test]
+fn patched_frames_render_byte_identical_to_a_full_render() {
+    // MUT2 oracle. After several in-place display-list patches — a deferred
+    // label, a fixed-box label (whose string both grows and SHRINKS, so
+    // vacated pixels must clear), and a background — the composited frame
+    // must be byte-identical to a full from-scratch render of the same state.
+    // ADR-002 determinism (CPU renderer) makes byte equality meaningful; this
+    // catches both wrong command surgery and under-damage in the compositor.
+    let mut h = App::new(mut2_view).run_headless(Size::new(320.0, 140.0));
+    for (a, b, c) in [(10, 33333, 1), (2, 4, 2), (777, 56, 3)] {
+        let sa: Signal<i64> = h.runtime().signal("m2a", || 0);
+        let sb: Signal<i64> = h.runtime().signal("m2b", || 0);
+        let sc: Signal<i64> = h.runtime().signal("m2c", || 0);
+        sa.set(h.runtime(), a);
+        sb.set(h.runtime(), b);
+        sc.set(h.runtime(), c);
+        h.pump();
+    }
+    let patched = h.screenshot();
+    h.assert_view_coherent();
+
+    // The same final state, rendered without any patch history: a resize away
+    // and back forces two full rebuilds and a full raster at the final size.
+    let mut h2 = App::new(mut2_view).run_headless(Size::new(320.0, 140.0));
+    let sa: Signal<i64> = h2.runtime().signal("m2a", || 0);
+    let sb: Signal<i64> = h2.runtime().signal("m2b", || 0);
+    let sc: Signal<i64> = h2.runtime().signal("m2c", || 0);
+    sa.set(h2.runtime(), 777);
+    sb.set(h2.runtime(), 56);
+    sc.set(h2.runtime(), 3);
+    h2.pump();
+    h2.resize(Size::new(300.0, 140.0));
+    h2.pump();
+    h2.resize(Size::new(320.0, 140.0));
+    h2.pump();
+    let fresh = h2.screenshot();
+
+    assert_eq!(
+        patched.pixels(),
+        fresh.pixels(),
+        "a patched frame must be byte-identical to a full render of the same state"
+    );
+}

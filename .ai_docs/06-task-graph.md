@@ -582,6 +582,53 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT2 ☑ Patch-driven damage — the patch frame is O(K) and flat in N (2026-08-30)
+
+**The last O(live nodes) work on a patch frame was `paint()` itself**: a full
+`build_display_list()` walk plus a full `damage_between` diff, run to discover
+a change the patch engine had just made. Both are gone from the steady state.
+
+**Mechanism.** `build_display_list` records each *bound* node's footprint —
+`DlSlot { text_cmd, bg_cmd, ineligible }` — while emitting (`emit_pass` takes
+the bound set). A patch frame then calls `paint_patched`, which rewrites
+exactly those commands inside the retained `last_dl` **in place** (same index,
+same count, nothing shifts — why in-place beat splicing): the glyph run is
+rebuilt from the cached `shaped_run` exactly as emission builds it, written
+over `runs[id]`, and damage is the union of the command's paint bounds before
+and after — the same rect `damage_between` would have found. The render tail
+(region raster + `overwrite_rect`, or surface present via `last_damage`) is
+unchanged. **Fallback, not failure**: any node whose footprint is more than
+its own command — ellipsized display string, editor caret/selection, text
+decoration, a bg patch on a node that emitted no box, a stale frame size —
+returns `None` and the frame takes the full `paint()`, which is always
+correct; a partial rewrite before a bail is harmless because the fallback
+rebuilds the list from scratch. A bound node with **no** entry emitted nothing
+(hidden, or culled off-canvas by R.3) — its patch changes no pixels and is
+skipped.
+
+**Measured** (`sparse`, taskset, K=1, D=0):
+
+| workload | MUT1 | MUT2 |
+|---|---:|---:|
+| bind N=10 000 | 467 µs | **217 µs** |
+| bind N=50 000 | 1 491 µs | **218 µs** |
+| chunkbind N=50 000 | 1 534 µs | **217 µs** |
+
+**Flat across N** — the plan's frame-contract term "O(K bindings), no term
+O(live nodes)" is now measured reality on the patch path. Cumulative over
+MUT0→2 at N=50 000: broken F3 would have full-rebuilt (~90 ms-class); the
+working patch path went 2 162 → 1 491 → **218 µs**.
+
+*Guarded by* `patched_frames_render_byte_identical_to_a_full_render`
+(binding.rs): three patch rounds across a deferred label, a fixed-box label
+whose string grows and shrinks (vacated pixels must clear), and a background
+toggle, byte-compared against a fresh full render of the same state (ADR-002
+CPU determinism makes byte equality meaningful) — this catches both wrong
+command surgery and compositor under-damage. Plus the full splice/fuzz suites.
+Remaining on the patch frame: ~215 µs of eval + semantics invalidation +
+culled region raster; the *rebuild* frame's O(N) passes (bounds walk, DL
+rebuild) are MUT3's territory.
+
 ## MUT1 ☑ Reverse-indexed bindings; the decline cliff is gone — 320 ms → 11 ms (2026-08-30)
 
 **Two structural fixes to the patch engine, both demonstrated before fixing.**

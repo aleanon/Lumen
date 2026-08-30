@@ -164,7 +164,9 @@ diagnostic can catch it: the mismatch is only knowable after layout.
   ```
 
   A binding updates through the **patch path**: no rebuild, no relayout, no
-  view closure re-run. Measured on a 3000-row list, changing one row:
+  view closure re-run — and no per-node frame work at all (MUT2): the patched
+  frame rewrites just that node's draw commands in the retained display list,
+  so it costs the same at 50 000 rows as at 10 000 (~0.2 ms). Measured on a 3000-row list, changing one row:
   **~93 µs bound against ~832 µs** for the same change written as a value read
   inside the view (or inside a `cx.scope`). Backgrounds (`bind_background`)
   always patch; text patches whenever the new string measures the same size,
