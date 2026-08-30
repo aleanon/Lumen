@@ -627,23 +627,40 @@ across tests that the harness runs in **parallel**, so they reset each other and
 the first-build assertion read 256 instead of 1 000. It looked exactly like a
 real memoization bug in `For`. Per-test statics fixed it.
 
-## S0 ◐ State-struct model — plan written, blocked on two decisions (2026-08-30)
+## S0 ☑ State-struct model — both blockers resolved, S1 ready (2026-08-30)
 
 `docs/plan-state-struct-2026-08.md`. Phased S0→S4, each shipping alone.
 
-**Blocked on two decisions before any code (S0):**
-* **D1 — view-local state.** Hover, caret, dropdown-open do not belong in app
-  state; SwiftUI needs both `@State` and `@Observable`. The keyed store does not
-  go away, it stops being the only thing. What is the authoring rule?
-* **D2 — hot reload.** ADR-007 records that the central store is *what makes hot
-  reload possible*. A typed struct changes shape when code changes, turning
-  reload into a schema migration. **Strongest argument against**; must be
-  answered first.
+**D1 — view-local state — RESOLVED.** iced has a single state struct too, and
+its answer is a second, framework-owned tree. Verified in `iced_core-0.14.0`:
+`widget::Tree { tag, state, children }` persists across frames and holds
+widget-internal state (`text_input` cursor, `scrollable` offset, `button`
+pressed) — never the user's struct; children are matched **positionally**
+(`diff_children` truncates and zips by index, `tree.rs:92`) with
+`iced_widget::keyed` as the escape hatch. **Lumen already has this**: a
+`cx.signal` inside a scope is scope-local, namespaced by scope path — the same
+structural keying. Decision: the keyed store stays as the view-local mechanism;
+the struct takes app data only.
+
+*Convergent evidence:* iced needed `keyed::column` for the same reason `For`
+(C2) documents its positional-chunk limitation, with `cx.component(item_key)` as
+the same escape. Two independent designs landing on positional-plus-keyed-escape
+suggests the shape is right rather than idiosyncratic.
+
+**D2 — hot reload — RESOLVED.** The migration is serde + `#[serde(default)]`,
+reported working in production by the owner on an iced app across adding,
+removing and changing fields. **Lumen already implements that pattern** for the
+keyed store: `snapshot()` writes JSON by stable key; `load_pending()` lets a new
+signal take its `|| default` closure (`#[serde(default)]` by another name); and
+`finish_restore()` emits **W0002** for any snapshot key never re-attached. The
+`State: Serialize + DeserializeOwned` bound is already there. *Requirement
+carried into S1:* the struct restore must **keep W0002** — plain serde drops
+unknown fields silently, which is strictly worse than today.
 
 Sized honestly by R9: **8.8% of a frame**, a floor. The motivation is
 correctness and ergonomics — compile-time identity, and `Component::deps`
 getting a correct automatic default that removes C1's silent-freeze failure mode
-— not speed. Orthogonal to C1/C2 (79% and 6×), and adopting it *instead* of them
+— not speed. Orthogonal to C1/C2 (79% and 6×); adopting it *instead* of them
 would trade 79% for 9%.
 
 ## R10 ☑ Granularity belongs to the collection, not the author — and that widget already exists (2026-08-30)
