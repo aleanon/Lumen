@@ -134,6 +134,11 @@ pub use lumen_layout::LayoutNode;
 /// });
 /// ```
 pub use lumen_macros::stable_handler;
+
+/// `#[derive(Reactive)]` (S1) — each field of a state struct gets a signal
+/// accessor keyed by its compile-time field path. See
+/// [`lumen_macros::Reactive`].
+pub use lumen_macros::Reactive;
 /// F3 binding sugar: `text!(cx, "Count: {count}")` → a reactive text element
 /// whose string tracks the interpolated signals. See [`lumen_macros::text`].
 ///

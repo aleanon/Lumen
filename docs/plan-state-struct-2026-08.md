@@ -24,6 +24,18 @@ reads are tracked as they are today.
 Sized before committing, because the first estimate in discussion was ~30% and
 the measurement (R9) said otherwise.
 
+### Which phase earns the 8.8% — **not S1**
+
+R9 measured addressing using **integer** keys (`rt.signal(i)`), which are
+already the allocation-free fast path ADR-021 built. A compile-time field path
+is *equally* fast, not faster — so **S1 cannot move the number**, and an earlier
+draft of this plan set S1 an exit criterion ("the addressing arm drops toward
+the field-read floor") that it is structurally incapable of meeting.
+
+The 8.8% is earned by **S3**, where the field *becomes* the slot and the lookup
+and downcast disappear. S1 and S2 are correctness and ergonomics work that make
+S3 expressible.
+
 ### Performance: 8.8%, and it is a floor
 
 `storelookup.rs`, N=50 000, collector open (recording only happens inside a
@@ -146,7 +158,7 @@ predecessor's measurement is in.
 | # | phase | exit criterion |
 |---|---|---|
 | **S0** | ~~Answer D1 and D2~~ — **done, both resolved above.** Record in the decision log. | ☑ Decisions taken; record them and proceed. |
-| **S1** | `#[derive(Reactive)]` in `lumen-macros`, generating field-path keys into the **existing** store. No API change for readers. **Carries D2's requirement: preserve W0002 on dropped fields.** | An app builds and runs identically; `storelookup` shows the addressing arm dropping toward the field-read floor; a reload that removes a field still reports W0002. |
+| **S1** | `#[derive(Reactive)]` in `lumen-macros`, generating field-path keys into the **existing** store. No API change for readers. **Carries D2's requirement: preserve W0002 on dropped fields.** | An app builds and runs identically; keys are allocation-free and cannot collide across structs; a reload that removes a field still reports W0002. **No performance claim** — see below. |
 | **S2** | `Component::deps` gains a default derived from tracked field reads; `deps` becomes optional where the component reads only `Reactive` state. | `tests/component.rs` passes with `deps` removed from a component that reads only state fields. |
 | **S3** | Field storage: the field *is* the slot, removing lookup+downcast. | The `read only` arm approaches the `field read` arm; no regression in `sparse` or `for_list`. |
 | **S4** | Migrate examples and the `lumen new` scaffold; the keyed store stays for view-local state per D1. | Whole workspace green; `sparse` unregressed. |

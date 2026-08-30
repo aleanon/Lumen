@@ -1312,6 +1312,23 @@ pub struct BuildCx<'a> {
     size: lumen_core::geometry::Size,
 }
 
+/// S1: lets a `#[derive(Reactive)]` accessor take `cx` directly rather than
+/// `cx.runtime()`.
+///
+/// `tracks()` is `false`, matching [`Runtime`]: a build captures its
+/// dependencies through the read *collectors* (`note_read`, which runs
+/// unconditionally on every read), not through the effect/memo subscription
+/// path that `tracks()` gates. Returning `true` would subscribe every
+/// build-time read as if it were an effect.
+impl lumen_core::state::ReadCx for BuildCx<'_> {
+    fn runtime(&self) -> &Runtime {
+        self.rt
+    }
+    fn tracks(&self) -> bool {
+        false
+    }
+}
+
 impl<'a> BuildCx<'a> {
     pub(crate) fn new(
         rt: &'a Runtime,

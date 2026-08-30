@@ -627,6 +627,53 @@ across tests that the harness runs in **parallel**, so they reset each other and
 the first-build assertion read 256 instead of 1 000. It looked exactly like a
 real memoization bug in `For`. Per-test statics fixed it.
 
+## S1 ☑ `#[derive(Reactive)]` — field-path keys into the existing store (2026-08-30)
+
+`lumen-macros`. For each named field, an accessor keyed by its **compile-time
+field path**:
+
+```rust
+#[derive(Reactive, Default)]
+struct Counter { count: i64, label: String }
+// Counter::count(cx) -> Signal<i64>    keyed ("Counter", "count")
+```
+
+The key is `(&'static str, &'static str)` — `Hash + Debug` and allocation-free
+per ADR-021 — and namespaced by the struct, so two structs may both have a
+`count`.
+
+**No performance claim, and the plan's exit criterion was corrected before
+implementing.** R9 measured addressing with *integer* keys, already the
+allocation-free fast path; a field path is equally fast, not faster. **S1 cannot
+move the 8.8%** — that is earned by S3, where the field becomes the slot. The
+draft plan had asked S1 to show "the addressing arm dropping toward the
+field-read floor", which it is structurally incapable of doing.
+
+**What it does buy — the two bugs from this session's own benchmarks:**
+* A `format!("r{i}")` key allocating per row per frame (ADR-021's anti-pattern,
+  worth 5 ms of 36). Now a compile-time path.
+* `cx.signal(k)` inside a scope silently addressing a **scope-local** slot
+  rather than the intended one — which reported a *fast* number for a frame that
+  never updated. The accessor uses `Runtime::signal` (rooted at `ROOT_ID`)
+  deliberately, so a field reads the same slot from any scope.
+  `tests/reactive_derive.rs` pins exactly that, reading inside and outside a
+  scope and asserting both see the write.
+
+**D2's requirement met:** a field dropped between reloads is still reported as
+**W0002**. The generated key is the snapshot key, so `finish_restore` reports it
+exactly as a hand-keyed signal would — where plain `#[serde(default)]` would
+drop it silently. Pinned by `a_dropped_field_is_still_reported_on_restore`.
+
+**Also added:** `impl ReadCx for BuildCx`, so an accessor takes `cx` rather than
+`cx.runtime()`. `tracks()` is **false**, matching `Runtime` — a build captures
+dependencies through the read collectors (`note_read`, unconditional), not the
+effect-subscription path `tracks()` gates; returning `true` would subscribe
+every build-time read as if it were an effect.
+
+**Shape of this phase, made explicit:** the struct is a **key namespace, not
+storage**. Its fields are never read and the compiler says so; the values live
+in the store. S3 is where the field becomes the slot.
+
 ## S0 ☑ State-struct model — both blockers resolved, S1 ready (2026-08-30)
 
 `docs/plan-state-struct-2026-08.md`. Phased S0→S4, each shipping alone.

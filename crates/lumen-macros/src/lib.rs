@@ -443,3 +443,113 @@ pub fn state_registry(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     expanded.into()
 }
+
+/// `#[derive(Reactive)]` (S1, `docs/plan-state-struct-2026-08.md`) — give each
+/// field of a state struct a signal accessor keyed by its **compile-time field
+/// path**.
+///
+/// ```ignore
+/// #[derive(Reactive, Default)]
+/// struct Counter { count: i64, label: String }
+///
+/// // generated:
+/// //   Counter::count(cx) -> Signal<i64>      keyed ("Counter", "count")
+/// //   Counter::label(cx) -> Signal<String>   keyed ("Counter", "label")
+///
+/// let n = Counter::count(cx).get(cx.runtime());
+/// Counter::count(cx).set(cx.runtime(), n + 1);
+/// ```
+///
+/// # Why
+///
+/// Identity stops being an author-written string. The key is
+/// `(&'static str, &'static str)` — `Hash + Debug`, allocation-free (ADR-021),
+/// and namespaced by the struct, so two structs may both have a `count`
+/// without colliding. Two bugs found in this repo's own benchmarks become
+/// unrepresentable: a `format!("r{i}")` key allocating per row per frame, and
+/// a `cx.signal(k)` inside a scope silently addressing a *scope-local* slot
+/// rather than the intended one.
+///
+/// # What this is not
+///
+/// **This does not make reads faster.** The value still lives in the keyed
+/// store, and an integer key was already allocation-free — a field path is
+/// equally fast, not faster. The 8.8% in the plan is earned by S3, where the
+/// field becomes the slot. S1 buys correctness and ergonomics, and makes S3
+/// expressible.
+///
+/// # The struct is a namespace, not storage (S1)
+///
+/// The values live in the keyed store; the struct's own fields are never read,
+/// and the compiler will say so (`fields are never read`). That is this phase's
+/// shape rather than an oversight — the struct declares the *schema* and the
+/// key paths. **S3** is where the field becomes the slot and the instance holds
+/// the data.
+///
+/// # Requirements
+///
+/// Every field must be `Default`, because the accessor supplies
+/// `T::default()` as the signal's initial value. Seed real initial values by
+/// writing them once at startup, or wait for `#[reactive(default = ..)]`.
+#[proc_macro_derive(Reactive)]
+pub fn reactive(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as syn::DeriveInput);
+    let name = &ast.ident;
+    let name_str = name.to_string();
+
+    let fields = match &ast.data {
+        syn::Data::Struct(s) => match &s.fields {
+            syn::Fields::Named(n) => &n.named,
+            other => {
+                return syn::Error::new(
+                    other.span(),
+                    "Reactive needs named fields: each field's name is its key",
+                )
+                .to_compile_error()
+                .into();
+            }
+        },
+        _ => {
+            return syn::Error::new(
+                ast.ident.span(),
+                "Reactive applies to structs; an enum has no fields to address",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    let accessors = fields.iter().map(|f| {
+        let ident = f.ident.as_ref().expect("named");
+        let ty = &f.ty;
+        let key = ident.to_string();
+        let doc = format!(
+            "Signal for `{name_str}.{key}`, keyed by its compile-time field path."
+        );
+        quote! {
+            #[doc = #doc]
+            pub fn #ident(
+                cx: &impl ::lumen_core::state::ReadCx,
+            ) -> ::lumen_core::state::Signal<#ty>
+            where
+                #ty: ::lumen_core::state::State + ::core::default::Default,
+            {
+                // `Runtime::signal`, deliberately, not `BuildCx::signal`: this
+                // roots at ROOT_ID, so a field is addressed identically no
+                // matter which scope reads it. `BuildCx::signal` namespaces by
+                // the enclosing scope, which is right for view-local state and
+                // wrong for app state — and is exactly the bug that silently
+                // read an always-zero slot in this repo's own benchmark.
+                ::lumen_core::state::ReadCx::runtime(cx)
+                    .signal((#name_str, #key), <#ty as ::core::default::Default>::default)
+            }
+        }
+    });
+
+    quote! {
+        impl #name {
+            #(#accessors)*
+        }
+    }
+    .into()
+}
