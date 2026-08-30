@@ -171,7 +171,10 @@ diagnostic can catch it: the mismatch is only knowable after layout.
   and falls back to a rebuild only when the box would genuinely move — an axis
   the author fixed (`style.width = Dim::px(..)`, a `VirtualList` item height, a
   paragraph that still wraps to the same lines) can never move, so those always
-  patch. A stretched single-line label under a definite container (the common
+  patch. The fallback is scoped (MUT1): only the scopes enclosing the moving
+  node re-run, every other scope splices, and patchable sibling bindings in
+  the same pump still commit — one growing label costs one scope's rebuild,
+  not the view's. A stretched single-line label under a definite container (the common
   case: any label in a `width: 100%` column) patches without even measuring —
   its width is parent-assigned and its height is line metrics, so only a
   replacement that gains a `\n` falls back (MUT0).

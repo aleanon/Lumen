@@ -13,7 +13,7 @@ use lumen_core::identity::{IdHash, ScopePath};
 use lumen_core::semantics::{
     Action, Role, SemanticsDoc, SemanticsNode, State as SemState, WindowInfo,
 };
-use lumen_core::state::Runtime;
+use lumen_core::state::{Runtime, SignalId};
 use lumen_core::tree::{NodeFlags, Tree};
 use lumen_core::{Color, NodeIndex, StableId};
 use lumen_layout::{Dim, LayoutEngine, LayoutNode, LayoutStyle, LayoutTree};
@@ -705,6 +705,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             scope_skipped: RefCell::new(crate::fxhash::HashSet::default()),
             tasks_table: RefCell::new(HashMap::default()),
             bg_bindings: Vec::new(),
+            binding_index: HashMap::default(),
             text_bindings: Vec::new(),
             structural_reads: lumen_core::state::ReadSet::default(),
             elided_cache: RefCell::new(None),
@@ -822,6 +823,14 @@ struct BoundBg {
 /// re-measures and compares. Same size ⇒ the node's `LayoutStyle` would come
 /// out identical ⇒ no relayout is possible ⇒ patch. Different size ⇒ fall back
 /// to a rebuild, which is always correct.
+/// MUT1: a reference into one of the two binding tables, for the reverse
+/// index (`binding_index`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BindingSlot {
+    Text(u32),
+    Bg(u32),
+}
+
 struct BoundText {
     node: NodeIndex,
     dynamic: lumen_core::Dynamic<String>,
@@ -1404,6 +1413,10 @@ pub struct Headless<
     /// Retained paint-only prop bindings from the last build (F3.4). A change to
     /// one binding's deps patches its node + repaints, skipping the rebuild.
     bg_bindings: Vec<BoundBg>,
+    /// MUT1: SignalId → binding slots. Rebuilt after every rebuild and kept
+    /// current across patches whose read set changed, so the pump resolves a
+    /// write to its bindings in O(writes) instead of scanning every binding.
+    binding_index: HashMap<SignalId, Vec<BindingSlot>>,
     /// F3.5: retained text bindings — see [`BoundText`].
     text_bindings: Vec<BoundText>,
     /// Signals whose change requires a structural rebuild (root + scope + text-
@@ -1651,6 +1664,10 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let time_driven = (self.requests.read_clock || self.requests.continuous || anims_running)
             && self.clock_ms != self.last_build_clock;
         let write_changed = self.rt.write_gen() != self.last_build_gen;
+        // MUT1: drain this pump's written signals unconditionally so the log
+        // cannot grow across pumps; entries a rebuild makes moot filter out as
+        // current on the next resolution.
+        let written = self.rt.take_written();
         // F3.4: a structural signal changed ⇒ rebuild; a change confined to
         // paint-only (background) bindings ⇒ patch that node + repaint, no
         // rebuild/relayout. `structural_reads` is every build-time read except
@@ -1664,6 +1681,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         // full rebuild when a state rule touches layout/typography (the A.2
         // risk note) so layout stays correct.
         let restyle_only = visual_changed && !needs_rebuild && !full_rebuild_forced();
+        // MUT1: written signals → stale binding indices via the reverse index.
+        let (stale_text, stale_bg) = if needs_rebuild {
+            (Vec::new(), Vec::new())
+        } else {
+            self.stale_bindings(&written)
+        };
         // The shape/run caches evict by frame epoch: entries used this frame or
         // last are the live working set and must survive a cap crossing. Advance
         // the epoch only on frames that actually shape — an idle pump shapes
@@ -1716,34 +1739,26 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             // edit behind. `assert_view_coherent` fails on exactly that frame.
             // It healed on the next pump, so a live window hid it and only
             // headless tests (which pump once per event) saw it.
-            if write_changed && self.text_bindings_stale() && !self.patch_text_bindings() {
+            if write_changed && !stale_text.is_empty() && !self.patch_text_bindings(&stale_text) {
                 self.allow_copy_forward = !visual_changed && !full_rebuild_forced();
                 self.rebuild();
             }
-        } else if write_changed && self.text_bindings_stale() {
+        } else if write_changed && !stale_text.is_empty() {
             // F3.5: a text binding changed. Patch if the new string measures
-            // the same, else rebuild — `patch_text_bindings` commits nothing
-            // when it declines, so this is a clean fallback rather than a
-            // partially-applied frame.
-            if !self.patch_text_bindings() {
+            // the same, else rebuild. MUT1: the verdict is per binding — the
+            // patchable ones commit (their spans splice through the rebuild
+            // and keep the values), the decliners' scope chains are evicted by
+            // `settle_bindings_for_rebuild`, and everything else splices.
+            if !self.patch_text_bindings(&stale_text) {
                 self.allow_copy_forward = !visual_changed && !full_rebuild_forced();
                 self.rebuild();
-            } else if self
-                .bg_bindings
-                .iter()
-                .any(|b| !b.deps.is_current(&self.rt))
-            {
+            } else if !stale_bg.is_empty() {
                 // A background binding changed in the same pump — fold it in,
                 // rather than leave it for a frame that may never come.
-                self.patch_bg_bindings();
+                self.patch_bg_bindings(&stale_bg);
             }
-        } else if write_changed
-            && self
-                .bg_bindings
-                .iter()
-                .any(|b| !b.deps.is_current(&self.rt))
-        {
-            self.patch_bg_bindings();
+        } else if write_changed && !stale_bg.is_empty() {
+            self.patch_bg_bindings(&stale_bg);
         } else {
             // Nothing changed — keep the retained frame, report no damage.
             self.last_damage = Damage::None;
@@ -4896,27 +4911,30 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// F3.5: try to satisfy changed **text** bindings without a rebuild.
     ///
     /// Returns `false` — caller must rebuild — if any changed binding would
-    /// move layout, or ellipsizes. Nothing is mutated in that case: the check
-    /// runs over every stale binding first and only then applies, so a
-    /// half-patched tree is not a state this can produce.
-    fn patch_text_bindings(&mut self) -> bool {
+    /// move layout, or ellipsizes. MUT1: the verdict is per binding. The
+    /// patchable ones commit their node content even then — the rebuild that
+    /// follows splices their spans and keeps the values, and
+    /// `settle_bindings_for_rebuild` skips them as current — while each
+    /// decliner's scope chain is evicted so the rebuild re-runs only that. A
+    /// half-patched *frame* is still not a state this can produce: on decline
+    /// no paint or semantics update happens here, the rebuild does both.
+    fn patch_text_bindings(&mut self, stale: &[usize]) -> bool {
         let rt = self.rt.clone();
-        let stale: Vec<usize> = self
-            .text_bindings
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| !b.deps.is_current(&rt))
-            .map(|(i, _)| i)
-            .collect();
         if stale.is_empty() {
             return true;
         }
-        // Phase 1 — evaluate and measure everything, commit nothing.
+        // Phase 1 — evaluate and measure, committing nothing yet. MUT1: the
+        // verdict is per binding. Patchable ones commit below even when a
+        // sibling declines — the rebuild that follows splices their spans and
+        // keeps the committed values, so the work is not wasted — and one
+        // decliner no longer converts a K-binding patch into an O(N) frame.
         let mut pending: Vec<(usize, String, lumen_core::state::ReadSet, f32, f32)> =
             Vec::with_capacity(stale.len());
-        for i in stale {
+        let mut declined = false;
+        for &i in stale {
             if !self.text_bindings[i].patchable {
-                return false;
+                declined = true;
+                continue;
             }
             let node = self.text_bindings[i].node;
             let (s, reads) = self.text_bindings[i].dynamic.eval_isolated(&rt);
@@ -4925,7 +4943,8 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 // away; the rebuild's own guard then routes the node down the
                 // eager path.
                 if s.contains('\n') {
-                    return false;
+                    declined = true;
+                    continue;
                 }
                 let b = &self.text_bindings[i];
                 pending.push((i, s, reads, b.w, b.h));
@@ -4936,14 +4955,16 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 NodeContent::Text(_, ts) => Some(ts.clone()),
                 _ => None,
             }) else {
-                return false;
+                declined = true;
+                continue;
             };
             let block = self.text.shaped(&s, &ts, wrap, ts.align);
             let (w, h) = (block.width().ceil(), block.height().ceil());
             let b = &self.text_bindings[i];
             // Only an axis whose size CAME from the measurement can move.
             if (b.auto_w && w != b.w) || (b.auto_h && h != b.h) {
-                return false;
+                declined = true;
+                continue;
             }
             pending.push((i, s, reads, w, h));
         }
@@ -4952,10 +4973,25 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         let mut patched: Vec<u32> = Vec::new();
         for (i, s, reads, w, h) in pending {
             let node = self.text_bindings[i].node;
+            Self::reindex_binding(
+                &mut self.binding_index,
+                BindingSlot::Text(i as u32),
+                &self.text_bindings[i].deps,
+                &reads,
+            );
             self.text_bindings[i].deps = reads;
             self.text_bindings[i].w = w;
             self.text_bindings[i].h = h;
             if let Some(m) = self.meta.get_mut(&node) {
+                // A conditional binding can change its read set when it
+                // switches branches; the observability projection must follow
+                // or the patched frame's semantics disagree with a fresh
+                // rebuild (caught by `assert_view_coherent` in the
+                // switching-signals test — a pre-MUT1 gap).
+                #[cfg(feature = "dev-observability")]
+                {
+                    m.deps.text = self.text_bindings[i].deps.dep_keys(&rt);
+                }
                 // The string is the node's content *and* its accessible label,
                 // exactly as `build_node` keeps them (`Element::text` sets
                 // both) — a patched frame that updated only one of the two
@@ -4967,6 +5003,12 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
             }
             patched.push(node.index());
+        }
+        if declined {
+            // MUT1: the decliners fall to `settle_bindings_for_rebuild`, which
+            // evicts exactly their scope chains; the pump rebuilds, which also
+            // repaints — so no paint or semantics work here.
+            return false;
         }
         // The accessible name changed, so the memoized semantics tree is stale.
         // The background patch below does not need this and does not do it;
@@ -4995,10 +5037,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
     /// patching helps: the view caches are dropped so nothing splices and every
     /// binding is re-evaluated by `build_node` against fresh layout.
     ///
-    /// Dropping *all* the caches is heavier than it needs to be — only the
-    /// scopes enclosing that node have to re-run — but it is the rare branch
-    /// (a size-changing text update landing in the same pump as a structural
-    /// change), and being coarse here cannot be wrong, only slow.
+    /// MUT1: a binding that cannot settle evicts exactly the chain of cached
+    /// scopes whose spans contain its node, so the rebuild re-runs that chain
+    /// and splices everything else. This replaced `clear_view_caches()`, which
+    /// dropped every span for one bad label — measured as the decline cliff:
+    /// 320 ms vs 9.4 ms for an honest one-chunk rebuild at N=50 000.
     fn settle_bindings_for_rebuild(&mut self) {
         let rt = self.rt.clone();
         for i in 0..self.bg_bindings.len() {
@@ -5009,34 +5052,42 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             let node = self.bg_bindings[i].node;
             self.bg_bindings[i].deps = reads;
             if let Some(m) = self.meta.get_mut(&node) {
+                #[cfg(feature = "dev-observability")]
+                {
+                    m.deps.background = self.bg_bindings[i].deps.dep_keys(&rt);
+                }
                 m.background = Some(color);
             }
         }
-        let mut must_relower = false;
+        let mut evict: Vec<NodeIndex> = Vec::new();
         for i in 0..self.text_bindings.len() {
             if self.text_bindings[i].deps.is_current(&rt) {
                 continue;
             }
+            let node = self.text_bindings[i].node;
             if !self.text_bindings[i].patchable {
-                must_relower = true;
+                evict.push(node);
                 continue;
             }
-            let node = self.text_bindings[i].node;
             let Some(ts) = self.meta.get(&node).and_then(|m| match &m.content {
                 NodeContent::Text(_, ts) => Some(ts.clone()),
                 _ => None,
             }) else {
-                must_relower = true;
+                evict.push(node);
                 continue;
             };
             let (s, reads) = self.text_bindings[i].dynamic.eval_isolated(&rt);
             if self.text_bindings[i].deferred {
                 if s.contains('\n') {
-                    must_relower = true;
+                    evict.push(node);
                     continue;
                 }
                 self.text_bindings[i].deps = reads;
                 if let Some(m) = self.meta.get_mut(&node) {
+                    #[cfg(feature = "dev-observability")]
+                    {
+                        m.deps.text = self.text_bindings[i].deps.dep_keys(&rt);
+                    }
                     m.label = s.clone();
                     if let NodeContent::Text(t, _) = &mut m.content {
                         *t = s;
@@ -5049,46 +5100,154 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             let (w, h) = (block.width().ceil(), block.height().ceil());
             let b = &self.text_bindings[i];
             if (b.auto_w && w != b.w) || (b.auto_h && h != b.h) {
-                must_relower = true;
+                evict.push(node);
                 continue;
             }
             self.text_bindings[i].deps = reads;
             self.text_bindings[i].w = w;
             self.text_bindings[i].h = h;
             if let Some(m) = self.meta.get_mut(&node) {
+                #[cfg(feature = "dev-observability")]
+                {
+                    m.deps.text = self.text_bindings[i].deps.dep_keys(&rt);
+                }
                 m.label = s.clone();
                 if let NodeContent::Text(t, _) = &mut m.content {
                     *t = s;
                 }
             }
         }
-        if must_relower {
-            self.clear_view_caches();
+        if !evict.is_empty() {
+            self.evict_scopes_containing(&evict);
+        }
+    }
+
+    /// MUT1: evict every cached scope whose recorded span contains one of
+    /// `nodes`. `scope_spans` still holds the previous build's records here
+    /// (settle runs before the `prev_spans` swap), and span roots are exactly
+    /// the subtree roots — so "contains" is an ancestor walk. Everything not
+    /// on a chain keeps its cache and splices.
+    fn evict_scopes_containing(&self, nodes: &[NodeIndex]) {
+        let mut root_to_key: HashMap<NodeIndex, Vec<IdHash>> = HashMap::default();
+        for (k, r) in &self.scope_spans {
+            root_to_key.entry(r.root).or_default().push(*k);
+        }
+        let mut cache = self.scope_cache.borrow_mut();
+        for &n in nodes {
+            let mut cur = n;
+            while cur.is_some() {
+                if let Some(keys) = root_to_key.get(&cur) {
+                    for k in keys {
+                        cache.remove(k);
+                    }
+                }
+                cur = self.tree.parent(cur);
+            }
         }
     }
 
     /// Whether any retained text binding's dependencies have changed (F3.5).
-    fn text_bindings_stale(&self) -> bool {
-        self.text_bindings
-            .iter()
-            .any(|b| !b.deps.is_current(&self.rt))
+    /// MUT1: written signals → stale binding indices, via the reverse index.
+    /// Sorted and deduplicated; `is_current` stays the authority (a logged
+    /// signal may resolve to bindings that were already refreshed), the index
+    /// only narrows the scan from O(bindings) to O(writes).
+    fn stale_bindings(&self, written: &[SignalId]) -> (Vec<usize>, Vec<usize>) {
+        if written.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let mut text: Vec<usize> = Vec::new();
+        let mut bg: Vec<usize> = Vec::new();
+        for sig in written {
+            if let Some(slots) = self.binding_index.get(sig) {
+                for s in slots {
+                    match *s {
+                        BindingSlot::Text(i) => text.push(i as usize),
+                        BindingSlot::Bg(i) => bg.push(i as usize),
+                    }
+                }
+            }
+        }
+        text.sort_unstable();
+        text.dedup();
+        bg.sort_unstable();
+        bg.dedup();
+        text.retain(|&i| !self.text_bindings[i].deps.is_current(&self.rt));
+        bg.retain(|&i| !self.bg_bindings[i].deps.is_current(&self.rt));
+        (text, bg)
     }
 
-    fn patch_bg_bindings(&mut self) {
+    /// MUT1: rebuild the reverse index from the live binding records. Called
+    /// once per rebuild, after lowering and the F3.6 carry-forward, so the
+    /// index always describes exactly the records the patch path will touch.
+    fn rebuild_binding_index(&mut self) {
+        self.binding_index.clear();
+        for (i, b) in self.text_bindings.iter().enumerate() {
+            for id in b.deps.signal_ids() {
+                self.binding_index
+                    .entry(id)
+                    .or_default()
+                    .push(BindingSlot::Text(i as u32));
+            }
+        }
+        for (i, b) in self.bg_bindings.iter().enumerate() {
+            for id in b.deps.signal_ids() {
+                self.binding_index
+                    .entry(id)
+                    .or_default()
+                    .push(BindingSlot::Bg(i as u32));
+            }
+        }
+    }
+
+    /// MUT1: move one binding between index buckets when a patch changed its
+    /// read set (a conditional binding reading different signals per branch).
+    fn reindex_binding(
+        index: &mut HashMap<SignalId, Vec<BindingSlot>>,
+        slot: BindingSlot,
+        old: &lumen_core::state::ReadSet,
+        new: &lumen_core::state::ReadSet,
+    ) {
+        let old_ids: Vec<SignalId> = old.signal_ids().collect();
+        let new_ids: Vec<SignalId> = new.signal_ids().collect();
+        if old_ids == new_ids {
+            return;
+        }
+        for id in &old_ids {
+            if new_ids.contains(id) {
+                continue;
+            }
+            if let Some(v) = index.get_mut(id) {
+                v.retain(|s| *s != slot);
+            }
+        }
+        for id in &new_ids {
+            if !old_ids.contains(id) {
+                let v = index.entry(*id).or_default();
+                if !v.contains(&slot) {
+                    v.push(slot);
+                }
+            }
+        }
+    }
+
+    fn patch_bg_bindings(&mut self, stale: &[usize]) {
         let rt = self.rt.clone();
-        let stale: Vec<usize> = self
-            .bg_bindings
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| !b.deps.is_current(&rt))
-            .map(|(i, _)| i)
-            .collect();
         let mut patched: Vec<u32> = Vec::new();
-        for i in stale {
+        for &i in stale {
             let (color, reads) = self.bg_bindings[i].dynamic.eval_isolated(&rt);
             let node = self.bg_bindings[i].node;
+            Self::reindex_binding(
+                &mut self.binding_index,
+                BindingSlot::Bg(i as u32),
+                &self.bg_bindings[i].deps,
+                &reads,
+            );
             self.bg_bindings[i].deps = reads;
             if let Some(m) = self.meta.get_mut(&node) {
+                #[cfg(feature = "dev-observability")]
+                {
+                    m.deps.background = self.bg_bindings[i].deps.dep_keys(&rt);
+                }
                 m.background = Some(color);
             }
             patched.push(node.index());
@@ -5137,6 +5296,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 ));
             }
         }
+        // MUT1: the binding tables are final for this build (lowering pushed
+        // fresh records, the carry-forward kept spliced ones) — index them.
+        self.rebuild_binding_index();
         // Baseline the skip-rebuild state after every build, so the next pump only
         // rebuilds on a real change (the build itself may bump the write-gen via
         // memo recomputes — capture the post-build value).

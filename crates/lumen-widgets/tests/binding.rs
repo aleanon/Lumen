@@ -8,7 +8,7 @@ use std::rc::Rc;
 use kurbo::Size;
 use lumen_core::state::Signal;
 use lumen_core::{Color, Dynamic};
-use lumen_widgets::{bind, text, widgets, App, BuildCx};
+use lumen_widgets::{bind, text, widgets, App, BuildCx, Element};
 
 #[cfg(feature = "dev-observability")]
 fn find<'a>(
@@ -482,6 +482,123 @@ fn deferred_bound_text_gaining_a_newline_falls_back_to_rebuild() {
     assert!(
         h.semantics_json().to_string().contains("first\\nsecond"),
         "the multiline value landed via the rebuild fallback"
+    );
+    h.assert_view_coherent();
+}
+
+#[test]
+fn a_declining_binding_rebuilds_only_its_scope() {
+    // MUT1: pre-fix, ONE binding whose new string measured differently called
+    // `clear_view_caches()`, so the rebuild that followed spliced nothing —
+    // measured as 320 ms vs 9.4 ms at N=50 000. Now the decliner's scope chain
+    // is evicted and every other scope splices. No definite root width, so the
+    // labels take the eager (measured) path where growth genuinely declines.
+    let a_runs = Rc::new(Cell::new(0u32));
+    let b_runs = Rc::new(Cell::new(0u32));
+    let (ar, br) = (a_runs.clone(), b_runs.clone());
+    let mut h = App::new(move |cx: &mut BuildCx| {
+        let ar = ar.clone();
+        let br = br.clone();
+        let grower = cx.scope_with_deps("grower", (), move |_| {
+            ar.set(ar.get() + 1);
+            widgets::text(bind!(rt => {
+                let v: Signal<i64> = rt.signal("grow", || 0);
+                "x".repeat(v.get(rt) as usize + 1)
+            }))
+        });
+        let stable = cx.scope_with_deps("stable", (), move |_| {
+            br.set(br.get() + 1);
+            widgets::text(bind!(rt => {
+                let v: Signal<i64> = rt.signal("other", || 7);
+                format!("other {}", v.get(rt))
+            }))
+        });
+        widgets::column(vec![grower, stable])
+    })
+    .run_headless(Size::new(300.0, 100.0));
+
+    assert_eq!((a_runs.get(), b_runs.get()), (1, 1), "one build each");
+    let v: Signal<i64> = h.runtime().signal("grow", || 0);
+    v.set(h.runtime(), 4);
+    h.pump();
+
+    assert_eq!(a_runs.get(), 2, "the declining binding's scope re-ran");
+    assert_eq!(
+        b_runs.get(),
+        1,
+        "the sibling scope spliced — a decline no longer drops every cache"
+    );
+    assert!(h.semantics_json().to_string().contains("xxxxx"));
+    h.assert_view_coherent();
+}
+
+#[test]
+fn a_patchable_sibling_commits_even_when_another_binding_declines() {
+    // MUT1 per-binding commit: the old pass was all-or-nothing — the first
+    // decliner aborted before anything applied. Both values must land in the
+    // same pump: one via patch-commit, one via the decline's rebuild.
+    let mut h = App::new(move |_cx: &mut BuildCx| {
+        // Fixed box on both axes → always patchable, whatever it measures.
+        let mut fixed: Element = widgets::text(bind!(rt => {
+            let v: Signal<i64> = rt.signal("fix", || 0);
+            format!("fixed {}", v.get(rt))
+        }));
+        fixed.style.width = lumen_layout::Dim::px(200.0);
+        fixed.style.height = lumen_layout::Dim::px(20.0);
+        // Auto box whose string grows → declines on every change.
+        let grower: Element = widgets::text(bind!(rt => {
+            let v: Signal<i64> = rt.signal("grow2", || 0);
+            "y".repeat(v.get(rt) as usize + 1)
+        }));
+        widgets::column(vec![fixed, grower])
+    })
+    .run_headless(Size::new(300.0, 100.0));
+
+    let f: Signal<i64> = h.runtime().signal("fix", || 0);
+    let g: Signal<i64> = h.runtime().signal("grow2", || 0);
+    f.set(h.runtime(), 9);
+    g.set(h.runtime(), 3);
+    h.pump();
+
+    let doc = h.semantics_json().to_string();
+    assert!(doc.contains("fixed 9"), "the patchable binding committed");
+    assert!(doc.contains("yyyy"), "the decliner landed via the rebuild");
+    h.assert_view_coherent();
+}
+
+#[test]
+fn a_binding_that_switches_signals_stays_indexed() {
+    // MUT1 reverse index: a conditional binding reads different signals per
+    // branch. After the branch flips, a write to the NEW dependency must still
+    // reach it — the commit re-buckets the binding in the index.
+    let mut h = App::new(move |_cx: &mut BuildCx| {
+        let mut root = widgets::column(vec![widgets::text(bind!(rt => {
+            let t: Signal<bool> = rt.signal("which", || false);
+            if t.get(rt) {
+                let b: Signal<i64> = rt.signal("bee", || 0);
+                format!("B {}", b.get(rt))
+            } else {
+                let a: Signal<i64> = rt.signal("aye", || 0);
+                format!("A {}", a.get(rt))
+            }
+        }))]);
+        root.style.width = lumen_layout::Dim::pct(1.0);
+        root
+    })
+    .run_headless(Size::new(300.0, 100.0));
+
+    let which: Signal<bool> = h.runtime().signal("which", || false);
+    which.set(h.runtime(), true);
+    h.pump();
+    assert!(h.semantics_json().to_string().contains("B 0"));
+
+    // The binding's read set is now {which, bee}. A write to `bee` must patch.
+    let bee: Signal<i64> = h.runtime().signal("bee", || 0);
+    bee.set(h.runtime(), 42);
+    h.pump();
+    assert!(
+        h.semantics_json().to_string().contains("B 42"),
+        "the re-bucketed dependency still reaches the binding"
     );
     h.assert_view_coherent();
 }

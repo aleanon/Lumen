@@ -13,7 +13,9 @@
 //! are different questions and only the second one diagnoses.
 //!
 //! ```text
-//! ROWS=10000 CHANGED=10 DEPTH=0 MODE=plain|scope|bind cargo run --release --bin sparse
+//! ROWS=10000 CHANGED=10 DEPTH=0 MODE=plain|scope|bind|chunkbind cargo run --release --bin sparse
+//! GROW=1 makes bound text grow one glyph per bump, so every patch DECLINES
+//! (the box would widen) — the decline-cliff arm MUT1 exists for.
 //! ```
 //!
 //! Modes, which exist to isolate *which* mechanism engages:
@@ -228,6 +230,50 @@ fn main() {
             }
             return root;
         }
+        // MODE=chunkbind: chunk-scoped structure with BOUND row text. The
+        // scope's deps are constant, so a row change never re-runs the chunk —
+        // it patches. With GROW=1 every write declines (the string widens),
+        // which is the decline cliff: pre-MUT1, one declining binding dropped
+        // ALL view caches, so the next rebuild spliced nothing.
+        if m == "chunkbind" {
+            let chunk = std::env::var("CHUNK")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(64)
+                .max(1);
+            let grow = std::env::var("GROW").is_ok();
+            let groups: Vec<Element> = (0..rows.div_ceil(chunk))
+                .map(|g| {
+                    let lo = g * chunk;
+                    let hi = ((g + 1) * chunk).min(rows);
+                    cx.scope_with_deps(("chunkbind", g), (), move |_cx2| {
+                        let items: Vec<Element> = (lo..hi)
+                            .map(|i| {
+                                let mut e: Element = widgets::text(bind!(rt => {
+                                    let v: Signal<i64> = rt.signal(key(i), || 0);
+                                    let v = v.get(rt);
+                                    if grow {
+                                        format!("row {i} · {}", "x".repeat(v as usize))
+                                    } else {
+                                        format!("row {i} · {v}")
+                                    }
+                                }));
+                                for _ in 0..depth {
+                                    e = widgets::column(vec![e]);
+                                }
+                                e
+                            })
+                            .collect();
+                        widgets::column(items)
+                    })
+                })
+                .collect();
+            let mut root: Element = widgets::column(groups);
+            if std::env::var("NOFILL").is_err() {
+                root.style.width = lumen_layout::Dim::pct(1.0);
+            }
+            return root;
+        }
         let kids: Vec<Element> = (0..rows)
             .map(|i| {
                 // The depth wrappers belong INSIDE the scope. An earlier
@@ -260,7 +306,12 @@ fn main() {
                     // it should patch rather than rebuild.
                     "bind" => wrap(widgets::text(bind!(rt => {
                         let v: Signal<i64> = rt.signal(key(i), || 0);
-                        format!("row {i} · {}", v.get(rt))
+                        let v = v.get(rt);
+                        if std::env::var("GROW").is_ok() {
+                            format!("row {i} · {}", "x".repeat(v as usize))
+                        } else {
+                            format!("row {i} · {v}")
+                        }
                     }))),
                     other => panic!("unknown MODE={other}"),
                 }
@@ -340,7 +391,12 @@ fn main() {
     v.set(h.runtime(), want);
     h.pump();
     h.pump(); // restyle-drops-bindings: a moved signal can lag one frame
-    let want_text = format!("row {probe} · {want}");
+    let grow_text = std::env::var("GROW").is_ok() && (mode == "bind" || mode == "chunkbind");
+    let want_text = if grow_text {
+        format!("row {probe} · {}", "x".repeat(want as usize))
+    } else {
+        format!("row {probe} · {want}")
+    };
     let doc = h.semantics_json().to_string();
     assert!(
         doc.contains(&want_text),

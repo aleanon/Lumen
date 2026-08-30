@@ -149,8 +149,11 @@ const MEMO_SCOPE_TAG: &str = "\u{0}lumen.memo";
 
 /// Interned identity of a stored value (signal or memo). `Copy` so [`Signal`]
 /// can be a cheap copyable handle.
+/// Opaque handle to a store slot. Public for the binding reverse index
+/// (MUT1): [`ReadSet::signal_ids`] exposes them and [`Runtime::take_written`]
+/// reports them; the payload stays private.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-struct SignalId(u32);
+pub struct SignalId(u32);
 
 /// Identity of a reactive scope (effect or memo recompute).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -375,6 +378,12 @@ struct Inner {
     /// state changed since the last one. Conservative: `set` bumps even when the
     /// written value equals the old one.
     write_gen: u64,
+    /// MUT1: signals written (or dropped) since the last
+    /// [`Runtime::take_written`] drain, deduplicated. The app resolves these
+    /// through its binding reverse index, replacing the per-pump O(bindings)
+    /// staleness scan with an O(writes) lookup.
+    written: Vec<SignalId>,
+    written_set: HashSet<SignalId>,
 
     // restore
     #[cfg(feature = "snapshot")]
@@ -421,6 +430,11 @@ impl ReadSet {
                 self.deps.push((id, ver));
             }
         }
+    }
+
+    /// The signal ids captured, for the binding reverse index (MUT1).
+    pub fn signal_ids(&self) -> impl Iterator<Item = SignalId> + '_ {
+        self.deps.iter().map(|(id, _)| *id)
     }
 
     /// The stable string keys of the signals captured, for observability — a
@@ -632,6 +646,15 @@ impl Runtime {
         out
     }
 
+    /// MUT1: drain the signals written or dropped since the last drain
+    /// (deduplicated). Called once per pump; the ids are resolved through the
+    /// app's binding reverse index so a K-signal frame touches K bindings.
+    pub fn take_written(&self) -> Vec<SignalId> {
+        let mut b = self.inner.borrow_mut();
+        b.written_set.clear();
+        std::mem::take(&mut b.written)
+    }
+
     /// The global write generation: bumped on every value write, so a caller
     /// can tell "something changed since I last looked" in O(1).
     pub fn write_gen(&self) -> u64 {
@@ -665,6 +688,12 @@ impl Runtime {
         let mut n = 0;
         for id in ids {
             if b.slots.remove(&id).is_some() {
+                // MUT1: a dropped slot makes any ReadSet naming it
+                // non-current; surface it like a write so the reverse-index
+                // path sees exactly what the old full scan saw.
+                if b.written_set.insert(id) {
+                    b.written.push(id);
+                }
                 n += 1;
             }
         }
@@ -1073,6 +1102,9 @@ impl Runtime {
                 }
                 let ver = b.write_gen.wrapping_add(1);
                 b.write_gen = ver;
+                if b.written_set.insert(*id) {
+                    b.written.push(*id);
+                }
                 slot.version = ver;
                 for s in slot.subs.iter().copied().collect::<Vec<_>>() {
                     if b.dirty_set.insert(s) {
@@ -1204,6 +1236,9 @@ impl Runtime {
             let mut b = self.inner.borrow_mut();
             let ver = b.write_gen.wrapping_add(1);
             b.write_gen = ver;
+            if b.written_set.insert(id) {
+                b.written.push(id);
+            }
             if let Some(slot) = b.slots.get_mut(&id) {
                 slot.value = Box::new(value);
                 slot.version = ver;
@@ -1241,6 +1276,9 @@ impl Runtime {
         }
         let ver = b.write_gen.wrapping_add(1);
         b.write_gen = ver;
+        if b.written_set.insert(id) {
+            b.written.push(id);
+        }
         let subs: Vec<ScopeId> = match b.slots.get_mut(&id) {
             Some(slot) => {
                 slot.value = Box::new(value);
@@ -1339,6 +1377,9 @@ impl<T: State> Signal<T> {
             let mut b = rt.inner.borrow_mut();
             let ver = b.write_gen.wrapping_add(1);
             b.write_gen = ver;
+            if b.written_set.insert(self.id) {
+                b.written.push(self.id);
+            }
             {
                 let key = b.id_to_key.get(self.id.0 as usize).cloned();
                 let slot = b.slots.get_mut(&self.id).expect("signal slot missing");

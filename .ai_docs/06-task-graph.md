@@ -582,6 +582,52 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT1 ☑ Reverse-indexed bindings; the decline cliff is gone — 320 ms → 11 ms (2026-08-30)
+
+**Two structural fixes to the patch engine, both demonstrated before fixing.**
+
+**1. The staleness scan was O(bindings).** Every pump ran
+`ReadSet::is_current` over every binding (twice on patch pumps). Now the
+runtime keeps a deduplicated log of written **and dropped** `SignalId`s
+(`Runtime::take_written`, fed at all four version-bump sites plus the
+evict-drop site, so the index path sees exactly what the scan saw), and the
+app resolves it through `binding_index: SignalId → [BindingSlot]` — rebuilt
+once per rebuild after the F3.6 carry-forward, re-bucketed on a patch whose
+read set changed (conditional bindings). `is_current` stays the authority;
+the index only narrows the scan. *Measured:* bind N=50 000 K=1
+**2 162 → 1 491 µs (−31%)**; N=10 000 **529 → 467 µs**.
+
+**2. One declining binding cost the whole view.** `patch_text_bindings` was
+all-or-nothing, and its rebuild fallback went through
+`settle_bindings_for_rebuild`'s `clear_view_caches()` — so a single label
+whose new string measured wider dropped **every** span and forced a full
+unmemoized rebuild. *Demonstrated with the new `chunkbind` + `GROW=1` sparse
+arms (NOFILL, so the labels take the eager path where growth genuinely
+declines):* **319 963 µs** at N=50 000, `nodes_rebuilt=50 197`. Now the
+verdict is per binding — patchable siblings commit even when one declines
+(their spans splice through the rebuild and keep the values) — and the
+decliner evicts only **the chain of cached scopes whose spans contain its
+node** (`evict_scopes_containing`: an ancestor walk against the span-root
+records, which at settle time still describe the previous build). *Measured:*
+**11 114 µs, `nodes_rebuilt=258`** — the honest one-chunk rebuild, 195 chunks
+spliced, **29×**. This is the "child asks its parent for space" fallback the
+plan promised, built from machinery that already existed.
+
+**A pre-existing coherence bug, exposed by the new switching-signals test:**
+no patch or settle commit ever updated the node's observability projection
+(`NodeDeps.text`/`.background`), so a conditional binding that switched
+branches left `ui.getDeps` and the semantics `deps` describing the old branch
+— `assert_view_coherent` fails on exactly that frame. All four commit sites
+now project the fresh dep keys. GROW note: under a definite root the growing
+string **patches** — MUT0's deferred rule makes width growth layout-neutral
+by construction — which is itself the design working; the cliff only exists
+on the eager path.
+
+*Guarded by:* `binding.rs` — decline containment (sibling scope's counter
+stays at 1), per-binding commit (both values land in one pump), and the
+re-bucketed conditional binding. The remaining bind-frame tail
+(1 491 µs at 50k) is `build_display_list` + `damage_between` — MUT2.
+
 ## MUT0 ☑ The F3 rebuild trigger diagnosed — a T2 regression, fixed: 18 430 → 529 µs (2026-08-30)
 
 **The term that fires is `write_changed && !structural_current`, and the reads
