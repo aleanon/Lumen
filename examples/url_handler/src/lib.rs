@@ -3,13 +3,13 @@
 //! routing half: an incoming `lumen://…` URL is parsed, the scheme stripped,
 //! and the router replaces its stack from the path — screen + parameter
 //! arrive like any state change.
-use lumen_layout::{Align, Dim, Display, FlexDirection, LayoutStyle};
+use lumen_layout::Dim;
 use lumen_widgets::nav::Router;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Stack};
 
 /// Build the url_handler app.
 pub fn main_app() -> App {
-    App::new(build)
+    App::view(build)
 }
 
 /// Strip the scheme and hand the path to the router (the piece an OS URL
@@ -20,7 +20,7 @@ pub fn open_url(rt: &lumen_core::state::Runtime, url: &str) {
     router.update(rt, move |r| r.deep_link(&path.replace('/', ":")));
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let router = cx.signal("router", || Router::new("home"));
     let current = router.get(cx.runtime()).current().to_string();
 
@@ -43,21 +43,16 @@ fn build(cx: &mut BuildCx) -> Element {
     ]);
     links.style.column_gap = Dim::px(8.0);
 
-    let mut col = widgets::column(vec![
-        widgets::text(format!("route: {current}")).id("route"),
-        screen,
-        links,
-    ])
-    .id("page");
-    col.style = LayoutStyle {
-        display: Display::Flex,
-        flex_direction: FlexDirection::Column,
-        width: Dim::pct(1.0),
-        height: Dim::pct(1.0),
-        align_items: Some(Align::Center),
-        justify_content: Some(Align::Center),
-        row_gap: Dim::px(12.0),
-        ..LayoutStyle::default()
-    };
-    col
+    // E2b: statement form. The `router` signal stays keyed — the public
+    // `open_url(rt, ..)` addresses it by the same key (D1).
+    Stack::column(move |c| {
+        c.child(widgets::text(format!("route: {current}")).id("route"));
+        c.child(screen);
+        c.child(links);
+    })
+    .width(Dim::pct(1.0))
+    .height(Dim::pct(1.0))
+    .centered()
+    .gap(12.0)
+    .id("page")
 }

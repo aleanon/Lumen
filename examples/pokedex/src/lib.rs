@@ -2,14 +2,14 @@
 //! its transport as a PARAMETER; the live runner (win.rs) hands it `ureq`
 //! (dev-dep), tests hand it canned JSON — the framework ships no HTTP.
 use lumen_core::tasks::MaybeSend;
-use lumen_layout::{Align, Dim, Display, FlexDirection, LayoutStyle};
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_layout::Dim;
+use lumen_widgets::{widgets, App, BuildCx, Stack};
 
 /// Build the app around an injected transport: `fetch(name) -> raw JSON`.
 pub fn app_with(
     fetch: impl Fn(&str) -> Result<String, String> + MaybeSend + Clone + 'static,
 ) -> App {
-    App::new(move |cx| build(cx, fetch.clone()))
+    App::view(move |cx| build(cx, fetch.clone()))
 }
 
 /// Extract `"name"` and the first `"type"` from the (Pokéapi-shaped) JSON —
@@ -25,7 +25,7 @@ fn scrape(json: &str, key: &str) -> String {
 fn build(
     cx: &mut BuildCx,
     fetch: impl Fn(&str) -> Result<String, String> + MaybeSend + Clone + 'static,
-) -> Element {
+) -> impl lumen_widgets::Direct {
     let query = cx.signal("query", || "pikachu".to_string());
     let q = query.get(cx.runtime());
     let f = fetch.clone();
@@ -50,21 +50,18 @@ fn build(
         .id("mon")
     };
 
-    let mut col = widgets::column(vec![
-        widgets::text("Pokédex (bring-your-own-client)").id("title"),
-        widgets::text_field_basic(cx, "query", &q).id("query-input"),
-        body,
-    ])
-    .id("page");
-    col.style = LayoutStyle {
-        display: Display::Flex,
-        flex_direction: FlexDirection::Column,
-        width: Dim::pct(1.0),
-        height: Dim::pct(1.0),
-        align_items: Some(Align::Center),
-        justify_content: Some(Align::Center),
-        row_gap: Dim::px(12.0),
-        ..LayoutStyle::default()
-    };
-    col
+    // E2b: statement form. `query` stays keyed (the field widget owns it,
+    // D1) and the resource flow above is untouched — only the container
+    // changes: its whole `LayoutStyle` literal is now Stack modifiers.
+    let field = widgets::text_field_basic(cx, "query", &q).id("query-input");
+    Stack::column(move |c| {
+        c.child(widgets::text("Pokédex (bring-your-own-client)").id("title"));
+        c.child(field);
+        c.child(body);
+    })
+    .width(Dim::pct(1.0))
+    .height(Dim::pct(1.0))
+    .centered()
+    .gap(12.0)
+    .id("page")
 }

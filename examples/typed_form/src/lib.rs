@@ -4,14 +4,14 @@
 //! here they're grouped under muted field labels and themed from `app.lss`.
 use lumen_widgets::element::Shadow;
 use lumen_widgets::{
-    row, widgets, App, BuildCx, Button, CheckBox, Element, Label, Slider, TextInput,
+    row, widgets, App, BuildCx, Button, CheckBox, Element, Label, Slider, Stack, TextInput,
 };
 
-use lumen_layout::{Align, Dim, Edges};
+use lumen_layout::{Align, Dim};
 
 /// Build the typed-form app.
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    App::view(build).stylesheet(include_str!("../app.lss"))
 }
 
 fn label(s: &str) -> Element {
@@ -32,7 +32,7 @@ fn field(name: &str, widget: Element) -> Element {
     c
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let name: Element = TextInput::new(cx, "name", "Ada Lovelace").id("name").into();
     let notify: Element = CheckBox::new(cx, "notify", "Email me product updates")
         .id("notify")
@@ -55,29 +55,30 @@ fn build(cx: &mut BuildCx) -> Element {
         b
     };
 
-    let mut card = widgets::column(vec![
-        Label::new("Preferences")
-            .bold()
-            .size(24.0)
-            .id("title")
-            .into(),
-        widgets::text("Authored with the typed builder API.").class("subtitle"),
-        field("DISPLAY NAME", name),
-        field("NOTIFICATIONS", notify),
-        field("VOLUME", volume),
-        buttons,
-    ])
+    // E2b: statement form throughout — the card's gap/padding/width/
+    // alignment/shadow and the page's centring are all Stack modifiers now.
+    // The typed leaves above need `cx`, so they are built eagerly and moved
+    // into the body.
+    let card = Stack::column(move |c| {
+        c.child(Label::new("Preferences").bold().size(24.0).id("title"));
+        c.child(widgets::text("Authored with the typed builder API.").class("subtitle"));
+        c.child(field("DISPLAY NAME", name));
+        c.child(field("NOTIFICATIONS", notify));
+        c.child(field("VOLUME", volume));
+        c.child(buttons);
+    })
+    .gap(18.0)
+    .padding(30.0)
+    .width(Dim::px(380.0))
+    .align_items(Align::Start)
+    .shadow(Shadow::soft())
     .id("card");
-    card.style.row_gap = Dim::px(18.0);
-    card.style.padding = Edges::all(Dim::px(30.0));
-    card.style.width = Dim::px(380.0);
-    card.style.align_items = Some(Align::Start);
-    card = card.shadow(Shadow::soft());
 
-    let mut page = widgets::column(vec![card]).id("page");
-    page.style.width = Dim::pct(1.0);
-    page.style.height = Dim::pct(1.0);
-    page.style.align_items = Some(Align::Center);
-    page.style.justify_content = Some(Align::Center);
-    page
+    Stack::column(move |c| {
+        c.child(card);
+    })
+    .width(Dim::pct(1.0))
+    .height(Dim::pct(1.0))
+    .centered()
+    .id("page")
 }

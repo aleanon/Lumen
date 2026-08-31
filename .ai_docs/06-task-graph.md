@@ -616,14 +616,20 @@ a `.window(..)` tree gets its own runtime with no installed state, so a
 generated `S::set_*` from a secondary window would panic. counter stays
 keyed for exactly this reason, noted in its source.
 
-**Not done:** the second pass — converting the roots the new alignment API
-unblocks — did not run; the four agents were terminated mid-flight by a
-session rate limit. Eight roots remain on `App::new`: qr, url_handler,
-vectorial_text, pokedex, typed_form (all now mechanical with
-`Stack::centered()`), plus multi_window (pinned), settings (Android shell,
-E4) and widget_showcase (E4's catalog builders). 102 `-> Element` helper
-signatures remain inside example bodies — E4/E5 territory, since most feed
-`Vec<Element>` containers or the canvas.
+**Second pass, done by hand** (the four agents were terminated mid-flight by
+a session rate limit): the five roots the alignment API unblocked — qr,
+url_handler, vectorial_text, pokedex, typed_form — are now statement-form
+`Stack`, and each one's whole `LayoutStyle { .. }` literal disappeared into
+modifiers (the unused-import warnings that followed were the proof).
+typed_form is the best demonstration: card *and* page, gap + padding +
+width + align + shadow + centring, entirely in the typed surface.
+
+**Final tally: 33 of 36 example roots migrated**, 11 crates on statement
+form. The three remaining are the pinned ones, each for a recorded reason —
+multi_window (`App::window`'s Element closure), settings (the Android
+shell's `run_styled(settings::build)`), widget_showcase (E4's catalog
+builders). 102 `-> Element` helper signatures remain inside example bodies:
+E4/E5 territory, since they feed `Vec<Element>` containers or the canvas.
 
 ## E0+E1 ☑ The Element deletion begins — scaffold, facade, and two exemplars (2026-08-31)
 

@@ -3,16 +3,16 @@
 //! the immediate-mode Canvas: filled, stroked, and scaled — effects a glyph
 //! atlas can't do.
 use kurbo::Affine;
-use lumen_layout::{Align, Dim, Display, FlexDirection, LayoutStyle};
+use lumen_layout::Dim;
 use lumen_text::{TextEngine, TextStyle};
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Stack};
 
 /// Build the vectorial-text app.
 pub fn main_app() -> App {
-    App::new(build)
+    App::view(build)
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let _ = cx;
     let mut canvas = widgets::canvas(460.0, 240.0, |frame, _size| {
         let mut eng = TextEngine::new();
@@ -48,20 +48,14 @@ fn build(cx: &mut BuildCx) -> Element {
     });
     canvas = canvas.id("vector");
 
-    let mut col = widgets::column(vec![
-        widgets::text("Glyph outlines → Canvas").id("title"),
-        canvas,
-    ])
-    .id("page");
-    col.style = LayoutStyle {
-        display: Display::Flex,
-        flex_direction: FlexDirection::Column,
-        width: Dim::pct(1.0),
-        height: Dim::pct(1.0),
-        align_items: Some(Align::Center),
-        justify_content: Some(Align::Center),
-        row_gap: Dim::px(10.0),
-        ..LayoutStyle::default()
-    };
-    col
+    // E2b: statement form — the canvas is built eagerly above and moved in.
+    Stack::column(move |c| {
+        c.child(widgets::text("Glyph outlines → Canvas").id("title"));
+        c.child(canvas);
+    })
+    .width(Dim::pct(1.0))
+    .height(Dim::pct(1.0))
+    .centered()
+    .gap(10.0)
+    .id("page")
 }
