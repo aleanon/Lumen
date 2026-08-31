@@ -134,7 +134,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-gauntlet"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-agent",
  "lumen-core",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "agent-gauntlet-2"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-agent",
  "lumen-core",
@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "agent-gauntlet-media"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-agent",
@@ -175,7 +175,7 @@ dependencies = [
 
 [[package]]
 name = "agent-gauntlet-web"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-agent",
  "lumen-core",
@@ -775,7 +775,7 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "catalog"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -821,7 +821,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "changelog"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -833,7 +833,7 @@ dependencies = [
 
 [[package]]
 name = "chart"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -845,7 +845,7 @@ dependencies = [
 
 [[package]]
 name = "chrono-stopwatch"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-agent",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "clock"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "color_palette"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -1020,7 +1020,7 @@ dependencies = [
 
 [[package]]
 name = "counter"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-core",
  "lumen-layout",
@@ -1150,7 +1150,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "data"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -1250,7 +1250,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
 name = "download_progress"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -1418,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "events"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -1430,7 +1430,7 @@ dependencies = [
 
 [[package]]
 name = "exit"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -1718,7 +1718,7 @@ dependencies = [
 
 [[package]]
 name = "gallery"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-agent",
  "lumen-core",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "glass"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -2001,7 +2001,7 @@ dependencies = [
 
 [[package]]
 name = "gradient"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -2130,7 +2130,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hello"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen",
  "lumen-test",
@@ -2139,7 +2139,7 @@ dependencies = [
 
 [[package]]
 name = "hello_android"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "android-activity",
  "lumen",
@@ -2148,7 +2148,7 @@ dependencies = [
 
 [[package]]
 name = "hello_ios"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen",
  "lumen-shell-ios",
@@ -2156,7 +2156,7 @@ dependencies = [
 
 [[package]]
 name = "hello_web"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen",
  "lumen-render",
@@ -2177,15 +2177,15 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hot_a"
-version = "0.1.0"
+version = "0.2.1"
 
 [[package]]
 name = "hot_b"
-version = "0.1.0"
+version = "0.2.1"
 
 [[package]]
 name = "hot_c"
-version = "0.1.0"
+version = "0.2.1"
 
 [[package]]
 name = "http"
@@ -2271,7 +2271,7 @@ dependencies = [
 
 [[package]]
 name = "iced-parity"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-agent",
@@ -2501,7 +2501,7 @@ dependencies = [
 
 [[package]]
 name = "inspector"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-agent",
  "lumen-core",
@@ -2511,7 +2511,7 @@ dependencies = [
 
 [[package]]
 name = "integration"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -2853,7 +2853,7 @@ checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
 
 [[package]]
 name = "lumen"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-core",
  "lumen-exec",
@@ -2868,7 +2868,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-agent"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -2882,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-app"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -2896,7 +2896,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-benches"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "criterion",
  "kurbo",
@@ -2912,7 +2912,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-cli"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "libloading 0.8.9",
  "lumen",
@@ -2927,7 +2927,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-core"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "bitflags 2.13.0",
  "jsonschema",
@@ -2940,7 +2940,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-exec"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "blocking",
  "lumen-core",
@@ -2951,7 +2951,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-layout"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -2960,7 +2960,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-macros"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2978,7 +2978,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-render"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -2992,7 +2992,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-shell"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -3017,7 +3017,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-shell-android"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "android-activity",
  "android_logger",
@@ -3031,7 +3031,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-shell-core"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen",
@@ -3042,7 +3042,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-shell-ios"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen",
@@ -3053,7 +3053,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-shell-web"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen",
  "lumen-agent",
@@ -3065,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-style"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -3077,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-test"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "jsonschema",
  "kurbo",
@@ -3091,7 +3091,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-text"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -3104,7 +3104,7 @@ dependencies = [
 
 [[package]]
 name = "lumen-widgets"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "accesskit",
  "image",
@@ -3270,7 +3270,7 @@ dependencies = [
 
 [[package]]
 name = "multi_window"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -4105,7 +4105,7 @@ dependencies = [
 
 [[package]]
 name = "pokedex"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -4284,7 +4284,7 @@ checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
 name = "qr"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -4821,7 +4821,7 @@ dependencies = [
 
 [[package]]
 name = "settings"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-agent",
  "lumen-core",
@@ -4833,7 +4833,7 @@ dependencies = [
 
 [[package]]
 name = "settings_android"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "android-activity",
  "lumen",
@@ -4860,7 +4860,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "sierpinski"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -4910,7 +4910,7 @@ checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "skills-smoke"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -5092,7 +5092,7 @@ checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
 
 [[package]]
 name = "styling"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-core",
  "lumen-layout",
@@ -5193,7 +5193,7 @@ dependencies = [
 
 [[package]]
 name = "system_information"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -5385,7 +5385,7 @@ dependencies = [
 
 [[package]]
 name = "todos"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-core",
  "lumen-layout",
@@ -5508,7 +5508,7 @@ dependencies = [
 
 [[package]]
 name = "tour"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -5648,7 +5648,7 @@ dependencies = [
 
 [[package]]
 name = "typed_form"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -5731,7 +5731,7 @@ dependencies = [
 
 [[package]]
 name = "url_handler"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -5777,7 +5777,7 @@ dependencies = [
 
 [[package]]
 name = "vectorial_text"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -6078,7 +6078,7 @@ dependencies = [
 
 [[package]]
 name = "websocket"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -6270,7 +6270,7 @@ dependencies = [
 
 [[package]]
 name = "widget-rating"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "lumen-core",
  "lumen-layout",
@@ -6280,7 +6280,7 @@ dependencies = [
 
 [[package]]
 name = "widget_gallery"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
@@ -6292,7 +6292,7 @@ dependencies = [
 
 [[package]]
 name = "widget_showcase"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "kurbo",
  "lumen-core",
