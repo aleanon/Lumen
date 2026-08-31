@@ -135,10 +135,6 @@ pub use lumen_layout::LayoutNode;
 /// ```
 pub use lumen_macros::stable_handler;
 
-/// `#[derive(Reactive)]` (S1) — each field of a state struct gets a signal
-/// accessor keyed by its compile-time field path. See
-/// [`lumen_macros::Reactive`].
-pub use lumen_macros::Reactive;
 /// F3 binding sugar: `text!(cx, "Count: {count}")` → a reactive text element
 /// whose string tracks the interpolated signals. See [`lumen_macros::text`].
 ///
@@ -148,6 +144,10 @@ pub use lumen_macros::Reactive;
 /// rebuild, no relayout — where a value read in the view is structural and
 /// rebuilds the frame.
 pub use lumen_macros::text;
+/// `#[derive(Reactive)]` (S1) — each field of a state struct gets a signal
+/// accessor keyed by its compile-time field path. See
+/// [`lumen_macros::Reactive`].
+pub use lumen_macros::Reactive;
 /// Re-exported so downstream crates can bound on the renderer backend (e.g.
 /// `Headless<R>` consumers like `lumen-agent`) without depending on `lumen-render`.
 pub use lumen_render::{Damage, DefaultRenderer, Present, Renderer, RgbaImage, TinySkia};
@@ -332,8 +332,8 @@ pub use file_picker::FilePicker;
 pub use grid::{CellRef, Grid, GridStyle};
 pub use label::Label;
 pub use lists::Pagination;
-pub use lists::{For, VirtualList};
 pub use lists::{DataGrid, Tree};
+pub use lists::{For, VirtualList};
 pub use nav_chrome::Tabs;
 pub use nav_chrome::{AppBar, BottomNav, NavigationRail, PullToRefresh};
 pub use overlay::{Menu, Modal, Select, Tooltip};

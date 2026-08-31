@@ -32,7 +32,10 @@ use lumen_widgets::{bind, widgets, App, BuildCx, Element, Label, Stack};
 use std::time::Instant;
 
 fn env(k: &str, d: usize) -> usize {
-    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
+    std::env::var(k)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(d)
 }
 
 fn rss_kb() -> u64 {
@@ -94,258 +97,249 @@ fn main() {
         })
     } else {
         App::new(move |cx: &mut BuildCx| {
-        // MODE=for: the materialized keyed collection. Same chunked memo as
-        // `chunk`/`component`, but the widget picks the grain instead of the
-        // author — the point of R10.
-        if m == "for" {
-            let vals: Vec<i64> = (0..rows)
-                .map(|i| {
-                    let v: Signal<i64> = cx.signal(key(i), || 0);
-                    v.get(cx.runtime())
-                })
-                .collect();
-            let mut root: Element = lumen_widgets::For::new(cx, "rows", &vals, |_cx, i, v| {
-                let mut e: Element = widgets::text(format!("row {i} · {v}"));
-                for _ in 0..depth {
-                    e = widgets::column(vec![e]);
-                }
-                e
-            })
-            .into();
-            if std::env::var("NOFILL").is_err() {
-                root.style.width = lumen_layout::Dim::pct(1.0);
-            }
-            return root;
-        }
-        // MODE=virtual: the collection widget that owns its own granularity.
-        // `VirtualList` calls `render(i)` only over the visible window, so the
-        // view loop, the build, the layout and the paint are all O(visible)
-        // rather than O(N) or O(N/chunk) — no author-chosen grain at all.
-        if m == "virtual" {
-            let rt = cx.runtime().clone();
-            return lumen_widgets::VirtualList::new(
-                cx,
-                "vl",
-                rows,
-                21.0,
-                win_h,
-                move |i| {
-                    let v: Signal<i64> = rt.signal(key(i), || 0);
-                    widgets::text(format!("row {i} · {}", v.get(&rt)))
-                },
-            )
-            .into();
-        }
-        // MODE=component: the same grouping as `chunk`, expressed as a
-        // `Component`. This is the arm that proves the abstraction costs
-        // nothing over the hand-written scope it packages — if it does not
-        // match `chunk`, the trait is overhead rather than ergonomics.
-        if m == "component" {
-            // S2: `#[derive(Hash)]` and no `deps` — every field participates,
-            // so it cannot omit one.
-            #[derive(std::hash::Hash)]
-            struct RowGroup {
-                lo: usize,
-                hi: usize,
-                depth: usize,
-                vals: Vec<i64>,
-            }
-            impl lumen_widgets::Component for RowGroup {
-                fn build(&self, _cx: &mut BuildCx) -> Element {
-                    let items: Vec<Element> = (self.lo..self.hi)
-                        .map(|i| {
-                            let mut e: Element =
-                                widgets::text(format!("row {i} · {}", self.vals[i - self.lo]));
-                            for _ in 0..self.depth {
-                                e = widgets::column(vec![e]);
-                            }
-                            e
-                        })
-                        .collect();
-                    widgets::column(items)
-                }
-            }
-            let chunk = std::env::var("CHUNK")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(64)
-                .max(1);
-            let groups: Vec<Element> = (0..rows.div_ceil(chunk))
-                .map(|g| {
-                    let lo = g * chunk;
-                    let hi = ((g + 1) * chunk).min(rows);
-                    let vals: Vec<i64> = (lo..hi)
-                        .map(|i| {
-                            let v: Signal<i64> = cx.signal(key(i), || 0);
-                            v.get(cx.runtime())
-                        })
-                        .collect();
-                    cx.component(
-                        ("group", g),
-                        RowGroup {
-                            lo,
-                            hi,
-                            depth,
-                            vals,
-                        },
-                    )
-                })
-                .collect();
-            let mut root: Element = widgets::column(groups);
-            if std::env::var("NOFILL").is_err() {
-                root.style.width = lumen_layout::Dim::pct(1.0);
-            }
-            return root;
-        }
-        // MODE=chunk: rows grouped `CHUNK` at a time under ONE scope. The
-        // per-row view cost only disappears if the loop itself stops running,
-        // which needs a scope ABOVE the loop, not inside it. This is the
-        // standard escape from the O(N) view floor and the shape a keyed-list
-        // construct (`For`, not yet built) would generate.
-        if m == "chunk" {
-            let chunk = std::env::var("CHUNK")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(64)
-                .max(1);
-            let groups: Vec<Element> = (0..rows.div_ceil(chunk))
-                .map(|g| {
-                    let lo = g * chunk;
-                    let hi = ((g + 1) * chunk).min(rows);
-                    // The chunk's dep is the sum of its rows' versions: cheap,
-                    // and changes iff any row in the chunk changed.
-                    // Read the values in the OUTER cx and move them in.
-                    // `cx2.signal(i)` inside the scope would be SCOPE-LOCAL
-                    // (F1 namespaces scope signals), so it would read a fresh
-                    // always-zero signal rather than the one `bump` writes —
-                    // caught by the equivalence guard, which is why it exists.
-                    let vals: Vec<i64> = (lo..hi)
-                        .map(|i| {
-                            let v: Signal<i64> = cx.signal(key(i), || 0);
-                            v.get(cx.runtime())
-                        })
-                        .collect();
-                    let mut acc: i64 = 0;
-                    for v in &vals {
-                        acc = acc.wrapping_mul(31).wrapping_add(*v);
-                    }
-                    cx.scope_with_deps(("chunk", g), acc, move |_cx2| {
-                        let items: Vec<Element> = (lo..hi)
-                            .map(|i| {
-                                let mut e: Element = widgets::text(format!(
-                                    "row {i} · {}",
-                                    vals[i - lo]
-                                ));
-                                for _ in 0..depth {
-                                    e = widgets::column(vec![e]);
-                                }
-                                e
-                            })
-                            .collect();
-                        widgets::column(items)
+            // MODE=for: the materialized keyed collection. Same chunked memo as
+            // `chunk`/`component`, but the widget picks the grain instead of the
+            // author — the point of R10.
+            if m == "for" {
+                let vals: Vec<i64> = (0..rows)
+                    .map(|i| {
+                        let v: Signal<i64> = cx.signal(key(i), || 0);
+                        v.get(cx.runtime())
                     })
-                })
-                .collect();
-            let mut root: Element = widgets::column(groups);
-            if std::env::var("NOFILL").is_err() {
-                root.style.width = lumen_layout::Dim::pct(1.0);
-            }
-            return root;
-        }
-        // MODE=chunkbind: chunk-scoped structure with BOUND row text. The
-        // scope's deps are constant, so a row change never re-runs the chunk —
-        // it patches. With GROW=1 every write declines (the string widens),
-        // which is the decline cliff: pre-MUT1, one declining binding dropped
-        // ALL view caches, so the next rebuild spliced nothing.
-        if m == "chunkbind" {
-            let chunk = std::env::var("CHUNK")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(64)
-                .max(1);
-            let grow = std::env::var("GROW").is_ok();
-            let groups: Vec<Element> = (0..rows.div_ceil(chunk))
-                .map(|g| {
-                    let lo = g * chunk;
-                    let hi = ((g + 1) * chunk).min(rows);
-                    cx.scope_with_deps(("chunkbind", g), (), move |_cx2| {
-                        let items: Vec<Element> = (lo..hi)
-                            .map(|i| {
-                                let mut e: Element = widgets::text(bind!(rt => {
-                                    let v: Signal<i64> = rt.signal(key(i), || 0);
-                                    let v = v.get(rt);
-                                    if grow {
-                                        format!("row {i} · {}", "x".repeat(v as usize))
-                                    } else {
-                                        format!("row {i} · {v}")
-                                    }
-                                }));
-                                for _ in 0..depth {
-                                    e = widgets::column(vec![e]);
-                                }
-                                e
-                            })
-                            .collect();
-                        widgets::column(items)
-                    })
-                })
-                .collect();
-            let mut root: Element = widgets::column(groups);
-            if std::env::var("NOFILL").is_err() {
-                root.style.width = lumen_layout::Dim::pct(1.0);
-            }
-            return root;
-        }
-        let kids: Vec<Element> = (0..rows)
-            .map(|i| {
-                // The depth wrappers belong INSIDE the scope. An earlier
-                // version wrapped the scope instead, so the 8 wrappers per row
-                // were rebuilt every frame (8 002 of 9 001 nodes at D=8) and
-                // memoization looked useless at depth — a property of the
-                // benchmark, not of the framework.
-                let wrap = |mut e: Element| {
+                    .collect();
+                let mut root: Element = lumen_widgets::For::new(cx, "rows", &vals, |_cx, i, v| {
+                    let mut e: Element = widgets::text(format!("row {i} · {v}"));
                     for _ in 0..depth {
                         e = widgets::column(vec![e]);
                     }
                     e
-                };
-                match m.as_str() {
-                    // Control: a top-level structural read of every row.
-                    "plain" => {
-                        let v: Signal<i64> = cx.signal(key(i), || 0);
-                        wrap(widgets::text(format!("row {i} · {}", v.get(cx.runtime()))))
-                    }
-                    // F1: the whole row — leaf and wrappers — is one memoized
-                    // scope keyed on its own value.
-                    "scope" => {
-                        let v: Signal<i64> = cx.signal(key(i), || 0);
-                        let cur = v.get(cx.runtime());
-                        cx.scope_with_deps(i, cur, move |_cx| {
-                            wrap(widgets::text(format!("row {i} · {cur}")))
-                        })
-                    }
-                    // F3: the row's text is a binding; its read is isolated, so
-                    // it should patch rather than rebuild.
-                    "bind" => wrap(widgets::text(bind!(rt => {
-                        let v: Signal<i64> = rt.signal(key(i), || 0);
-                        let v = v.get(rt);
-                        if std::env::var("GROW").is_ok() {
-                            format!("row {i} · {}", "x".repeat(v as usize))
-                        } else {
-                            format!("row {i} · {v}")
-                        }
-                    }))),
-                    other => panic!("unknown MODE={other}"),
+                })
+                .into();
+                if std::env::var("NOFILL").is_err() {
+                    root.style.width = lumen_layout::Dim::pct(1.0);
                 }
-            })
-            .collect();
-        let mut root: Element = widgets::column(kids);
-        // Same as fwbench: a definite containing block is T2's precondition and
-        // is what virtually every real root does.
-        if std::env::var("NOFILL").is_err() {
-            root.style.width = lumen_layout::Dim::pct(1.0);
-        }
-        root
+                return root;
+            }
+            // MODE=virtual: the collection widget that owns its own granularity.
+            // `VirtualList` calls `render(i)` only over the visible window, so the
+            // view loop, the build, the layout and the paint are all O(visible)
+            // rather than O(N) or O(N/chunk) — no author-chosen grain at all.
+            if m == "virtual" {
+                let rt = cx.runtime().clone();
+                return lumen_widgets::VirtualList::new(cx, "vl", rows, 21.0, win_h, move |i| {
+                    let v: Signal<i64> = rt.signal(key(i), || 0);
+                    widgets::text(format!("row {i} · {}", v.get(&rt)))
+                })
+                .into();
+            }
+            // MODE=component: the same grouping as `chunk`, expressed as a
+            // `Component`. This is the arm that proves the abstraction costs
+            // nothing over the hand-written scope it packages — if it does not
+            // match `chunk`, the trait is overhead rather than ergonomics.
+            if m == "component" {
+                // S2: `#[derive(Hash)]` and no `deps` — every field participates,
+                // so it cannot omit one.
+                #[derive(std::hash::Hash)]
+                struct RowGroup {
+                    lo: usize,
+                    hi: usize,
+                    depth: usize,
+                    vals: Vec<i64>,
+                }
+                impl lumen_widgets::Component for RowGroup {
+                    fn build(&self, _cx: &mut BuildCx) -> Element {
+                        let items: Vec<Element> = (self.lo..self.hi)
+                            .map(|i| {
+                                let mut e: Element =
+                                    widgets::text(format!("row {i} · {}", self.vals[i - self.lo]));
+                                for _ in 0..self.depth {
+                                    e = widgets::column(vec![e]);
+                                }
+                                e
+                            })
+                            .collect();
+                        widgets::column(items)
+                    }
+                }
+                let chunk = std::env::var("CHUNK")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(64)
+                    .max(1);
+                let groups: Vec<Element> = (0..rows.div_ceil(chunk))
+                    .map(|g| {
+                        let lo = g * chunk;
+                        let hi = ((g + 1) * chunk).min(rows);
+                        let vals: Vec<i64> = (lo..hi)
+                            .map(|i| {
+                                let v: Signal<i64> = cx.signal(key(i), || 0);
+                                v.get(cx.runtime())
+                            })
+                            .collect();
+                        cx.component(
+                            ("group", g),
+                            RowGroup {
+                                lo,
+                                hi,
+                                depth,
+                                vals,
+                            },
+                        )
+                    })
+                    .collect();
+                let mut root: Element = widgets::column(groups);
+                if std::env::var("NOFILL").is_err() {
+                    root.style.width = lumen_layout::Dim::pct(1.0);
+                }
+                return root;
+            }
+            // MODE=chunk: rows grouped `CHUNK` at a time under ONE scope. The
+            // per-row view cost only disappears if the loop itself stops running,
+            // which needs a scope ABOVE the loop, not inside it. This is the
+            // standard escape from the O(N) view floor and the shape a keyed-list
+            // construct (`For`, not yet built) would generate.
+            if m == "chunk" {
+                let chunk = std::env::var("CHUNK")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(64)
+                    .max(1);
+                let groups: Vec<Element> = (0..rows.div_ceil(chunk))
+                    .map(|g| {
+                        let lo = g * chunk;
+                        let hi = ((g + 1) * chunk).min(rows);
+                        // The chunk's dep is the sum of its rows' versions: cheap,
+                        // and changes iff any row in the chunk changed.
+                        // Read the values in the OUTER cx and move them in.
+                        // `cx2.signal(i)` inside the scope would be SCOPE-LOCAL
+                        // (F1 namespaces scope signals), so it would read a fresh
+                        // always-zero signal rather than the one `bump` writes —
+                        // caught by the equivalence guard, which is why it exists.
+                        let vals: Vec<i64> = (lo..hi)
+                            .map(|i| {
+                                let v: Signal<i64> = cx.signal(key(i), || 0);
+                                v.get(cx.runtime())
+                            })
+                            .collect();
+                        let mut acc: i64 = 0;
+                        for v in &vals {
+                            acc = acc.wrapping_mul(31).wrapping_add(*v);
+                        }
+                        cx.scope_with_deps(("chunk", g), acc, move |_cx2| {
+                            let items: Vec<Element> = (lo..hi)
+                                .map(|i| {
+                                    let mut e: Element =
+                                        widgets::text(format!("row {i} · {}", vals[i - lo]));
+                                    for _ in 0..depth {
+                                        e = widgets::column(vec![e]);
+                                    }
+                                    e
+                                })
+                                .collect();
+                            widgets::column(items)
+                        })
+                    })
+                    .collect();
+                let mut root: Element = widgets::column(groups);
+                if std::env::var("NOFILL").is_err() {
+                    root.style.width = lumen_layout::Dim::pct(1.0);
+                }
+                return root;
+            }
+            // MODE=chunkbind: chunk-scoped structure with BOUND row text. The
+            // scope's deps are constant, so a row change never re-runs the chunk —
+            // it patches. With GROW=1 every write declines (the string widens),
+            // which is the decline cliff: pre-MUT1, one declining binding dropped
+            // ALL view caches, so the next rebuild spliced nothing.
+            if m == "chunkbind" {
+                let chunk = std::env::var("CHUNK")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(64)
+                    .max(1);
+                let grow = std::env::var("GROW").is_ok();
+                let groups: Vec<Element> = (0..rows.div_ceil(chunk))
+                    .map(|g| {
+                        let lo = g * chunk;
+                        let hi = ((g + 1) * chunk).min(rows);
+                        cx.scope_with_deps(("chunkbind", g), (), move |_cx2| {
+                            let items: Vec<Element> = (lo..hi)
+                                .map(|i| {
+                                    let mut e: Element = widgets::text(bind!(rt => {
+                                        let v: Signal<i64> = rt.signal(key(i), || 0);
+                                        let v = v.get(rt);
+                                        if grow {
+                                            format!("row {i} · {}", "x".repeat(v as usize))
+                                        } else {
+                                            format!("row {i} · {v}")
+                                        }
+                                    }));
+                                    for _ in 0..depth {
+                                        e = widgets::column(vec![e]);
+                                    }
+                                    e
+                                })
+                                .collect();
+                            widgets::column(items)
+                        })
+                    })
+                    .collect();
+                let mut root: Element = widgets::column(groups);
+                if std::env::var("NOFILL").is_err() {
+                    root.style.width = lumen_layout::Dim::pct(1.0);
+                }
+                return root;
+            }
+            let kids: Vec<Element> = (0..rows)
+                .map(|i| {
+                    // The depth wrappers belong INSIDE the scope. An earlier
+                    // version wrapped the scope instead, so the 8 wrappers per row
+                    // were rebuilt every frame (8 002 of 9 001 nodes at D=8) and
+                    // memoization looked useless at depth — a property of the
+                    // benchmark, not of the framework.
+                    let wrap = |mut e: Element| {
+                        for _ in 0..depth {
+                            e = widgets::column(vec![e]);
+                        }
+                        e
+                    };
+                    match m.as_str() {
+                        // Control: a top-level structural read of every row.
+                        "plain" => {
+                            let v: Signal<i64> = cx.signal(key(i), || 0);
+                            wrap(widgets::text(format!("row {i} · {}", v.get(cx.runtime()))))
+                        }
+                        // F1: the whole row — leaf and wrappers — is one memoized
+                        // scope keyed on its own value.
+                        "scope" => {
+                            let v: Signal<i64> = cx.signal(key(i), || 0);
+                            let cur = v.get(cx.runtime());
+                            cx.scope_with_deps(i, cur, move |_cx| {
+                                wrap(widgets::text(format!("row {i} · {cur}")))
+                            })
+                        }
+                        // F3: the row's text is a binding; its read is isolated, so
+                        // it should patch rather than rebuild.
+                        "bind" => wrap(widgets::text(bind!(rt => {
+                            let v: Signal<i64> = rt.signal(key(i), || 0);
+                            let v = v.get(rt);
+                            if std::env::var("GROW").is_ok() {
+                                format!("row {i} · {}", "x".repeat(v as usize))
+                            } else {
+                                format!("row {i} · {v}")
+                            }
+                        }))),
+                        other => panic!("unknown MODE={other}"),
+                    }
+                })
+                .collect();
+            let mut root: Element = widgets::column(kids);
+            // Same as fwbench: a definite containing block is T2's precondition and
+            // is what virtually every real root does.
+            if std::env::var("NOFILL").is_err() {
+                root.style.width = lumen_layout::Dim::pct(1.0);
+            }
+            root
         })
     };
     let mut h = app.run_headless(Size::new(400.0, win_h));

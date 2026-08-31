@@ -10,7 +10,10 @@ use lumen_core::state::Signal;
 use lumen_widgets::{bind, widgets, App, BuildCx, Element};
 
 fn main() {
-    let n: usize = std::env::var("ROWS").ok().and_then(|v| v.parse().ok()).unwrap_or(5_000);
+    let n: usize = std::env::var("ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5_000);
     let mut h = App::new(move |cx: &mut BuildCx| {
         let kids: Vec<Element> = (0..n)
             .map(|i| {
@@ -39,5 +42,8 @@ fn main() {
         h.pump();
         best = best.min(t.elapsed().as_micros());
     }
-    println!("bound\tobs={}\tN={n}\tframe_us={best}", cfg!(feature = "obs"));
+    println!(
+        "bound\tobs={}\tN={n}\tframe_us={best}",
+        cfg!(feature = "obs")
+    );
 }

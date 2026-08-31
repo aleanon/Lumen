@@ -38,7 +38,10 @@ const N: usize = 100_000;
 #[test]
 fn a_virtual_list_is_keyboard_operable() {
     let mut h = App::new(|cx: &mut BuildCx| {
-        VirtualList::new(cx, "vl", N, 24.0, 300.0, |i| widgets::text(format!("Row {i}"))).into()
+        VirtualList::new(cx, "vl", N, 24.0, 300.0, |i| {
+            widgets::text(format!("Row {i}"))
+        })
+        .into()
     })
     .run_headless(Size::new(400.0, 300.0));
     h.pump();
@@ -70,7 +73,10 @@ fn a_virtual_list_is_keyboard_operable() {
 #[test]
 fn scrolling_realizes_rows_that_were_not_in_the_tree() {
     let mut h = App::new(|cx: &mut BuildCx| {
-        VirtualList::new(cx, "vl", N, 24.0, 300.0, |i| widgets::text(format!("Row {i}"))).into()
+        VirtualList::new(cx, "vl", N, 24.0, 300.0, |i| {
+            widgets::text(format!("Row {i}"))
+        })
+        .into()
     })
     .run_headless(Size::new(400.0, 300.0));
     h.pump();
@@ -115,7 +121,10 @@ fn scrolling_realizes_rows_that_were_not_in_the_tree() {
 #[test]
 fn a_data_grid_is_keyboard_operable() {
     let mut h = App::new(|cx: &mut BuildCx| {
-        DataGrid::new(cx, "dg", &["A", "B"], N, 22.0, 300.0, |r, c| format!("{r}:{c}")).into()
+        DataGrid::new(cx, "dg", &["A", "B"], N, 22.0, 300.0, |r, c| {
+            format!("{r}:{c}")
+        })
+        .into()
     })
     .run_headless(Size::new(400.0, 600.0));
     h.pump();

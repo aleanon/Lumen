@@ -5,7 +5,10 @@ use lumen_widgets::{bind, widgets, App, BuildCx, Element};
 use std::time::Instant;
 
 fn main() {
-    let rows: usize = std::env::var("ROWS").ok().and_then(|v| v.parse().ok()).unwrap_or(50_000);
+    let rows: usize = std::env::var("ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50_000);
     let mut h = App::new(move |_cx: &mut BuildCx| {
         let kids: Vec<Element> = (0..rows)
             .map(|i| {

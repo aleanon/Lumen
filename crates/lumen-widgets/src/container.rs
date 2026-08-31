@@ -336,7 +336,8 @@ impl<F: FnOnce(&mut crate::Kids)> Stack<F> {
 
     /// Centre children on both axes (E2b) — sugar for the page/card shape.
     pub fn centered(self) -> Self {
-        self.align_items(Align::Center).justify_content(Align::Center)
+        self.align_items(Align::Center)
+            .justify_content(Align::Center)
     }
 
     /// Drop shadow (E2b — the card idiom).

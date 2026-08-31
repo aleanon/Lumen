@@ -553,9 +553,7 @@ pub fn reactive(input: TokenStream) -> TokenStream {
         let update_ident = quote::format_ident!("update_{}", ident);
         let ty = &f.ty;
         let key = ident.to_string();
-        let doc = format!(
-            "Signal for `{name_str}.{key}`, keyed by its compile-time field path."
-        );
+        let doc = format!("Signal for `{name_str}.{key}`, keyed by its compile-time field path.");
         let read_doc = format!(
             "MUT8: read `{name_str}.{key}` from the installed instance — one \
              recorded read plus a direct field reference (no store lookup)."
@@ -565,7 +563,8 @@ pub fn reactive(input: TokenStream) -> TokenStream {
              `bind!` closures and handlers that only have a `Runtime`."
         );
         let set_doc = format!("MUT8: write `{name_str}.{key}` and bump its version slot.");
-        let update_doc = format!("MUT8: update `{name_str}.{key}` in place and bump its version slot.");
+        let update_doc =
+            format!("MUT8: update `{name_str}.{key}` in place and bump its version slot.");
         quote! {
             #[doc = #read_doc]
             pub fn #ident<'a>(

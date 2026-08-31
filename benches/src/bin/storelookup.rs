@@ -29,7 +29,10 @@ use lumen_widgets::{widgets, App, BuildCx};
 use std::time::Instant;
 
 fn env(k: &str, d: usize) -> usize {
-    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
+    std::env::var(k)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(d)
 }
 
 fn best_of<F: FnMut() -> i64>(rounds: usize, mut f: F) -> (f64, i64) {
@@ -52,8 +55,8 @@ fn main() {
     let n = env("N", 50_000);
     let rounds = env("ROUNDS", 40);
 
-    let mut h = App::new(|_cx: &mut BuildCx| widgets::text("x"))
-        .run_headless(Size::new(100.0, 40.0));
+    let mut h =
+        App::new(|_cx: &mut BuildCx| widgets::text("x")).run_headless(Size::new(100.0, 40.0));
     h.pump();
     let rt = h.runtime();
 
@@ -141,9 +144,8 @@ fn main() {
         let (acc, _r) = rt.collect_reads(|| {
             let mut acc = 0i64;
             for (i, h) in hashes.iter().enumerate() {
-                let s: Signal<i64> = rt.signal_at(*h, lumen_core::identity::ROOT_ID, || {
-                    format!("{i}")
-                }, || 0);
+                let s: Signal<i64> =
+                    rt.signal_at(*h, lumen_core::identity::ROOT_ID, || format!("{i}"), || 0);
                 acc = acc.wrapping_add(s.get(rt));
             }
             acc
@@ -209,12 +211,32 @@ fn main() {
     let per_ns = |x: f64| x * 1000.0 / n as f64;
     println!("N={n}  (µs total, ns/read)");
     println!("  collector CLOSED");
-    println!("    address+read   {:8.1}  {:6.1} ns", us(addr_read), per_ns(addr_read));
-    println!("    read only      {:8.1}  {:6.1} ns", us(read_only), per_ns(read_only));
-    println!("    field read     {:8.1}  {:6.1} ns", us(field), per_ns(field));
+    println!(
+        "    address+read   {:8.1}  {:6.1} ns",
+        us(addr_read),
+        per_ns(addr_read)
+    );
+    println!(
+        "    read only      {:8.1}  {:6.1} ns",
+        us(read_only),
+        per_ns(read_only)
+    );
+    println!(
+        "    field read     {:8.1}  {:6.1} ns",
+        us(field),
+        per_ns(field)
+    );
     println!("  collector OPEN (as in a build)");
-    println!("    address+read   {:8.1}  {:6.1} ns", us(addr_read_c), per_ns(addr_read_c));
-    println!("    read only      {:8.1}  {:6.1} ns", us(read_only_c), per_ns(read_only_c));
+    println!(
+        "    address+read   {:8.1}  {:6.1} ns",
+        us(addr_read_c),
+        per_ns(addr_read_c)
+    );
+    println!(
+        "    read only      {:8.1}  {:6.1} ns",
+        us(read_only_c),
+        per_ns(read_only_c)
+    );
     println!("  ----");
     println!(
         "    addressing (removed by field paths) {:8.1} µs",
@@ -225,8 +247,16 @@ fn main() {
         read_only_c - field
     );
     println!("  S3 candidate: precomputed field-path hash");
-    println!("    hash only                     {:8.1}  {:6.1} ns", us(hash_only), per_ns(hash_only));
-    println!("    precomputed addr+read         {:8.1}  {:6.1} ns", us(precomputed), per_ns(precomputed));
+    println!(
+        "    hash only                     {:8.1}  {:6.1} ns",
+        us(hash_only),
+        per_ns(hash_only)
+    );
+    println!(
+        "    precomputed addr+read         {:8.1}  {:6.1} ns",
+        us(precomputed),
+        per_ns(precomputed)
+    );
     println!(
         "    saved vs address+read         {:8.1} µs ({:.0}% of addressing)",
         addr_read_c - precomputed,

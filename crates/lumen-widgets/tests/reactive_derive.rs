@@ -106,7 +106,10 @@ fn a_field_reads_the_same_slot_inside_and_outside_a_scope() {
     let mut h = App::new(|cx: &mut BuildCx| {
         let outer = Counter::count_signal(cx).get(cx.runtime());
         let inner = cx.scope("s", |cx2| {
-            widgets::text(format!("inner={}", Counter::count_signal(cx2).get(cx2.runtime())))
+            widgets::text(format!(
+                "inner={}",
+                Counter::count_signal(cx2).get(cx2.runtime())
+            ))
         });
         widgets::column(vec![widgets::text(format!("outer={outer}")), inner])
     })
@@ -160,7 +163,6 @@ fn a_dropped_field_is_still_reported_on_restore() {
          reported, not silently dropped; got {diags:?}"
     );
 }
-
 
 // ---- MUT8: the instance-threaded state model ----
 
@@ -235,7 +237,11 @@ fn with_state_binding_patches_through_get_accessor() {
     assert_eq!(build_runs.get(), 1);
     Dash::update_count(h.runtime(), |c| *c += 41);
     h.pump();
-    assert_eq!(build_runs.get(), 1, "a bound field write patches, not rebuilds");
+    assert_eq!(
+        build_runs.get(),
+        1,
+        "a bound field write patches, not rebuilds"
+    );
     assert!(h.semantics_json().to_string().contains("n = 41"));
     h.assert_view_coherent();
 }

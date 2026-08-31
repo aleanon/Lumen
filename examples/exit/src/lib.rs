@@ -24,8 +24,7 @@ pub fn main_app() -> App {
         let content: Vec<Element> = if is_armed {
             vec![
                 widgets::text("Really quit?").id("confirm"),
-                widgets::button("Yes, exit", |rt| queue_system(rt, SystemRequest::Exit))
-                    .id("exit"),
+                widgets::button("Yes, exit", |rt| queue_system(rt, SystemRequest::Exit)).id("exit"),
                 widgets::button("Cancel", |rt| ExitState::set_armed(rt, false)).id("cancel"),
             ]
         } else {

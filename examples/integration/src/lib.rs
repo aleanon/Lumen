@@ -31,8 +31,7 @@ fn build(cx: &mut BuildCx, s: &HudState) -> Element {
     let mut col = widgets::column(vec![
         widgets::text("Lumen HUD (embedded)").id("title"),
         widgets::text(format!("host clicks: {v}")).id("clicks"),
-        widgets::button("+1 from HUD", |rt| HudState::update_clicks(rt, |c| *c += 1))
-            .id("bump"),
+        widgets::button("+1 from HUD", |rt| HudState::update_clicks(rt, |c| *c += 1)).id("bump"),
     ])
     .id("hud");
     col.style = LayoutStyle {

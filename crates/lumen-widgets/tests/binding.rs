@@ -39,7 +39,7 @@ fn bound_text_tracks_its_signal_and_reports_deps() {
     // runs in both states, which is the property that matters.
     #[cfg(feature = "dev-observability")]
     {
-    let doc = h.semantics_doc();
+        let doc = h.semantics_doc();
         let want = ["n".to_string()];
         assert_eq!(
             find(&doc.root, "lbl").and_then(|n| n.deps.as_deref()),
@@ -78,7 +78,7 @@ fn bound_background_tracks_its_signal() {
     // runs in both states, which is the property that matters.
     #[cfg(feature = "dev-observability")]
     {
-    let doc = h.semantics_doc();
+        let doc = h.semantics_doc();
         let want = ["on".to_string()];
         assert_eq!(
             find(&doc.root, "b").and_then(|n| n.deps.as_deref()),
@@ -624,14 +624,16 @@ fn mut2_view(_cx: &mut BuildCx) -> Element {
     }));
     fixed.style.width = lumen_layout::Dim::px(180.0);
     fixed.style.height = lumen_layout::Dim::px(20.0);
-    let boxed = widgets::text("box").id("bx").bind_background(Dynamic::new(|rt| {
-        let v: Signal<i64> = rt.signal("m2c", || 0);
-        if v.get(rt) % 2 == 0 {
-            Color::srgb8(200, 0, 0, 255)
-        } else {
-            Color::srgb8(0, 0, 200, 255)
-        }
-    }));
+    let boxed = widgets::text("box")
+        .id("bx")
+        .bind_background(Dynamic::new(|rt| {
+            let v: Signal<i64> = rt.signal("m2c", || 0);
+            if v.get(rt) % 2 == 0 {
+                Color::srgb8(200, 0, 0, 255)
+            } else {
+                Color::srgb8(0, 0, 200, 255)
+            }
+        }));
     let mut root = widgets::column(vec![deferred, fixed, boxed]);
     root.style.width = lumen_layout::Dim::pct(1.0);
     root
@@ -680,7 +682,6 @@ fn patched_frames_render_byte_identical_to_a_full_render() {
         "a patched frame must be byte-identical to a full render of the same state"
     );
 }
-
 
 #[test]
 fn a_color_binding_patches_without_rebuild() {

@@ -286,7 +286,9 @@ fn viewport(name: &str, w: &Window, viewport_h: f64, children: Vec<Element>) -> 
         max_x: 0.0,
         max_y,
     }))
-    .set_on_key(Some(crate::scrollable::scroll_keys(offset, viewport_h, max_y)))
+    .set_on_key(Some(crate::scrollable::scroll_keys(
+        offset, viewport_h, max_y,
+    )))
     .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
         offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
     })))
@@ -581,7 +583,9 @@ impl DataGrid {
                 max_x: 0.0,
                 max_y,
             }))
-            .set_on_key(Some(crate::scrollable::scroll_keys(offset, viewport_h, max_y)))
+            .set_on_key(Some(crate::scrollable::scroll_keys(
+                offset, viewport_h, max_y,
+            )))
             .set_on_wheel(Some(Rc::new(move |rt, _dx, dy, _mods| {
                 offset.update(rt, |o| *o = (*o + dy).clamp(0.0, max_y))
             })));

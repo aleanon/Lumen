@@ -16,7 +16,10 @@ use lumen_widgets::{widgets, App, BuildCx, CheckBox, Element, Label, Slider, Sta
 use std::time::Instant;
 
 fn env(k: &str, d: usize) -> usize {
-    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
+    std::env::var(k)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(d)
 }
 
 fn main() {

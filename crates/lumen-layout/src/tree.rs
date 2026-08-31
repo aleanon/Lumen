@@ -241,9 +241,7 @@ impl LayoutTree {
     /// `compute`/`relayout_subtree`. `false` means the pruner proved its whole
     /// subtree unchanged — every stored bound below it is still exact.
     pub fn node_is_fresh(&self, node: LayoutNode) -> bool {
-        self.abs
-            .get(&node.0)
-            .is_none_or(|e| e.stamp == self.stamp)
+        self.abs.get(&node.0).is_none_or(|e| e.stamp == self.stamp)
     }
 
     /// Number of nodes whose bounds were recomputed by the last

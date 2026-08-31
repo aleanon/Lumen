@@ -1219,9 +1219,10 @@ impl Runtime {
             map.insert(key, <dyn StoredValue as StoredValue>::to_json(&*slot.value));
         }
         // MUT8: the app-state instance rides along under a reserved key.
-        if let (Some(fns), Some(state)) =
-            (self.state_json.borrow().as_ref(), self.app_state.borrow().as_ref())
-        {
+        if let (Some(fns), Some(state)) = (
+            self.state_json.borrow().as_ref(),
+            self.app_state.borrow().as_ref(),
+        ) {
             map.insert("__app_state".into(), (fns.to_json)(state.as_ref()));
         }
         StateSnapshot(serde_json::Value::Object(map))

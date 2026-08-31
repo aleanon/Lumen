@@ -70,7 +70,6 @@ fn theme_helpers_are_reachable_through_the_facade() {
     let _: Element = lumen::theme::card(widgets::text("body"));
 }
 
-
 /// E1: the statement-form + state-struct surface is reachable facade-only —
 /// exactly what `lumen new` scaffolds. If this stops compiling, scaffolded
 /// apps break before any user sees it.

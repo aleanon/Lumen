@@ -7,8 +7,8 @@
 //! `docs/a11y-checklist.md` for the manual VoiceOver/NVDA verification.
 
 use accesskit::{
-    Action as AkAction, ActionData, Node, NodeId, Role as AkRole, ScrollUnit, Toggled, Tree, TreeId,
-    TreeUpdate,
+    Action as AkAction, ActionData, Node, NodeId, Role as AkRole, ScrollUnit, Toggled, Tree,
+    TreeId, TreeUpdate,
 };
 use kurbo::{Point, Rect, Vec2};
 use lumen_core::semantics::{Action, Role, SemanticsNode, State};
@@ -110,19 +110,25 @@ pub fn resolve_at_action(
         } else {
             path.len() - 1
         };
-        path[..end].iter().rev().find(|n| n.scroll.is_some()).copied()
+        path[..end]
+            .iter()
+            .rev()
+            .find(|n| n.scroll.is_some())
+            .copied()
     };
 
     match action {
         AkAction::Click => Some(AtCommand::Click(center(node.bounds))),
 
-        AkAction::ScrollUp | AkAction::ScrollDown | AkAction::ScrollLeft | AkAction::ScrollRight => {
+        AkAction::ScrollUp
+        | AkAction::ScrollDown
+        | AkAction::ScrollLeft
+        | AkAction::ScrollRight => {
             let sc = scroller(true)?;
             let step = match data {
-                Some(ActionData::ScrollUnit(ScrollUnit::Page)) => {
-                    (sc.bounds.height() - lumen_core::events::WHEEL_LINE_PX)
-                        .max(lumen_core::events::WHEEL_LINE_PX)
-                }
+                Some(ActionData::ScrollUnit(ScrollUnit::Page)) => (sc.bounds.height()
+                    - lumen_core::events::WHEEL_LINE_PX)
+                    .max(lumen_core::events::WHEEL_LINE_PX),
                 // `Item` and an absent unit both mean "a line" — AccessKit
                 // leaves the unit optional and the line is the safe default.
                 _ => lumen_core::events::WHEEL_LINE_PX,

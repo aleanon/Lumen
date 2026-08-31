@@ -437,10 +437,7 @@ impl App<lumen_render::TinySkia, lumen_core::tasks::InlineSpawner> {
     /// `Serialize`/`Deserialize` and add `#[serde(default)]` so a reload
     /// survives fields being added or removed; view-local state stays in the
     /// keyed store exactly as before (the D1 decision).
-    pub fn with_state<S, V>(
-        state: S,
-        root: impl Fn(&mut BuildCx, &S) -> V + 'static,
-    ) -> App
+    pub fn with_state<S, V>(state: S, root: impl Fn(&mut BuildCx, &S) -> V + 'static) -> App
     where
         S: lumen_core::state::ReactiveState + lumen_core::state::State,
         V: Direct + 'static,
@@ -7066,7 +7063,11 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
         #[cfg(feature = "dev-observability")]
         let mut class_deps: Vec<String> = Vec::new();
         let dyn_color = el.rare.as_ref().and_then(|r| r.dyn_color.clone());
-        if el.dyn_text.is_some() || el.dyn_bg.is_some() || el.dyn_classes.is_some() || dyn_color.is_some() {
+        if el.dyn_text.is_some()
+            || el.dyn_bg.is_some()
+            || el.dyn_classes.is_some()
+            || dyn_color.is_some()
+        {
             let rt = self.app.rt.clone();
             if let Some(d) = el.dyn_classes.clone() {
                 // Classes drive the `.lss` cascade (may change size) → NON-isolated
@@ -7396,9 +7397,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             f.set(NodeFlags::CSS_HIDDEN, css.visibility == Some(false));
             f.set(
                 NodeFlags::LAYER_FX,
-                css.clip.is_some()
-                    || css.opacity.unwrap_or(1.0) < 1.0
-                    || css.blend_mode.is_some(),
+                css.clip.is_some() || css.opacity.unwrap_or(1.0) < 1.0 || css.blend_mode.is_some(),
             );
             self.tree.set_flags(node, f);
             self.app.node_style.insert(node, css);
@@ -7437,9 +7436,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             f.set(NodeFlags::CSS_HIDDEN, css.visibility == Some(false));
             f.set(
                 NodeFlags::LAYER_FX,
-                css.clip.is_some()
-                    || css.opacity.unwrap_or(1.0) < 1.0
-                    || css.blend_mode.is_some(),
+                css.clip.is_some() || css.opacity.unwrap_or(1.0) < 1.0 || css.blend_mode.is_some(),
             );
             self.tree.set_flags(node, f);
             self.app.node_style.insert(node, css);
@@ -7751,7 +7748,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             || el_rare.as_ref().is_some_and(|r| r.scroll.is_some())
             || el_rare.as_ref().is_some_and(|r| r.shadow.is_some())
             || el_rare.as_ref().is_some_and(|r| r.set_size.is_some())
-            || el_rare.as_ref().is_some_and(|r| r.position_in_set.is_some())
+            || el_rare
+                .as_ref()
+                .is_some_and(|r| r.position_in_set.is_some())
         {
             // O0.14: `Element`'s rare half has the same shape as `NodeMeta`'s,
             // so the whole box moves across instead of fourteen field reads.
@@ -8722,7 +8721,9 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
             let ty = bounds.y0 + m.pad.1;
             let scale = self.scale as f32;
             let (run, run_rect, _metrics) = {
-                let cached = self.text.shaped_run(txt, &ts, m.wrap_width, ts.align, scale);
+                let cached = self
+                    .text
+                    .shaped_run(txt, &ts, m.wrap_width, ts.align, scale);
                 let mut run = cached.run.clone();
                 for g in &mut run.glyphs {
                     g.x += tx as f32;
@@ -8794,8 +8795,7 @@ impl<R: lumen_render::Renderer, E: lumen_core::tasks::Spawner, P: PlatformConfig
                 }
                 brush
             });
-            let brush =
-                gradient.unwrap_or(Brush::Solid(bg.unwrap_or(Color::srgb8(0, 0, 0, 0))));
+            let brush = gradient.unwrap_or(Brush::Solid(bg.unwrap_or(Color::srgb8(0, 0, 0, 0))));
             let bounds_now = dl.cmds[ci].paint_bounds();
             let DrawCmd::Rect { brush: b, .. } = &mut dl.cmds[ci] else {
                 self.last_dl = Some(dl);

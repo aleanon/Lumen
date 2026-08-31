@@ -123,20 +123,19 @@ fn two_lists_do_not_collide() {
     let mut h = App::new(|cx: &mut BuildCx| {
         let a: Vec<i64> = vec![1, 2, 3];
         let b: Vec<i64> = vec![7, 8, 9];
-        let la: Element = For::new(cx, "a", &a, |_c, i, v| {
-            widgets::text(format!("a{i}={v}"))
-        })
-        .into();
-        let lb: Element = For::new(cx, "b", &b, |_c, i, v| {
-            widgets::text(format!("b{i}={v}"))
-        })
-        .into();
+        let la: Element =
+            For::new(cx, "a", &a, |_c, i, v| widgets::text(format!("a{i}={v}"))).into();
+        let lb: Element =
+            For::new(cx, "b", &b, |_c, i, v| widgets::text(format!("b{i}={v}"))).into();
         widgets::column(vec![la, lb])
     })
     .run_headless(Size::new(300.0, 300.0));
     h.pump();
     let doc = h.semantics_json().to_string();
-    assert!(doc.contains("a0=1") && doc.contains("a2=3"), "first list: {doc}");
+    assert!(
+        doc.contains("a0=1") && doc.contains("a2=3"),
+        "first list: {doc}"
+    );
     assert!(
         doc.contains("b0=7") && doc.contains("b2=9"),
         "second list — a shared id would have made one shadow the other"
