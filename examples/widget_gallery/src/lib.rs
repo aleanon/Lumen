@@ -15,7 +15,7 @@ use lumen_layout::{Align, Dim, Edges};
 
 /// Build the gallery app.
 pub fn main_app() -> App {
-    App::new(build)
+    App::view(build)
 }
 
 const CARD_W: f32 = 560.0;
@@ -59,7 +59,10 @@ fn dark() -> Pal {
     }
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+/// E2b: the root is the typed `Container` itself (no final `.into()`), so
+/// no `Element` appears in the signature; sections stay `Vec<Element>`-built
+/// (`Container::new` takes a vec) pending E4's per-widget statement forms.
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let rt = cx.runtime();
     // Seed the held value so the matching radio is selected on first paint (an
     // empty default matches neither "Light" nor "Dark").
@@ -342,7 +345,6 @@ fn build(cx: &mut BuildCx) -> Element {
         .justify(Align::Center)
         .background(pal.page)
         .id("page")
-        .into()
 }
 
 /// Read the `draft` field's text from within a handler (the Add button needs the

@@ -258,6 +258,15 @@ pub struct Stack<F> {
     /// a definite containing block (`width: 100%` being every real root).
     width: Option<Dim>,
     height: Option<Dim>,
+    /// E2b: cross-axis / main-axis alignment. All four migration tranches
+    /// reported the same blocker — every example centres a card, and neither
+    /// `Stack` nor `.lss` could express it — so alignment lives here now.
+    align: Option<Align>,
+    justify: Option<Align>,
+    /// E2b: a drop shadow (the card idiom), and this stack's own flex-grow
+    /// when it is itself a child (the `fill()` helper idiom).
+    shadow: Option<crate::element::Shadow>,
+    grow: Option<f32>,
     common: Common,
 }
 
@@ -271,6 +280,10 @@ impl<F: FnOnce(&mut crate::Kids)> Stack<F> {
             padding: 0.0,
             width: None,
             height: None,
+            align: None,
+            justify: None,
+            shadow: None,
+            grow: None,
             common: Common::default(),
         }
     }
@@ -307,6 +320,37 @@ impl<F: FnOnce(&mut crate::Kids)> Stack<F> {
         self.height = Some(h);
         self
     }
+
+    /// Cross-axis alignment of children (E2b) — `Align::Center` is the
+    /// centred-card idiom every example uses.
+    pub fn align_items(mut self, a: Align) -> Self {
+        self.align = Some(a);
+        self
+    }
+
+    /// Main-axis distribution of children (E2b).
+    pub fn justify_content(mut self, j: Align) -> Self {
+        self.justify = Some(j);
+        self
+    }
+
+    /// Centre children on both axes (E2b) — sugar for the page/card shape.
+    pub fn centered(self) -> Self {
+        self.align_items(Align::Center).justify_content(Align::Center)
+    }
+
+    /// Drop shadow (E2b — the card idiom).
+    pub fn shadow(mut self, s: crate::element::Shadow) -> Self {
+        self.shadow = Some(s);
+        self
+    }
+
+    /// This stack's own flex-grow when it is a child (E2b — the `fill()`
+    /// helper idiom).
+    pub fn grow(mut self, g: f32) -> Self {
+        self.grow = Some(g);
+        self
+    }
 }
 
 impl<F: FnOnce(&mut crate::Kids)> crate::Direct for Stack<F> {
@@ -323,6 +367,10 @@ impl<F: FnOnce(&mut crate::Kids)> crate::Direct for Stack<F> {
             padding,
             width,
             height,
+            align,
+            justify,
+            shadow,
+            grow,
             common,
         } = self;
         let mut el = Element {
@@ -336,10 +384,16 @@ impl<F: FnOnce(&mut crate::Kids)> crate::Direct for Stack<F> {
                 padding: Edges::all(Dim::px(padding)),
                 width: width.unwrap_or(Dim::Auto),
                 height: height.unwrap_or(Dim::Auto),
+                align_items: align,
+                justify_content: justify,
+                flex_grow: grow.unwrap_or(0.0),
                 ..LayoutStyle::default()
             },
             ..Element::default()
         };
+        if let Some(sh) = shadow {
+            el = el.shadow(sh);
+        }
         common.apply(&mut el);
         // E1: the body is `FnOnce` — so eagerly-built children (anything that
         // needed `cx` at build time) can be MOVED into it — adapted through an

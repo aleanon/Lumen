@@ -1438,6 +1438,7 @@ dependencies = [
  "lumen-render",
  "lumen-shell",
  "lumen-widgets",
+ "serde",
 ]
 
 [[package]]
@@ -2518,6 +2519,7 @@ dependencies = [
  "lumen-render",
  "lumen-shell",
  "lumen-widgets",
+ "serde",
  "wgpu",
  "winit",
 ]
@@ -5390,6 +5392,7 @@ dependencies = [
  "lumen-render",
  "lumen-shell",
  "lumen-widgets",
+ "serde",
 ]
 
 [[package]]
@@ -5513,6 +5516,7 @@ dependencies = [
  "lumen-render",
  "lumen-shell",
  "lumen-widgets",
+ "serde",
 ]
 
 [[package]]

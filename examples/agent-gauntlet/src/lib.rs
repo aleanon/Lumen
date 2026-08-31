@@ -6,7 +6,7 @@
 
 use lumen_render::RgbaImage;
 use lumen_widgets::shader::ShaderWidget;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Element, Stack};
 
 /// The app stylesheet (themeable; hot-reloadable).
 pub const STYLESHEET: &str = r#"
@@ -26,10 +26,13 @@ fn render_shader() -> RgbaImage {
 /// Build the gauntlet application (shader rendered once at construction).
 pub fn main_app() -> App {
     let shader = render_shader();
-    App::new(move |cx| build(cx, &shader)).stylesheet(STYLESHEET)
+    App::view(move |cx| build(cx, &shader)).stylesheet(STYLESHEET)
 }
 
-fn build(cx: &mut BuildCx, shader: &RgbaImage) -> Element {
+/// E2b: statement-form root; children that need `cx` are built eagerly and
+/// moved into the body. Ids are load-bearing (the release-gate driver and
+/// lumen-agent address them) and survive unchanged.
+fn build(cx: &mut BuildCx, shader: &RgbaImage) -> impl lumen_widgets::Direct {
     let tab = cx.signal("tab", || 0usize);
     let current = tab.get(cx.runtime());
     // The injected layout bug is on by default; the agent fixes it.
@@ -61,7 +64,14 @@ fn build(cx: &mut BuildCx, shader: &RgbaImage) -> Element {
         ]),
     };
 
-    widgets::column(vec![header, nav, widgets::divider(), screen]).id("root")
+    let divider = widgets::divider();
+    Stack::column(move |c| {
+        c.child(header);
+        c.child(nav);
+        c.child(divider);
+        c.child(screen);
+    })
+    .id("root")
 }
 
 fn home(buggy: bool) -> Element {

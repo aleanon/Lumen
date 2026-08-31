@@ -6,7 +6,7 @@ use lumen_widgets::forms::{form_field, validate, Validator};
 use lumen_widgets::i18n::{Catalog, Locale};
 use lumen_widgets::nav::Router;
 use lumen_widgets::undo::History;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Element, Stack};
 
 fn catalog() -> Catalog {
     let mut c = Catalog::new().with_fallback(Locale::new("en"));
@@ -19,10 +19,12 @@ fn catalog() -> Catalog {
 
 /// Build the contacts app.
 pub fn main_app() -> App {
-    App::new(build)
+    App::view(build)
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+/// E2b: statement-form root; the two screens stay `Element` locals (their
+/// internals feed `vec!`-built columns), moved into the body.
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let router = cx.signal("router", || Router::new("list"));
     let contacts = cx.signal("contacts", || History::new(Vec::<String>::new()));
     let locale = cx.signal("locale", || Locale::new("en"));
@@ -90,7 +92,13 @@ fn build(cx: &mut BuildCx) -> Element {
         widgets::column(col)
     };
 
-    widgets::column(vec![header, widgets::divider(), body]).id("root")
+    let divider = widgets::divider();
+    Stack::column(move |c| {
+        c.child(header);
+        c.child(divider);
+        c.child(body);
+    })
+    .id("root")
 }
 
 // Save the new contact (validating) then return to the list.

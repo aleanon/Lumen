@@ -582,6 +582,49 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## E2 ◐ Examples: ten crates removed, 28 of 36 roots migrated (2026-08-31)
+
+**E2a ☑ — consolidation.** Ten crates that each demonstrated exactly ONE
+widget the `widget_showcase` catalog already seeds with real data were
+removed: accordion, toast, progress_bar, loading_spinners, markdown, image,
+datagrid, pane_grid, modal, svg. Verified first: no path dependencies, no
+justfile/CI references. Feature demos (canvas, gradients, async, routing,
+M.5/M.6 artifacts) stay standalone.
+
+**E2b ◐ — migration, run as four parallel tranches.** 28 of 36 remaining
+example roots now enter through `App::view`/`App::with_state` with build
+signatures returning `impl Direct`; five crates (hello, exit, integration,
+todos, tour) run the **full form** on a `#[derive(Reactive)]` state struct.
+All builds, all tests, clippy and the lean legs green.
+
+**The finding, and it was unanimous across all four tranches independently:
+alignment did not exist anywhere in the authoring surface.** Not on `Stack`,
+and not in `lumen_style` either — so neither inline css nor `.lss` could
+centre a card, which is the repo's universal example shape. That single gap,
+not the statement form itself, is what capped 20-odd crates at
+signature-only migration. Closed centrally rather than worked around four
+times: `Stack::align_items` / `justify_content` / `centered()` / `shadow()`
+/ `grow()`, gated by `facade_complete`.
+
+**Genuinely pinned, recorded in `docs/plan-element-deletion-2026-08.md`
+rather than forced:** `App::window` stores `Rc<dyn Fn(&mut BuildCx) ->
+Element>` (multi_window, counter); the third-party widget ABI is
+`fn(cx, ..) -> Element` (widget-rating exemplifies it); `Container::new`
+still takes `Vec<Element>`; `widgets::canvas` is Element-and-field-mutation.
+All four are E4's business. **One new hazard:** `App::with_state` x P.3d —
+a `.window(..)` tree gets its own runtime with no installed state, so a
+generated `S::set_*` from a secondary window would panic. counter stays
+keyed for exactly this reason, noted in its source.
+
+**Not done:** the second pass — converting the roots the new alignment API
+unblocks — did not run; the four agents were terminated mid-flight by a
+session rate limit. Eight roots remain on `App::new`: qr, url_handler,
+vectorial_text, pokedex, typed_form (all now mechanical with
+`Stack::centered()`), plus multi_window (pinned), settings (Android shell,
+E4) and widget_showcase (E4's catalog builders). 102 `-> Element` helper
+signatures remain inside example bodies — E4/E5 territory, since most feed
+`Vec<Element>` containers or the canvas.
+
 ## E0+E1 ☑ The Element deletion begins — scaffold, facade, and two exemplars (2026-08-31)
 
 `docs/plan-element-deletion-2026-08.md`. Inventory: **208 files** return

@@ -88,12 +88,15 @@ fn statement_form_and_state_struct_are_facade_complete() {
         let n = *s.n(cx);
         Stack::column(move |c| {
             c.child(Label::new(format!("n {n}")).id("n"));
+            c.child(Stack::row(|_| {}).grow(1.0));
             c.child(
                 Button::new("+")
                     .on_press(|rt| S::update_n(rt, |v| *v += 1))
                     .id("inc"),
             );
         })
+        .centered()
+        .shadow(lumen::Shadow::soft())
     })
     .run_headless(lumen::geometry::Size::new(200.0, 100.0));
     h.pump();

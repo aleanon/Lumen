@@ -12,7 +12,10 @@ use lumen_layout::{Align, Dim, Edges};
 
 /// Build the data app.
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    // E2b: `App::view` root; the body keeps its `Element` structure — the
+    // page centers with `align_items`/`justify_content`, which `Stack` does
+    // not express yet (recorded as an E2 API gap).
+    App::view(build).stylesheet(include_str!("../app.lss"))
 }
 
 fn txt(s: impl Into<lumen_widgets::Text>, size: f32, weight: f32) -> Element {

@@ -14,7 +14,10 @@ const CHUNK_MS: u64 = 8;
 
 /// Build the download app.
 pub fn main_app() -> App {
-    App::new(build)
+    // E2b: `App::view` root. The body keeps its `Element` root for now — the
+    // page centers itself with `align_items`/`justify_content`, which `Stack`
+    // does not express yet (recorded as an E2 API gap).
+    App::view(build)
 }
 
 fn build(cx: &mut BuildCx) -> Element {

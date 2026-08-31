@@ -19,7 +19,7 @@ use lumen_widgets::{widgets, App, BuildCx, Element};
 
 /// Build the PULSE stopwatch app (starts in the dark "Eclipse" theme).
 pub fn main_app() -> App {
-    App::new(build)
+    App::view(build)
 }
 
 // --- palette ----------------------------------------------------------------
@@ -105,7 +105,10 @@ fn light() -> Pal {
 
 // --- build ------------------------------------------------------------------
 
-fn build(cx: &mut BuildCx) -> Element {
+/// E2b: signature migrated to `impl Direct`; the body keeps its raw
+/// `Element` root — this design centres with `align_items`/`justify_content`,
+/// which `Stack` cannot yet express (recorded as an E2 gap).
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let elapsed = cx.signal("elapsed_ms", || 0.0f64);
     let running = cx.signal("running", || false);
     let last = cx.signal("last_ms", || 0.0f64);

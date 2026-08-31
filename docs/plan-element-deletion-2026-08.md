@@ -31,6 +31,28 @@ files, the rest scattered.
   Now `FnOnce` (adapted through an `Option` to the object-safe
   `write_body`), which is what makes the mixed form writable.
 - (MUT7b, earlier) `Stack::width`/`height` for the definite containing block.
+- **E2b, the unanimous finding of all four migration tranches:** alignment
+  did not exist anywhere in the authoring surface — not on `Stack`, and not
+  in `lumen_style` either, so neither inline css nor `.lss` could centre a
+  card, which is the repo's universal example shape. Closed centrally:
+  `Stack::align_items` / `justify_content` / `centered()` / `shadow()` /
+  `grow()`.
+
+## Pinned until E4/E5 (found by E2b, recorded rather than worked around)
+
+- `App::window(desc, root)` stores `Rc<dyn Fn(&mut BuildCx) -> Element>` —
+  secondary-window roots are signature-pinned (multi_window, counter).
+- The **third-party widget ABI** is `fn(cx, ..) -> Element` (widget-rating
+  exemplifies it) — it changes with E4's native-lowering story, not per crate.
+- Typed containers (`Container::new`) still take `Vec<Element>`; statement
+  bodies for typed widgets are E4 (widget_gallery's sections wait on it).
+- `widgets::canvas` returns `Element` and is styled by field mutation — a
+  typed statement-form `Canvas` would finish the clock/sierpinski/glass class.
+- **`App::with_state` x P.3d (hazard):** a `.window(..)` tree gets its own
+  runtime with NO installed state, so a generated `S::set_*` called from a
+  secondary window panics. P.3d must decide whether the instance is shared or
+  per-window; until then with_state apps and secondary windows do not mix
+  (counter deliberately stays keyed for this reason, noted in its source).
 
 ## Stages
 

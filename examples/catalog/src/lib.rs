@@ -26,7 +26,7 @@ use std::time::Duration;
 
 /// Build the catalog app.
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    App::view(build).stylesheet(include_str!("../app.lss"))
 }
 
 const TOTAL: usize = 1000;
@@ -184,7 +184,11 @@ fn row_view(idx: usize, value: &Option<Star>, t: f64, alt: bool) -> Element {
     r
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+/// E2b: signature migrated to `impl Direct`; the body keeps its raw
+/// `Element` composition — the page centres with `align_items`/
+/// `justify_content` and the card is a `Position::Relative` stage, neither
+/// of which `Stack` can express yet (E2 gap).
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let scroll = cx.signal("scroll", || 0.0f64);
     let y = scroll.get(cx.runtime()).clamp(0.0, MAX_Y);
     let first = (y / ROW_H).floor() as usize;

@@ -16,6 +16,7 @@ name = "integration-win"
 path = "examples/win.rs"
 
 [dependencies]
+serde = { workspace = true }
 lumen-core = { workspace = true }
 lumen-render = { workspace = true }
 lumen-widgets = { workspace = true }

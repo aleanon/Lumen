@@ -11,7 +11,10 @@ use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
 
 /// Build the styling showcase (stylesheet baked in; watch `app.lss` to reload).
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    // E2b: `App::view` root; the body keeps its `Element` structure — the
+    // page centers with `align_items`/`justify_content`, which `Stack` does
+    // not express yet (recorded as an E2 API gap).
+    App::view(build).stylesheet(include_str!("../app.lss"))
 }
 
 const STATUSES: &[(&str, &str)] = &[

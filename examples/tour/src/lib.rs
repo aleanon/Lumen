@@ -2,13 +2,21 @@
 //! dots, and Back/Next (Next becomes Finish). Themed from `app.lss`.
 use lumen_core::state::Runtime;
 use lumen_widgets::element::Shadow;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Element, Reactive};
 
 use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
 
+/// App state (E2b, MUT8): the walkthrough's one piece of state.
+#[derive(Default, Reactive, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+#[reactive(crate = "lumen_core")]
+struct TourState {
+    step: i64,
+}
+
 /// Build the tour app.
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    App::with_state(TourState::default(), build).stylesheet(include_str!("../app.lss"))
 }
 
 const PAGES: &[(&str, &str)] = &[
@@ -78,10 +86,9 @@ fn dot(on: bool) -> Element {
     e
 }
 
-fn build(cx: &mut BuildCx) -> Element {
-    let step = cx.signal("step", || 0i64);
+fn build(cx: &mut BuildCx, s: &TourState) -> Element {
     let n = PAGES.len() as i64;
-    let i = step.get(cx.runtime()).clamp(0, n - 1);
+    let i = (*s.step(cx)).clamp(0, n - 1);
     let (title, body) = PAGES[i as usize];
     let last = i == n - 1;
 
@@ -107,11 +114,11 @@ fn build(cx: &mut BuildCx) -> Element {
 
     let nav = {
         let back = button("Back", "back", move |rt| {
-            step.update(rt, |s| *s = (*s - 1).max(0))
+            TourState::update_step(rt, |s| *s = (*s - 1).max(0))
         })
         .id("back");
         let next = button(if last { "Finish" } else { "Next" }, "next", move |rt| {
-            step.update(rt, move |s| *s = if *s + 1 >= n { 0 } else { *s + 1 })
+            TourState::update_step(rt, move |s| *s = if *s + 1 >= n { 0 } else { *s + 1 })
         })
         .id("next");
         let mut r = widgets::row(vec![back, next]);

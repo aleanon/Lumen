@@ -21,6 +21,7 @@ path = "examples/win.rs"
 
 [dependencies]
 lumen-core = { workspace = true }
+serde = { workspace = true }
 lumen-render = { workspace = true }
 lumen-widgets = { workspace = true }
 lumen-layout = { workspace = true }

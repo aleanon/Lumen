@@ -9,7 +9,7 @@ use lumen_layout::{Align, Dim, Edges};
 
 /// Build the system-information app.
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    App::view(build).stylesheet(include_str!("../app.lss"))
 }
 
 fn txt(s: impl Into<lumen_widgets::Text>, size: f32, weight: f32) -> Element {
@@ -48,7 +48,12 @@ fn status() -> Element {
     r
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+// E2b: the entry is Direct (`App::view`) and this signature is
+// statement-form-ready, but the BODY stays Element: the root centres its card
+// (`align_items`/`justify_content`, and absolute positioning in some crates),
+// which `Stack` cannot yet express — recorded as an E2 gap. Behaviour, ids and
+// `app.lss` are unchanged.
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let _ = cx;
     let info = system_info();
 

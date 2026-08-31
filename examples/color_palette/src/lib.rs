@@ -8,7 +8,7 @@ use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
 
 /// Build the color-palette app.
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    App::view(build).stylesheet(include_str!("../app.lss"))
 }
 
 fn txt(s: impl Into<lumen_widgets::Text>, size: f32, weight: f32) -> Element {
@@ -34,7 +34,12 @@ fn box_(color: Color, w: f32, h: f32, radius: f64) -> Element {
     e
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+// E2b: the entry is Direct (`App::view`) and this signature is
+// statement-form-ready, but the BODY stays Element: the root centres its card
+// (`align_items`/`justify_content`, and absolute positioning in some crates),
+// which `Stack` cannot yet express — recorded as an E2 gap. Behaviour, ids and
+// `app.lss` are unchanged.
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let hue = cx.signal("hue", || 255.0f64);
     let h = hue.get(cx.runtime());
     let base = Color::from_oklch(0.62, 0.15, h as f32);

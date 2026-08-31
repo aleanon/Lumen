@@ -12,7 +12,11 @@ use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
 
 /// Build the counter app.
 pub fn main_app() -> App {
-    App::new(build)
+    // E2b: `App::view` root. The tally deliberately stays a KEYED signal, not
+    // an `App::with_state` struct: the stats window is a second runtime tree
+    // over the same store (P.3d), and instance state across secondary windows
+    // is exactly what P.3d still has to revisit.
+    App::view(build)
         .stylesheet(include_str!("../app.lss"))
         // P.3d: a second window over the same store — the tally is live in
         // both, and its +1 drives the main window (and vice versa).

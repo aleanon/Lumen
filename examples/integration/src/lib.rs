@@ -5,11 +5,19 @@
 //! uploads it as a texture — Lumen never touches the host's event loop or
 //! device.
 use lumen_layout::{Align, Dim, Display, FlexDirection, LayoutStyle};
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Element, Reactive};
+
+/// HUD state: clicks forwarded by the host (E2b full form).
+#[derive(Default, Reactive, serde::Serialize, serde::Deserialize)]
+#[reactive(crate = "lumen_core")]
+#[serde(default)]
+struct HudState {
+    clicks: i32,
+}
 
 /// The embedded HUD app: a live counter the host forwards clicks into.
 pub fn hud_app() -> App {
-    App::new(build)
+    App::with_state(HudState::default(), build)
 }
 
 /// (Also runnable standalone for the headless smoke.)
@@ -17,13 +25,14 @@ pub fn main_app() -> App {
     hud_app()
 }
 
-fn build(cx: &mut BuildCx) -> Element {
-    let clicks = cx.signal("clicks", || 0i32);
-    let v = clicks.get(cx.runtime());
+// The root stays an `Element`: `Stack` cannot express centering yet (gap).
+fn build(cx: &mut BuildCx, s: &HudState) -> Element {
+    let v = *s.clicks(cx);
     let mut col = widgets::column(vec![
         widgets::text("Lumen HUD (embedded)").id("title"),
         widgets::text(format!("host clicks: {v}")).id("clicks"),
-        widgets::button("+1 from HUD", move |rt| clicks.update(rt, |c| *c += 1)).id("bump"),
+        widgets::button("+1 from HUD", |rt| HudState::update_clicks(rt, |c| *c += 1))
+            .id("bump"),
     ])
     .id("hud");
     col.style = LayoutStyle {

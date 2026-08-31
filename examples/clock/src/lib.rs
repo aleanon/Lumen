@@ -11,7 +11,7 @@ use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
 
 /// Build the clock app.
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    App::view(build).stylesheet(include_str!("../app.lss"))
 }
 
 const DIAL: f64 = 230.0;
@@ -72,7 +72,12 @@ fn draw_clock(f: &mut Frame, h: f64, m: f64, s: f64) {
     f.fill_circle(c, 6.0, Color::srgb8(0xff, 0x5a, 0x7a, 0xff));
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+// E2b: the entry is Direct (`App::view`) and this signature is
+// statement-form-ready, but the BODY stays Element: the root centres its card
+// (`align_items`/`justify_content`, and absolute positioning in some crates),
+// which `Stack` cannot yet express — recorded as an E2 gap. Behaviour, ids and
+// `app.lss` are unchanged.
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let now = cx.now_ms();
     cx.animate(); // keep ticking
     let secs = now / 1000.0;

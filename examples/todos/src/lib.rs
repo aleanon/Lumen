@@ -7,14 +7,35 @@
 use lumen_core::semantics::{Action, Role};
 use lumen_core::state::Runtime;
 use lumen_widgets::element::Shadow;
-use lumen_widgets::{widgets, App, BuildCx, Element};
+use lumen_widgets::{widgets, App, BuildCx, Element, Reactive};
 use std::rc::Rc;
 
 use lumen_layout::{Align, Dim, Display, Edges, FlexDirection, LayoutStyle};
 
 /// Build the todos app.
 pub fn main_app() -> App {
-    App::new(build).stylesheet(include_str!("../app.lss"))
+    App::with_state(TodosState::default(), build).stylesheet(include_str!("../app.lss"))
+}
+
+/// App state (E2b, MUT8): the list itself. The DRAFT stays a keyed signal —
+/// `text_field_basic` owns it (view-local state, the D1 boundary).
+#[derive(Reactive, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+#[reactive(crate = "lumen_core")]
+struct TodosState {
+    todos: Vec<(String, bool)>,
+}
+
+impl Default for TodosState {
+    fn default() -> Self {
+        TodosState {
+            todos: vec![
+                ("Design the gallery".to_string(), true),
+                ("Theme it from .lss".to_string(), false),
+                ("Ship the examples".to_string(), false),
+            ],
+        }
+    }
 }
 
 fn txt(s: impl Into<lumen_widgets::Text>, size: f32, weight: f32) -> Element {
@@ -63,16 +84,9 @@ fn check(done: bool, on: impl Fn(&Runtime) + 'static) -> Element {
     e
 }
 
-fn build(cx: &mut BuildCx) -> Element {
-    let todos = cx.signal("todos", || {
-        vec![
-            ("Design the gallery".to_string(), true),
-            ("Theme it from .lss".to_string(), false),
-            ("Ship the examples".to_string(), false),
-        ]
-    });
+fn build(cx: &mut BuildCx, s: &TodosState) -> Element {
     let draft = cx.signal("draft", String::new);
-    let items = todos.get(cx.runtime());
+    let items = s.todos(cx);
     let total = items.len();
     let left = items.iter().filter(|(_, d)| !*d).count();
 
@@ -92,7 +106,7 @@ fn build(cx: &mut BuildCx) -> Element {
     let mut add = widgets::button("Add", move |rt| {
         let t = draft.get(rt).trim().to_string();
         if !t.is_empty() {
-            todos.update(rt, move |v| v.push((t.clone(), false)));
+            TodosState::update_todos(rt, move |v| v.push((t.clone(), false)));
             draft.set(rt, String::new());
         }
     })
@@ -113,7 +127,7 @@ fn build(cx: &mut BuildCx) -> Element {
         .map(|(i, (text, done))| {
             let done = *done;
             let tog = check(done, move |rt| {
-                todos.update(rt, move |v| {
+                TodosState::update_todos(rt, move |v| {
                     if let Some(it) = v.get_mut(i) {
                         it.1 = !it.1;
                     }
@@ -125,7 +139,7 @@ fn build(cx: &mut BuildCx) -> Element {
                 lbl = lbl.class("done");
             }
             let mut del = widgets::button("Del", move |rt| {
-                todos.update(rt, move |v| {
+                TodosState::update_todos(rt, move |v| {
                     if i < v.len() {
                         v.remove(i);
                     }

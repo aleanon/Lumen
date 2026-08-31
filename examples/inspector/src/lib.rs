@@ -15,10 +15,15 @@ const TRACE: &[&str] = &[
 
 /// Build the inspector application.
 pub fn main_app() -> App {
-    App::new(build)
+    App::view(build)
 }
 
-fn build(cx: &mut BuildCx) -> Element {
+// E2b: the entry is Direct (`App::view`) and this signature is
+// statement-form-ready, but the BODY stays Element: the root centres its card
+// (`align_items`/`justify_content`, and absolute positioning in some crates),
+// which `Stack` cannot yet express — recorded as an E2 gap. Behaviour, ids and
+// `app.lss` are unchanged.
+fn build(cx: &mut BuildCx) -> impl lumen_widgets::Direct {
     let tab = cx.signal("tab", || 0usize);
     let current = tab.get(cx.runtime());
 
