@@ -8,7 +8,12 @@ fn node(n: u32, role: Role, label: &str) -> SemanticsNode {
     // key on `index` because they test elision structure, not identity.
     let mut s = SemanticsNode::new(NodeHandle::root(&n), n, role);
     s.label = label.to_string();
-    s.type_name = role.type_name();
+    // A11Y3 gated `type_name` (agent-only payload) behind `dev-observability`;
+    // this fixture has to follow, or a lean build fails to compile the test.
+    #[cfg(feature = "dev-observability")]
+    {
+        s.type_name = role.type_name();
+    }
     s
 }
 fn with_id(mut s: SemanticsNode, id: &str) -> SemanticsNode {
