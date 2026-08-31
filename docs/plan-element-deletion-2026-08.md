@@ -39,9 +39,14 @@ files, the rest scattered.
   Element-free), facade + derive fixes, exemplars `hello` (full) and
   `gallery` (mixed). `hello`'s golden re-blessed deliberately: typed
   `Button` is the canonical look; `Element::button` was the legacy helper.
-- **E2 ◻** remaining example crates (~63 files; `iced-parity` last — it
-  exists to mirror iced's shapes and may keep Element deliberately).
-  Signature-pinned: `settings` (Android shell) migrates with E4's shell work.
+- **E2 ◐** remaining example crates. **E2a ☑ (2026-08-31)**: ten
+  single-widget demo crates removed — each showed one widget the
+  `widget_showcase` catalog already seeds (accordion, toast, progress_bar,
+  loading_spinners, markdown, image, datagrid, pane_grid, modal, svg).
+  `iced-parity` stays (it mirrors iced's shapes deliberately);
+  `widget_showcase` itself defers to E4 (its catalog builders are
+  `fn(..) -> Element` by design). Signature-pinned: `settings` (Android
+  shell) migrates with E4's shell work.
 - **E3 ◻** tests: lumen-widgets (59) + lumen-agent (11) + shells (2).
 - **E4 ◻** widget internals: replace the `@direct_bridge` `build → Element`
   with native `lower` per widget (43 files) — this is where the transient

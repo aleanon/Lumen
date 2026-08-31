@@ -127,17 +127,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "accordion"
-version = "0.1.0"
-dependencies = [
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-widgets",
-]
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -299,7 +288,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0348a1c054491f4bfe6ab86a7b6ab1e44e45d899005de92f58b3df180b36ddaf"
 dependencies = [
  "clipboard-win",
- "image 0.25.10",
+ "image",
  "log",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -1176,18 +1165,6 @@ name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
-
-[[package]]
-name = "datagrid"
-version = "0.1.0"
-dependencies = [
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-text",
- "lumen-widgets",
-]
 
 [[package]]
 name = "digest"
@@ -2462,18 +2439,6 @@ dependencies = [
 
 [[package]]
 name = "image"
-version = "0.1.0"
-dependencies = [
- "kurbo",
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-widgets",
-]
-
-[[package]]
-name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
@@ -2870,18 +2835,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
-name = "loading_spinners"
-version = "0.1.0"
-dependencies = [
- "kurbo",
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-widgets",
-]
-
-[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3152,7 +3105,7 @@ name = "lumen-widgets"
 version = "0.1.0"
 dependencies = [
  "accesskit",
- "image 0.25.10",
+ "image",
  "kurbo",
  "lumen-app",
  "lumen-core",
@@ -3227,18 +3180,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "markdown"
-version = "0.1.0"
-dependencies = [
- "kurbo",
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-widgets",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3293,18 +3234,6 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "modal"
-version = "0.1.0"
-dependencies = [
- "kurbo",
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-widgets",
 ]
 
 [[package]]
@@ -3947,18 +3876,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pane_grid"
-version = "0.1.0"
-dependencies = [
- "kurbo",
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-widgets",
-]
-
-[[package]]
 name = "pango"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4337,18 +4254,6 @@ name = "profiling"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
-
-[[package]]
-name = "progress_bar"
-version = "0.1.0"
-dependencies = [
- "kurbo",
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-widgets",
-]
 
 [[package]]
 name = "proptest"
@@ -5195,18 +5100,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "svg"
-version = "0.1.0"
-dependencies = [
- "kurbo",
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-widgets",
-]
-
-[[package]]
 name = "swash"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5486,18 +5379,6 @@ checksum = "be4d6b5f19ff7664e8c98d03e2139cb510db9b0a60b55f8e8709b689d939b6bc"
 dependencies = [
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "toast"
-version = "0.1.0"
-dependencies = [
- "kurbo",
- "lumen-core",
- "lumen-layout",
- "lumen-render",
- "lumen-shell",
- "lumen-widgets",
 ]
 
 [[package]]

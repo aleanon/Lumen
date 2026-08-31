@@ -1,5 +1,13 @@
 # 08 — Example Suite Plan (iced-parity)
 
+> **E2 consolidation (2026-08-31):** the single-widget demo crates
+> (`accordion`, `toast`, `progress_bar`, `loading_spinners`, `markdown`,
+> `image`, `datagrid`, `pane_grid`, `modal`, `svg`) were **removed** — each
+> demonstrated one widget the `widget_showcase` catalog already seeds with
+> real data (its dropdown covers all 60+ built-ins). Rows below describing
+> them are historical planning record. Feature demos (canvas, gradients,
+> async, routing, milestone artifacts) remain standalone crates.
+
 Goal: ship a canonical example gallery, using the **iced** framework's example
 set as the target list. For each example this records what it demonstrates, the
 current Lumen status, and **what is missing to build it on Linux**. The gaps roll
