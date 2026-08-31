@@ -15,9 +15,11 @@ run name *args:
     ver=$(awk '/^\[workspace\.package\]/{f=1;next} f&&/^version = /{gsub(/"/,"",$3); print $3; exit}' Cargo.toml)
     # Release: a debug build of the CPU renderer + text stack is ~35x slower,
     # which shows up as a low animation frame rate and laggy resize.
-    # `@$ver` pins the workspace member (pre-1.0 lockstep version): the
-    # `image` example would otherwise be ambiguous with the ADR-M1 `image`
-    # dependency.
+    # `@$ver` pins the workspace member (pre-1.0 lockstep version), so an
+    # example crate can never be ambiguous with a same-named dependency. The
+    # case that motivated it — the `image` example vs the ADR-M1 `image`
+    # dep — is gone with E2a, but the pin stays: it is free and the next
+    # collision would be silent.
     if [[ -f "examples/$name/examples/win.rs" ]]; then
         cargo run -q --release -p "$name@$ver" --example "$name-win"  # standalone example crate
     elif [[ -d "examples/$name" && -f "examples/$name/src/main.rs" ]]; then
