@@ -582,6 +582,54 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## E4 ✗ Native widget lowering — measured worthless; the win is the staging tree (2026-08-31)
+
+**Closed on evidence, the S3/MUT9 precedent.** E4 was specified as "replace
+the `@direct_bridge` `build -> Element` with native lowering across 43 widget
+files — this is where the transient per-node `Element` dies". Measured
+first (`benches/src/bin/widgetlower.rs`, kept as the arm): whole `pump`s over
+N widgets of one kind, every pump a real full rebuild.
+
+**Converting a widget natively buys nothing.** `Slider` (root + track +
+thumb) was converted properly — a shared childless `root()`, children
+constructed *inside* a `write_body` closure so the subtree is never
+materialized and no `children` vector is allocated — and measured
+**3 819 → 3 830 µs at N=2000 (6 001 nodes): zero, inside noise.** The
+conversion was reverted; it added a second lowering path for no gain.
+
+**The staging tree is real, and it is a *container* property.** The same
+2 000 leaves delivered as statement-form children instead of a
+`Vec<Element>`:
+
+| N (leaves) | `widgets::column(vec![..])` | `Stack::column(\|c\| ..)` | |
+|---:|---:|---:|---|
+| 100 | 495 ns/node | 436 | −12% (noisy at 44 µs) |
+| 500 | 443 | 389 | −12% |
+| 2 000 | 501 | 446 | −11% |
+| 8 000 | 579 | 500 | −14% |
+
+**So the cost is a working-set effect, not a per-node constant** — which is
+exactly why the Slider showed zero. `widgets::column` materializes every
+child (2 000 x 784 B = 1.5 MB) before lowering any of them; `Stack`
+constructs and writes each one in turn. A widget's 2–48 internal children
+never come near that threshold; an author's 500+ list does. **This also
+explains O0.20's −18.1%**, which was always measured against the *authoring*
+staging tree and got generalized into a widget-internals claim it never
+supported.
+
+**Consequences.** (1) E4 as written is closed — no widget-file conversion is
+worth doing for performance. (2) The win it was chasing is already shipped
+and already adopted: `Stack` (MUT7b) plus the E2 example migration. (3) E5's
+premise narrows to exactly R8's ~5%: the `Element` intermediary itself, which
+only goes away when the node-write API stops taking one — a change across all
+63 widgets plus `build_node`, for 5%. Recorded so the next reader prices it
+honestly rather than inheriting "E4 unblocks it".
+
+*One methodology note for the file:* the first N=100 run showed statement
+form 68% **worse**; three repeats gave 44/44/95 µs against 50/68/50. At
+~45 µs the arm is below this box's stable-measurement floor — the same
+cold-first-run artifact that faked ADOPT's 1.49x and the perf gate's 1.665.
+
 ## E2 ◐ Examples: ten crates removed, 28 of 36 roots migrated (2026-08-31)
 
 **E2a ☑ — consolidation.** Ten crates that each demonstrated exactly ONE

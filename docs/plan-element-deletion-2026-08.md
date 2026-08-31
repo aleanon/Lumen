@@ -70,10 +70,16 @@ files, the rest scattered.
   `fn(..) -> Element` by design). Signature-pinned: `settings` (Android
   shell) migrates with E4's shell work.
 - **E3 ◻** tests: lumen-widgets (59) + lumen-agent (11) + shells (2).
-- **E4 ◻** widget internals: replace the `@direct_bridge` `build → Element`
-  with native `lower` per widget (43 files) — this is where the transient
-  per-node `Element` dies. Convert `run_styled`-class shell entry points to
-  `impl Direct`.
+- **E4 ✗ (2026-08-31)** widget internals: **closed on measurement.**
+  Converting a widget to native lowering buys nothing — `Slider` converted
+  properly measured 3 819 → 3 830 µs (zero), because the staging-tree cost
+  is a working-set effect that needs ~500+ siblings to appear, and a
+  widget's 2–48 internal children never reach it. The win it was chasing
+  (11–14%) belongs to *containers* and is already shipped as `Stack` and
+  adopted by the E2 examples. See the task-graph entry; bench arm
+  `benches/src/bin/widgetlower.rs`. The shell entry-point conversion
+  (`run_styled`-class, `impl Direct`) is unrelated to lowering cost and
+  moves to E5 with the rest of the API change.
 - **E5 ◻** engine: `build_node` consumes widgets, `Element` deleted, the
   type_sizes gate retired. R8-costed ~5% of a changed frame.
 
