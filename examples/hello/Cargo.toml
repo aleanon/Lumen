@@ -16,6 +16,7 @@ name = "hello"
 path = "src/main.rs"
 
 [dependencies]
+serde = { workspace = true }
 lumen = { workspace = true }
 
 [dev-dependencies]

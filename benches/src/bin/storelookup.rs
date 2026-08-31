@@ -155,6 +155,7 @@ fn main() {
     // The derive's instance accessor: one recorded read + a direct reference.
     // No addressing, no slot lookup, no downcast.
     #[derive(Default, lumen_widgets::Reactive, serde::Serialize, serde::Deserialize)]
+    #[reactive(crate = "lumen_core")]
     #[serde(default)]
     struct StateBench {
         rows: Vec<i64>,

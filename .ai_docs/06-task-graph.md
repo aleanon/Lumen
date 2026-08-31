@@ -582,6 +582,36 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## E0+E1 ☑ The Element deletion begins — scaffold, facade, and two exemplars (2026-08-31)
+
+`docs/plan-element-deletion-2026-08.md`. Inventory: **208 files** return
+`Element` (59 widgets tests, 43 widget `build` fns, ~65 example files, 11
+agent tests, 3 engine). Stages E0–E5; E5 is the `build_node` rewrite where
+`Element` actually dies.
+
+**E1 shipped the migration's first citizens.** `lumen new` now scaffolds the
+full form — `App::with_state` + `#[derive(Reactive)]` + statement-form
+`Stack` — so every new app starts Element-free (verified by scaffolding into
+scratch and compiling against the workspace). `examples/hello` is the
+full-form exemplar; `examples/gallery` is the **mixed form**: cx-coupled
+helpers keep their keyed view-local state (D1) and are built eagerly, then
+moved into the body.
+
+**Three API gaps found by actually walking the path, all closed:** the
+facade did not export `Button`/`Label`/`Stack`/`Kids`/`Reactive` (scaffolded
+apps are facade-only — nothing typed was reachable); the `Reactive` derive
+emitted `::lumen_core` paths a facade app cannot resolve (now serde-style
+`#[reactive(crate = "…")]`, defaulting to `::lumen`); and `Stack` bodies
+were `FnMut`, so eagerly-built children could not be MOVED in (now `FnOnce`,
+adapted through an `Option` to the object-safe `write_body`). Each is gated:
+a new `facade_complete` test drives a with_state statement-form app through
+`lumen` alone.
+
+**One deliberate golden re-bless**: `hello`'s counter now renders the typed
+`Button` (the canonical W-series look) instead of the legacy
+`Element::button` helper (padding-8/radius-6). Goldens exist to catch
+unintended drift; this drift is the migration's intent, recorded here.
+
 ## MUT9 ✗ Compile-time dep masks — measured, and MUT8 already took the prize (2026-08-31)
 
 **Closed on evidence, the S3 precedent.** MUT9's charter — replace runtime

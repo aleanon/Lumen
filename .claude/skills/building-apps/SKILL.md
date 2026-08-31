@@ -199,7 +199,12 @@ diagnostic can catch it: the mismatch is only knowable after layout.
   patch path). `Stack::column`/`row` take `gap`/`padding`/`width`/`height`
   plus the universal modifiers; give a statement-form root an explicit
   `width(Dim::pct(1.0))` so deferred text keeps its definite containing
-  block. `App::new` (Element form) remains fully supported.
+  block. Stack bodies are `FnOnce`: a cx-coupled helper (`switch`, `tabs`,
+  …) is built eagerly into a local, then MOVED into the body with
+  `c.child(local)` — see `examples/gallery` (mixed form) and
+  `examples/hello` (full form). `App::new` (Element form) remains fully
+  supported; the Element-deletion migration is staged in
+  `docs/plan-element-deletion-2026-08.md`.
 
   Reading a signal in the view body and interpolating the *value*
   (`widgets::text(format!("{}", n.get(cx.runtime())))`) is the slow form: that

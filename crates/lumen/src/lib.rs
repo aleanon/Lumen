@@ -24,6 +24,11 @@ pub use lumen_core::semantics;
 #[doc(inline)]
 pub use lumen_widgets::{app::FrameStats, App, BuildCx, Element, Handler, Headless};
 
+/// E1 (Element-deletion migration): the statement-form/typed authoring
+/// surface — `App::view`/`App::with_state` roots build from these directly,
+/// no `Element` in user code. `Reactive` is the app-state derive (MUT8).
+pub use lumen_widgets::{Button, Kids, Label, Reactive, Stack};
+
 /// Types named in `Element`'s public builders, so those builders are actually
 /// callable through the facade (SD4).
 ///

@@ -69,3 +69,38 @@ fn theme_helpers_are_reachable_through_the_facade() {
     let _ = lumen::theme::accent();
     let _: Element = lumen::theme::card(widgets::text("body"));
 }
+
+
+/// E1: the statement-form + state-struct surface is reachable facade-only —
+/// exactly what `lumen new` scaffolds. If this stops compiling, scaffolded
+/// apps break before any user sees it.
+#[test]
+fn statement_form_and_state_struct_are_facade_complete() {
+    use lumen::{App, Button, Label, Reactive, Stack};
+
+    #[derive(Default, Reactive, serde::Serialize, serde::Deserialize)]
+    #[serde(default)]
+    struct S {
+        n: i32,
+    }
+
+    let mut h = App::with_state(S::default(), |cx, s: &S| {
+        let n = *s.n(cx);
+        Stack::column(move |c| {
+            c.child(Label::new(format!("n {n}")).id("n"));
+            c.child(
+                Button::new("+")
+                    .on_press(|rt| S::update_n(rt, |v| *v += 1))
+                    .id("inc"),
+            );
+        })
+    })
+    .run_headless(lumen::geometry::Size::new(200.0, 100.0));
+    h.pump();
+    S::set_n(h.runtime(), 5);
+    h.pump();
+    // The JSON projection is snapshot-gated; the lean leg still exercises the
+    // whole build/write/patch path above.
+    #[cfg(feature = "snapshot")]
+    assert!(h.semantics_json().to_string().contains("n 5"));
+}

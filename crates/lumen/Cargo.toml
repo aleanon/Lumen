@@ -72,3 +72,6 @@ lumen-widgets = { path = "../lumen-widgets", default-features = false }
 # under `--no-default-features`. Same trap already documented for lumen-widgets
 # in crates/lumen-shell/Cargo.toml.
 lumen-shell = { path = "../lumen-shell", default-features = false }
+
+[dev-dependencies]
+serde = { workspace = true }

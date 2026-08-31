@@ -261,7 +261,7 @@ pub struct Stack<F> {
     common: Common,
 }
 
-impl<F: FnMut(&mut crate::Kids)> Stack<F> {
+impl<F: FnOnce(&mut crate::Kids)> Stack<F> {
     /// A vertical stack whose children are emitted by `body`.
     pub fn column(body: F) -> Stack<F> {
         Stack {
@@ -309,7 +309,7 @@ impl<F: FnMut(&mut crate::Kids)> Stack<F> {
     }
 }
 
-impl<F: FnMut(&mut crate::Kids)> crate::Direct for Stack<F> {
+impl<F: FnOnce(&mut crate::Kids)> crate::Direct for Stack<F> {
     fn lower_owned(
         self,
         w: &mut dyn crate::NodeWriter,
@@ -317,7 +317,7 @@ impl<F: FnMut(&mut crate::Kids)> crate::Direct for Stack<F> {
         in_overlay: bool,
     ) -> (crate::NodeIndex, crate::LayoutNode) {
         let Stack {
-            mut body,
+            body,
             direction,
             gap,
             padding,
@@ -341,7 +341,17 @@ impl<F: FnMut(&mut crate::Kids)> crate::Direct for Stack<F> {
             ..Element::default()
         };
         common.apply(&mut el);
-        w.write_body(el, parent, in_overlay, &mut body)
+        // E1: the body is `FnOnce` — so eagerly-built children (anything that
+        // needed `cx` at build time) can be MOVED into it — adapted through an
+        // `Option` because `write_body` needs an object-safe `FnMut`. It runs
+        // the body exactly once; the take makes a second call a no-op rather
+        // than UB-by-panic in a render path.
+        let mut body = Some(body);
+        w.write_body(el, parent, in_overlay, &mut move |k: &mut crate::Kids| {
+            if let Some(b) = body.take() {
+                b(k)
+            }
+        })
     }
 }
 

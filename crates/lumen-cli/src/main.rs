@@ -318,7 +318,10 @@ const SKILL_SCAFFOLD_NOTE: &str = "\
 > **Scaffolded copy** (shipped by `lumen new`). In this project, import\n\
 > through the `lumen` facade (`use lumen::widgets::…`) instead of the\n\
 > internal `lumen_core`/`lumen_widgets` crates the framework repo's\n\
-> examples use (ADR-W2). `scripts/agent_client.py` and the `justfile` are\n\
+> examples use (ADR-W2). This scaffold authors views in the statement\n\
+> form (`Stack::column(|c| …)`) with one `#[derive(Reactive)]` state\n\
+> struct (`App::with_state`) — prefer that model for new screens; the\n\
+> older `Element`/`widgets::…` form still works everywhere. `scripts/agent_client.py` and the `justfile` are\n\
 > included here (`just run-agent` enables the endpoint via the facade's\n\
 > `agent` feature); paths like `.ai_docs/…`, `docs/…`, `examples/…`, and\n\
 > `crates/…` refer to the Lumen framework repository.\n";
@@ -390,20 +393,31 @@ fn cmd_new(name: Option<&str>, json: bool) -> i32 {
         "[package]\nname = {name:?}\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
          [lib]\nname = {name:?}\npath = \"src/lib.rs\"\n\n\
          [[bin]]\nname = {name:?}\npath = \"src/main.rs\"\n\n\
-         [dependencies]\n{lumen_dep}\n\n[dev-dependencies]\n{lumen_test_dep}\n"
+         [dependencies]\n{lumen_dep}\nserde = {{ version = \"1\", features = [\"derive\"] }}\n\n         [dev-dependencies]\n{lumen_test_dep}\n"
     );
+    // E1: the scaffold is the migration's first citizen — new apps start on
+    // the statement-form + state-struct model (MUT7b/MUT8), no `Element`.
     let lib_rs = "//! A Lumen app.\n\
-        use lumen::widgets::{button, column, text};\n\
-        use lumen::App;\n\n\
+        use lumen::{App, Button, Label, Reactive, Stack};\n\n\
+        /// App state: one struct, one field per piece of state (MUT8).\n\
+        /// `#[serde(default)]` lets hot reload survive shape changes.\n\
+        #[derive(Default, Reactive, serde::Serialize, serde::Deserialize)]\n\
+        #[serde(default)]\n\
+        struct AppState {\n    \
+            count: i32,\n\
+        }\n\n\
         /// The application entry point (`lumen` convention).\n\
         pub fn main_app() -> App {\n    \
-            App::new(|cx| {\n        \
-                let count = cx.signal(\"count\", || 0i32);\n        \
-                let value = count.get(cx.runtime());\n        \
-                column(vec![\n            \
-                    text(format!(\"Count: {value}\")).id(\"count\"),\n            \
-                    button(\"+1\", move |rt| count.update(rt, |c| *c += 1)).id(\"increment\"),\n        \
-                ])\n    \
+            App::with_state(AppState::default(), |cx, s: &AppState| {\n        \
+                let value = *s.count(cx);\n        \
+                Stack::column(move |c| {\n            \
+                    c.child(Label::new(format!(\"Count: {value}\")).id(\"count\"));\n            \
+                    c.child(\n                \
+                        Button::new(\"+1\")\n                    \
+                            .on_press(|rt| AppState::update_count(rt, |c| *c += 1))\n                    \
+                            .id(\"increment\"),\n                \
+                    );\n        \
+                })\n    \
             })\n}\n";
     let main_rs = format!(
         "//! `{name}` binary.\n\

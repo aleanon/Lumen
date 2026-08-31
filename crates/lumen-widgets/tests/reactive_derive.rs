@@ -16,6 +16,7 @@ use std::rc::Rc;
 // oversight — S3 is where the field becomes the slot.
 #[allow(dead_code)]
 #[derive(Reactive, Default)]
+#[reactive(crate = "lumen_core")]
 struct Counter {
     count: i64,
     label: String,
@@ -26,6 +27,7 @@ struct Counter {
 /// a `count`.
 #[allow(dead_code)]
 #[derive(Reactive, Default)]
+#[reactive(crate = "lumen_core")]
 struct Other {
     count: i64,
 }
@@ -163,6 +165,7 @@ fn a_dropped_field_is_still_reported_on_restore() {
 // ---- MUT8: the instance-threaded state model ----
 
 #[derive(Reactive)]
+#[reactive(crate = "lumen_core")]
 #[cfg_attr(feature = "snapshot", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "snapshot", serde(default))]
 struct Dash {

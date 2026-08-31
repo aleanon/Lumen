@@ -2,19 +2,32 @@
 //!
 //! Exposes `main_app()` by the convention `lumen new` scaffolds and
 //! `lumen-test`/`lumen test` build from.
+//!
+//! E1 (Element-deletion migration): authored in the statement form with one
+//! `#[derive(Reactive)]` state struct — no `Element` in this file. The old
+//! form this replaced read a keyed signal and built `column(vec![...])`.
 
-use lumen::widgets::{button, column, text};
-use lumen::{App, Color};
+use lumen::{App, Button, Color, Label, Reactive, Stack};
+
+/// App state: one struct, one field per piece of state (MUT8).
+#[derive(Default, Reactive, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct HelloState {
+    count: i32,
+}
 
 /// Build the counter application.
 pub fn main_app() -> App {
-    App::new(|cx| {
-        let count = cx.signal("count", || 0i32);
-        let value = count.get(cx.runtime());
-        column(vec![
-            text(format!("Count: {value}")).id("count"),
-            button("+1", move |rt| count.update(rt, |c| *c += 1)).id("increment"),
-        ])
+    App::with_state(HelloState::default(), |cx, s: &HelloState| {
+        let value = *s.count(cx);
+        Stack::column(move |c| {
+            c.child(Label::new(format!("Count: {value}")).id("count"));
+            c.child(
+                Button::new("+1")
+                    .on_press(|rt| HelloState::update_count(rt, |c| *c += 1))
+                    .id("increment"),
+            );
+        })
         .background(Color::srgb8(0xff, 0xff, 0xff, 0xff))
     })
 }

@@ -491,11 +491,32 @@ pub fn state_registry(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Every field must be `Default`, because the accessor supplies
 /// `T::default()` as the signal's initial value. Seed real initial values by
 /// writing them once at startup, or wait for `#[reactive(default = ..)]`.
-#[proc_macro_derive(Reactive)]
+#[proc_macro_derive(Reactive, attributes(reactive))]
 pub fn reactive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as syn::DeriveInput);
     let name = &ast.ident;
     let name_str = name.to_string();
+
+    // E1: which crate the generated code paths through. Scaffolded apps are
+    // facade-only (ADR-W2), so the DEFAULT is `::lumen`; framework-internal
+    // call sites (which cannot name the facade — it depends on them) declare
+    // `#[reactive(crate = "lumen_core")]`.
+    let mut root: syn::Path = syn::parse_quote!(::lumen);
+    for attr in &ast.attrs {
+        if attr.path().is_ident("reactive") {
+            let res = attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("crate") {
+                    let v: syn::LitStr = meta.value()?.parse()?;
+                    root = syn::parse_str(&format!("::{}", v.value()))
+                        .map_err(|e| meta.error(format!("bad crate path: {e}")))?;
+                }
+                Ok(())
+            });
+            if let Err(e) = res {
+                return e.to_compile_error().into();
+            }
+        }
+    }
 
     let fields = match &ast.data {
         syn::Data::Struct(s) => match &s.fields {
@@ -549,32 +570,32 @@ pub fn reactive(input: TokenStream) -> TokenStream {
             #[doc = #read_doc]
             pub fn #ident<'a>(
                 &'a self,
-                cx: &impl ::lumen_core::state::ReadCx,
+                cx: &impl #root::state::ReadCx,
             ) -> &'a #ty {
-                let rt = ::lumen_core::state::ReadCx::runtime(cx);
-                rt.track_state_field(#ordinal, ::lumen_core::state::ReadCx::tracks(cx));
+                let rt = #root::state::ReadCx::runtime(cx);
+                rt.track_state_field(#ordinal, #root::state::ReadCx::tracks(cx));
                 &self.#ident
             }
 
             #[doc = #get_doc]
-            pub fn #get_ident(cx: &impl ::lumen_core::state::ReadCx) -> #ty
+            pub fn #get_ident(cx: &impl #root::state::ReadCx) -> #ty
             where
                 #ty: ::core::clone::Clone,
             {
-                let rt = ::lumen_core::state::ReadCx::runtime(cx);
-                rt.track_state_field(#ordinal, ::lumen_core::state::ReadCx::tracks(cx));
+                let rt = #root::state::ReadCx::runtime(cx);
+                rt.track_state_field(#ordinal, #root::state::ReadCx::tracks(cx));
                 rt.with_state(|s: &Self| ::core::clone::Clone::clone(&s.#ident))
             }
 
             #[doc = #set_doc]
-            pub fn #set_ident(rt: &::lumen_core::state::Runtime, v: #ty) {
+            pub fn #set_ident(rt: &#root::state::Runtime, v: #ty) {
                 rt.with_state_mut(|s: &mut Self| s.#ident = v);
                 rt.touch_state_field(#ordinal);
             }
 
             #[doc = #update_doc]
             pub fn #update_ident(
-                rt: &::lumen_core::state::Runtime,
+                rt: &#root::state::Runtime,
                 f: impl ::core::ops::FnOnce(&mut #ty),
             ) {
                 rt.with_state_mut(|s: &mut Self| f(&mut s.#ident));
@@ -583,10 +604,10 @@ pub fn reactive(input: TokenStream) -> TokenStream {
 
             #[doc = #doc]
             pub fn #signal_ident(
-                cx: &impl ::lumen_core::state::ReadCx,
-            ) -> ::lumen_core::state::Signal<#ty>
+                cx: &impl #root::state::ReadCx,
+            ) -> #root::state::Signal<#ty>
             where
-                #ty: ::lumen_core::state::State + ::core::default::Default,
+                #ty: #root::state::State + ::core::default::Default,
             {
                 // `Runtime::signal`, deliberately, not `BuildCx::signal`: this
                 // roots at ROOT_ID, so a field is addressed identically no
@@ -594,7 +615,7 @@ pub fn reactive(input: TokenStream) -> TokenStream {
                 // the enclosing scope, which is right for view-local state and
                 // wrong for app state — and is exactly the bug that silently
                 // read an always-zero slot in this repo's own benchmark.
-                ::lumen_core::state::ReadCx::runtime(cx)
+                #root::state::ReadCx::runtime(cx)
                     .signal((#name_str, #key), <#ty as ::core::default::Default>::default)
             }
         }
@@ -605,7 +626,7 @@ pub fn reactive(input: TokenStream) -> TokenStream {
             #(#accessors)*
         }
 
-        impl ::lumen_core::state::ReactiveState for #name {
+        impl #root::state::ReactiveState for #name {
             const FIELDS: &'static [&'static str] = &[#(#field_names),*];
         }
     }

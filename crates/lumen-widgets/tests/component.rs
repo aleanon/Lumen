@@ -114,6 +114,7 @@ fn changed_deps_rebuild_it() {
 /// tracker supplies it — and the field is root-scoped, so the test can move it.
 #[allow(dead_code)]
 #[derive(lumen_widgets::Reactive, Default)]
+#[reactive(crate = "lumen_core")]
 struct Model {
     v: i64,
 }
