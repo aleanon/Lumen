@@ -162,7 +162,20 @@ N=50 000 from 9.2 ms to **under 1 ms** (bindings O(K) + warm layout ~0.6 ms +
 patch damage), which crosses below iced's model — iced positionally diffs its
 whole widget tree every frame; a working patch path does not.
 
-## 5. Risks
+## 5. Program status (2026-08-31 — complete)
+
+MUT0–MUT8 landed; MUT9 closed on measurement (recording fell to ~2 ns/read
+as a side effect of MUT8 — the mask's prize is <0.1% of a frame; see the
+task-graph entry). Deferred with rationale along the way: opacity/transform
+bindings (no node-level property exists — animations rework), the Element
+deletion's final stages (~180 authoring files + the `build_node` rewrite,
+staged behind `Element::direct`), DL segment splicing for rebuild frames
+(now below the priority line at ~400 µs), RTL layout pruning. Scoreboard:
+patch frame 215 µs flat in N (was ~90 ms broken); structural rebuild 3.0 ms
+(was 9.3); decline cliff 5.5 ms (was 320); observer tax 0 (was 15 ms);
+state read 3.4 ns (was 26.5).
+
+## 6. Risks
 
 - **Coherence surface grows.** Every new patch path is a new way to drift from
   rebuild semantics. Mitigation is the existing oracle + the F3.6 precedent

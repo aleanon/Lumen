@@ -582,6 +582,40 @@ The OS accessibility bridge was an **unconditional** dependency in three crates.
 
 *Also caught:* the disk preflight added with the pre-push hook refused a run at 16 GB free. That is the guard working, and it is the most likely explanation for the two unreproducible `executors` failures earlier in this session — that leg always builds fresh under different features, so it is the one that would fail first under disk pressure.
 
+## MUT9 ✗ Compile-time dep masks — measured, and MUT8 already took the prize (2026-08-31)
+
+**Closed on evidence, the S3 precedent.** MUT9's charter — replace runtime
+read-recording with a compile-time field mask where all reads go through
+derived accessors — was sized against R9's "read recording survives any
+representation: 5.2% of a frame" (≈11.4 ns of the keyed store's 26.5 ns
+read). That premise died with MUT8: the state-field accessor's recording is
+one borrow + index + push, measured at **~2.0 ns/read** (`storelookup`:
+79.2 µs closed vs 181.2 µs open over 50 000 reads). A perfect mask can
+recover at most those ~100 µs per 50 000 reads — and a real view reads a
+handful of fields per scope, not fifty thousand, so the frame-level prize is
+below the measurement noise floor. The downstream `ReadSet` construction
+(`snapshot_reads`) is proportional to reads collected with a cheap dedupe —
+also nothing at real read counts.
+
+**What a mask would still cost:** either trusted author declarations (the
+exact silent-freeze footgun S2 exists to make unrepresentable) or a
+type-level projection proof, which is a research project, not a phase.
+Spending that complexity to chase <0.1% fails the series' own bar.
+
+**Reopen if**: a profiled app shows collector pushes in its hot frame (the
+signature would be `track_state_field` in a flat profile), or the mask
+becomes free as a side effect of some future typed-view work. The
+measurements and the bench arm are in place.
+
+**The MUT program is complete: MUT0–MUT8 landed, MUT9 closed measured.**
+Frame contract, final scoreboard (one changed row of 50 000, vs where the
+investigation started): bound-value patch **~215 µs flat in N** with
+semantics current for free (a broken ~90 ms full rebuild before MUT0);
+honest structural rebuild **3.0 ms** (was 9.3); the decline cliff **5.5 ms**
+(was 320); the 15 ms observer tax **0**; a state-field read **3.4 ns** (was
+26.5). Idle remains 0. The recorded residue and the staged Element deletion
+are in the MUT7 entry.
+
 ## MUT8 ☑ The state struct is the storage — 26.5 → 3.4 ns per read (2026-08-30)
 
 **S3-deep, shipped.** `App::with_state(state, |cx, s: &S| …)` threads one
